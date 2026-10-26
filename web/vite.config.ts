@@ -13,11 +13,13 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    // Keys are path prefixes: keep the trailing slashes, or '/s' would also
+    // swallow Vite's own /src/… modules and the /session route.
     proxy: {
-      '/api': { target: gateway, changeOrigin: false },
-      '/s': { target: gateway, changeOrigin: false, ws: true },
-      '/fonts': { target: gateway, changeOrigin: false },
-      '/internal': { target: gateway, changeOrigin: false },
+      '/api/': { target: gateway, changeOrigin: false },
+      '/s/': { target: gateway, changeOrigin: false, ws: true },
+      '/fonts/': { target: gateway, changeOrigin: false },
+      '/internal/': { target: gateway, changeOrigin: false },
     },
   },
   build: {
@@ -29,7 +31,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: false,
     setupFiles: ['./src/test-setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
+    include: ['src/**/*.test.{ts,tsx}', 'dev/**/*.test.ts'],
     css: { modules: { classNameStrategy: 'non-scoped' } },
   },
 })

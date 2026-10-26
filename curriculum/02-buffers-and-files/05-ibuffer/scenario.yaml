@@ -1,0 +1,98 @@
+id: 02-buffers-and-files/05-ibuffer
+title: Many buffers with ibuffer
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files]
+vscode: none
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open:
+    - projects/hello/src/main.rs
+    - projects/hello/src/lib.rs
+    - projects/hello/README.md
+    - projects/polyglot/src/main.rs
+    - projects/polyglot/src/lib.rs
+    - projects/notes/todo.md
+  layout: single
+  # Three *Help* buffers to clean up, and unsaved changes in two Rust
+  # files and one Markdown file. Automatic saving is off for the lesson.
+  eval: >-
+    (progn
+      (when (bound-and-true-p auto-save-visited-mode) (auto-save-visited-mode -1))
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (save-window-excursion
+        (dolist (fn '(find-file save-buffer kill-buffer))
+          (describe-function fn)
+          (unless (eq fn 'kill-buffer)
+            (with-current-buffer (help-buffer) (rename-uniquely)))))
+      (dolist (f '("/work/projects/hello/src/main.rs" "/work/projects/polyglot/src/lib.rs"))
+        (with-current-buffer (find-buffer-visiting f)
+          (goto-char (point-min))
+          (insert "// draft: not saved yet\n")))
+      (with-current-buffer (find-buffer-visiting "/work/projects/notes/todo.md")
+        (goto-char (point-max))
+        (insert "- [ ] Decide later whether to keep this line\n")))
+steps:
+  - id: open
+    goal: Open ibuffer
+    detail: "`C-x C-b` lists the buffers, grouped by project. A `*` in the first columns means modified; `%` means read-only. `n` and `p` move, `RET` opens the buffer on a line, `q` leaves."
+    demo: "C-x C-b"
+    conditions:
+      - text: C-x C-b was used
+        event: { command: ibuffer }
+        hint: "Control x, then Control b."
+      - text: ibuffer is in the selected window
+        state: { mode: ibuffer-mode }
+        hint: "If you left the list, C-x C-b opens it again."
+  - id: help
+    goal: Kill every *Help* buffer in one operation
+    detail: "Commands that act on many buffers work on the marked ones. `* h` marks every help buffer at once; `D` kills the marked buffers."
+    demo: "* ~200 h ~600 D"
+    conditions:
+      - text: marked buffers were killed with D
+        event: { command: ibuffer-do-delete }
+        hint: "Mark first (* h marks all help buffers), then D (capital d)."
+      - text: no *Help* buffer is left
+        elisp: '(not (seq-find (lambda (b) (eq (buffer-local-value (quote major-mode) b) (quote help-mode))) (buffer-list)))'
+        hint: "* h marks the help buffers in one go. If some are not marked, m on their lines marks them, then D."
+  - id: filter
+    goal: Show only the Rust buffers
+    detail: "A filter hides lines without touching the buffers. `/ f` filters by file name with a regular expression: type `rs$` (names ending in rs) and `RET`. The line at the top shows the active filter."
+    demo: '/ ~200 f ~400 "rs$" RET'
+    conditions:
+      - text: a filter is active
+        elisp: '(let ((b (get-buffer "*Ibuffer*"))) (and b (buffer-local-value (quote ibuffer-filtering-qualifiers) b)))'
+        hint: "/ f, then rs$, then RET. (/ m filters by major mode instead.)"
+      - text: only .rs buffers are listed
+        elisp: '(let ((b (get-buffer "*Ibuffer*"))) (and b (with-current-buffer b (let ((l (ibuffer-current-state-list))) (and l (seq-every-p (lambda (e) (string-suffix-p ".rs" (or (buffer-file-name (car e)) ""))) l))))))'
+        hint: "The filter should keep main.rs and lib.rs of both projects and hide the rest. / / removes filters if you want to start again."
+  - id: save
+    goal: Save the modified Rust buffers, and only those
+    detail: "`* m` marks the modified buffers among those listed; `S` saves the marked ones. The Markdown file stays unsaved because the filter hides it."
+    demo: "* ~200 m ~600 S"
+    conditions:
+      - text: marked buffers were saved with S
+        event: { command: ibuffer-do-save }
+        hint: "* m marks the modified buffers, S (capital s) saves them."
+      - text: no Rust buffer has unsaved changes
+        elisp: '(not (seq-find (lambda (b) (and (buffer-file-name b) (string-suffix-p ".rs" (buffer-file-name b)) (buffer-modified-p b))) (buffer-list)))'
+        hint: "Check the first column: a * still marks a modified buffer. Mark it with m and press S."
+      - text: todo.md is still unsaved
+        elisp: '(let ((b (find-buffer-visiting "/work/projects/notes/todo.md"))) (and b (buffer-modified-p b)))'
+        hint: "Only the Rust files were to be saved. If todo.md was saved too, reset this step and keep the filter on while you mark."
+  - id: clear
+    goal: Remove the filter and leave
+    detail: "`/ /` removes every filter, so the whole list comes back. `q` puts ibuffer away."
+    demo: "/ ~200 / ~600 q"
+    conditions:
+      - text: the filter was removed
+        event: { command: ibuffer-filter-disable }
+        hint: "Slash, then slash again."
+      - text: ibuffer is closed
+        state: { "windows.mode": { not: ibuffer-mode } }
+        hint: "q leaves ibuffer and shows the buffer you were in."

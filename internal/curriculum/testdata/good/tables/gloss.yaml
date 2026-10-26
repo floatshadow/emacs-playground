@@ -1,0 +1,2 @@
+find-file: Open a file (asks for a path)
+save-buffer: Save the buffer to its file

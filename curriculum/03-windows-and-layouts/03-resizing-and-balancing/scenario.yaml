@@ -1,0 +1,71 @@
+id: 03-windows-and-layouts/03-resizing-and-balancing
+title: Resizing and balancing
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows]
+vscode: "drag borders, maximise group"
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/hello/src/main.rs]
+  layout: "(vsplit projects/hello/src/main.rs *compilation*)"
+  compile: "sh hello/build.sh"
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (let ((w (get-buffer-window (find-buffer-visiting "/work/projects/hello/src/main.rs"))))
+        (when w (select-window w))))
+steps:
+  - id: eight
+    goal: Make the compile window exactly eight lines high
+    detail: "Move into the compile window (`C-x o`). `C-x -` shrinks a window to fit its text, which here is eight lines. To adjust by hand, `C-x ^` makes the selected window one line taller (a plain `^` right after repeats it), `C-u 2 C-x ^` two lines, `C-u -1 C-x ^` one line shorter. Dragging a mode line with the mouse works too, even in the terminal."
+    demo: "C-x o ~400 C-x -"
+    conditions:
+      - text: the compile window was resized
+        any:
+          - event: { command: shrink-window-if-larger-than-buffer }
+          - event: { command: enlarge-window }
+          - event: { command: shrink-window }
+          - event: { command: fit-window-to-buffer }
+          - event: { command: mouse-drag-mode-line }
+        hint: "C-x o into the compile window, then C-x - (Control x, minus)."
+      - text: the compile window shows exactly eight lines of text
+        elisp: '(let ((w (get-buffer-window "*compilation*"))) (and w (= (window-body-height w) 8)))'
+        hint: "C-x ^ adds one line; C-u -1 C-x ^ removes one. Count the text lines between the top of the window and its mode line: there should be eight."
+      - text: main.rs above, compile below
+        layout: "(vsplit main.rs *compilation*)"
+        hint: "Two windows, main.rs on top. If the layout changed, reset this step."
+  - id: balance
+    goal: Balance the two windows
+    detail: "`C-x +` makes all windows the same size again."
+    demo: "C-x +"
+    conditions:
+      - text: C-x + was used
+        event: { command: balance-windows }
+        hint: "Control x, then plus (Shift and =)."
+      - text: the windows are the same height
+        elisp: '(let ((hs (mapcar (function window-total-height) (window-list nil (quote no-minibuf))))) (and (= (length hs) 2) (<= (- (apply (function max) hs) (apply (function min) hs)) 1)))'
+        hint: "C-x + again. (They may differ by one line when the frame height is odd.)"
+  - id: rotate
+    goal: Rotate the layout a quarter turn
+    detail: "Emacs 31 can turn a whole layout around. `C-x w r` then the right arrow rotates it clockwise: the stacked windows end up side by side. (`C-x w t` transposes, `C-x w f` flips.)"
+    demo: "C-x w r <right>"
+    conditions:
+      - text: the layout was rotated or transposed
+        any:
+          - event: { command: window-layout-rotate-clockwise }
+          - event: { command: window-layout-rotate-anticlockwise }
+          - event: { command: window-layout-transpose }
+        hint: "Control x, w, r, then the right arrow key."
+      - text: main.rs and the compile output are side by side
+        any:
+          - layout: "(hsplit *compilation* main.rs)"
+          - layout: "(hsplit main.rs *compilation*)"
+        hint: "One rotation turns above-and-below into side-by-side. If you rotated twice, rotate once more the other way: C-x w r and the left arrow."
+    stuck:
+      - when: { unbound_repeats: 2 }
+        say: "C-x w r waits for an arrow key: right rotates clockwise, left anticlockwise. M-x window-layout-rotate-clockwise does the same."

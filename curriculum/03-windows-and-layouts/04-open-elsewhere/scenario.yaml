@@ -1,0 +1,63 @@
+id: 03-windows-and-layouts/04-open-elsewhere
+title: Open things elsewhere
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows]
+vscode: "open to the side, open in new window"
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/hello/src/main.rs]
+  layout: "projects/hello/src/main.rs"
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (dolist (b (buffer-list))
+        (when (eq (buffer-local-value (quote major-mode) b) (quote dired-mode))
+          (kill-buffer b))))
+steps:
+  - id: beside
+    goal: Open Cargo.toml beside main.rs
+    detail: "`C-x 4 f` is `C-x C-f` that opens the file in another window. With only one window, Emacs splits wherever there is room, so decide first: `C-x 3` makes a window on the right, then `C-x 4 f ../Cargo.toml RET` fills it."
+    demo: 'C-x 3 ~400 C-x 4 f ~500 "../Cargo.toml" RET'
+    conditions:
+      - text: C-x 4 f was used
+        event: { command: find-file-other-window }
+        hint: "Control x, 4, then f. The 4 family means: the same command, in another window."
+      - text: main.rs on the left, Cargo.toml on the right
+        layout: "(hsplit main.rs Cargo.toml)"
+        hint: "C-x 3 first, so there is a right-hand window for C-x 4 f to use. Cargo.toml is one directory up from src/."
+  - id: below
+    goal: Put a Dired listing of hello below Cargo.toml
+    detail: "In the Cargo.toml window, `C-x 2` splits it. `C-x 4 d RET` lists the directory in the other window, which is the new one below, the window you have not used yet."
+    demo: "C-x 2 ~400 C-x 4 d ~500 RET"
+    conditions:
+      - text: C-x 4 d was used
+        event: { command: dired-other-window }
+        hint: "Control x, 4, then d. RET accepts the directory it offers."
+      - text: main.rs left; Cargo.toml above a listing on the right
+        layout: "(hsplit main.rs (vsplit Cargo.toml *))"
+        hint: "Split the Cargo.toml window with C-x 2 first. If the listing replaced main.rs, C-c <left> undoes it."
+      - text: the listing is of /work/projects/hello/
+        elisp: '(seq-find (lambda (w) (with-current-buffer (window-buffer w) (and (derived-mode-p (quote dired-mode)) (equal (expand-file-name default-directory) "/work/projects/hello/")))) (window-list))'
+        hint: "The directory to list is hello, where Cargo.toml lives."
+  - id: prefix
+    goal: Show the buffer list in another window, then close it
+    detail: "`C-x 4 4` works with any command: the next command shows its buffer in another window. `C-x 4 4 C-x C-b` opens ibuffer elsewhere instead of replacing the window you are in. `q` closes it and the window shows what it showed before."
+    demo: "C-x 4 4 ~400 C-x C-b ~1200 q"
+    conditions:
+      - text: C-x 4 4 was used
+        event: { command: other-window-prefix }
+        hint: "Control x, 4, 4, then the command: C-x C-b."
+      - text: ibuffer was opened and closed again
+        all:
+          - event: { command: ibuffer }
+          - state: { "windows.mode": { not: ibuffer-mode } }
+        hint: "q inside ibuffer closes it."
+      - text: the layout is back
+        layout: "(hsplit main.rs (vsplit Cargo.toml *))"
+        hint: "q puts back the buffer the window showed before. If it did not, C-c <left> undoes layout changes one at a time."

@@ -1,0 +1,69 @@
+id: 01-moving-and-editing/02-kill-and-yank
+title: Kill, yank and the kill ring
+minutes: 15
+mode: terminal
+modules: [base, agent, editing]
+vscode: "cut, copy, paste, clipboard history"
+setup:
+  workspace: fixtures/editing
+  root: editing
+  reset: true
+  open: [editing/src/shapes.rs]
+  layout: single
+  eval: '(with-current-buffer (find-buffer-visiting "/work/editing/src/shapes.rs") (goto-char (point-min)))'
+steps:
+  - id: stray
+    goal: Kill the FIXME line
+    detail: "Go to line 3 and press `C-k` twice: the first kills the text of the line, the second the newline. Consecutive kills join into one entry in the kill ring."
+    demo: "C-n ~200 C-n ~300 C-a ~300 C-k ~300 C-k"
+    conditions:
+      - text: C-k was used
+        any:
+          - event: { command: kill-line }
+          - event: { command: kill-whole-line }
+          # kill-line sets this-command to kill-region; agents reporting
+          # this-command rather than real-this-command send that name.
+          - event: { command: kill-region }
+        hint: "C-k kills from the cursor to the end of the line. At the end of a line it kills the newline."
+      - text: the FIXME line is gone
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/shapes.rs") (save-excursion (goto-char (point-min)) (not (re-search-forward "FIXME\\|\n\n\n" nil t))))'
+        hint: "Put the cursor at the start of the FIXME line (C-a), then C-k C-k. If an empty line is left behind, C-k once more."
+  - id: move
+    goal: Move describe below perimeter
+    detail: "The cursor is on the empty line above `describe`. Set the mark with `C-SPC`, go down four lines with `C-n`, and kill the region with `C-w`. Then `M->` and `C-y` put it back at the end."
+    demo: "C-SPC ~300 C-n ~200 C-n ~200 C-n ~200 C-n ~400 C-w ~400 M-> ~400 C-y"
+    conditions:
+      - text: a region was killed
+        event: { command: kill-region }
+        hint: "C-SPC marks where the region starts. Move to where it ends, then C-w."
+      - text: the order is area, perimeter, describe
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/shapes.rs") (let ((s (buffer-string))) (and (string-match-p "fn area[^\0]*fn perimeter[^\0]*fn describe" s) (= 1 (how-many "fn describe" (point-min) (point-max))))))'
+        hint: "M-> jumps to the end of the file; C-y yanks (pastes) the last kill there."
+  - id: ring
+    goal: Bring the FIXME line back from the kill ring
+    detail: "You changed your mind: the FIXME line stays until review. Go to line 3. `C-y` yanks the latest kill, which is the function. `M-y` right after replaces it with the kill before it: the FIXME line."
+    demo: "M-< ~300 C-n ~200 C-n ~400 C-y ~600 M-y"
+    conditions:
+      - text: M-y was used
+        any:
+          - event: { command: yank-pop }
+          - event: { command: consult-yank-pop }
+          # yank-pop sets this-command to yank (see the stray step).
+          - event: { command: yank, min: 2 }
+        hint: "Press C-y, and immediately M-y. Each further M-y goes one entry further back."
+      - text: the FIXME line is back on line 3, describe is still there once
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/shapes.rs") (save-excursion (goto-char (point-min)) (forward-line 2) (and (looking-at "// FIXME") (= 1 (how-many "fn describe" (point-min) (point-max))))))'
+        hint: "If the function was pasted instead, M-y swaps it for the older kill. C-/ undoes a wrong paste."
+  - id: copy
+    goal: Copy the whole file without changing it
+    detail: "`C-x h` selects the whole buffer. `M-w` copies the region into the kill ring without deleting anything."
+    demo: "C-x h ~500 M-w"
+    conditions:
+      - text: C-x h selected everything
+        event: { command: mark-whole-buffer }
+        hint: "C-x, then h."
+      - text: M-w copied it
+        all:
+          - event: { command: kill-ring-save }
+          - elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/shapes.rs") (equal (substring-no-properties (car kill-ring)) (buffer-substring-no-properties (point-min) (point-max))))'
+        hint: "M-w is Alt and w. It copies; C-w would have cut."

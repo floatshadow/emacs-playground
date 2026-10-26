@@ -1,0 +1,339 @@
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { QueryClient } from '@tanstack/react-query'
+import { http, HttpResponse } from 'msw'
+import { setupServer } from 'msw/node'
+import WS from 'vitest-websocket-mock'
+import type { CurriculumIndex, Event } from '../protocol.gen'
+import { DEFAULT_TABLES } from '../advice/defaults'
+import { disconnectSession } from '../api/session/connection'
+import { useSessionStore } from '../store/session'
+import { useUiStore } from '../store/ui'
+import indexJson from '../../dev/fixtures/index.json'
+import { LESSONS } from '../../dev/lessons.ts'
+import { App } from '../app'
+
+// xterm.js and noVNC need a real canvas; the panes are stubbed (their hosts are tested in the browser).
+vi.mock('../components/screen/TerminalPane', () => ({
+  default: () => <div data-testid="terminal" />,
+}))
+vi.mock('../components/screen/VncPane', () => ({ default: () => <div data-testid="vnc" /> }))
+vi.mock('../components/screen/hosts', () => ({
+  getTerminalHost: () => ({ reattach: vi.fn(), focus: vi.fn() }),
+  getVncHost: () => ({ ensure: vi.fn(), focus: vi.fn() }),
+}))
+
+const LESSON = '02-buffers-and-files/03-opening-files'
+const EVENTS_URL = 'ws://localhost:3000/s/local/events'
+
+const rpcCalls: { op: string; body: unknown }[] = []
+const index = { ...(indexJson as unknown as CurriculumIndex), tables: DEFAULT_TABLES }
+
+const server = setupServer(
+  http.get('/api/v1/me', () =>
+    HttpResponse.json({
+      user: { id: 'local', displayName: 'Local learner', kind: 'local' },
+      mode: 'local',
+      authMode: 'none',
+      features: { gui: true, remoteBox: false, stuckReports: true, authorMode: false },
+    }),
+  ),
+  http.post('/api/v1/sessions', () =>
+    HttpResponse.json({ id: 'local', state: 'ready', createdAt: 1, gui: true }, { status: 201 }),
+  ),
+  http.get('/api/v1/curriculum', () => HttpResponse.json(index)),
+  http.get('/api/v1/curriculum/lessons/*', ({ request }) => {
+    const id = decodeURIComponent(
+      new URL(request.url).pathname.replace('/api/v1/curriculum/lessons/', ''),
+    )
+    const b = LESSONS[id]
+    return b
+      ? HttpResponse.json(b)
+      : HttpResponse.json(
+          { status: 404, code: 'not_found', message: 'no such lesson' },
+          { status: 404 },
+        )
+  }),
+  http.get('/api/v1/progress', () => HttpResponse.json({ lessons: {}, updatedAt: 1 })),
+  http.post('/s/local/rpc/:op', async ({ params, request }) => {
+    const body = await request.json()
+    rpcCalls.push({ op: String(params['op']), body })
+    if (params['op'] === 'scenario') {
+      return HttpResponse.json({
+        ok: true,
+        result: {
+          step: { lessonId: LESSON, stepId: 'open' },
+          index: 0,
+          count: 4,
+          modules: [],
+          restarting: false,
+        },
+      })
+    }
+    if (params['op'] === 'describe')
+      return HttpResponse.json({ ok: true, result: { cmd: '', doc: '' } })
+    return HttpResponse.json({ ok: true, result: {} })
+  }),
+)
+
+// The mock events server must exist before MSW patches WebSocket: MSW then
+// passes the (unhandled) events connection through to it.
+const ws = new WS(EVENTS_URL, { jsonProtocol: true })
+
+beforeAll(() => server.listen({ onUnhandledFrame: 'bypass' }))
+afterAll(() => {
+  server.close()
+  WS.clean()
+})
+
+beforeEach(() => {
+  rpcCalls.length = 0
+  useSessionStore.getState().reset()
+  useUiStore.setState({ hintLevels: {}, toasts: [], demo: null })
+  window.history.pushState({}, '', `/lesson/${LESSON}`)
+})
+afterEach(() => {
+  disconnectSession()
+})
+
+function renderApp() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<App queryClient={qc} />)
+}
+
+function send(ev: Event) {
+  act(() => ws.send(ev))
+}
+
+const hello: Event = {
+  t: 'hello',
+  seq: 1,
+  protocol: 1,
+  sessionId: 'local',
+  mode: 'terminal',
+  emacs: { version: '31.1', uptimeMs: 1000 },
+  frames: { terminal: true, gui: false },
+  step: null,
+  modules: ['base', 'agent'],
+  replayed: false,
+}
+
+const state = (over: Record<string, unknown> = {}): Event => ({
+  t: 'state',
+  seq: 2,
+  buf: 'README.md',
+  file: '/work/hello/README.md',
+  mode: 'markdown-mode',
+  modeName: 'Markdown',
+  minors: [],
+  modified: false,
+  readonly: false,
+  narrowed: false,
+  overwrite: false,
+  line: 1,
+  col: 0,
+  point: 1,
+  markActive: false,
+  windows: [
+    {
+      id: 3,
+      buf: 'README.md',
+      mode: 'markdown-mode',
+      selected: true,
+      dedicated: false,
+      side: null,
+    },
+  ],
+  layout: 3,
+  frame: 'terminal',
+  frames: 1,
+  tabs: { count: 1, current: 'main' },
+  minibuffer: null,
+  isearch: false,
+  recursive: 0,
+  macro: false,
+  prefixArg: null,
+  readOnlyReason: null,
+  diagAtPoint: null,
+  ...over,
+})
+
+async function openLesson() {
+  renderApp()
+  await waitFor(() => expect(ws.server.clients().length).toBe(1))
+  send(hello)
+  send(state())
+  await waitFor(() => expect(rpcCalls.find((c) => c.op === 'scenario')).toBeDefined())
+  expect(rpcCalls.find((c) => c.op === 'scenario')?.body).toEqual({
+    lessonId: LESSON,
+    stepId: 'open',
+  })
+  send({
+    t: 'step',
+    seq: 3,
+    lessonId: LESSON,
+    stepId: 'open',
+    status: 'loaded',
+    index: 0,
+    count: 4,
+  })
+  await screen.findByRole('heading', { level: 1, name: 'Opening files' })
+}
+
+describe('LessonScreen against a fake events stream', () => {
+  it('loads the scenario once the session says hello and renders the steps', async () => {
+    await openLesson()
+    const steps = screen.getByRole('list', { name: 'Steps' })
+    const items = within(steps)
+      .getAllByRole('listitem')
+      .filter((li) => li.parentElement === steps)
+    expect(items).toHaveLength(4)
+    expect(items[0]).toHaveAttribute('aria-current', 'step')
+    expect(within(items[0] as HTMLElement).getByText('Open src/main.rs')).toBeInTheDocument()
+    // Directives rendered: the VS Code box, a try-it button and a keycap.
+    expect(screen.getByRole('complementary', { name: 'Coming from VS Code.' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /try it/ }).length).toBeGreaterThan(0)
+  })
+
+  it('reveals hints level by level and records them', async () => {
+    const user = userEvent.setup()
+    await openLesson()
+    send({
+      t: 'check',
+      seq: 4,
+      lessonId: LESSON,
+      stepId: 'open',
+      conditions: [
+        { id: 'open/1', ok: false },
+        { id: 'open/2', ok: false },
+      ],
+      complete: false,
+    })
+    await user.click(screen.getByRole('button', { name: 'Show a hint' }))
+    const note = await screen.findByRole('note')
+    expect(note).toHaveTextContent('hint for: the Find file prompt was used')
+    expect(note).toHaveTextContent('C-x then C-f.')
+    await waitFor(() =>
+      expect(rpcCalls).toContainEqual({ op: 'hint', body: { stepId: 'open', level: 1 } }),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Show the exact keys' }))
+    expect(screen.getByRole('note')).toHaveTextContent('C-x C-f "src/ma" TAB RET')
+    await waitFor(() =>
+      expect(rpcCalls).toContainEqual({ op: 'hint', body: { stepId: 'open', level: 2 } }),
+    )
+    expect(screen.queryByRole('button', { name: 'Show the exact keys' })).toBeNull()
+
+    // The first condition is met: the hint moves to the next one.
+    send({
+      t: 'check',
+      seq: 5,
+      lessonId: LESSON,
+      stepId: 'open',
+      conditions: [
+        { id: 'open/1', ok: true },
+        { id: 'open/2', ok: false },
+      ],
+      complete: false,
+    })
+    expect(screen.getByRole('note')).toHaveTextContent('hint for: main.rs is the current buffer')
+  })
+
+  it('marks a completed step done and moves to the next', async () => {
+    await openLesson()
+    send({
+      t: 'step',
+      seq: 6,
+      lessonId: LESSON,
+      stepId: 'open',
+      status: 'complete',
+      index: 0,
+      count: 4,
+    })
+    send({
+      t: 'step',
+      seq: 7,
+      lessonId: LESSON,
+      stepId: 'edit',
+      status: 'loaded',
+      index: 1,
+      count: 4,
+    })
+    const steps = screen.getByRole('list', { name: 'Steps' })
+    const items = within(steps)
+      .getAllByRole('listitem')
+      .filter((li) => li.parentElement === steps)
+    expect(items[0]).toHaveTextContent(/^Done:/)
+    expect(items[1]).toHaveAttribute('aria-current', 'step')
+  })
+
+  it('shows the ticker, Where am I and the cheat sheet from events', async () => {
+    await openLesson()
+    send({ t: 'prefix', seq: 8, keys: 'C-x', source: 'tap' })
+    expect(screen.getByText('waiting for the next key')).toBeInTheDocument()
+    send({
+      t: 'key',
+      seq: 9,
+      keys: 'C-x C-f',
+      cmd: 'find-file',
+      buf: 'README.md',
+      mode: 'markdown-mode',
+      frame: 'terminal',
+    })
+    send(
+      state({
+        seq: 10,
+        minibuffer: { depth: 1, prompt: 'Find file: ', contents: '~/hello/', kind: 'prompt' },
+      }),
+    )
+    expect(screen.getByText('find-file')).toBeInTheDocument()
+    expect(screen.getByText('Open a file (asks for a path)')).toBeInTheDocument()
+    expect(screen.getByText('A prompt is open: Find file:')).toBeInTheDocument()
+    expect(screen.getByText('prompt open')).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: 'preview' })).toBeInTheDocument()
+  })
+
+  it('shows a habit card once and lets the learner dismiss it', async () => {
+    const user = userEvent.setup()
+    await openLesson()
+    send({
+      t: 'key',
+      seq: 11,
+      keys: 'C-z',
+      cmd: 'suspend-frame',
+      buf: 'README.md',
+      mode: 'markdown-mode',
+      frame: 'terminal',
+    })
+    expect(screen.getByText(/Coming from VS Code\?/)).toBeInTheDocument()
+    await user.click(screen.getAllByRole('button', { name: 'Dismiss' })[0] as HTMLElement)
+    expect(screen.queryByText(/Coming from VS Code\?/)).toBeNull()
+  })
+
+  it('overlays: frame closed, restarting, busy banner', async () => {
+    await openLesson()
+    send({ t: 'emacs', seq: 12, event: 'frame-closed', frame: 'terminal', reason: 'C-x C-c' })
+    expect(screen.getByRole('alert', { name: 'The Emacs frame closed.' })).toBeInTheDocument()
+    send({ t: 'emacs', seq: 13, event: 'frame-opened', frame: 'terminal' })
+    expect(screen.queryByRole('alert', { name: 'The Emacs frame closed.' })).toBeNull()
+    send({ t: 'emacs', seq: 14, event: 'restarting' })
+    expect(screen.getByRole('alert', { name: 'Emacs is restarting.' })).toBeInTheDocument()
+    send({ t: 'emacs', seq: 15, event: 'daemon-restarted' })
+    expect(screen.queryByRole('alert', { name: 'Emacs is restarting.' })).toBeNull()
+    send({ t: 'emacs', seq: 16, event: 'unresponsive' })
+    expect(screen.getByText('Emacs is busy.')).toBeInTheDocument()
+  })
+
+  it('Rescue calls the rpc and names what was done', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('/s/local/rpc/rescue', () =>
+        HttpResponse.json({ ok: true, result: { did: ['cancelled the prompt'] } }),
+      ),
+    )
+    await openLesson()
+    await user.click(screen.getAllByRole('button', { name: 'Rescue me' })[0] as HTMLElement)
+    expect(await screen.findByText('Rescue: cancelled the prompt.')).toBeInTheDocument()
+  })
+})

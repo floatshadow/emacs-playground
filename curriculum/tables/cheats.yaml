@@ -1,13 +1,179 @@
 # Cheat sheet rows per major mode (frontend.md §6): mode → list of
-# [keys, description]. The key "common" holds rows shown in every mode.
-#
-# Example:
-#   common:
-#     - [C-g, cancel anything]
-#   rust-ts-mode:
-#     - [M-., go to definition]
-#     - [C-c C-c, compile]
-#
-# TODO(curriculum): rows for the modes met in Parts 0-3 (fundamental,
-# lisp-interaction, rust-ts, markdown, dired, Buffer-menu, help, ibuffer).
-{}
+# [keys, description]. The key "common" holds rows shown in every mode,
+# after the mode's own rows. Modes are the major-mode symbols the agent
+# reports in state.mode. Keep each list short: the five or six keys that
+# matter most in that buffer.
+
+common:
+  - [C-g, cancel anything]
+  - [C-x C-f, open a file]
+  - [C-x C-s, save]
+  - [C-x b, switch buffer]
+  - [C-s, search]
+  - [M-x, run a command by name]
+  - [C-/, undo]
+  - [C-h k, "what does this key do?"]
+
+fundamental-mode:
+  - [C-a / C-e, start / end of line]
+  - [C-k, cut to end of line]
+  - [C-y, paste]
+
+text-mode:
+  - [M-f / M-b, word forward / back]
+  - [M-q, refill the paragraph]
+  - [M-$, check spelling of a word]
+
+markdown-mode:
+  - [C-c C-c p, preview]
+  - [M-RET, new list item]
+  - [C-c C-l, insert a link]
+  - [C-c C-s b, bold]
+  - [TAB, fold or unfold a heading]
+
+gfm-mode:
+  - [C-c C-c p, preview]
+  - [M-RET, new list item]
+  - [C-c C-l, insert a link]
+
+rust-ts-mode:
+  - [C-M-a / C-M-e, start / end of function]
+  - [C-M-f / C-M-b, over a bracketed block]
+  - [M-g i, jump to a definition]
+  - [C-c C-c, compile]
+  - [M-g M-n, next error]
+  - [M-;, comment the region]
+
+rust-mode:
+  - [C-M-a / C-M-e, start / end of function]
+  - [C-c C-c, compile]
+  - [M-g M-n, next error]
+
+emacs-lisp-mode:
+  - [C-M-x, evaluate the form around the cursor]
+  - [C-x C-e, evaluate the expression before the cursor]
+  - [M-x eval-buffer, evaluate the whole file]
+  - [C-h f, describe the function under the cursor]
+  - [M-., go to definition]
+
+lisp-interaction-mode:
+  - [C-j, evaluate and print the result]
+  - [C-x C-e, evaluate the expression before the cursor]
+  - [C-x b, back to your file]
+
+conf-toml-mode:
+  - [C-c C-u, uncomment]
+  - [M-;, comment the region]
+
+toml-ts-mode:
+  - [M-;, comment the region]
+  - [C-M-a / C-M-e, start / end of a table]
+
+sh-mode:
+  - [C-c C-x, run this script]
+  - [M-;, comment the region]
+
+bash-ts-mode:
+  - [C-c C-x, run this script]
+  - [M-;, comment the region]
+
+help-mode:
+  - [q, close help]
+  - [RET, follow the link]
+  - [l / r, back / forward]
+  - [s, show the source]
+  - [n / p, next / previous line]
+
+helpful-mode:
+  - [q, close help]
+  - [RET, follow the link]
+  - [g, refresh]
+
+Info-mode:
+  - [q, close the manual]
+  - [SPC, read on]
+  - [n / p, next / previous node]
+  - [u, up a level]
+  - [l, back]
+
+apropos-mode:
+  - [q, close]
+  - [RET, describe the item on this line]
+
+Buffer-menu-mode:
+  - [q, leave this list]
+  - [RET, open the buffer on this line]
+  - [d / x, flag for killing / kill flagged]
+  - [n / p, move down / up]
+
+ibuffer-mode:
+  - [RET, open the buffer on this line]
+  - [m / u, mark / unmark]
+  - [D, kill marked buffers]
+  - [S, save marked buffers]
+  - ["* m", mark modified buffers]
+  - ["* h", mark help buffers]
+  - [/ f, filter by file name]
+  - [/ /, remove filters]
+  - [q, leave the list]
+
+dired-mode:
+  - [RET, open the file or folder]
+  - [^, parent folder]
+  - [m / u, mark / unmark]
+  - [d / x, flag for deletion / delete flagged]
+  - [R, move or rename]
+  - [C, copy]
+  - [+, new folder]
+  - [j, go to a file by name]
+  - [q, leave the listing]
+
+wdired-mode:
+  - [C-c C-c, apply the renames]
+  - [C-c ESC, discard the edits]
+
+compilation-mode:
+  - [RET, jump to this error]
+  - [g, rebuild]
+  - [n / p, next / previous error]
+  - [q, close]
+
+grep-mode:
+  - [RET, visit this match]
+  - [n / p, next / previous match]
+  - [g, search again]
+  - [q, close]
+
+occur-mode:
+  - [RET, visit this match]
+  - [n / p, next / previous match]
+  - [e, edit the matches in place]
+  - [q, close]
+
+xref--xref-buffer-mode:
+  - [RET, visit this match]
+  - [n / p, preview next / previous]
+  - [q, close]
+
+bookmark-bmenu-mode:
+  - [RET, jump to this bookmark]
+  - [d / x, flag / delete]
+  - [r, rename]
+  - [q, close]
+
+vundo-mode:
+  - [b / f, back / forward in history]
+  - [n / p, other branch]
+  - [RET, keep this state]
+  - [q, quit where you started]
+
+messages-buffer-mode:
+  - [q, close]
+
+completion-list-mode:
+  - [RET, pick this completion]
+  - [C-g, back to the prompt]
+
+special-mode:
+  - [q, close]
+  - [g, refresh]

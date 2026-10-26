@@ -1,0 +1,96 @@
+import { afterEach, describe, expect, it } from 'vitest'
+import { record, type Recorder } from '../test/recorder'
+import { DEFAULT_GLOSS } from './defaults'
+import {
+  missingGlosses,
+  selectTicker,
+  tickerGap,
+  tickerOnKey,
+  tickerOnPrefix,
+  TICKER_MAX,
+  type TickerEntry,
+} from './ticker'
+
+let rec: Recorder | null = null
+afterEach(() => rec?.dispose())
+
+const key = (keys: string, cmd: string, extra: Record<string, unknown> = {}) =>
+  ({
+    t: 'key',
+    keys,
+    cmd,
+    buf: 'main.rs',
+    mode: 'rust-ts-mode',
+    frame: 'terminal',
+    ...extra,
+  }) as const
+
+describe('ticker reducer', () => {
+  it('a prefix adds a pending entry, the completed command replaces it', () => {
+    let t: TickerEntry[] = []
+    t = tickerOnPrefix(t, { t: 'prefix', keys: 'C-x', source: 'tap' }, 1)
+    expect(t.map((e) => e.kind)).toEqual(['prefix'])
+    t = tickerOnPrefix(t, { t: 'prefix', keys: 'C-x n', source: 'tap' }, 2)
+    expect(t).toHaveLength(1)
+    expect(t[0]?.keys).toEqual(['C-x', 'n'])
+    t = tickerOnKey(t, key('C-x n w', 'widen'), 3)
+    expect(t.map((e) => [e.kind, e.cmd])).toEqual([['ok', 'widen']])
+  })
+
+  it('an empty prefix clears the pending entry', () => {
+    let t = tickerOnPrefix([], { t: 'prefix', keys: 'C-x', source: 'tap' }, 1)
+    t = tickerOnPrefix(t, { t: 'prefix', keys: '', source: 'tap' }, 2)
+    expect(t).toEqual([])
+  })
+
+  it('classifies unbound and quit commands', () => {
+    let t = tickerOnKey([], key('C-x C-y', 'undefined'), 1)
+    t = tickerOnKey(t, key('C-g', 'keyboard-quit'), 2)
+    t = tickerOnKey(t, key('M-x', 'compile', { mx: true }), 3)
+    expect(t.map((e) => e.kind)).toEqual(['unbound', 'quit', 'ok'])
+    expect(t[2]?.mx).toBe(true)
+    expect(t[2]?.keys).toEqual(['M-x'])
+  })
+
+  it('keeps at most 40 entries and shows six, newest first', () => {
+    let t: TickerEntry[] = []
+    for (let i = 0; i < 50; i++) t = tickerOnKey(t, key('C-f', 'forward-char'), i)
+    expect(t).toHaveLength(TICKER_MAX)
+    t = tickerOnKey(t, key('C-x C-f', 'find-file'), 99)
+    const v = selectTicker(t, DEFAULT_GLOSS, {})
+    expect(v).toHaveLength(6)
+    expect(v[0]?.last).toBe(true)
+    expect(v[0]?.label).toBe('find-file')
+    expect(v[0]?.gloss).toBe('Open a file (asks for a path)')
+  })
+
+  it('glosses come from the table, then from describe', () => {
+    let t = tickerOnKey([], key('C-c C-k', 'my-command'), 1)
+    expect(missingGlosses(t, DEFAULT_GLOSS, {}).map((e) => e.cmd)).toEqual(['my-command'])
+    expect(selectTicker(t, DEFAULT_GLOSS, { 'my-command': 'Does my thing' })[0]?.gloss).toBe(
+      'Does my thing',
+    )
+    t = tickerOnKey(t, key('C-x C-y', 'undefined'), 2)
+    expect(selectTicker(t, DEFAULT_GLOSS, {})[0]?.gloss).toBe('Nothing is bound to this key here')
+  })
+
+  it('marks gaps once', () => {
+    let t = tickerGap([], 1)
+    t = tickerGap(t, 2)
+    expect(t.map((e) => e.kind)).toEqual(['gap'])
+  })
+
+  it('a recorded C-x C-f session reads like the demo ticker', () => {
+    rec = record(['hello/README.md'])
+    rec.keys('C-x C-f').type('src/ma').keys('TAB RET')
+    const s = rec.replay()
+    const v = selectTicker(s.ticker, DEFAULT_GLOSS, {})
+    expect(v.map((x) => x.label).slice(0, 3)).toEqual([
+      'exit-minibuffer',
+      'minibuffer-complete',
+      'self-insert-command',
+    ])
+    expect(s.ticker.some((e) => e.kind === 'prefix')).toBe(false)
+    expect(s.ticker.find((e) => e.cmd === 'find-file')?.keys).toEqual(['C-x', 'C-f'])
+  })
+})

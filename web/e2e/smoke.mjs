@@ -5,8 +5,8 @@
 //   PG_URL=http://127.0.0.1:8080 pnpm e2e
 // Environment: PG_CDP (default http://127.0.0.1:9222), PG_URL (default
 // http://127.0.0.1:8080), PG_SHOT (optional screenshot path).
-// TODO(frontend, frontend.md §14): the Playwright scenarios (open lesson 2.3,
-// ticker shows find-file, complete a step, reset, GUI frame, preview reload).
+// The frontend.md §14 scenarios (lesson 2.3, ticker, steps, reset, GUI
+// frame, preview reload) are in e2e/lesson.mjs (pnpm e2e:lesson).
 import { chromium } from 'playwright-core'
 
 const cdp = process.env.PG_CDP ?? 'http://127.0.0.1:9222'

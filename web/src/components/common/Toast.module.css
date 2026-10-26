@@ -1,0 +1,47 @@
+.region {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: grid;
+  gap: 8px;
+  justify-items: center;
+  pointer-events: none;
+  width: min(560px, calc(100vw - 32px));
+}
+.toast {
+  pointer-events: auto;
+  background: var(--ink);
+  color: #fff;
+  padding: 10px 12px 10px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  box-shadow: 0 6px 20px rgba(30, 27, 46, 0.25);
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  animation: rise 0.18s ease-out;
+}
+.error {
+  background: var(--err);
+}
+.x {
+  background: transparent;
+  border: 0;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.x:hover {
+  opacity: 1;
+}
+@keyframes rise {
+  from {
+    transform: translateY(6px);
+    opacity: 0;
+  }
+}

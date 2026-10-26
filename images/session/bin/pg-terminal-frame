@@ -1,0 +1,23 @@
+#!/bin/sh
+# pg-terminal-frame: the terminal frame, run as the command of the tmux
+# pane (emacs.md sections 5 and 7):
+#
+#   tmux -L pg new-session -d -s emacs -x 120 -y 36 /opt/playground/bin/pg-terminal-frame
+#
+# While the daemon is (re)starting it says so in the pane and waits
+# instead of failing, so tmux's respawn (tmux.conf) does not spin.
+# Environment: PG_EMACS_SERVER (playground).
+set -u
+
+server="${PG_EMACS_SERVER:-playground}"
+
+i=0
+until emacsclient -s "$server" -e t >/dev/null 2>&1; do
+  if [ "$i" -eq 0 ]; then
+    printf '\033[2J\033[H  Starting Emacs...\r\n'
+  fi
+  i=$((i + 1))
+  sleep 0.25
+done
+
+exec emacsclient -t -s "$server" "$@"

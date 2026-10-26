@@ -1,0 +1,83 @@
+id: 02-buffers-and-files/01-buffers-are-not-tabs
+title: Buffers are not tabs
+minutes: 8
+mode: terminal
+modules: [base, agent, editing, files]
+vscode: editor tabs
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/hello/src/lib.rs, projects/hello/README.md, projects/hello/src/main.rs]
+  layout: single
+  # Tidy the desk: close unmodified file buffers from earlier lessons so
+  # the list shows this lesson's six buffers, then make one buffer that
+  # is not a file.
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (with-current-buffer (get-buffer-create "notes")
+        (erase-buffer)
+        (insert "This buffer is not a file. It lives in memory until you kill it.\n"))
+      (get-buffer-create "*Messages*")
+      (get-buffer-create "*scratch*"))
+steps:
+  - id: list
+    goal: Open the buffer list
+    detail: "`C-x C-b` lists every buffer Emacs holds. It replaces the current window's contents for now; nothing is closed."
+    demo: "C-x C-b"
+    conditions:
+      - text: the buffer list was opened
+        any:
+          - event: { command: ibuffer }
+          - event: { command: list-buffers }
+        hint: "Control x, then Control b. Not C-x b, which switches buffers."
+      - text: the list is on screen
+        state: { "windows.mode": { in: [ibuffer-mode, Buffer-menu-mode] } }
+        hint: "If the list disappeared, press C-x C-b again."
+  - id: mark
+    goal: Mark exactly the buffers that visit files
+    detail: "Six buffers, grouped by project. Move with `n` and `p`. Press `m` on each buffer that shows a file in the *Filename* column; `u` unmarks a line. Leave `notes`, *scratch* and *Messages* unmarked: they are buffers without files."
+    demo: '% f ~300 "." ~300 RET'
+    conditions:
+      - text: every buffer that visits a file is marked
+        elisp: '(let ((b (get-buffer "*Ibuffer*"))) (and b (with-current-buffer b (seq-every-p (lambda (e) (or (not (buffer-file-name (car e))) (eq (cdr e) ibuffer-marked-char))) (ibuffer-current-state-list)))))'
+        hint: "Put the cursor on a line whose Filename column shows a path, then m. Do that for main.rs, lib.rs and README.md. (% f . RET marks every buffer with a file name in one go.)"
+      - text: no buffer without a file is marked
+        elisp: '(let ((b (get-buffer "*Ibuffer*"))) (and b (with-current-buffer b (seq-every-p (lambda (e) (or (buffer-file-name (car e)) (not (eq (cdr e) ibuffer-marked-char)))) (ibuffer-current-state-list)))))'
+        hint: "notes looks like a file name but has no path: it is only in memory. u on a line removes its mark."
+    stuck:
+      - when: { step_seconds: 120 }
+        say: "Look at the last column of the list: a path there means the buffer visits a file. n and p move between lines, m marks, u unmarks."
+  - id: not-a-file
+    goal: Leave the list and switch to the notes buffer
+    detail: "`q` puts the list away. Then `C-x b` asks for a buffer name: type `notes` and `RET`. The mode line shows no file name, and `C-x C-s` would ask where to save it."
+    demo: 'q ~400 C-x b ~400 "notes" RET'
+    conditions:
+      - text: C-x b was used
+        any:
+          - event: { command: switch-to-buffer }
+          - event: { command: consult-buffer }
+        hint: "Control x, then a plain b. Type notes, then RET."
+      - text: notes is shown, and it visits no file
+        state: { buf: notes, file: null }
+        hint: "Type the name exactly: notes. RET switches to it."
+  - id: kill
+    goal: Kill the lib.rs buffer; the file stays on disk
+    detail: "`C-x k` kills a buffer, which is closer to closing a tab than deleting a file. It offers the current buffer; type `lib.rs` instead and `RET`."
+    demo: 'C-x k ~400 "lib.rs" RET'
+    conditions:
+      - text: C-x k was used
+        any:
+          - event: { command: kill-buffer }
+          - event: { command: kill-current-buffer }
+        hint: "Control x, then a plain k. The prompt offers the current buffer; type lib.rs and RET."
+      - text: no buffer shows lib.rs any more
+        elisp: '(not (find-buffer-visiting "/work/projects/hello/src/lib.rs"))'
+        hint: "Kill the buffer named lib.rs. TAB completes buffer names in the prompt."
+      - text: the file lib.rs is still on disk
+        file: { path: projects/hello/src/lib.rs, exists: true }
+        hint: "Killing a buffer never deletes its file. If the file is gone, reset this step."

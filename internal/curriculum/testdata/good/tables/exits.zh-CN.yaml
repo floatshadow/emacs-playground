@@ -1,0 +1,4 @@
+- id: minibuffer-prompt
+  when: { "minibuffer.kind": prompt }
+  why: "提示已打开：{minibuffer.prompt}"
+  how: "RET 确认，C-g 取消。"

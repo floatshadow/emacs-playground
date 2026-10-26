@@ -1,0 +1,113 @@
+id: 02-buffers-and-files/06-dired
+title: Dired and the dirvish side window
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files]
+vscode: "Explorer, file operations"
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/inbox/brief.md]
+  layout: single
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (with-current-buffer (find-buffer-visiting "/work/projects/inbox/brief.md")
+        (goto-char (point-min))))
+steps:
+  - id: open
+    goal: List the inbox folder
+    detail: "`C-x d` asks for a directory and offers the one of the current file. `RET` accepts it. Each line of the listing is a file; the cursor sits on one at a time."
+    demo: "C-x d ~500 RET"
+    conditions:
+      - text: Dired was opened
+        any:
+          - event: { command: dired }
+          - event: { command: dired-jump }
+          - event: { command: dirvish }
+          - event: { command: dirvish-side }
+        hint: "Control x, then a plain d. RET accepts the directory it offers."
+      - text: the listing shows /work/projects/inbox/
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (derived-mode-p (quote dired-mode)) (equal (expand-file-name default-directory) "/work/projects/inbox/")))'
+        hint: "The inbox folder is where brief.md lives. If you are elsewhere, ^ goes up a level and RET on a folder goes in."
+  - id: mkdir
+    goal: Make a docs folder
+    detail: "`+` creates a directory. Type `docs` and `RET`; the new folder appears in the listing."
+    demo: '+ ~400 "docs" RET'
+    conditions:
+      - text: + was used
+        event: { command: dired-create-directory }
+        hint: "Press + (plus) in the listing."
+      - text: inbox/docs exists
+        elisp: '(file-directory-p "/work/projects/inbox/docs")'
+        hint: "Name it docs, inside the inbox folder (the prompt starts there)."
+  - id: move
+    goal: Move architecture.md and meeting-notes.md into docs
+    detail: "Mark both files with `m` (`j` jumps to a file by name, or move with `n` and `p`), then `R` moves the marked files. Answer `docs` and `RET`. `u` unmarks a line, `U` unmarks everything."
+    demo: 'j ~400 "architecture.md" RET ~300 m ~300 j ~400 "meeting-notes.md" RET ~300 m ~500 R ~500 "docs" RET'
+    conditions:
+      - text: R moved files
+        event: { command: dired-do-rename }
+        hint: "Mark with m, then R (capital r), then type docs and RET."
+      - text: both notes are in docs
+        all:
+          - file: { path: projects/inbox/docs/architecture.md, exists: true }
+          - file: { path: projects/inbox/docs/meeting-notes.md, exists: true }
+        hint: "Both files must be marked (a * at the start of their lines) before R. If only one moved, mark the other and R again."
+      - text: they are no longer in inbox
+        all:
+          - file: { path: projects/inbox/architecture.md, exists: false }
+          - file: { path: projects/inbox/meeting-notes.md, exists: false }
+        hint: "R moves; C (copy) would have left the originals behind. Delete the copies with d and x, or reset this step."
+    stuck:
+      - when: { step_seconds: 150 }
+        say: "Marked lines start with *. R moves every marked file at once; with nothing marked it moves the file under the cursor. U removes all marks."
+  - id: rename
+    goal: Rename todo-old.txt to todo.txt
+    detail: "With no marks, `R` acts on the file under the cursor and renames it in place."
+    demo: 'j ~400 "todo-old.txt" RET ~400 R ~500 "todo.txt" RET'
+    conditions:
+      - text: todo.txt exists
+        file: { path: projects/inbox/todo.txt, exists: true }
+        hint: "Put the cursor on todo-old.txt, press R and type todo.txt."
+      - text: todo-old.txt is gone
+        file: { path: projects/inbox/todo-old.txt, exists: false }
+        hint: "Rename, do not copy: R, not C."
+  - id: delete
+    goal: Delete the stray scratch.tmp
+    detail: "`d` flags a file for deletion (a `D` appears at the start of its line); `x` deletes every flagged file after asking. Flagging first means a slip of the finger deletes nothing."
+    demo: 'j ~400 "scratch.tmp" RET ~400 d ~500 x ~600 y'
+    conditions:
+      - text: x deleted the flagged file
+        any:
+          - event: { command: dired-do-flagged-delete }
+          - event: { command: dired-do-delete }
+        hint: "d on the scratch.tmp line, then x, then answer y."
+      - text: scratch.tmp is gone
+        file: { path: projects/inbox/scratch.tmp, exists: false }
+        hint: "Only scratch.tmp should carry the D flag. u removes a flag from a line."
+  - id: around
+    goal: Look inside docs, come back up, and leave
+    detail: "`RET` on a folder opens it; `^` goes to the parent folder. `q` puts the listing away."
+    demo: 'j ~400 "docs" RET ~400 RET ~800 ^ ~800 q'
+    conditions:
+      - text: you opened a folder
+        any:
+          - event: { command: dired-find-file }
+          - event: { command: dired-find-alternate-file }
+          - event: { command: dirvish-find-entry-a }
+        hint: "Put the cursor on the docs line and press RET."
+      - text: ^ went back up
+        event: { command: dired-up-directory }
+        hint: "^ (Shift 6) goes to the parent folder."
+      - text: the listing was closed
+        all:
+          - any:
+              - event: { command: dirvish-quit }
+              - event: { command: quit-window }
+          - state: { "windows.mode": { not: dired-mode } }
+        hint: "q closes the listing and shows the file you were in before."

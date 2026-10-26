@@ -7,10 +7,93 @@
 #   vscode  what they meant ("undo")
 #   say     the card body; key names render as keycaps
 #
-# Example:
-#   - key: C-z
-#     vscode: undo
-#     say: "C-z suspends Emacs to the shell. Undo is C-/ (also C-x u)."
-#
-# TODO(curriculum): port HABITS from design/demo/mock-emacs.js.
-[]
+# Ported from HABITS in design/demo/mock-emacs.js. Prefix keys (C-x, C-c,
+# C-u) are not listed: they never arrive as a single-key command event.
+
+- key: C-z
+  vscode: undo
+  say: "C-z would suspend Emacs to the shell; in the playground it does nothing. Undo is C-/ (redo is C-?)."
+
+- key: C-f
+  vscode: find
+  say: "C-f moves the cursor right one character. Search is C-s."
+
+- key: C-a
+  vscode: select all
+  say: "C-a goes to the start of the line. Select all is C-x h."
+
+- key: C-v
+  vscode: paste
+  say: "C-v scrolls down a page. Paste is C-y."
+
+- key: C-s
+  vscode: save
+  say: "C-s starts an incremental search (I-search at the bottom). Save is C-x C-s. C-g leaves the search."
+
+- key: C-p
+  vscode: command palette
+  say: "C-p moves up one line. The command palette is M-x."
+
+- key: C-o
+  vscode: open file
+  say: "C-o inserts a blank line after the cursor. Open a file with C-x C-f."
+
+- key: C-w
+  vscode: close tab
+  say: "C-w cuts the selected region. Close a buffer with C-x k. Browsers often grab this key; use Focus mode."
+
+- key: C-n
+  vscode: new file
+  say: "C-n moves down one line. For a new file: C-x C-f and type a name that does not exist yet."
+
+- key: C-d
+  vscode: select next match
+  say: "C-d deletes the character under the cursor. Selecting the next match is C-> once Part 1 is on (lesson 1.7)."
+
+- key: C-b
+  vscode: toggle sidebar
+  say: "C-b moves left one character. The file sidebar is Dired and dirvish, lesson 2.6 (C-x C-j)."
+
+- key: C-e
+  vscode: quick open
+  say: "C-e goes to the end of the line. Quick open is C-x b (buffers) or C-x C-f (files)."
+
+- key: C-k
+  vscode: chord prefix
+  say: "C-k cut the rest of the line into the kill ring. C-y brings it back."
+
+- key: C-r
+  vscode: recent files
+  say: "C-r searches backward. Recent files: C-x C-r."
+
+- key: C-l
+  vscode: select line
+  say: "C-l re-centres the screen on your line; nothing was selected. Press it again for top, then bottom."
+
+- key: C-h
+  vscode: replace
+  say: "C-h opens the help system. C-h k explains any key. Replace is M-%."
+
+- key: C-y
+  vscode: redo
+  say: "C-y pastes the last cut text. Redo is C-? (or C-M-_ where the terminal cannot send C-?)."
+
+- key: C-SPC
+  vscode: trigger completion
+  say: "C-SPC starts a selection (sets the mark). Completion pops up as you type in code; C-M-i asks for it."
+
+- key: C-/
+  vscode: toggle comment
+  say: "C-/ is undo. Comment a line with C-x C-; or the region with M-;."
+
+- key: C-q
+  vscode: quit
+  say: "C-q inserts the next key you press literally, as a character. To close the frame: C-x C-c (the playground reopens it)."
+
+- key: C-j
+  vscode: toggle panel
+  say: "C-j inserts a new line and indents it. Extra windows close with C-x 1; lesson 3.5 tames pop-ups."
+
+- key: C-t
+  vscode: go to symbol
+  say: "C-t swapped the two characters around the cursor (C-/ undoes it). Jump to a definition by name with M-g i."

@@ -1,0 +1,96 @@
+id: 03-windows-and-layouts/01-windows-and-frames
+title: Windows and frames
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows]
+vscode: "editor groups, split editor"
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/hello/src/main.rs, projects/hello/README.md]
+  layout: "projects/hello/src/main.rs"
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (with-current-buffer (find-buffer-visiting "/work/projects/hello/src/main.rs")
+        (goto-char (point-min))))
+steps:
+  - id: split
+    goal: Show main.rs twice, one window above the other
+    detail: "`C-x 2` splits the selected window in two, one above the other. Both windows show the same buffer: there is still only one main.rs."
+    demo: "C-x 2"
+    conditions:
+      - text: C-x 2 was used
+        event: { command: split-window-below }
+        hint: "Control x, then the digit 2."
+      - text: main.rs above main.rs
+        layout: "(vsplit main.rs main.rs)"
+        hint: "Two windows, stacked. If you have more, C-x 1 starts over from one."
+  - id: edit
+    goal: Edit in the lower window and watch the upper one
+    detail: "`C-x o` moves the cursor to the other window. Go to the end with `M->` and type a comment. The upper window shows the change as you type, because both windows show one buffer."
+    demo: 'C-x o ~400 M-> ~300 "// typed in the lower window"'
+    conditions:
+      - text: the lower window is selected
+        elisp: '(and (not (eq (selected-window) (frame-first-window))) (eq (window-buffer (selected-window)) (find-buffer-visiting "/work/projects/hello/src/main.rs")))'
+        hint: "C-x o moves to the next window; the bright mode line marks the selected one."
+      - text: main.rs has the new comment
+        elisp: '(let ((b (find-buffer-visiting "/work/projects/hello/src/main.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "typed in the lower window" nil t)))))'
+        hint: "Type the comment in the lower window: // typed in the lower window."
+      - text: still two windows on main.rs
+        layout: "(vsplit main.rs main.rs)"
+        hint: "Keep the two windows. If one disappeared, C-x 2 brings the split back."
+  - id: side
+    goal: Split the lower window side by side and show README.md there
+    detail: "`C-x 3` splits the selected window into left and right. `C-x o` moves into the new right-hand window, and `C-x b README.md RET` shows README.md in it."
+    demo: 'C-x 3 ~400 C-x o ~400 C-x b ~400 "README.md" RET'
+    conditions:
+      - text: C-x 3 was used
+        event: { command: split-window-right }
+        hint: "Control x, then the digit 3, while the lower window is selected."
+      - text: main.rs on top; main.rs and README.md side by side below
+        layout: "(vsplit main.rs (hsplit main.rs README.md))"
+        hint: "C-x b README.md RET in the lower right window. C-x o cycles through the windows: top, lower left, lower right."
+  - id: close
+    goal: Close the top window
+    detail: "`C-x 0` deletes the selected window. Only the window goes; the buffer stays open. Move to the top window with `C-x o`, then `C-x 0`."
+    demo: "C-x o ~400 C-x 0"
+    conditions:
+      - text: C-x 0 was used
+        event: { command: delete-window }
+        hint: "C-x o until the top window is selected, then Control x and the digit 0."
+      - text: main.rs and README.md side by side
+        layout: "(hsplit main.rs README.md)"
+        hint: "Delete only the top window. If the wrong one went, C-x 2 and C-x b bring it back, or reset this step."
+  - id: frame
+    goal: Open a second frame, then close it
+    detail: "A frame is what your desktop calls a window. `C-x 5 2` makes a new frame; in a terminal it takes over the whole screen, with one window. `C-x 5 0` deletes it and your two windows come back."
+    demo: "C-x 5 2 ~1500 C-x 5 0"
+    conditions:
+      - text: C-x 5 2 made a frame
+        event: { command: make-frame-command }
+        hint: "Control x, 5, then 2."
+      - text: C-x 5 0 deleted it
+        event: { command: delete-frame }
+        hint: "Control x, 5, then 0, in the new frame."
+      - text: the two windows are back
+        layout: "(hsplit main.rs README.md)"
+        hint: "The first frame keeps its layout. If you see one window, you are still in the new frame: C-x 5 0."
+  - id: one
+    goal: Close README.md's window and buffer in one go
+    detail: "`C-x 4 0` kills the selected window and its buffer together. Select the README.md window first (`C-x o` until its mode line is bright), then press it."
+    demo: 'C-x b ~300 "README.md" RET ~400 C-x 4 0'
+    conditions:
+      - text: C-x 4 0 was used
+        event: { command: kill-buffer-and-window }
+        hint: "Control x, 4, then 0, in the README.md window."
+      - text: one window, main.rs
+        layout: "main.rs"
+        hint: "If another window remains, C-x 1 keeps only the selected one."
+      - text: README.md is no longer open
+        elisp: '(not (find-buffer-visiting "/work/projects/hello/README.md"))'
+        hint: "C-x 4 0 must run in the README.md window: it kills that window's buffer."

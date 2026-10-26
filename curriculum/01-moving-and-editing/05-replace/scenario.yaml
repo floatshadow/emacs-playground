@@ -1,0 +1,47 @@
+id: 01-moving-and-editing/05-replace
+title: Replace
+minutes: 12
+mode: terminal
+modules: [base, agent, editing]
+vscode: "Ctrl+H, regex mode"
+setup:
+  workspace: fixtures/editing
+  root: editing
+  reset: true
+  open: [editing/notes/style.md, editing/src/latency.rs]
+  layout: single
+  eval: '(dolist (f (list "/work/editing/notes/style.md" "/work/editing/src/latency.rs")) (with-current-buffer (find-buffer-visiting f) (goto-char (point-min))))'
+steps:
+  - id: ask
+    goal: "colour to color, except in the quotation"
+    detail: "`M-%` asks what to replace (`RET`) and with what (`RET`), highlighting every match as you type. Then it stops at each match: `y` replaces, `n` skips, `!` replaces all the rest, `q` stops. Lower-case input matches any case, and *Colour* becomes *Color*."
+    demo: 'M-< ~300 M-% ~400 "colour" RET ~300 "color" RET ~600 y ~500 y ~500 n ~500 y'
+    conditions:
+      - text: M-% was used
+        any:
+          - event: { command: visual-replace }
+          - event: { command: query-replace }
+        hint: "M-% is Alt and % (Alt Shift 5). Type colour RET, color RET."
+      - text: the three ordinary uses say color
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/style.md") (save-excursion (goto-char (point-min)) (and (search-forward "Color names" nil t) (search-forward "color of links" nil t) (search-forward "warning color." nil t))))'
+        hint: "Answer y at Colour names, the colour of links and the warning colour."
+      - text: the quotation is unchanged
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/style.md") (save-excursion (goto-char (point-min)) (search-forward "\"the colour of money\"" nil t)))'
+        hint: "Answer n at the colour of money. If you replaced it, C-/ undoes one replacement at a time."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "The prompt wants the text to find, then RET, then the replacement, then RET. C-g cancels and nothing is replaced."
+  - id: capture
+    goal: Rename p50_ms, p90_ms and p99_ms to p50_millis and so on
+    detail: "Open `src/latency.rs` (`C-x b latency.rs RET`). `C-M-%` (or `M-x query-replace-regexp`) takes a regexp: `p\\([0-9]+\\)_ms` captures the digits as group 1, and the replacement `p\\1_millis` puts them back. `p99_budget` does not match, so it stays. `!` replaces every match."
+    demo: 'C-x b ~400 "latency.rs" RET ~300 M-< ~300 M-x ~400 "query-replace-regexp" RET ~400 "p\\([0-9]+\\)_ms" RET ~400 "p\\1_millis" RET ~600 !'
+    conditions:
+      - text: query-replace-regexp was used
+        event: { command: query-replace-regexp }
+        hint: "C-M-% is Control Alt %. If your keyboard will not send it, M-x query-replace-regexp RET."
+      - text: every pNN_ms is now pNN_millis
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/latency.rs") (save-excursion (goto-char (point-min)) (and (not (re-search-forward "p[0-9]+_ms" nil t)) (= 3 (how-many "p\\(50\\|90\\|99\\)_millis: f64" (point-min) (point-max))))))'
+        hint: "The regexp is p\\([0-9]+\\)_ms and the replacement p\\1_millis. Start from the top with M-< so no match is skipped."
+      - text: p99_budget kept its name
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/latency.rs") (= 2 (how-many "p99_budget" (point-min) (point-max))))'
+        hint: "p99_budget should not match the regexp. If it changed, C-/ undoes the replacements."

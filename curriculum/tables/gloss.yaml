@@ -1,10 +1,367 @@
 # Ticker glosses (frontend.md §6): command name → a short plain-language
 # gloss shown under the chord. Commands missing here fall back to the first
-# docstring line through rpc describe.
-#
-# Example:
-#   find-file: Open a file (asks for a path)
-#
-# TODO(curriculum): port GLOSS from design/demo/mock-emacs.js and add every
-# command taught in Parts 0-3.
-{}
+# docstring line through rpc describe. Every command that a lesson in
+# Parts 0-3 mentions or checks has an entry (curriculum/tools/validate.py
+# checks the event conditions against this table).
+
+# --- Always there -----------------------------------------------------
+self-insert-command: Insert the character you typed
+undefined: This key does nothing here
+execute-extended-command: Run any command by name
+keyboard-quit: Cancel whatever is in progress
+keyboard-escape-quit: "Get out of everything: prompt, extra windows, recursive edits"
+abort-minibuffers: Cancel the prompt
+minibuffer-keyboard-quit: Cancel the prompt
+abort-recursive-edit: Cancel the prompt or recursive edit
+exit-recursive-edit: Finish the recursive edit
+top-level: Leave every prompt and recursive edit
+universal-argument: Give the next command a number or a variant
+digit-argument: Part of a number for the next command
+negative-argument: Make the next command's number negative
+playground-rescue: "Rescue: leave prompts, searches and extra windows"
+save-buffers-kill-terminal: Close this frame (the playground reopens it)
+suspend-frame: Suspend Emacs to the shell (off in the playground)
+emacs-version: Show which Emacs this is
+repeat: Repeat the last command
+quoted-insert: Insert the next key literally
+newline: Insert a line break
+open-line: Insert a line break after the cursor, staying put
+electric-newline-and-maybe-indent: Insert a line break and indent
+indent-for-tab-command: Indent this line
+delete-char: Delete the character under the cursor
+delete-backward-char: Delete the character before the cursor
+delete-forward-char: Delete the character under the cursor
+transpose-chars: Swap the two characters around the cursor
+overwrite-mode: Toggle overwrite mode (typing replaces text)
+read-only-mode: Toggle read-only for this buffer
+count-words: Count lines, words and characters
+what-line: Show the line number
+whitespace-mode: Show spaces, tabs and line ends
+display-line-numbers-mode: Toggle line numbers
+comment-dwim: Comment or uncomment the region or line
+comment-line: Comment or uncomment this line
+
+# --- Help (0.3) ---------------------------------------------------------
+help-command: "Help: press a key for the kind of help"
+help-for-help: List every help command
+describe-key: Explain what a key does
+describe-key-briefly: Name the command a key runs
+describe-function: Explain a command or function by name
+describe-variable: Explain a setting (a variable) by name
+describe-symbol: Explain anything by name
+describe-mode: Explain the current major and minor modes
+describe-bindings: List every key binding available here
+describe-char: Explain the character under the cursor
+view-lossage: Show the last keys you pressed
+help-with-tutorial: Open the built-in tutorial
+help-view-source: Open the source code of what help describes
+help-follow: Follow the link under the cursor
+help-go-back: Back to the previous help page
+help-go-forward: Forward to the next help page
+push-button: Press the button or link under the cursor
+info: Open the manuals (Info)
+display-local-help: Show the help text at the cursor
+helpful-key: Explain what a key does (helpful)
+helpful-callable: Explain a command or function (helpful)
+helpful-variable: Explain a setting (helpful)
+quit-window: Close this special window and go back
+
+# --- Files and buffers (0.1, 2.x) --------------------------------------
+find-file: Open a file (asks for a path)
+find-file-read-only: Open a file without allowing edits
+find-alternate-file: Replace this buffer with another file
+save-buffer: Save this buffer to its file
+save-some-buffers: Offer to save every modified buffer
+write-file: Save this buffer under a new name
+revert-buffer: Reload the buffer from its file
+revert-buffer-quick: Reload the buffer from its file
+switch-to-buffer: Switch to another open buffer
+switch-to-buffer-other-window: Show a buffer in another window
+previous-buffer: Back to the buffer this window showed before
+next-buffer: Forward through this window's buffers
+kill-buffer: Close a buffer (not a window; the file stays)
+kill-current-buffer: Close this buffer (the file stays)
+list-buffers: List all open buffers in a second window
+ibuffer: List every buffer, grouped, to mark and act on
+ibuffer-mark-forward: "Buffer list: mark this buffer"
+ibuffer-unmark-forward: "Buffer list: unmark this buffer"
+ibuffer-mark-by-file-name-regexp: "Buffer list: mark buffers whose file matches"
+ibuffer-mark-by-mode: "Buffer list: mark buffers in a mode"
+ibuffer-mark-modified-buffers: "Buffer list: mark modified buffers"
+ibuffer-mark-unsaved-buffers: "Buffer list: mark unsaved file buffers"
+ibuffer-mark-help-buffers: "Buffer list: mark help buffers"
+ibuffer-mark-special-buffers: "Buffer list: mark *special* buffers"
+ibuffer-toggle-marks: "Buffer list: swap marked and unmarked"
+ibuffer-unmark-all: "Buffer list: remove marks"
+ibuffer-do-delete: "Buffer list: kill the marked buffers"
+ibuffer-do-save: "Buffer list: save the marked buffers"
+ibuffer-do-view: "Buffer list: show the marked buffers"
+ibuffer-visit-buffer: "Buffer list: open the buffer on this line"
+ibuffer-filter-by-filename: "Buffer list: show only files matching"
+ibuffer-filter-by-mode: "Buffer list: show only one mode"
+ibuffer-filter-by-used-mode: "Buffer list: show only one mode"
+ibuffer-filter-by-file-extension: "Buffer list: show only an extension"
+ibuffer-filter-disable: "Buffer list: remove every filter"
+Buffer-menu-this-window: Open the buffer on this line here
+recentf-open: Open a recently used file
+recentf-open-files: List recently used files
+consult-recent-file: Open a recently used file, with preview
+consult-buffer: Switch buffer, recent file or bookmark, with preview
+
+# --- Dired (2.6) --------------------------------------------------------
+dired: List a folder (Dired)
+dired-jump: List the folder of this file, on its line
+dired-other-window: List a folder in another window
+dired-find-file: Open the file on this line
+dired-find-alternate-file: Open the file on this line, replacing the listing
+dired-up-directory: Go to the parent folder
+dired-goto-file: Move to a file by name
+dired-mark: Mark the file on this line
+dired-unmark: Unmark the file on this line
+dired-unmark-all-marks: Remove every mark
+dired-flag-file-deletion: Flag the file on this line for deletion
+dired-do-flagged-delete: Delete the flagged files (asks first)
+dired-do-delete: Delete the marked files (asks first)
+dired-do-rename: Move or rename the marked files
+dired-do-copy: Copy the marked files
+dired-create-directory: Make a new folder
+dired-do-shell-command: Run a shell command on the marked files
+dired-do-async-shell-command: Run a shell command on the marked files, in the background
+dired-hide-details-mode: Show or hide file details
+dired-mark-files-regexp: Mark files whose names match a regexp
+dirvish: Open the folder in dirvish's full view
+dirvish-side: Show the folder tree in a side window
+dirvish-quit: Close the listing
+dirvish-subtree-toggle: Open or close the folder on this line in place
+dirvish-dispatch: Show dirvish's menu of commands
+dirvish-find-entry-a: Open the file or folder on this line
+wdired-change-to-wdired-mode: Edit file names in the listing
+
+# --- Projects, bookmarks, registers (2.7, 2.8) --------------------------
+project-find-file: Open a file of this project by name
+project-find-regexp: Search the whole project for a regexp
+project-search: Search the project, one match at a time
+project-switch-to-buffer: Switch among this project's buffers
+project-switch-project: Switch to another project
+project-kill-buffers: Close every buffer of this project
+project-compile: Run a build command in the project root
+project-find-dir: Open a folder of this project
+project-vc-dir: Show the project's version control status
+project-eshell: Open a shell in the project root
+playground-project-tab: Open a project in a tab of its own
+consult-ripgrep: Search the project with ripgrep, with preview
+bookmark-set: Bookmark this place under a name
+bookmark-jump: Jump to a bookmark by name
+bookmark-bmenu-list: List every bookmark
+bookmark-bmenu-this-window: Jump to the bookmark on this line
+bookmark-delete: Delete a bookmark
+point-to-register: Remember this place in a register
+jump-to-register: Jump to the place or layout in a register
+window-configuration-to-register: Remember this window layout in a register
+copy-to-register: Copy the region into a register
+insert-register: Insert the text from a register
+
+# --- Motion (1.1) -------------------------------------------------------
+forward-char: Move right one character
+backward-char: Move left one character
+next-line: Move down one line
+previous-line: Move up one line
+forward-word: Move right one word
+backward-word: Move left one word
+move-beginning-of-line: Go to the start of the line
+move-end-of-line: Go to the end of the line
+back-to-indentation: Go to the first non-blank character
+backward-sentence: Go to the start of the sentence
+forward-sentence: Go to the end of the sentence
+beginning-of-buffer: Jump to the top
+end-of-buffer: Jump to the bottom
+scroll-up-command: Scroll down a page
+scroll-down-command: Scroll up a page
+recenter-top-bottom: Scroll so the cursor line is centred (then top, then bottom)
+reposition-window: Show as much of this function as fits
+goto-line: Jump to a line number
+forward-sexp: Jump over the next balanced expression
+backward-sexp: Jump back over a balanced expression
+forward-list: Jump over the next bracketed group
+backward-list: Jump back over a bracketed group
+beginning-of-defun: Go to the start of this function
+end-of-defun: Go to the end of this function
+treesit-beginning-of-defun: Go to the start of this function
+treesit-end-of-defun: Go to the end of this function
+mouse-set-point: Move the cursor where you clicked
+
+# --- Killing and yanking (1.2) -----------------------------------------
+set-mark-command: Start selecting from here (set the mark)
+exchange-point-and-mark: Swap the cursor and the mark
+mark-whole-buffer: Select everything
+kill-line: Cut to the end of the line
+kill-whole-line: Cut the whole line
+kill-word: Cut to the end of the word
+backward-kill-word: Cut back to the start of the word
+kill-region: Cut the selected region
+kill-ring-save: Copy the selected region
+zap-to-char: Cut up to and including a character
+yank: Paste the last cut text
+yank-pop: Replace the paste with an older kill
+consult-yank-pop: Replace the paste with an older kill, or pick one
+
+# --- Undo (1.3) ---------------------------------------------------------
+undo: Undo the last change
+undo-only: Undo, never redo
+undo-redo: Redo what undo undid
+vundo: Show the undo history as a tree
+vundo-backward: "Undo tree: one step back"
+vundo-forward: "Undo tree: one step forward"
+vundo-confirm: "Undo tree: keep this state"
+vundo-quit: "Undo tree: back to where you started"
+
+# --- Search and replace (1.4, 1.5) -------------------------------------
+isearch-forward: Search forward as you type
+isearch-backward: Search backward as you type
+isearch-forward-regexp: Search for a regular expression
+isearch-backward-regexp: Search back for a regular expression
+isearch-forward-symbol-at-point: Search for the symbol under the cursor
+isearch-repeat-forward: Jump to the next match
+isearch-repeat-backward: Jump to the previous match
+isearch-exit: Stop searching and stay here
+isearch-abort: Cancel the search (back to the start)
+isearch-cancel: Cancel the search (back to the start)
+isearch-printing-char: Add a character to the search
+isearch-delete-char: Remove the last searched character
+isearch-toggle-case-fold: "Search: toggle case sensitivity"
+isearch-toggle-lax-whitespace: "Search: toggle loose matching of spaces"
+occur: List every line that matches
+occur-mode-goto-occurrence: Visit the match on this line
+occur-mode-goto-occurrence-other-window: Visit the match in another window
+occur-mode-display-occurrence: Show the match without leaving the list
+next-error: Jump to the next match or error
+previous-error: Jump to the previous match or error
+query-replace: Replace text, asking at each match
+query-replace-regexp: Replace a regexp, asking at each match
+visual-replace: Replace text with a live preview, asking at each match
+replace-string: Replace text everywhere after the cursor
+
+# --- Rectangles and macros (1.6) ---------------------------------------
+rectangle-mark-mode: Select a rectangle (columns)
+kill-rectangle: Cut the rectangle
+yank-rectangle: Paste the last cut rectangle
+string-rectangle: Replace each line of the rectangle with text
+rectangle-number-lines: Number the lines of the rectangle
+kmacro-start-macro: Start recording a keyboard macro
+kmacro-start-macro-or-insert-counter: Start recording, or insert the counter
+kmacro-end-macro: Stop recording the macro
+kmacro-end-or-call-macro: Stop recording, or replay the macro
+kmacro-call-macro: Replay the last macro
+kmacro-set-counter: Set the macro counter
+kmacro-insert-counter: Insert the macro counter
+kmacro-name-last-macro: Give the last macro a command name
+kmacro-edit-macro: Edit the last macro as text
+apply-macro-to-region-lines: Run the macro on every line of the region
+
+# --- Multiple cursors, iedit, expreg, avy, imenu (1.7, 1.8) ------------
+iedit-mode: Edit every occurrence of this symbol at once
+mc/edit-lines: One cursor on each line of the region
+mc/mark-next-like-this: Add a cursor at the next match
+mc/mark-previous-like-this: Add a cursor at the previous match
+mc/mark-all-like-this: A cursor at every match
+expreg-expand: Grow the selection to the next piece of syntax
+expreg-contract: Shrink the selection back
+avy-goto-char-timer: Jump to any visible text by typing it
+imenu: Jump to a definition in this file
+consult-imenu: Jump to a definition in this file, with preview
+consult-outline: Jump to a heading in this file
+
+# --- Windows (3.1 to 3.4) ----------------------------------------------
+split-window-below: "Split: one window above the other"
+split-window-right: "Split: two windows side by side"
+delete-window: Close this window; the buffer stays open
+delete-other-windows: Keep only this window
+kill-buffer-and-window: Close this window and its buffer
+other-window: Move the cursor to the next window
+windmove-left: Move to the window on the left
+windmove-right: Move to the window on the right
+windmove-up: Move to the window above
+windmove-down: Move to the window below
+ace-window: Jump to a window by its letter
+enlarge-window: Make this window taller
+shrink-window: Make this window shorter
+enlarge-window-horizontally: Make this window wider
+shrink-window-horizontally: Make this window narrower
+shrink-window-if-larger-than-buffer: Shrink this window to fit its text
+fit-window-to-buffer: Size this window to fit its text
+balance-windows: Make all windows the same size
+maximize-window: Make this window as large as possible
+minimize-window: Make this window as small as possible
+mouse-drag-mode-line: Resize a window by dragging its mode line
+mouse-drag-vertical-line: Resize windows by dragging the divider
+window-layout-rotate-clockwise: Rotate the whole layout clockwise
+window-layout-rotate-anticlockwise: Rotate the whole layout anticlockwise
+window-layout-transpose: Swap rows and columns of the layout
+window-layout-flip-leftright: Mirror the layout left to right
+window-layout-flip-topdown: Mirror the layout top to bottom
+rotate-windows: Move every buffer to the next window
+rotate-windows-back: Move every buffer to the previous window
+window-swap-states: Swap this window with the next one
+find-file-other-window: Open a file in another window
+dired-other-frame: List a folder in a new frame
+find-file-other-frame: Open a file in a new frame
+clone-indirect-buffer-other-window: A second, independent view of this buffer
+other-window-prefix: Show the next command's buffer in another window
+same-window-prefix: Show the next command's buffer in this window
+make-frame-command: Open a new frame
+delete-frame: Close this frame
+other-frame: Move to the next frame
+
+# --- Pop-ups, layouts, tabs, focus (3.5 to 3.8) ------------------------
+window-toggle-side-windows: Hide or show the side windows
+popper-toggle: Hide or show the latest pop-up
+popper-cycle: Show the next pop-up
+popper-toggle-type: Make this buffer a pop-up, or not
+eval-buffer: Run all the Lisp in this buffer
+eval-defun: Run the Lisp form around the cursor
+eval-last-sexp: Run the Lisp expression before the cursor
+elisp-eval-region-or-buffer: Run the Lisp in the region or buffer
+winner-undo: Undo the last change of window layout
+winner-redo: Redo a layout change
+burly-bookmark-windows: Save this window layout as a named bookmark
+burly-open-bookmark: Restore a saved window layout
+desktop-save-mode: Keep buffers and windows across restarts
+tab-new: Open a new tab
+tab-close: Close this tab (buffers stay)
+tab-next: Go to the next tab
+tab-previous: Go to the previous tab
+tab-switch: Go to a tab by name
+tab-rename: Rename this tab
+tab-undo: Reopen the last closed tab
+tab-bar-new-tab: Open a new tab
+tab-bar-close-tab: Close this tab (buffers stay)
+tab-bar-close-tab-by-name: Close a tab by name
+tab-bar-switch-to-next-tab: Go to the next tab
+tab-bar-switch-to-tab: Go to a tab by name
+tab-bar-select-tab: Go to the tab you clicked
+switch-to-buffer-other-tab: Show a buffer in a new tab
+tab-line-mode: Tabs of this window's buffers above it
+olivetti-mode: Centre the text in the window
+follow-mode: Let two windows scroll as one long page
+text-scale-adjust: Make the text bigger or smaller (GUI frame)
+global-text-scale-adjust: Zoom every buffer (GUI frame)
+
+# --- Building (2.7, 3.3, 3.8) ------------------------------------------
+compile: Run a build command and show its output
+recompile: Run the last build command again
+compile-goto-error: Jump to this error in the source
+next-error-no-select: Show the next error
+
+# --- Minibuffer (2.2) ---------------------------------------------------
+minibuffer-complete: Complete the name (TAB)
+minibuffer-complete-word: Complete one word
+minibuffer-complete-and-exit: Complete, then accept
+exit-minibuffer: Accept what you typed
+completion-at-point: Complete the text before the cursor
+previous-history-element: Bring back what you typed before
+next-history-element: Forward through what you typed before
+previous-line-or-history-element: Up a line, or back through the history
+next-line-or-history-element: Down a line, or forward through the history
+previous-matching-history-element: Search what you typed before
+minibuffer-previous-completion: Highlight the previous completion
+minibuffer-next-completion: Highlight the next completion

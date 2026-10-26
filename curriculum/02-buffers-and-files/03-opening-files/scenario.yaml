@@ -1,0 +1,91 @@
+id: 02-buffers-and-files/03-opening-files
+title: Opening files
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files]
+vscode: "Ctrl+P, Ctrl+O"
+setup:
+  workspace: fixtures/hello
+  root: hello
+  reset: true
+  open: [hello/src/lib.rs]
+  layout: single
+  # This lesson is about the modified flag and saving: keep the playground's
+  # optional auto-save of visited files out of the way.
+  eval: "(progn (when (bound-and-true-p auto-save-visited-mode) (auto-save-visited-mode -1)) (goto-char (point-min)))"
+steps:
+  - id: open
+    goal: Open src/main.rs
+    detail: "Hold Control, press x, then Control f. Type `ma`, press `TAB`, then `RET`."
+    demo: 'C-x C-f ~500 "ma" ~300 TAB ~500 RET'
+    conditions:
+      - text: the Find file prompt was used
+        event: { command: find-file }
+        hint: "C-x then C-f. The prompt appears in the bottom line. If you see C-x- in the bottom line, Emacs is waiting for the second key."
+      - text: main.rs is the current buffer
+        state: { file: /work/hello/src/main.rs }
+        hint: "In the prompt, type ma and press TAB; it completes to main.rs. Then RET."
+    stuck:
+      - when: { minibuffer_seconds: 30 }
+        say: "Still in the prompt? RET accepts what you typed, C-g cancels, TAB completes names."
+      - when: { step_seconds: 300 }
+        say: "If the files look wrong, reset this step from the right-hand panel. It restores the files and the layout."
+  - id: edit
+    goal: Change the greeting
+    detail: "Turn *Hello* into *Hi*. `C-s` finds text as you type. There is no insert mode: typing inserts."
+    demo: 'M-< C-s ~300 "Hello" ~400 RET DEL DEL DEL DEL DEL ~300 "Hi"'
+    conditions:
+      - text: the cursor is on the greeting line
+        elisp: '(let ((b (find-buffer-visiting "/work/hello/src/main.rs"))) (and b (eq b (window-buffer (selected-window))) (with-current-buffer b (save-excursion (beginning-of-line) (looking-at ".*format!(")))))'
+        hint: "C-s then type Hello. The cursor jumps to the match. RET leaves the search with the cursor there."
+      - text: the greeting now says Hi
+        elisp: '(let ((b (find-buffer-visiting "/work/hello/src/main.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "format!(\"Hi, {name}!\")" nil t)))))'
+        hint: "Backspace (DEL) deletes to the left. Then just type Hi. The mode line changes from -:--- to -:**- when the buffer has unsaved changes."
+    stuck:
+      - when: { quits_in_window: { count: 3, seconds: 10 } }
+        say: "C-g is always safe, but you do not need it here. Click into main.rs, put the cursor after Hello and press DEL five times."
+  - id: save
+    goal: Save it
+    detail: "`C-x C-s` writes the buffer to disk. Watch the mode line: `**` means unsaved."
+    demo: "C-x C-s"
+    conditions:
+      - text: save-buffer ran
+        event: { command: save-buffer }
+        hint: "C-x C-s. If the bottom line says (No changes need to be saved), the edit did not happen yet."
+      - text: main.rs has no unsaved changes
+        all:
+          - file: { path: hello/src/main.rs, contains: 'format!("Hi, {name}!")' }
+          - elisp: '(let ((b (find-buffer-visiting "/work/hello/src/main.rs"))) (and b (not (buffer-modified-p b))))'
+        hint: "The mode line still shows **. Press C-x C-s again, in the main.rs window."
+  - id: oops
+    goal: Make a mess, then clean it up
+    detail: "Press `C-x C-b`. The list of every open buffer takes over, on purpose. Then get back to main.rs."
+    demo: "C-x C-b ~1500 C-x o ~300 q"
+    conditions:
+      - text: C-x C-b opened the buffer list
+        any:
+          - event: { command: ibuffer }
+          - event: { command: list-buffers }
+        hint: "C-x C-b lists every buffer. This is the most common \"what just happened?\" moment, so you are doing it on purpose."
+      - text: back to a single window showing main.rs
+        layout: "main.rs"
+        hint: "q closes a list like this one. If it opened in a second window, C-x o moves into it first, or C-x 1 keeps only the window the cursor is in."
+    stuck:
+      - when: { step_seconds: 120 }
+        say: "Lost in the list? Press q. Nothing in it can hurt your files unless you mark lines and press x."
+  - id: dired
+    goal: Open the folder by mistake, then leave it
+    detail: "Press `C-x C-f` and then `RET` without typing a name. You asked for the directory itself, so Emacs shows Dired, a file listing. `q` leaves it."
+    demo: "C-x C-f ~800 RET ~1500 q"
+    conditions:
+      - text: C-x C-f was used
+        event: { command: find-file }
+        hint: "C-x C-f, and this time press RET straight away."
+      - text: q closed Dired
+        any:
+          - event: { command: dirvish-quit }
+          - event: { command: quit-window }
+        hint: "You are in Dired, a listing of src/. q puts it away."
+      - text: main.rs is the current buffer again
+        state: { file: /work/hello/src/main.rs }
+        hint: "q closes Dired and shows the buffer you were in. C-x b main.rs RET also gets you there."

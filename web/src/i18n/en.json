@@ -1,3 +1,355 @@
 {
-  "app.title": "Emacs Playground"
+  "app": {
+    "title": "Emacs Playground"
+  },
+  "common": {
+    "cancel": "Cancel",
+    "dismiss": "Dismiss",
+    "loading": "Loading…",
+    "retry": "Try again",
+    "yes": "yes",
+    "no": "no"
+  },
+  "a11y": {
+    "echo": "Echo area: {{text}}",
+    "where": "Buffer {{buffer}}, {{mode}} mode."
+  },
+  "topbar": {
+    "breadcrumbs": "Breadcrumbs",
+    "course": "Course",
+    "projects": "Projects",
+    "session": "Session",
+    "sessionTitle": "Session status, frame, modules and settings",
+    "localSession": "local session",
+    "serverSession": "your session",
+    "noSession": "no session yet",
+    "connecting": "{{where}} · connecting…",
+    "busy": "Emacs is busy",
+    "focus": "Focus mode",
+    "focusTitle": "Fullscreen with the keyboard locked, so Ctrl+W and friends reach Emacs",
+    "whereAmI": "Where am I",
+    "hidePreview": "Hide preview",
+    "showPreview": "Show preview"
+  },
+  "rail": {
+    "label": "Live help",
+    "close": "Close the panel",
+    "where": "Where am I",
+    "nudges": "Did you mean",
+    "rescue": "Rescue"
+  },
+  "frame": {
+    "label": "Frame",
+    "terminal": "Terminal",
+    "gui": "GUI",
+    "terminalFrame": "terminal frame",
+    "guiFrame": "GUI frame",
+    "guiTitle": "Show the same Emacs in a graphical frame (PDFs, images)",
+    "guiUnavailable": "The GUI frame is not enabled on this server",
+    "starting": "starting GUI frame",
+    "guiTimeout": "The GUI frame did not start. The terminal frame keeps working; try again from the session page."
+  },
+  "screen": {
+    "stageLabel": "Emacs",
+    "terminalLabel": "Emacs, terminal frame. Shift+Escape moves focus to the lesson.",
+    "terminalRole": "terminal",
+    "guiLabel": "Emacs, GUI frame",
+    "headerTerminal": "Emacs {{version}}, terminal frame in tmux, {{size}}",
+    "headerGui": "Emacs {{version}}, GUI frame on Xvnc via noVNC",
+    "modules": "modules: {{list}}",
+    "modulesTitle": "Configuration modules loaded in this Emacs"
+  },
+  "overlay": {
+    "starting": "Starting your Emacs…",
+    "startingBody": "The playground is starting a session. The first start takes a few seconds.",
+    "sessionFailed": "Could not start a session.",
+    "replaced": "This Emacs is open somewhere else.",
+    "replacedBody": "Another tab or window attached to the terminal. Your work is safe; take it back here whenever you like.",
+    "reattach": "Use it here",
+    "restarting": "Emacs is restarting.",
+    "restartingBody": "Your files are safe. Buffers come back from the last snapshot in a moment.",
+    "frameClosed": "The Emacs frame closed.",
+    "frameClosedBody": "C-x C-c ran save-buffers-kill-terminal. The playground is reopening your frame; buffers are intact because Emacs runs as a daemon. On your own machine this would quit Emacs.",
+    "suspended": "Emacs is suspended.",
+    "suspendedBody": "C-z sent Emacs to the background of the shell. Resuming it for you. (In a real terminal you would type fg.)",
+    "stopping": "The session is stopping.",
+    "stoppingBody": "Your workspace is kept. Reload the page to start it again.",
+    "unavailable": "Emacs is not available yet.",
+    "unavailableBody": "Retrying. If this lasts, use Restart Emacs on the session page.",
+    "modules": "Loading new configuration modules…",
+    "modulesBody": "Emacs restarts with the modules this part teaches. Your buffers come back.",
+    "busy": "Emacs is busy.",
+    "busyBody": "It has not answered for a few seconds.",
+    "reconnecting": "reconnecting…"
+  },
+  "ticker": {
+    "label": "Key ticker: the keys you pressed and the commands they ran",
+    "empty": "Press a key in the Emacs pane. Every chord shows up here with the command it ran.",
+    "waiting": "waiting for the next key",
+    "prefixGloss": "This is a prefix: it does nothing alone.",
+    "typedName": "typed name",
+    "gap": "Some keys were missed while reconnecting."
+  },
+  "where": {
+    "waiting": "Waiting for Emacs to report its state…",
+    "buffer": "Buffer",
+    "mode": "Mode",
+    "windows": "Windows",
+    "prompt": "Prompt",
+    "unsaved": "(unsaved changes)",
+    "oneWindow": "one",
+    "manyWindows": "{{n}} (cursor is in the highlighted one)",
+    "none": "none",
+    "open": "open",
+    "calm": "Nothing unusual is going on. You are editing normally."
+  },
+  "nudges": {
+    "empty": "Nothing to translate yet. VS Code habits that do something else in Emacs will show up here, once each.",
+    "dismiss": "Dismiss"
+  },
+  "cheat": {
+    "title": "Keys for this buffer"
+  },
+  "rescue": {
+    "button": "Rescue me",
+    "explain": "Cancels any prompt, closes extra windows, widens, stops macros and overwrite mode. Never touches your files.",
+    "reset": "Reset this step",
+    "resetTitle": "Restore the files and layout for this step from its checkpoint",
+    "did": "Rescue: {{what}}.",
+    "nothing": "Rescue: you were already in a normal state. Nothing changed.",
+    "nothingShort": "nothing to undo",
+    "noStep": "No step is active, so there is nothing to reset.",
+    "restored_one": "Restored {{count}} file and the Emacs layout from this step's checkpoint.",
+    "restored_other": "Restored {{count}} files and the Emacs layout from this step's checkpoint.",
+    "restoredShort": "files and layout restored from the step checkpoint",
+    "restored_zero": "Restored the Emacs layout from this step's checkpoint; no files had changed."
+  },
+  "stuck": {
+    "button": "I'm stuck: tell the course author",
+    "title": "Report that you are stuck",
+    "explain": "This sends your last few hundred keys and what Emacs showed to the people who maintain the course, so the lesson can be improved. Your files are not sent.",
+    "noteLabel": "What were you trying to do? (optional)",
+    "send": "Send report",
+    "sent": "Thanks. The report was sent.",
+    "failed": "Could not send the report: {{error}}"
+  },
+  "lesson": {
+    "paneLabel": "Lesson",
+    "vscode": "Coming from VS Code.",
+    "loading": "Loading the lesson into Emacs…",
+    "loadFailed": "Could not load the lesson files into Emacs: {{error}}",
+    "complete": "Lesson complete.",
+    "next": "Next:",
+    "backToMap": "Back to the course map",
+    "notFound": "This lesson is not written yet.",
+    "notFoundBody": "It is on the course map as planned. Pick another lesson for now.",
+    "error": "Could not load this lesson."
+  },
+  "steps": {
+    "label": "Steps",
+    "statusDone": "Done:",
+    "statusActive": "Current step:",
+    "statusTodo": "Later:",
+    "cond": {
+      "met": "met:",
+      "next": "next:",
+      "unmet": "not yet:",
+      "unknown": "could not check:"
+    },
+    "unknown": "(could not be checked)",
+    "hintFor": "hint for: {{text}}",
+    "exactKeys": "the exact keys",
+    "showHint": "Show a hint",
+    "showKeys": "Show the exact keys",
+    "goTo": "Go to this step",
+    "redo": "Do this step again"
+  },
+  "demo": {
+    "watch": "Watch it",
+    "watchTitle": "Play the keys for this step into Emacs; press any key to stop",
+    "stop": "Stop",
+    "playing": "Playing the demo for “{{goal}}”…",
+    "cancelled": "Demo stopped: you pressed a key.",
+    "failed": "The demo stopped: {{error}}",
+    "bad": "This step's demo cannot be played: {{error}}"
+  },
+  "try": {
+    "label": "try it",
+    "title": "Send {{keys}} to Emacs",
+    "sent": "Sent {{keys}} to Emacs."
+  },
+  "terminal": {
+    "reservedKey": "Your browser may keep that key for itself (Ctrl+W, Ctrl+T, Ctrl+N…). Focus mode, top right, locks the keyboard so the keys reach Emacs."
+  },
+  "focus": {
+    "locked": "Focus mode: fullscreen with the keyboard locked. Hold Esc to leave.",
+    "noLock": "Fullscreen is on, but this browser keeps some keys (Ctrl+W, Ctrl+T, Ctrl+N). Chrome and Edge can lock them; Firefox cannot.",
+    "refused": "The browser refused fullscreen: {{error}}",
+    "unsupported": "Fullscreen is not available in this browser."
+  },
+  "preview": {
+    "tabs": "Preview tabs",
+    "empty": "Nothing to preview yet. Use the ◧ button next to a file in the tree.",
+    "noSession": "Waiting for the session…",
+    "loadError": "Could not load this file.",
+    "building": "{{source}} saved; rebuilding {{name}}…",
+    "updated": "{{name}} updated {{when}}.",
+    "deleted": "{{name}} was deleted.",
+    "watching": "{{name}}: reloads when it changes.",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "fit": "Fit width",
+    "pages_one": "{{count}} page",
+    "pages_other": "{{count}} pages",
+    "pdfPage": "Page {{n}} of {{total}} of {{name}}",
+    "pdfError": "Could not render the PDF: {{error}}"
+  },
+  "tree": {
+    "label": "Project files",
+    "waiting": "Waiting for the session…",
+    "error": "Could not list this folder.",
+    "open": "Open {{path}} in Emacs",
+    "preview": "Preview {{name}}",
+    "modified": "(unsaved changes)"
+  },
+  "checkpoints": {
+    "none": "No checkpoints yet. One is taken when each task starts.",
+    "files_one": "{{count}} file changed since",
+    "files_other": "{{count}} files changed since",
+    "restore": "Restore",
+    "save": "Save a checkpoint now",
+    "saveTitle": "Save a checkpoint",
+    "saveButton": "Save",
+    "labelLabel": "Name",
+    "saved": "Checkpoint “{{label}}” saved.",
+    "restored_one": "Restored {{count}} file from “{{label}}”.",
+    "restored_other": "Restored {{count}} files from “{{label}}”.",
+    "confirmTitle": "Restore “{{label}}”?",
+    "willOverwrite_one": "This overwrites {{count}} file with the version from the checkpoint:",
+    "willOverwrite_other": "This overwrites {{count}} files with the version from the checkpoint:",
+    "nothingChanged": "No files differ from this checkpoint; the Emacs layout is restored.",
+    "keeps": "Build folders (target, _build, .venv) are kept. Your Git staging area is reset to the checkpoint.",
+    "restored_zero": "Restored “{{label}}”; no files had changed."
+  },
+  "project": {
+    "sideLabel": "Project files and tasks",
+    "files": "Files",
+    "filesNote": "the workspace",
+    "tasks": "Tasks",
+    "taskOf": "Task {{n}} of {{total}}",
+    "crumbTask": "Task {{n}} of {{total}}: {{goal}}",
+    "checkpoints": "Checkpoints",
+    "checkpointsNote": "git refs under refs/playground",
+    "complete": "Project complete. Every task is done.",
+    "brief": "About this project",
+    "notFound": "This project is not written yet.",
+    "notFoundBody": "It is listed on the course map as planned.",
+    "cardTasks_one": "{{count}} task",
+    "cardTasks_other": "{{count}} tasks",
+    "doneTasks": "{{done}} of {{total}} tasks done"
+  },
+  "course": {
+    "crumb": "Course map",
+    "title": "From the first keystroke to your own config",
+    "intro": "Fifteen parts, each unlocking a piece of a real development setup. Every lesson runs inside the same pre-configured Emacs you take home at the end. The order is a suggestion: start anywhere.",
+    "legend": {
+      "terminal": "runs in the terminal frame",
+      "gui": "needs the GUI frame",
+      "remote": "uses the SSH box",
+      "project": "hands-on project"
+    },
+    "lessonsCount_one": "{{count}} lesson",
+    "lessonsCount_other": "{{count}} lessons",
+    "projectsCount_one": "{{count}} project",
+    "projectsCount_other": "{{count}} projects",
+    "plannedTag": "planned",
+    "partProgress": "Progress in part {{n}}",
+    "suggestedAfter": "suggested after part {{n}}",
+    "inVsCode": "in VS Code: {{what}}",
+    "minutes": "{{n}} min",
+    "state": {
+      "done": "done",
+      "current": "you are here",
+      "in-progress": "in progress",
+      "not-started": "not started",
+      "suggested": "suggested after part {{n}}",
+      "planned": "planned"
+    },
+    "projects": "Projects",
+    "projectsBelow": "See the project list below. Each project has its own checkpoints.",
+    "projectsIntro": "Each project mirrors something you already do in VS Code, task by task, with checkpoints you can return to. Later projects mix languages on purpose.",
+    "continue": "Continue",
+    "start": "Start",
+    "loadError": "Could not load the course."
+  },
+  "session": {
+    "title": "Your session",
+    "ledeLocal": "One Emacs runs in a container on this machine. Your files live in ./workspace next to compose.yaml.",
+    "ledeServer": "Your Emacs runs in a container on the server. Your files are kept between visits.",
+    "emacs": "Emacs",
+    "state": "Session",
+    "version": "Version",
+    "uptime": "Running for",
+    "agent": "Playground agent",
+    "connected": "connected",
+    "disconnected": "not connected",
+    "responsive": "Responsive",
+    "step": "Active step",
+    "created": "Started",
+    "image": "Image",
+    "none": "none",
+    "restart": "Restart Emacs",
+    "restartTitle": "Restart Emacs?",
+    "restartBody": "The last resort when Emacs is stuck. Files are safe; unsaved edits since the last auto-save (5 s) may be lost. Buffers are reopened from the last snapshot.",
+    "restarting": "Restarting Emacs…",
+    "stop": "Stop the session",
+    "stopTitle": "Stop the session?",
+    "stopBody": "The container stops; your workspace and progress are kept. Opening a lesson starts it again.",
+    "stopped": "Session stopped.",
+    "frame": "Frame",
+    "frameBody": "The same Emacs can show a terminal frame (crisp text, every key) or a GUI frame (PDFs and images). Buffers are shared; switching is instant.",
+    "modules": "Configuration modules",
+    "modulesBody": "Parts of the course unlock modules of the Emacs configuration as they teach them. You can turn them on early here; Emacs restarts with your buffers.",
+    "part": "part {{n}}",
+    "apply": "Apply and restart Emacs",
+    "applying": "Restarting…",
+    "modulesApplied": "Modules unchanged.",
+    "modulesRestarting": "Emacs is restarting with the new modules.",
+    "byo": "Use your own terminal",
+    "byoBody": "The same Emacs can be attached from a native terminal (kitty, WezTerm, iTerm2), with the full keyboard. The browser keeps showing the lesson and the ticker.",
+    "byoServer": "On a server, only the browser can attach to your Emacs.",
+    "export": "Take it home",
+    "exportLocal": "Everything you build, including your growing Emacs configuration in emacs.d, is in ./workspace. Copy it to keep it:",
+    "exportServer": "Ask the operator for an export of your workspace (playctl export-user). A download button is planned.",
+    "versions": "Toolchain versions",
+    "prefs": "Preferences",
+    "language": "Language",
+    "screenReader": "Screen reader mode for the terminal",
+    "reducedMotion": "Reduce motion",
+    "signedInAs": "Signed in as {{name}}",
+    "logout": "Sign out"
+  },
+  "author": {
+    "title": "Author mode",
+    "step": "Active step:",
+    "exits": "Matched exits:",
+    "state": "Raw state"
+  },
+  "login": {
+    "title": "Sign in",
+    "heading": "Welcome to Emacs Playground",
+    "lede": "Enter the invite code you were given to start your own Emacs.",
+    "codeLabel": "Invite code",
+    "submit": "Start",
+    "badCode": "That code was not accepted. Check it and try again.",
+    "oidc": "Sign in with your organisation"
+  },
+  "notFound": {
+    "title": "Nothing here.",
+    "back": "Back to the course map"
+  },
+  "emacs": {
+    "restarted": "Emacs restarted; your files are safe.",
+    "modulesLoaded": "Loaded the configuration modules for this part of the course."
+  }
 }

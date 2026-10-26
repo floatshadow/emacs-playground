@@ -1,0 +1,91 @@
+id: 02-buffers-and-files/08-recent-bookmarks-registers
+title: "Recent files, bookmarks and registers"
+minutes: 8
+mode: terminal
+modules: [base, agent, editing, files]
+vscode: "recent, Ctrl+Shift+T"
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/hello/src/main.rs]
+  layout: single
+  # Put two files on the recent list without opening them now.
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (require 'recentf)
+      (recentf-mode 1)
+      (dolist (f '("/work/projects/polyglot/README.md" "/work/projects/notes/todo.md"))
+        (let ((b (find-buffer-visiting f))) (when b (kill-buffer b)))
+        (recentf-add-file f)))
+steps:
+  - id: recent
+    goal: Reopen notes/todo.md from the recent files
+    detail: "`C-x C-r` lists files you opened recently, newest first, even after a restart. Type the start of the path, `/work/projects/n`, press `TAB` to complete it, then `RET`."
+    demo: 'C-x C-r ~600 "/work/projects/n" ~300 TAB ~400 RET'
+    conditions:
+      - text: C-x C-r was used
+        any:
+          - event: { command: recentf-open }
+          - event: { command: recentf-open-files }
+          - event: { command: consult-recent-file }
+        hint: "Control x, then Control r."
+      - text: todo.md is open
+        state: { file: /work/projects/notes/todo.md }
+        hint: "TAB on an empty prompt lists the recent files. Type enough of the path to make it unique, TAB, RET."
+  - id: bookmark
+    goal: Bookmark three files
+    detail: "`C-x r m` sets a bookmark at the cursor and asks for a name. Bookmark todo.md as `todo`, then open `/work/projects/polyglot/README.md` and bookmark it as `polyglot`, then `/work/projects/hello/src/main.rs` as `main`."
+    demo: 'C-x r m ~400 "todo" RET ~400 C-x C-f ~400 "/work/projects/polyglot/README.md" RET ~400 C-x r m ~400 "polyglot" RET ~400 C-x C-f ~400 "/work/projects/hello/src/main.rs" RET ~400 C-x r m ~400 "main" RET'
+    conditions:
+      - text: three bookmarks were set
+        event: { command: bookmark-set, min: 3 }
+        hint: "C-x r m in each of the three files. The name is up to you; the demo uses todo, polyglot and main."
+      - text: todo.md, polyglot's README.md and hello's main.rs are bookmarked
+        elisp: '(progn (require (quote bookmark)) (bookmark-maybe-load-default-file) (seq-every-p (lambda (f) (seq-find (lambda (b) (let ((bf (bookmark-get-filename b))) (and bf (equal (expand-file-name bf) f)))) bookmark-alist)) (list "/work/projects/notes/todo.md" "/work/projects/polyglot/README.md" "/work/projects/hello/src/main.rs")))'
+        hint: "Open each file with C-x C-f; typing a / after the offered directory starts a fresh path. Then C-x r m there."
+  - id: jump
+    goal: Jump to todo, then to polyglot, by name
+    detail: "`C-x r b` jumps to a bookmark by name, opening the file if needed. `TAB` completes names."
+    demo: 'C-x r b ~400 "todo" RET ~600 C-x r b ~400 "polyglot" RET'
+    conditions:
+      - text: C-x r b was used twice
+        event: { command: bookmark-jump, min: 2 }
+        hint: "Control x, r, b, then the bookmark name."
+      - text: polyglot's README.md is shown
+        state: { file: /work/projects/polyglot/README.md }
+        hint: "The last jump goes to the README.md of polyglot."
+  - id: list
+    goal: Jump to main.rs from the bookmark list
+    detail: "`C-x r l` lists every bookmark. Move to the *main* line (`C-s main RET` gets there) and press `RET` to jump. `q` would leave the list instead."
+    demo: 'C-x r l ~800 C-s ~300 "main" RET ~300 RET'
+    conditions:
+      - text: the bookmark list was opened
+        event: { command: bookmark-bmenu-list }
+        hint: "Control x, r, then a plain l."
+      - text: main.rs is shown
+        state: { file: /work/projects/hello/src/main.rs }
+        hint: "Put the cursor on the main line and press RET."
+  - id: place
+    goal: Close main.rs and reopen it where you left off
+    detail: "Go to line 10 (`M-g g 10 RET`), kill the buffer (`C-x k RET`) and reopen it from the recent files. The cursor comes back to line 10: Emacs remembers your place in every file."
+    demo: 'M-g g ~400 "10" RET ~400 C-x k ~400 RET ~600 C-x C-r ~600 "/work/projects/hello/src/m" ~300 TAB ~300 RET'
+    conditions:
+      - text: main.rs was killed and reopened
+        all:
+          - any:
+              - event: { command: kill-buffer }
+              - event: { command: kill-current-buffer }
+          - any:
+              - event: { command: recentf-open }
+              - event: { command: find-file }
+              - event: { command: bookmark-jump }
+              - event: { command: consult-recent-file }
+        hint: "C-x k RET kills main.rs. C-x C-r brings it back."
+      - text: the cursor is back on line 10 of main.rs
+        state: { file: /work/projects/hello/src/main.rs, line: 10 }
+        hint: "Kill the buffer while the cursor is on line 10; save-place remembers that position for the next visit."

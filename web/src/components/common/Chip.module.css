@@ -1,0 +1,51 @@
+.chip {
+  font: 12.5px var(--mono);
+  background: var(--paper-3);
+  padding: 3px 8px;
+  border-radius: 4px;
+  color: var(--ink-2);
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.live::before,
+.warn::before,
+.err::before,
+.busy::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 6px;
+  flex: none;
+}
+.live::before {
+  background: var(--ok);
+}
+.warn::before {
+  background: var(--warn);
+}
+.busy::before {
+  background: var(--warn);
+  animation: pulse 1s infinite;
+}
+.err::before {
+  background: var(--err);
+}
+.warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.err {
+  background: var(--err-soft);
+  color: var(--err);
+}
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}

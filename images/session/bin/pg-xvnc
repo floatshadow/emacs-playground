@@ -1,0 +1,29 @@
+#!/bin/sh
+# pg-xvnc: the X display for the GUI frame (emacs.md section 6), in the
+# foreground.  TigerVNC's Xvnc is an X server and a VNC server in one;
+# it listens for VNC on 127.0.0.1 only, without authentication, because
+# the only way to it is sessiond's /vnc bridge, which the gateway
+# authenticates.  No window manager runs: the Emacs frame is full screen.
+#
+# Environment (defaults match sessiond's, internal/protocol SessiondConfig):
+#   PG_DISPLAY       X display          (:1)
+#   PG_VNC_GEOMETRY  screen size        (1600x900)
+#   PG_VNC_PORT      VNC TCP port       (5901)
+#   PG_VNC_DPI       dots per inch      (110)
+# Extra arguments are passed to Xvnc.
+set -eu
+
+display="${PG_DISPLAY:-:1}"
+
+exec Xvnc "$display" \
+  -geometry "${PG_VNC_GEOMETRY:-1600x900}" \
+  -depth 24 \
+  -rfbport "${PG_VNC_PORT:-5901}" \
+  -localhost \
+  -SecurityTypes None \
+  -dpi "${PG_VNC_DPI:-110}" \
+  -AlwaysShared \
+  -AcceptSetDesktopSize \
+  -desktop "Emacs Playground" \
+  -nolisten tcp \
+  "$@"

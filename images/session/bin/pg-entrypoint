@@ -1,0 +1,20 @@
+#!/bin/sh
+# pg-entrypoint: entry point of the session image, run under tini.
+#
+#   docker run IMAGE                      sessiond (the playground)
+#   docker run -it -v "$PWD:/work" IMAGE emacs -nw    standalone Emacs
+#
+# For anything other than sessiond (standalone use, emacs.md section 11)
+# it first gives an empty workspace the playground configuration, as
+# sessiond does when it starts (backend.md section 3.2): /work/emacs.d is
+# a copy of /opt/playground/emacs.d, and ~/.config/emacs points there.
+set -eu
+
+pristine="${PG_PRISTINE_CONFIG:-/opt/playground/emacs.d}"
+work="${PG_WORKSPACE:-/work}"
+
+if [ "${1:-}" != "sessiond" ] && [ ! -e "$work/emacs.d" ] && [ -w "$work" ]; then
+  cp -R "$pristine" "$work/emacs.d"
+fi
+
+exec "$@"

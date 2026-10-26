@@ -1,0 +1,81 @@
+id: 01-moving-and-editing/06-rectangles-and-macros
+title: Rectangles and keyboard macros
+minutes: 15
+mode: terminal
+modules: [base, agent, editing]
+vscode: "column select, repeat last edit"
+setup:
+  workspace: fixtures/editing
+  root: editing
+  reset: true
+  open: [editing/notes/languages.md]
+  layout: single
+  eval: '(progn (setq kmacro-counter 0) (with-current-buffer (find-buffer-visiting "/work/editing/notes/languages.md") (goto-char (point-min))))'
+steps:
+  - id: rectangle
+    goal: Remove the bullets with a rectangle
+    detail: "A rectangle is the region seen as columns. Set the mark at the start of the first line (`C-SPC`), go to line 5, two characters in (`C-n` four times, `C-f` twice), and kill the rectangle with `C-x r k`."
+    demo: "M-< ~200 C-SPC ~300 C-n ~150 C-n ~150 C-n ~150 C-n ~300 C-f ~150 C-f ~400 C-x r k"
+    conditions:
+      - text: a rectangle was killed
+        any:
+          - event: { command: kill-rectangle }
+          - event: { command: kill-region }
+        hint: "C-x r k kills the rectangle between the mark and the cursor. C-x SPC shows the rectangle as you move."
+      - text: no line starts with "- " any more
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/languages.md") (save-excursion (goto-char (point-min)) (and (not (re-search-forward "^- " nil t)) (re-search-forward "^Rust\nOCaml\nPython\nTypst\nLaTeX$" nil t))))'
+        hint: "The rectangle should be exactly two columns wide (the dash and the space) and five lines tall."
+  - id: counter
+    goal: Set the macro counter to 1
+    detail: "A keyboard macro can insert a number that grows by one each time it runs. `C-x C-k C-c` sets where it starts."
+    demo: 'C-x C-k C-c ~400 "1" RET'
+    conditions:
+      - text: C-x C-k C-c was used
+        event: { command: kmacro-set-counter }
+        hint: "C-x C-k C-c: Control x, Control k, Control c."
+      - text: the counter starts at 1
+        # Outside a macro, kmacro-set-counter sets the value the next
+        # recording starts from (kmacro-initial-counter-value).
+        elisp: "(or (eql (bound-and-true-p kmacro-initial-counter-value) 1) (eql (bound-and-true-p kmacro-counter) 1))"
+        hint: "Type 1 at the prompt and RET."
+  - id: record
+    goal: Record one line of the table
+    detail: "At the start of line 1: `F3` starts recording. Type `| `, press `F3` again (while recording it inserts the counter), type ` | `, `C-e`, type ` |`, then `C-n C-a` to get ready for the next line, and `F4` to stop."
+    demo: 'M-< ~300 <f3> ~400 "| " <f3> ~300 " | " C-e ~200 " |" C-n ~200 C-a ~400 <f4>'
+    conditions:
+      - text: a macro was recorded
+        any:
+          - event: { command: kmacro-end-or-call-macro }
+          - event: { command: kmacro-end-macro }
+        hint: "F3 starts, F4 ends. Def in the mode line means recording."
+      - text: line 1 reads "| 1 | Rust |"
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/languages.md") (save-excursion (goto-char (point-min)) (looking-at "| 1 | Rust |$")))'
+        hint: "Inside the recording, F3 inserts the counter. If line 1 is wrong, C-/ until it is back, then record again."
+      - text: recording has stopped
+        state: { macro: false }
+        hint: "F4 stops recording. If Def is still in the mode line, press F4."
+    stuck:
+      - when: { step_seconds: 150 }
+        say: "If Def is still in the mode line, Emacs is still recording: F4 stops. If the line went wrong, C-g throws the recording away; undo and start again with F3."
+  - id: replay
+    goal: Run the macro on the other four lines
+    detail: "`F4` runs the last macro once; `C-u 4 F4` runs it four times. (`C-x C-k r` runs it once on every line of a region.)"
+    demo: "C-u 4 <f4>"
+    conditions:
+      - text: all five lines are table rows
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/languages.md") (save-excursion (goto-char (point-min)) (re-search-forward "^| 1 | Rust |\n| 2 | OCaml |\n| 3 | Python |\n| 4 | Typst |\n| 5 | LaTeX |$" nil t)))'
+        hint: "The cursor must be at the start of line 2 when you replay. C-u 4 F4 runs the macro four times."
+      - text: the macro has finished running
+        elisp: "(not executing-kbd-macro)"
+        hint: "Wait for the macro to finish."
+  - id: header
+    goal: Add the table header
+    detail: "`M-<`, then `C-o` twice: it opens empty lines above the cursor without moving it. Type the header row, go down with `C-n` and type the separator row. (In a Markdown table, `RET` jumps to the next row instead of breaking the line, which is why `C-o` is handy here.)"
+    demo: 'M-< ~300 C-o ~200 C-o ~300 "| # | Language |" ~300 C-n ~300 "|---|---|"'
+    conditions:
+      - text: line 1 is the header row
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/languages.md") (save-excursion (goto-char (point-min)) (looking-at "| # | Language |$")))'
+        hint: "Line 1: | # | Language |. C-o at the start of the first row makes an empty line above it."
+      - text: line 2 separates the header from the rows
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/languages.md") (save-excursion (goto-char (point-min)) (looking-at "| # | Language |\n|---|---|\n| 1 | Rust |")))'
+        hint: "Line 1: | # | Language |, line 2: |---|---|, then the rows. C-o at the start of line 1 makes room above it."

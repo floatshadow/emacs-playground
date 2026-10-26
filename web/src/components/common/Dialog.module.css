@@ -1,0 +1,42 @@
+.dialog {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  max-width: min(520px, calc(100vw - 32px));
+  width: 100%;
+}
+.dialog::backdrop {
+  background: rgba(13, 14, 28, 0.55);
+}
+.card {
+  background: var(--paper);
+  color: var(--ink);
+  border-radius: 8px;
+  padding: 20px 22px 16px;
+  box-shadow: 0 12px 40px rgba(30, 27, 46, 0.3);
+  font: 15px/1.5 var(--serif);
+}
+.title {
+  font-size: 19px;
+  margin: 0 0 10px;
+}
+.body {
+  font-size: 14.5px;
+  color: var(--ink-2);
+}
+.body p {
+  margin: 0 0 10px;
+}
+.body ul {
+  margin: 4px 0 10px;
+  padding-left: 18px;
+  font: 13px/1.6 var(--mono);
+  max-height: 200px;
+  overflow: auto;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 14px;
+}

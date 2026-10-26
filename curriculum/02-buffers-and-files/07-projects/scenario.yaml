@@ -1,0 +1,106 @@
+id: 02-buffers-and-files/07-projects
+title: Projects
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files]
+vscode: "workspace, Ctrl+Shift+F"
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/hello/README.md]
+  layout: single
+  # Both crates are known projects from the start, so C-x p p offers
+  # them by name. (A directory with Cargo.toml is a project root: the
+  # files module adds it to project-vc-extra-root-markers.)
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (require 'project)
+      (dolist (d '("/work/projects/hello/" "/work/projects/polyglot/"))
+        (let ((p (project-current nil d)))
+          (when p (project-remember-project p)))))
+steps:
+  - id: find-file
+    goal: Open Cargo.toml by name, from anywhere in the project
+    detail: "`C-x p f` lists every file of the current project, wherever you are in it, with paths relative to the project root (`src/main.rs`, `tests/shout.rs`). Type `Cargo.toml` (`TAB` completes) and `RET`."
+    demo: 'C-x p f ~600 "Cargo.toml" ~300 RET'
+    conditions:
+      - text: C-x p f was used
+        event: { command: project-find-file }
+        hint: "Control x, p, then f. The prompt names the project: hello."
+      - text: Cargo.toml is open
+        state: { file: /work/projects/hello/Cargo.toml }
+        hint: "Type Cargo.toml (capital C) and RET. TAB on an empty prompt lists every file."
+  - id: todos
+    goal: Find every TODO in the project and visit each one
+    detail: "`C-x p g` searches the whole project for a regular expression and lists the matches. Search for `TODO`. Then `M-g M-n` jumps to the next match, wherever it is; press it until you have seen all three."
+    demo: 'C-x p g ~500 "TODO" RET ~1500 M-g M-n ~700 M-g M-n ~700 M-g M-n'
+    conditions:
+      - text: the project was searched
+        any:
+          - event: { command: project-find-regexp }
+          - event: { command: consult-ripgrep }
+          - event: { command: project-search }
+        hint: "C-x p g, type TODO, RET. The matches appear in an *xref* window."
+      - text: all three files with a TODO were visited
+        elisp: '(and (find-buffer-visiting "/work/projects/hello/src/main.rs") (find-buffer-visiting "/work/projects/hello/src/lib.rs") (find-buffer-visiting "/work/projects/hello/tests/shout.rs"))'
+        hint: "M-g M-n (Alt g, then Alt n) visits the next match. RET on a line in the *xref* window visits that one."
+      - text: the cursor is on a TODO
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (let ((l (thing-at-point (quote line) t))) (and l (string-match-p "TODO" l))))'
+        hint: "End on one of the matches, in the file itself."
+  - id: buffers
+    goal: Switch among this project's buffers only
+    detail: "`C-x p b` is `C-x b` limited to the current project: other projects' buffers and special buffers stay out of the way. Switch to `README.md`."
+    demo: 'C-x p b ~600 "README.md" RET'
+    conditions:
+      - text: C-x p b was used
+        event: { command: project-switch-to-buffer }
+        hint: "Control x, p, then b."
+      - text: hello's README.md is shown
+        state: { file: /work/projects/hello/README.md }
+        hint: "Type README.md (TAB completes) and RET."
+  - id: compile
+    goal: Run the project's build with C-x p c
+    detail: "`C-x p c` runs a build command in the project root, whichever file you are in. It offers `make -k`; clear it with `C-a C-k`, type `sh build.sh`, `RET`. The output appears in *compilation*."
+    demo: 'C-x p c ~600 C-a ~200 C-k ~300 "sh build.sh" RET ~1500'
+    conditions:
+      - text: C-x p c was used
+        event: { command: project-compile }
+        hint: "Control x, p, then c."
+      - text: the build finished
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "Finished dev profile" nil t)))))'
+        hint: "The command is sh build.sh. In the prompt, C-a goes to the start and C-k deletes the rest of the line."
+  - id: switch
+    goal: Switch to the polyglot project and open its main.rs
+    detail: "`C-x p p` lists the projects Emacs knows. Pick `/work/projects/polyglot/`; a menu asks what to do there: `f` finds a file. Open `src/main.rs`."
+    demo: 'C-x p p ~600 "/work/projects/polyglot/" RET ~800 f ~600 "src/main.rs" RET'
+    conditions:
+      - text: C-x p p was used
+        any:
+          - event: { command: project-switch-project }
+          - event: { command: playground-project-tab }
+        hint: "Control x, p, then p again. TAB completes the project path."
+      - text: polyglot's main.rs is open
+        state: { file: /work/projects/polyglot/src/main.rs }
+        hint: "After choosing the project, press f and type src/main.rs."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "TAB lists the known projects. Pick /work/projects/polyglot/ and RET; then a key from the menu (f finds a file)."
+  - id: close
+    goal: Close the polyglot project
+    detail: "`C-x p k` kills every buffer of the current project after asking. You land back in *hello*, where you were before."
+    demo: "C-x p k ~600 y"
+    conditions:
+      - text: C-x p k was used
+        event: { command: project-kill-buffers }
+        hint: "Control x, p, then k, and y to confirm."
+      - text: no polyglot buffer is left
+        elisp: '(not (seq-find (lambda (b) (let ((d (buffer-local-value (quote default-directory) b))) (and d (string-prefix-p "/work/projects/polyglot/" (expand-file-name d)) (not (string-prefix-p " " (buffer-name b)))))) (buffer-list)))'
+        hint: "Run C-x p k while you are in a polyglot buffer: it closes the project you are in."
+      - text: you are back in hello
+        state: { file: { regex: "^/work/projects/hello/" } }
+        hint: "C-x p p, choose hello, then f to open one of its files."

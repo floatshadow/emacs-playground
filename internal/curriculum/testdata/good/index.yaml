@@ -1,0 +1,45 @@
+# Test curriculum: two ready lessons in part 0, a planned part 1 and a
+# planned project in part 14.
+parts:
+  - n: 0
+    id: 00-orientation
+    title: Orientation
+    minutes: 20
+    outcome: Read the screen.
+    modules: [base, agent]
+    status: ready
+    lessons:
+      - { id: 00-orientation/01-first, n: "0.1", title: First lesson (index title), minutes: 10, vscode: "status bar", status: ready }
+      - { id: 00-orientation/02-second, n: "0.2", title: Second lesson, minutes: 10, status: ready }
+  - n: 1
+    id: 01-moving-and-editing
+    title: Moving and editing
+    minutes: 120
+    outcome: Move and edit.
+    modules: [editing]
+    status: planned
+    suggestedAfter: 0
+    lessons:
+      - { id: 01-moving-and-editing/01-motion, n: "1.1", title: Motion, minutes: 15, status: planned }
+  - n: 2
+    id: 14-projects
+    title: Projects
+    minutes: 75
+    outcome: Do real work.
+    modules: []
+    status: planned
+    suggestedAfter: 1
+    lessons:
+      - { id: projects/p1-hello-cargo, n: P1, title: "Hello, cargo", minutes: 75, tags: [project], status: planned }
+
+projects:
+  - id: projects/p1-hello-cargo
+    n: P1
+    title: "Hello, cargo"
+    minutes: 75
+    languages: [Rust]
+    tags: [project]
+    status: planned
+    tasks:
+      - { id: scaffold, n: 1, title: Scaffold }
+      - { id: layout, n: 2, title: Layout }

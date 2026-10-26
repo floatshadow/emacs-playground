@@ -1,0 +1,87 @@
+id: 03-windows-and-layouts/08-focus-and-layout-recipes
+title: Focus and layout recipes
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows]
+vscode: "zen mode, zoom, centred layout"
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/hello/src/main.rs, projects/hello/src/lib.rs, projects/hello/tests/shout.rs, projects/notes/reading.md]
+  layout: "projects/notes/reading.md"
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (with-current-buffer (find-buffer-visiting "/work/projects/notes/reading.md")
+        (goto-char (point-min))
+        (when (bound-and-true-p olivetti-mode) (olivetti-mode -1))
+        (when (bound-and-true-p follow-mode) (follow-mode -1))))
+steps:
+  - id: follow
+    goal: Read reading.md as one long page in two columns
+    detail: "`C-x 3` shows the file twice, side by side. `M-x follow-mode RET` links the two windows: the right one continues where the left one ends, and scrolling either scrolls both. Try `C-v` and `M-v` once it is on."
+    demo: 'C-x 3 ~500 M-x ~400 "follow-mode" RET'
+    conditions:
+      - text: follow-mode is on in reading.md
+        elisp: '(let ((b (find-buffer-visiting "/work/projects/notes/reading.md"))) (and b (buffer-local-value (quote follow-mode) b)))'
+        hint: "M-x follow-mode RET, in the reading.md window."
+      - text: reading.md in two columns
+        layout: "(hsplit reading.md reading.md)"
+        hint: "C-x 3 first, so there are two windows on the same buffer."
+  - id: build
+    goal: "Recipe 1, edit and build: main.rs above, build output below"
+    detail: "`C-x 1`, then `C-x b main.rs RET`, then `C-x p c` with `sh build.sh`. The windows module puts the output below, a third high."
+    demo: 'C-x 1 ~400 C-x b ~400 "main.rs" RET ~400 C-x p c ~600 C-a ~200 C-k ~300 "sh build.sh" RET ~1500'
+    conditions:
+      - text: a build ran
+        any:
+          - event: { command: project-compile }
+          - event: { command: compile }
+          - event: { command: recompile }
+        hint: "C-x p c, then sh build.sh as the command."
+      - text: main.rs above *compilation*
+        layout: "(vsplit main.rs *compilation*)"
+        hint: "Start from one window on main.rs (C-x 1), then build."
+  - id: test
+    goal: "Recipe 2, implementation and test: lib.rs left, shout.rs right"
+    detail: "`C-x 1`, `C-x b lib.rs RET`, `C-x 3`, `C-x o`, `C-x b shout.rs RET`."
+    demo: 'C-x 1 ~400 C-x b ~400 "lib.rs" RET ~400 C-x 3 ~400 C-x o ~400 C-x b ~400 "shout.rs" RET'
+    conditions:
+      - text: two windows side by side
+        layout: "(hsplit * *)"
+        hint: "C-x 1, then C-x 3."
+      - text: lib.rs beside shout.rs
+        layout: "(hsplit lib.rs shout.rs)"
+        hint: "lib.rs on the left, tests/shout.rs on the right."
+  - id: writing
+    goal: "Recipe 3, writing: reading.md alone, centred"
+    detail: "`C-x 1`, `C-x b reading.md RET`, then `M-x olivetti-mode RET`: the text gets a comfortable width in the middle of the window. Nothing in the file changes."
+    demo: 'C-x 1 ~400 C-x b ~400 "reading.md" RET ~400 M-x ~400 "olivetti-mode" RET'
+    conditions:
+      - text: olivetti-mode is on in reading.md
+        elisp: '(let ((b (find-buffer-visiting "/work/projects/notes/reading.md"))) (and b (buffer-local-value (quote olivetti-mode) b)))'
+        hint: "M-x olivetti-mode RET in reading.md. Run it again to turn it off."
+      - text: one window on reading.md
+        layout: "reading.md"
+        hint: "C-x 1 keeps only the selected window."
+  - id: wide
+    goal: "Recipe 4, wide code and narrow notes: main.rs wider on the left"
+    detail: "`C-x 3`, then `C-x b main.rs RET` on the left. `C-x }` widens the selected window by a column, and a plain `}` repeats it: press it until main.rs is clearly wider (five or six times). `C-x {` narrows."
+    demo: 'C-x 3 ~400 C-x b ~400 "main.rs" RET ~400 C-x } ~200 } ~150 } ~150 } ~150 } ~150 }'
+    conditions:
+      - text: the window was widened
+        any:
+          - event: { command: enlarge-window-horizontally }
+          - event: { command: shrink-window-horizontally }
+          - event: { command: mouse-drag-vertical-line }
+        hint: "C-x } (Control x, then a closing brace), then } again and again."
+      - text: main.rs left, reading.md right
+        layout: "(hsplit main.rs reading.md)"
+        hint: "C-x 3, then show main.rs in the left window with C-x b."
+      - text: main.rs is at least ten columns wider
+        elisp: '(let* ((ws (window-list nil (quote no-minibuf) (frame-first-window))) (l (car ws)) (r (cadr ws))) (and l r (>= (- (window-total-width l) (window-total-width r)) 10)))'
+        hint: "Keep pressing } right after C-x }. If the other window grew instead, C-x o and use C-x { there."

@@ -1,0 +1,35 @@
+#!/bin/sh
+# pg-gui-frame: open the full-screen GUI frame of the playground daemon
+# on the Xvnc display (emacs.md sections 6 and 7) and stay in the
+# foreground while it exists, so a supervisor can re-run it.
+#
+# Waits up to 10 s for the X display and for the daemon.
+# Environment: PG_DISPLAY (:1), PG_EMACS_SERVER (playground).
+# Extra arguments are passed to emacsclient.
+set -eu
+
+DISPLAY="${PG_DISPLAY:-:1}"
+export DISPLAY
+server="${PG_EMACS_SERVER:-playground}"
+
+i=0
+until xdotool getdisplaygeometry >/dev/null 2>&1; do
+  i=$((i + 1))
+  if [ "$i" -gt 100 ]; then
+    echo "pg-gui-frame: X display $DISPLAY is not ready" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
+i=0
+until emacsclient -s "$server" -e t >/dev/null 2>&1; do
+  i=$((i + 1))
+  if [ "$i" -gt 100 ]; then
+    echo "pg-gui-frame: Emacs server $server is not running" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+
+exec emacsclient -c -s "$server" --frame-parameters='((fullscreen . fullboth))' "$@"

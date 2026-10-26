@@ -1,0 +1,31 @@
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  overflow: hidden;
+  flex: none;
+}
+.seg button {
+  border: 0;
+  background: #fff;
+  padding: 5px 11px;
+  font: 13.5px var(--serif);
+  cursor: pointer;
+  color: var(--ink-2);
+}
+.seg button + button {
+  border-left: 1px solid var(--rule);
+}
+.seg button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.seg button.on {
+  background: var(--violet-soft);
+  color: var(--violet-ink);
+  font-weight: 600;
+}
+.seg button:focus-visible {
+  outline: 2px solid var(--violet);
+  outline-offset: -2px;
+}

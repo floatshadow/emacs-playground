@@ -1,0 +1,12 @@
+# State Emacs writes while you work; not configuration.  The workspace
+# is a git repository and the playground's checkpoints commit it, so
+# these stay out (see modules/base.el, "Where state files go").
+/var/
+/elpa/
+/eln-cache/
+/auto-save-list/
+/modules.el.tmp
+# Emacs 31 compiles user-lisp/ and collects its autoloads there.
+/user-lisp/.user-lisp-autoloads.el
+*.elc
+*.eln

@@ -1,0 +1,49 @@
+id: 00-orientation/01-first
+title: { en: Opening files, zh-CN: 打开文件 }
+minutes: 12
+mode: terminal
+tags: []
+modules: [base, agent]
+vscode: "Ctrl+P, Ctrl+O"
+preview:
+  tabs: [hello/README.md]
+setup:
+  workspace: fixtures/hello
+  root: hello
+  open: [hello/README.md]
+  layout: single
+  eval: "(goto-char (point-min))"
+steps:
+  - id: open
+    goal: Open src/main.rs
+    detail: "Hold Control, press x, then Control f."
+    demo: 'C-x C-f "src/ma" TAB ~400 RET'
+    conditions:
+      - text: the Find file prompt was used
+        event: { command: find-file, min: 1 }
+        hint: "C-x then C-f."
+      - text: main.rs is the current buffer
+        elisp: '(equal (buffer-file-name) "/work/hello/src/main.rs")'
+        hint: { en: "Type ma, press TAB, then RET.", zh-CN: "输入 ma，按 TAB，然后 RET。" }
+    stuck:
+      - when: { minibuffer_seconds: 30 }
+        say: "Still in the prompt? RET accepts, C-g cancels."
+  - id: save
+    goal: Save it
+    demo: '"// edited" C-x C-s'
+    conditions:
+      - text: saved
+        all:
+          - { event: { command: save-buffer } }
+          - { file: { path: hello/src/main.rs, contains: "edited" } }
+        hint: "C-x C-s."
+      - text: not narrowed
+        state: { narrowed: false, "windows.length": { gte: 1 } }
+    checkpoint: false
+  - id: layout
+    goal: Code above, README below
+    demo: 'C-x 2 C-x o C-x b "README.md" RET'
+    conditions:
+      - id: layout-ok
+        text: the layout matches
+        layout: "(vsplit main.rs README.md)"

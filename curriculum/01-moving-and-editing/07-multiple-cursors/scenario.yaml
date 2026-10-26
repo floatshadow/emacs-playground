@@ -1,0 +1,59 @@
+id: 01-moving-and-editing/07-multiple-cursors
+title: Multiple cursors and iedit
+minutes: 12
+mode: terminal
+modules: [base, agent, editing]
+vscode: "Ctrl+D, rename symbol in file"
+setup:
+  workspace: fixtures/editing
+  root: editing
+  reset: true
+  open: [editing/src/report.rs]
+  layout: single
+  eval: '(with-current-buffer (find-buffer-visiting "/work/editing/src/report.rs") (goto-char (point-min)))'
+steps:
+  - id: iedit
+    goal: Rename width to cols inside fn rule only
+    detail: "Put the cursor on `width` inside `fn rule`. `C-;` (iedit) highlights every occurrence in the buffer; with a prefix of 0, `M-0 C-;`, only those in the current function. Edit one and the others follow: `M-d` deletes the word, type `cols`, then `C-;` again to finish. (The demo runs `M-x iedit-mode`, the command behind `C-;`, because some terminals cannot send `C-;`.)"
+    demo: 'C-s ~300 "fn rule" RET ~200 C-s ~300 "width" RET ~200 M-b ~400 M-0 M-x ~400 "iedit-mode" RET ~800 M-d ~400 "cols" ~600 M-x ~400 "iedit-mode" RET'
+    conditions:
+      - text: iedit was used
+        event: { command: iedit-mode }
+        hint: "With the cursor on width: M-0 then C-; (or M-0 M-x iedit-mode RET)."
+      - text: fn rule says cols three times
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/report.rs") (save-excursion (goto-char (point-min)) (and (search-forward "let cols = total.min(40);" nil t) (search-forward "if cols > 20" nil t) (search-forward "repeat(cols)" nil t))))'
+        hint: "Delete width in the highlighted occurrence and type cols; all three in fn rule change together."
+      - text: fn summary still says width
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/report.rs") (save-excursion (goto-char (point-min)) (and (search-forward "let width = widest.max(10);" nil t) (search-forward "{:^width$}" nil t) (search-forward "widest line {width}" nil t))))'
+        hint: "Without the 0 prefix iedit changes the whole buffer. C-/ undoes; then try M-0 C-; with the cursor inside fn rule."
+      - text: iedit is finished
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/report.rs") (not (bound-and-true-p iedit-mode)))'
+        hint: "Press C-; (or run iedit-mode) again to leave iedit."
+    stuck:
+      - when: { step_seconds: 150 }
+        say: "Everything highlighted changes together while iedit is on. C-; turns it off; C-/ undoes an edit that went too far."
+  - id: edit-lines
+    goal: Make the three colour constants public
+    detail: "Select from the start of `const RED` to the start of `const BLUE` and press `C-c m l`: one cursor per line. Type `pub ` once and it appears on all three lines. `C-g` goes back to one cursor."
+    demo: 'M-< ~200 C-s ~300 "const RED" RET ~200 C-a ~300 C-SPC ~200 C-n ~200 C-n ~400 C-c m l ~600 "pub " ~600 C-g'
+    conditions:
+      - text: mc/edit-lines was used
+        event: { command: mc/edit-lines }
+        hint: "C-SPC at the start of the first line, C-n down to the last, then C-c m l."
+      - text: RED, GREEN and BLUE are pub const
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/report.rs") (save-excursion (goto-char (point-min)) (re-search-forward "^pub const RED.*\npub const GREEN.*\npub const BLUE" nil t)))'
+        hint: "Every cursor types the same thing. If a line got pub twice, C-/ and try again."
+      - text: back to one cursor
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/report.rs") (not (bound-and-true-p multiple-cursors-mode)))'
+        hint: "C-g leaves multiple-cursors mode."
+  - id: expand
+    goal: Grow a selection from a word to the whole string
+    detail: "Put the cursor inside the word *report* in `\"report\"`. Each `C-=` grows the selection to the next larger piece of syntax: the word, then the string with its quotes, then the argument list, then the whole call. Copy the string with its quotes using `M-w`. `C--` shrinks the selection again."
+    demo: 'M-< ~200 C-s ~300 "\"report" RET ~300 M-b ~400 C-= ~500 C-= ~500 M-w'
+    conditions:
+      - text: the selection was grown
+        event: { command: expreg-expand }
+        hint: "C-= (Control and =), pressed several times in a row, with the cursor inside the word report."
+      - text: '"report", quotes included, was copied'
+        elisp: '(and kill-ring (equal (substring-no-properties (car kill-ring)) "\"report\""))'
+        hint: "Grow until the highlight covers both quote marks, then M-w. C-- (Control and minus, expreg-contract) shrinks it again."

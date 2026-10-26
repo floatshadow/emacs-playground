@@ -1,0 +1,113 @@
+id: 00-orientation/02-getting-unstuck
+title: C-g and the three ways to get lost
+minutes: 12
+mode: terminal
+modules: [base, agent]
+vscode: Esc
+setup:
+  workspace: fixtures/hello
+  root: hello
+  reset: true
+  open: [hello/src/main.rs]
+  layout: single
+steps:
+  - id: prompt
+    goal: Open a prompt, then cancel it
+    detail: "`C-x C-f` opens the Find file prompt in the minibuffer. Do not open anything: press `C-g`."
+    demo: "C-x C-f ~1000 C-g"
+    conditions:
+      - text: a prompt was opened
+        event: { command: find-file }
+        hint: "C-x C-f opens a prompt at the bottom of the screen."
+      - text: C-g cancelled it
+        any:
+          - event: { command: abort-minibuffers }
+          - event: { command: minibuffer-keyboard-quit }
+          - event: { command: abort-recursive-edit }
+          - event: { command: keyboard-quit }
+          - event: { command: keyboard-escape-quit }
+        hint: "Press C-g (Control and g) while the prompt is open. The echo area says Quit."
+      - text: no prompt is open now
+        state: { minibuffer: null }
+        hint: "A prompt is still open at the bottom. C-g closes it."
+  - id: search
+    goal: Start a search, then cancel it
+    detail: "`C-s` starts searching as you type. Type `zzz`, which is not in the file: the prompt says *Failing I-search*. `C-g` removes what did not match; a second `C-g` ends the search and puts the cursor back."
+    demo: 'C-s ~400 "zzz" ~800 C-g ~400 C-g'
+    conditions:
+      - text: a search was started
+        event: { command: isearch-forward }
+        hint: "C-s starts an incremental search. The bottom line shows I-search:."
+      - text: the search was cancelled
+        any:
+          - event: { command: isearch-abort }
+          - event: { command: keyboard-quit }
+          - event: { command: isearch-cancel }
+        hint: "C-g cancels the search. When the text does not match, the first C-g only removes the failing part; press it again."
+      - text: no search is running now
+        state: { isearch: false, minibuffer: null }
+        hint: "I-search is still shown at the bottom. Press C-g until it disappears."
+    stuck:
+      - when: { quits_in_window: { count: 4, seconds: 8 } }
+        say: "Pressing C-g many times is fine: it is always safe. Look at the bottom line; when it no longer says I-search, the search is over."
+  - id: buffer-list
+    goal: Open the buffer list, then close it
+    detail: "`C-x C-b` lists every buffer in a second window. It appears without moving your cursor. `C-x 1` keeps only the window you are in."
+    demo: "C-x C-b ~1500 C-x 1"
+    conditions:
+      - text: the buffer list was opened
+        any:
+          - event: { command: list-buffers }
+          - event: { command: ibuffer }
+        hint: "Press C-x, then C-b."
+      - text: back to one window showing main.rs
+        layout: "main.rs"
+        hint: "C-x 1 keeps only the selected window. If you moved into the list, q closes it instead."
+  - id: help
+    goal: Open help for a key, then leave the help window
+    detail: "`C-h k` then `C-f` explains what `C-f` does, in a *Help* window. The cursor moves into it, so `q` closes it straight away."
+    demo: "C-h k ~400 C-f ~1500 q"
+    conditions:
+      - text: help was opened
+        any:
+          - event: { command: describe-key }
+          - event: { command: helpful-key }
+        hint: "C-h k, then the key you are curious about: C-f."
+      - text: q closed the help window
+        event: { command: quit-window }
+        hint: "The cursor is in the *Help* window (its mode line is the bright one). Press q there. If you clicked back into main.rs, C-x o moves into the help again."
+      - text: back to one window showing main.rs
+        layout: "main.rs"
+        hint: "If a second window remains, C-x 1 removes it."
+  - id: tutorial
+    goal: Open the tutorial, then put it away
+    detail: "`C-h t` replaces main.rs with the built-in tutorial. It is an ordinary buffer, so `q` would just type a q. Kill it with `C-x k RET`. Emacs asks whether to save your position in the tutorial: answer `n`. main.rs comes back."
+    demo: "C-h t ~1500 C-x k ~500 RET ~600 n"
+    conditions:
+      - text: the tutorial was opened
+        event: { command: help-with-tutorial }
+        hint: "C-h t opens the Emacs tutorial."
+      - text: the tutorial buffer is gone
+        elisp: '(not (get-buffer "TUTORIAL"))'
+        hint: "C-x k asks which buffer to kill, offering the current one. RET accepts it. Then answer the y-or-n question with n."
+      - text: main.rs is shown again
+        state: { file: /work/hello/src/main.rs }
+        hint: "After killing a buffer, Emacs shows the previous one. C-x b main.rs RET also brings it back."
+  - id: escape
+    goal: Make a big mess, then escape with ESC ESC ESC
+    detail: "Press `C-x 2`, `C-x 3` and `M-x`: three windows and an open prompt. `ESC ESC ESC` (Esc three times) gets out of one thing at a time: first the prompt, then the extra windows."
+    demo: "C-x 2 ~300 C-x 3 ~300 M-x ~800 ESC ESC ESC ~600 ESC ESC ESC"
+    conditions:
+      - text: the window was split
+        any:
+          - event: { command: split-window-below }
+          - event: { command: split-window-right }
+        hint: "C-x 2 splits the window; C-x 3 splits it again, side by side."
+      - text: ESC ESC ESC was used
+        event: { command: keyboard-escape-quit }
+        hint: "Press Esc three times quickly."
+      - text: one window and no prompt
+        all:
+          - layout: single
+          - state: { minibuffer: null }
+        hint: "ESC ESC ESC first closes the prompt. Press it again to close the extra windows."

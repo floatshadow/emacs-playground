@@ -1,0 +1,116 @@
+id: 02-buffers-and-files/04-switch-save-kill
+title: Switching, saving and killing buffers
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files]
+vscode: "Ctrl+Tab, Ctrl+S, Ctrl+W, Save As"
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/hello/README.md]
+  layout: single
+  # This lesson is about saving: the playground's automatic saving of
+  # visited files would clear the ** flag behind the learner's back.
+  eval: >-
+    (progn
+      (when (bound-and-true-p auto-save-visited-mode) (auto-save-visited-mode -1))
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (dolist (f '("/work/projects/hello/CHANGES.md"))
+        (let ((b (find-buffer-visiting f))) (when b (kill-buffer b)))))
+steps:
+  - id: open
+    goal: Open four files, two of them called main.rs
+    detail: "With `C-x C-f`, open `src/main.rs` and `src/lib.rs` of *hello*, then `/work/projects/polyglot/src/main.rs` (typing a `/` after the offered directory starts over from the root) and `../README.md` from there. Watch the buffer names: two files called *main.rs* become `main.rs<hello>` and `main.rs<polyglot>`."
+    demo: 'C-x C-f ~400 "src/main.rs" RET ~400 C-x C-f ~400 "lib.rs" RET ~400 C-x C-f ~400 "/work/projects/polyglot/src/main.rs" RET ~400 C-x C-f ~400 "../README.md" RET'
+    conditions:
+      - text: hello's main.rs and lib.rs are open
+        elisp: '(and (find-buffer-visiting "/work/projects/hello/src/main.rs") (find-buffer-visiting "/work/projects/hello/src/lib.rs"))'
+        hint: "C-x C-f, type src/main.rs, RET. Then C-x C-f again: the prompt now starts in src/, so lib.rs is enough."
+      - text: polyglot's main.rs and README.md are open
+        elisp: '(and (find-buffer-visiting "/work/projects/polyglot/src/main.rs") (find-buffer-visiting "/work/projects/polyglot/README.md"))'
+        hint: "In the C-x C-f prompt, type /work/projects/polyglot/src/main.rs right after what is there; the second / starts a fresh path. Then ../README.md from there."
+      - text: the two main.rs buffers have different names
+        elisp: '(let ((a (find-buffer-visiting "/work/projects/hello/src/main.rs")) (b (find-buffer-visiting "/work/projects/polyglot/src/main.rs"))) (and a b (string-prefix-p "main.rs<" (buffer-name a)) (string-prefix-p "main.rs<" (buffer-name b))))'
+        hint: "Emacs adds the directory in angle brackets when two buffers would have the same name: main.rs<hello>, main.rs<polyglot>."
+  - id: switch
+    goal: Switch to main.rs<hello>, back, and back again
+    detail: "`C-x b` switches by name: type `main.rs<h`, `TAB`, `RET`. `C-x b RET` with nothing typed goes back to the buffer you were just in. `C-x <left>` walks back through what this window showed before, `C-x <right>` forward."
+    demo: 'C-x b ~400 "main.rs<h" ~300 TAB ~300 RET ~600 C-x b ~400 RET ~600 C-x <left>'
+    conditions:
+      - text: C-x b was used twice
+        any:
+          - event: { command: switch-to-buffer, min: 2 }
+          - event: { command: consult-buffer, min: 2 }
+        hint: "C-x b, type main.rs<h, TAB, RET. Then C-x b and just RET to go back."
+      - text: C-x <left> or C-x <right> was used
+        any:
+          - event: { command: previous-buffer }
+          - event: { command: next-buffer }
+        hint: "Control x, then the left arrow key: the previous buffer shown in this window."
+      - text: main.rs<hello> is shown
+        state: { file: /work/projects/hello/src/main.rs }
+        hint: "End on hello's main.rs. C-x b main.rs<hello> RET gets you there directly."
+  - id: save-all
+    goal: Change main.rs and lib.rs, then save both at once
+    detail: "Add a comment at the top of each file (`M-<`, then type). Both mode lines show `**`. `C-x s` offers to save every modified buffer, one by one: `y` saves, `n` skips, `!` saves all the rest."
+    demo: 'M-< ~300 "// edited in Emacs\n" ~300 C-x b ~400 "lib.rs" RET ~300 M-< ~300 "// edited too\n" ~400 C-x s ~600 !'
+    conditions:
+      - text: main.rs and lib.rs both start with a comment
+        elisp: '(seq-every-p (lambda (f) (let ((b (find-buffer-visiting f))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (looking-at "//")))))) (list "/work/projects/hello/src/main.rs" "/work/projects/hello/src/lib.rs"))'
+        hint: "Type a line starting with // at the very top of main.rs<hello> and of lib.rs. The demo writes // edited in Emacs."
+      - text: C-x s saved them
+        event: { command: save-some-buffers }
+        hint: "Control x, then a plain s. Answer ! to save every modified buffer."
+      - text: nothing is left unsaved
+        elisp: '(not (seq-find (lambda (b) (and (buffer-file-name b) (string-prefix-p "/work/projects/" (buffer-file-name b)) (buffer-modified-p b))) (buffer-list)))'
+        hint: "A ** in a mode line means unsaved. C-x s again and answer y or !."
+  - id: save-as
+    goal: Save hello's README.md as CHANGES.md
+    detail: "`C-x C-w` writes the buffer to a new file and the buffer follows it: switch to `README.md<hello>`, press `C-x C-w`, type `CHANGES.md`, `RET`. README.md stays on disk as it was."
+    demo: 'C-x b ~400 "README.md<h" ~300 TAB ~300 RET ~400 C-x C-w ~400 "CHANGES.md" RET'
+    conditions:
+      - text: C-x C-w was used
+        event: { command: write-file }
+        hint: "Control x, then Control w. Browsers like to grab Ctrl+W: use Focus mode, or M-x write-file."
+      - text: CHANGES.md exists in hello
+        file: { path: projects/hello/CHANGES.md, exists: true }
+        hint: "Write it next to README.md: the prompt starts in /work/projects/hello/, so CHANGES.md is enough."
+      - text: the buffer now visits CHANGES.md
+        state: { file: /work/projects/hello/CHANGES.md }
+        hint: "After C-x C-w the buffer's name and file are CHANGES.md."
+  - id: kill-two
+    goal: Kill CHANGES.md and polyglot's main.rs
+    detail: "`C-x k RET` kills the current buffer. Then `C-x k`, `main.rs<p`, `TAB`, `RET` kills the other. Watch hello's buffer lose its `<hello>`: there is only one *main.rs* left."
+    demo: 'C-x k ~400 RET ~600 C-x k ~400 "main.rs<p" ~300 TAB ~300 RET'
+    conditions:
+      - text: two buffers were killed
+        any:
+          - event: { command: kill-buffer, min: 2 }
+          - event: { command: kill-current-buffer, min: 2 }
+        hint: "C-x k offers the current buffer; RET accepts. For the second one, type its name."
+      - text: neither CHANGES.md nor polyglot's main.rs is open
+        elisp: '(not (or (find-buffer-visiting "/work/projects/hello/CHANGES.md") (find-buffer-visiting "/work/projects/polyglot/src/main.rs")))'
+        hint: "Kill the buffer CHANGES.md and the buffer main.rs<polyglot>."
+      - text: hello's main.rs is plain main.rs again
+        elisp: '(let ((b (find-buffer-visiting "/work/projects/hello/src/main.rs"))) (and b (equal (buffer-name b) "main.rs")))'
+        hint: "Once only one main.rs is open, the <hello> suffix goes away by itself."
+  - id: revert
+    goal: Throw away an unsaved change
+    detail: "In `lib.rs`, type something you regret. `C-x x g` reverts the buffer to the file on disk; it asks first because there are unsaved changes."
+    demo: 'C-x b ~400 "lib.rs" RET ~300 M-> ~300 "oops" ~600 C-x x g ~600 y'
+    conditions:
+      - text: the buffer was reverted
+        any:
+          - event: { command: revert-buffer-quick }
+          - event: { command: revert-buffer }
+        hint: "C-x x g, then y. (M-x revert-buffer does the same.)"
+      - text: lib.rs matches the file again
+        elisp: '(let ((b (find-buffer-visiting "/work/projects/hello/src/lib.rs"))) (and b (not (buffer-modified-p b)) (with-current-buffer b (save-excursion (goto-char (point-min)) (not (search-forward "oops" nil t))))))'
+        hint: "Revert lib.rs, not another buffer: switch to it first with C-x b lib.rs RET."
+      - text: the saved comment survived
+        file: { path: projects/hello/src/lib.rs, regex: "\\A//" }
+        hint: "Reverting reloads what was saved, so the comment from the save step is still there. If it is gone, it was never saved: reset this step."

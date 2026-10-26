@@ -1,30 +1,21 @@
-import { APIPrefix, Version } from './protocol.gen'
-import styles from './app.module.css'
+import { useState } from 'react'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import { RouterProvider } from 'react-router'
+import { makeQueryClient } from './api/queries'
+import { makeRouter } from './routes'
+import './i18n'
 
 /**
- * Placeholder shell. TODO(frontend, frontend.md §1-§2): replace with the
- * router (routes.tsx), AppShell and the screens.
+ * The app: TanStack Query for server state, the data router for screens.
+ * The session connection (events, terminal, GUI) lives in module-level hosts
+ * above the router, so navigation never drops a WebSocket (frontend.md §2).
  */
-export function App() {
+export function App({ queryClient }: { queryClient?: QueryClient }) {
+  const [qc] = useState(() => queryClient ?? makeQueryClient())
+  const [router] = useState(makeRouter)
   return (
-    <div className={styles.shell}>
-      <header className={styles.topbar}>
-        <span className={styles.brand}>
-          <i className={styles.mark} aria-hidden="true">
-            e
-          </i>
-          Emacs Playground
-        </span>
-        <span className={styles.chip}>
-          protocol {Version} · {APIPrefix}
-        </span>
-      </header>
-      <main className={styles.main}>
-        <h1>Emacs Playground</h1>
-        <p>
-          The web app is being built. Press <kbd>C-x</kbd> <kbd>C-f</kbd> once it is ready.
-        </p>
-      </main>
-    </div>
+    <QueryClientProvider client={qc}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
   )
 }

@@ -1,0 +1,84 @@
+id: 01-moving-and-editing/03-undo
+title: Undo that never loses work
+minutes: 10
+mode: terminal
+modules: [base, agent, editing]
+vscode: "Ctrl+Z, Ctrl+Y"
+setup:
+  workspace: fixtures/editing
+  root: editing
+  reset: true
+  open: [editing/notes/journal.md]
+  layout: single
+  eval: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/journal.md") (goto-char (point-min)))'
+steps:
+  - id: delete
+    goal: Delete the Tuesday entry
+    detail: "Search for `## Tuesday`, go to the start of the line, set the mark, search for `## Wednesday`, go to the start of that line and kill the region with `C-w`."
+    demo: 'C-s ~300 "## Tuesday" RET C-a ~300 C-SPC ~300 C-s ~300 "## Wednesday" RET C-a ~400 C-w'
+    conditions:
+      - text: a region was killed
+        event: { command: kill-region }
+        hint: "C-SPC at the start of ## Tuesday, move to the start of ## Wednesday, C-w."
+      - text: the Tuesday entry is gone
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/journal.md") (save-excursion (goto-char (point-min)) (not (search-forward "Pressed it a lot" nil t))))'
+        hint: "The whole entry, heading and paragraph, should be inside the region before C-w."
+  - id: write
+    goal: Write a Thursday entry at the end
+    detail: "`M->` goes to the end. Add a heading `## Thursday`, an empty line and one sentence ending in a full stop. Every word you type is more history on top of the deletion."
+    demo: 'M-> ~300 "\n## Thursday\n\nUndo saved me twice today."'
+    conditions:
+      - text: there is a ## Thursday heading
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/journal.md") (save-excursion (goto-char (point-min)) (re-search-forward "^## Thursday$" nil t)))'
+        hint: "M-> goes to the end of the file. Type ## Thursday on a line of its own."
+      - text: there is a Thursday entry with a sentence
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/journal.md") (save-excursion (goto-char (point-min)) (re-search-forward "^## Thursday\n\n[^\n]*\\." nil t)))'
+        hint: "Type ## Thursday, press RET twice, then a sentence that ends with a full stop."
+      - text: Tuesday is still gone
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/journal.md") (save-excursion (goto-char (point-min)) (not (search-forward "Pressed it a lot" nil t))))'
+        hint: "Leave the deletion in place for now; the next step brings Tuesday back without losing Thursday."
+  - id: undo-region
+    goal: Get Tuesday back without losing Thursday
+    detail: "Plain undo would remove Thursday first. Instead, select the place where Tuesday used to be (from the start of `## Wednesday` up two lines) and press `C-/`: with an active region, undo only undoes changes inside it."
+    demo: 'C-r ~300 "## Wednesday" RET ~300 C-SPC ~300 C-p ~200 C-p ~400 C-/'
+    conditions:
+      - text: undo was used
+        any:
+          - event: { command: undo }
+          - event: { command: undo-only }
+        hint: "C-/ is undo (also C-_ and C-x u's neighbour). In a terminal C-/ may arrive as C-_; both work."
+      - text: Tuesday is back
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/journal.md") (save-excursion (goto-char (point-min)) (search-forward "Pressed it a lot" nil t)))'
+        hint: "The region must include the spot where Tuesday was: the start of the ## Wednesday line. Mark there, move up, then C-/."
+      - text: Thursday is still there
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/journal.md") (save-excursion (goto-char (point-min)) (search-forward "## Thursday" nil t)))'
+        hint: "If Thursday disappeared, the undo ran without a region. Nothing is lost: keep reading, the next step shows redo."
+  - id: redo
+    goal: Undo, then redo
+    detail: "`C-g` deactivates the region. `C-/` undoes the last change (Tuesday goes away again); `C-M-_` (or `C-?` with a full keyboard) redoes it. Undo in Emacs is itself undoable, so nothing you typed is ever out of reach."
+    demo: "C-g ~300 C-/ ~600 C-M-_"
+    conditions:
+      - text: undo-redo was used
+        any:
+          - event: { command: undo-redo }
+          - event: { command: vundo-forward }
+          # undo-redo calls undo, which sets this-command to undo.
+          - event: { command: undo, min: 2 }
+        hint: "C-M-_ is Control Alt underscore (Esc then C-_ also works). C-? does the same where the terminal can send it."
+      - text: Tuesday and Thursday are both there
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/journal.md") (save-excursion (goto-char (point-min)) (and (search-forward "Pressed it a lot" nil t) (search-forward "## Thursday" nil t))))'
+        hint: "If Tuesday is missing, redo once more with C-M-_."
+  - id: vundo
+    goal: Look at the history as a tree
+    detail: "`C-x u` opens vundo: every state of the buffer is a node; `b` and `f` walk back and forward, `RET` keeps the state you are on, `q` quits where you started."
+    demo: "C-x u ~1500 q"
+    conditions:
+      - text: vundo was opened
+        event: { command: vundo }
+        hint: "C-x, then u."
+      - text: vundo is closed
+        state: { "windows.mode": { not: vundo-mode } }
+        hint: "q closes the vundo window."
+      - text: Tuesday and Thursday are both there
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/journal.md") (save-excursion (goto-char (point-min)) (and (search-forward "Pressed it a lot" nil t) (search-forward "## Thursday" nil t))))'
+        hint: "If you moved through the tree and confirmed an older state, C-x u again and walk forward with f."

@@ -1,0 +1,77 @@
+id: 02-buffers-and-files/02-the-minibuffer
+title: The minibuffer
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files]
+vscode: the palette input box
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/notes/ideas.md]
+  layout: single
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (with-current-buffer (find-buffer-visiting "/work/projects/notes/ideas.md")
+        (goto-char (point-min))))
+steps:
+  - id: complete
+    goal: Run count-words, completing its name with TAB
+    detail: "`M-x` opens the minibuffer with the prompt *M-x*. Type `count-w` and press `TAB`: Emacs completes as far as it can and lists the rest. `RET` runs *count-words*, and the echo area answers."
+    demo: 'M-x ~500 "count-w" ~300 TAB ~800 RET'
+    conditions:
+      - text: TAB completed in the minibuffer
+        any:
+          - event: { command: minibuffer-complete }
+          - event: { command: completion-at-point }
+          - event: { command: minibuffer-complete-word }
+        hint: "Type the first letters, count-w, then press TAB while the prompt is open."
+      - text: count-words ran
+        event: { command: count-words }
+        hint: "After TAB the prompt says count-words. RET runs it; the answer appears in the echo area at the bottom."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "The minibuffer is waiting at the bottom. RET runs what you typed, TAB completes, C-g cancels."
+  - id: two-more
+    goal: Run what-line and whitespace-mode by name
+    detail: "Two more commands by name. `M-x what-line RET` reports the line number. `M-x whitespace-mode RET` makes spaces and line ends visible (run it again later to hide them)."
+    demo: 'M-x ~400 "what-line" RET ~800 M-x ~400 "whitespace-mode" RET'
+    conditions:
+      - text: what-line ran
+        event: { command: what-line }
+        hint: "M-x, type what-line, RET."
+      - text: whitespace-mode ran
+        event: { command: whitespace-mode }
+        hint: "M-x, type whitespace-mode (TAB helps), RET."
+  - id: history
+    goal: Run count-words again, from the history
+    detail: "Every prompt remembers what you typed. In *M-x*, `M-p` steps back through earlier commands, `M-n` forward again. Three `M-p` reach *count-words*; `RET` runs it. (`M-r` searches the history by a regexp instead of stepping.)"
+    demo: 'M-x ~500 M-p ~500 M-p ~500 M-p ~500 RET'
+    conditions:
+      - text: the history was used
+        any:
+          - event: { command: previous-history-element }
+          - event: { command: previous-line-or-history-element }
+          - event: { command: previous-matching-history-element }
+          - event: { command: next-history-element }
+        hint: "Open M-x and press M-p (Alt and p). Each press shows an older entry."
+      - text: count-words ran again
+        event: { command: count-words }
+        hint: "Keep pressing M-p until the prompt shows count-words, then RET. M-n goes the other way."
+  - id: argument
+    goal: Type forty equals signs with one key
+    detail: "`C-u` gives the next command a number. Go to the end of the file with `M->`, then `C-u 40 =` inserts forty `=` at once. The same trick moves forty lines with `C-u 40 C-n`."
+    demo: 'M-> ~300 C-u ~200 4 ~200 0 ~300 ='
+    conditions:
+      - text: one command typed all forty
+        # C-u 40 = inserts the forty characters as one undo record; typing
+        # them one by one leaves records of at most 20 (undo amalgamation).
+        elisp: '(let ((b (find-buffer-visiting "/work/projects/notes/ideas.md"))) (and b (seq-find (lambda (e) (and (consp e) (integerp (car e)) (integerp (cdr e)) (>= (- (cdr e) (car e)) 40))) (buffer-local-value (quote buffer-undo-list) b))))'
+        hint: "C-u (Control u), then the digits 4 and 0, then =. Forty = typed one at a time do not count here: the point is to let Emacs do the counting."
+      - text: ideas.md has a line of forty =
+        elisp: '(let ((b (find-buffer-visiting "/work/projects/notes/ideas.md"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "^=\\{40\\}$" nil t)))))'
+        hint: "Put the cursor on an empty line (M-> goes to the end of the file), then C-u 40 =. If the line is too long or too short, C-/ undoes it."

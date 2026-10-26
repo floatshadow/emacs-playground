@@ -40,3 +40,27 @@ kbd {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+button {
+  font-family: inherit;
+}
+.dim {
+  color: var(--ink-3);
+}
+/* The motion preference from the session screen, in addition to prefers-reduced-motion. */
+.reduce-motion *,
+.reduce-motion *::before,
+.reduce-motion *::after {
+  animation: none !important;
+  transition: none !important;
+}
+/* xterm.js fills its pane; tmux owns history, so there is no scrollbar. */
+.pg-terminal .xterm {
+  height: 100%;
+}
+.pg-terminal .xterm-viewport {
+  overflow-y: hidden !important;
+  background-color: var(--screen) !important;
+}
+.pg-vnc > div {
+  background: var(--screen) !important;
+}

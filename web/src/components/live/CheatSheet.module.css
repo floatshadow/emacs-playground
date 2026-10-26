@@ -1,0 +1,14 @@
+.cheat {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.cheat td {
+  padding: 4px 0;
+  border-top: 1px solid var(--rule);
+  vertical-align: top;
+}
+.cheat td:first-child {
+  white-space: nowrap;
+  padding-right: 10px;
+}

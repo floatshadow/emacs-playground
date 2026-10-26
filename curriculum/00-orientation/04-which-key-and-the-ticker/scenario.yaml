@@ -1,0 +1,67 @@
+id: 00-orientation/04-which-key-and-the-ticker
+title: Which-key and the key ticker
+minutes: 8
+mode: terminal
+modules: [base, agent]
+vscode: keyboard shortcut reference
+setup:
+  workspace: fixtures/hello
+  root: hello
+  reset: true
+  open: [hello/src/main.rs]
+  layout: single
+  eval: "(progn (goto-char (point-min)) (forward-line 2))"
+steps:
+  - id: popup
+    goal: Find the bookmark command under C-x r
+    detail: "Press `C-x r` and wait a second. The which-key popup lists every key that can follow, with the command it runs. Find the one that sets a bookmark (it is `m`), press it, and accept the default name with `RET`."
+    demo: "C-x r ~1500 m ~600 RET"
+    conditions:
+      - text: bookmark-set ran
+        event: { command: bookmark-set }
+        hint: "C-x r, wait for the popup, look for bookmark-set. It is m."
+      - text: the name was accepted
+        state: { minibuffer: null }
+        hint: "The prompt offers main.rs as the name; RET accepts it."
+    stuck:
+      - when: { idle_seconds: 40 }
+        say: "Press C-x, then r, then wait. If nothing pops up, C-x r C-h lists the same keys in a help buffer."
+  - id: list
+    goal: Find the command that lists bookmarks
+    detail: "Back to `C-x r`. One of the keys lists bookmarks (`l`). Open the list, see your bookmark, then leave with `q`."
+    demo: "C-x r ~1500 l ~1500 q"
+    conditions:
+      - text: the bookmark list was opened
+        event: { command: bookmark-bmenu-list }
+        hint: "In the C-x r popup, the bookmark list is l."
+      - text: q closed it
+        event: { command: quit-window }
+        hint: "Lists like this one close with q."
+      - text: main.rs is shown again
+        state: { file: /work/hello/src/main.rs }
+        hint: "q returns to the buffer you were in."
+  - id: register
+    goal: Save your place in a register and jump back
+    detail: "Two more keys from the same popup: `C-x r SPC a` stores the cursor position in register *a*. Jump to the end with `M->`, then `C-x r j a` jumps back."
+    demo: "C-x r SPC ~400 a ~400 M-> ~400 C-x r j ~400 a"
+    conditions:
+      - text: the position was stored
+        event: { command: point-to-register }
+        hint: "C-x r SPC, then a letter to name the register: a."
+      - text: you jumped back to it
+        event: { command: jump-to-register }
+        hint: "C-x r j, then the same letter a."
+      - text: the cursor is where you stored it
+        elisp: '(let ((m (get-register ?a))) (and (markerp m) (eq (marker-buffer m) (window-buffer (selected-window))) (= (marker-position m) (window-point (selected-window)))))'
+        hint: "Store first with C-x r SPC a, move away, then C-x r j a."
+  - id: by-name
+    goal: Run a command by name and watch the ticker
+    detail: "Every key runs a named command, and `M-x` runs any command by name. Turn on line numbers with `M-x display-line-numbers-mode RET`. The ticker under the screen shows *M-x display-line-numbers-mode*."
+    demo: 'M-x ~500 "display-line-numbers-mode" ~300 RET'
+    conditions:
+      - text: display-line-numbers-mode ran
+        event: { command: display-line-numbers-mode }
+        hint: "M-x, then type display-line-numbers-mode (TAB completes), then RET."
+      - text: line numbers are on in main.rs
+        elisp: "(buffer-local-value 'display-line-numbers-mode (window-buffer (selected-window)))"
+        hint: "Running the command again turns line numbers off; run it once more."

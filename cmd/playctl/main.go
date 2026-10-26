@@ -1,15 +1,21 @@
 // Command playctl is the developer and CI tool (backend.md §4).
+//
+//	playctl curriculum validate [dir]
+//	playctl curriculum build [dir] -o out/
+//	playctl curriculum play <lesson>... | all [-session URL] [-dir curriculum]
+//	playctl config schema | check <file>
+//	playctl protocol typescript [-o file] [-check]
+//	playctl dev | session shell | images build [image]
+//	playctl version
 package main
 
 import (
-	"bytes"
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/zsy/emacs-playground/internal/buildinfo"
-	"github.com/zsy/emacs-playground/internal/config"
-	"github.com/zsy/emacs-playground/internal/protocol/tsgen"
 )
 
 const usage = `usage: playctl <command> [args]
@@ -17,15 +23,18 @@ const usage = `usage: playctl <command> [args]
 commands:
   curriculum validate [dir]            schema-check the curriculum source (default ./curriculum)
   curriculum build [dir] -o out/       build curriculum.json, lesson bundles and fixture tarballs
-  curriculum play <lesson> [-session URL]
+  curriculum play <lesson>... | all [-session URL] [-dir curriculum] [-timeout 30s] [-speed 1]
                                        replay every step's demo in a session and require completion
   config schema                        print the configuration JSON Schema
   config check <file>                  validate a configuration file
-  protocol typescript [-o file]        generate TypeScript types from internal/protocol
-  images build [session|gateway|remote-box]
-  dev                                  run the gateway from source with the Vite dev server
-  session shell                        attach to the local session's tmux
-  export-user <id>                     tarball of a workspace and its progress (server)
+  protocol typescript [-o file] [-check]
+                                       generate TypeScript types from internal/protocol
+  images build [session|gateway|remote-box] [-tag T]
+                                       build images with docker build
+  dev [-no-session]                    session container, gateway from source and the Vite dev server
+  fonts [-o .dev/fonts]                web fonts from the gateway image's fonts stage, for dev
+  session shell                        attach your terminal to the local session's tmux
+  export-user <id>                     tarball of a workspace and its progress (server; not yet)
   version                              print the version
 `
 
@@ -38,66 +47,75 @@ func main() {
 		}
 		return
 	}
+	os.Exit(run(args))
+}
+
+func run(args []string) int {
+	sub := ""
+	if len(args) > 1 {
+		sub = args[1]
+	}
 	switch args[0] {
 	case "version":
 		fmt.Println(buildinfo.Version)
+		return 0
+	case "curriculum":
+		switch sub {
+		case "validate":
+			return curriculumValidate(args[2:])
+		case "build":
+			return curriculumBuild(args[2:])
+		case "play":
+			return curriculumPlay(args[2:])
+		}
 	case "config":
-		if len(args) >= 3 && args[1] == "check" {
-			if _, err := config.LoadFile(args[2]); err != nil {
-				fmt.Fprintln(os.Stderr, err)
-				os.Exit(1)
-			}
-			fmt.Println(args[2] + ": ok")
-			return
+		switch sub {
+		case "schema":
+			return configSchema(args[2:])
+		case "check":
+			return configCheck(args[2:])
 		}
-		// TODO(playctl, backend.md §4): config schema via invopop/jsonschema.
-		notYet(args)
 	case "protocol":
-		if len(args) >= 2 && args[1] == "typescript" {
-			os.Exit(protocolTypescript(args[2:]))
+		if sub == "typescript" {
+			return protocolTypescript(args[2:])
 		}
-		notYet(args)
-	default:
-		// TODO(playctl, backend.md §4): curriculum validate/build/play,
-		// images build, dev, session shell, export-user.
-		notYet(args)
-	}
-}
-
-// protocolTypescript implements `playctl protocol typescript [-o file]
-// [-src dir] [-check]`. With -check it exits 1 when the file is out of date
-// (CI drift check, frontend.md §14).
-func protocolTypescript(args []string) int {
-	fs := flag.NewFlagSet("protocol typescript", flag.ExitOnError)
-	out := fs.String("o", "", "output file (default stdout)")
-	src := fs.String("src", "internal/protocol", "protocol package directory")
-	check := fs.Bool("check", false, "fail if the output file differs from the generated code")
-	_ = fs.Parse(args)
-	code, err := tsgen.Generate(*src)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+	case "images":
+		if sub == "build" {
+			return imagesBuild(args[2:])
+		}
+	case "dev":
+		return dev(args[1:])
+	case "fonts":
+		return fonts(args[1:])
+	case "session":
+		if sub == "shell" {
+			return sessionShell(args[2:])
+		}
+	case "export-user":
+		// TODO(playctl, deployment.md §5): tar the learner's workspace volume
+		// (docker run --rm -v pg-ws-<uid>:/work …) together with their
+		// progress rows from the gateway store.
+		fmt.Fprintln(os.Stderr, "playctl export-user: not implemented in this build (deployment.md §5)")
 		return 1
 	}
-	if *out == "" {
-		_, _ = os.Stdout.Write(code)
-		return 0
-	}
-	if *check {
-		cur, err := os.ReadFile(*out)
-		if err != nil || !bytes.Equal(cur, code) {
-			fmt.Fprintf(os.Stderr, "%s is out of date; run playctl protocol typescript -o %s\n", *out, *out)
-			return 1
-		}
-		return 0
-	}
-	if err := os.WriteFile(*out, code, 0o644); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 1
-	}
-	return 0
+	fmt.Fprintf(os.Stderr, "playctl %s: unknown command\n\n%s", strings.Join(args, " "), usage)
+	return 2
 }
 
-func notYet(args []string) {
-	fmt.Fprintf(os.Stderr, "playctl %v: not implemented yet\n\n%s", args, usage)
-	os.Exit(1)
+// parseInterleaved parses flags that may appear before, between or after
+// positional arguments ("play 0.1 -session URL") and returns the
+// positionals.
+func parseInterleaved(fs *flag.FlagSet, args []string) ([]string, error) {
+	var pos []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		args = fs.Args()
+		if len(args) == 0 {
+			return pos, nil
+		}
+		pos = append(pos, args[0])
+		args = args[1:]
+	}
 }

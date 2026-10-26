@@ -1,0 +1,31 @@
+;; -*- mode: lisp-data -*-
+;; Snippets for tempel (completion module, lesson 4.4).
+;; M-+ inserts one by name, M-* completes the name at point.  In a
+;; snippet, p is a field you fill in (TAB moves to the next), q is where
+;; the cursor ends, n a newline and > indentation.  Add your own here.
+
+fundamental-mode
+
+(today (format-time-string "%Y-%m-%d"))
+
+prog-mode
+
+(todo comment-start "TODO: " q)
+(fixme comment-start "FIXME: " q)
+
+rust-ts-mode
+
+(fn "fn " p "(" p ") -> " p " {" n> q n "}" >)
+(main "fn main() {" n> q n "}" >)
+(test "#[test]" n> "fn " p "() {" n> q n "}" >)
+(println "println!(\"" p "\"" q ");")
+(struct "#[derive(Debug)]" n> "struct " p " {" n> q n "}" >)
+(impl "impl " p " {" n> q n "}" >)
+(match "match " p " {" n> p " => " q "," n "}" >)
+
+python-base-mode
+
+(def "def " p "(" p "):" n> q)
+(class "class " p ":" n> "def __init__(self" p "):" n> q)
+(main "if __name__ == \"__main__\":" n> q)
+(test "def test_" p "():" n> q)

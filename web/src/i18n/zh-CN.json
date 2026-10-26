@@ -1,3 +1,86 @@
 {
-  "app.title": "Emacs 练习场"
+  "app": {
+    "title": "Emacs 练习场"
+  },
+  "common": {
+    "cancel": "取消",
+    "dismiss": "关闭",
+    "loading": "加载中…",
+    "retry": "重试",
+    "yes": "是",
+    "no": "否"
+  },
+  "topbar": {
+    "course": "课程",
+    "projects": "项目",
+    "session": "会话",
+    "localSession": "本地会话",
+    "serverSession": "你的会话",
+    "noSession": "尚无会话",
+    "focus": "专注模式",
+    "whereAmI": "我在哪儿",
+    "hidePreview": "隐藏预览",
+    "showPreview": "显示预览"
+  },
+  "rail": {
+    "where": "我在哪儿",
+    "nudges": "你是不是想",
+    "rescue": "救援"
+  },
+  "frame": {
+    "terminal": "终端",
+    "gui": "图形",
+    "terminalFrame": "终端框架",
+    "guiFrame": "图形框架"
+  },
+  "rescue": {
+    "button": "救我",
+    "reset": "重置这一步",
+    "explain": "取消任何提示、关闭多余窗口、取消缩窄、停止宏和覆盖模式。绝不改动你的文件。"
+  },
+  "where": {
+    "buffer": "缓冲区",
+    "mode": "模式",
+    "windows": "窗口",
+    "prompt": "提示",
+    "oneWindow": "一个",
+    "none": "无",
+    "calm": "一切正常，你正在编辑。"
+  },
+  "cheat": {
+    "title": "本缓冲区的按键"
+  },
+  "steps": {
+    "showHint": "显示提示",
+    "showKeys": "显示具体按键"
+  },
+  "demo": {
+    "watch": "看演示",
+    "stop": "停止"
+  },
+  "lesson": {
+    "complete": "本课完成。",
+    "next": "下一课："
+  },
+  "course": {
+    "crumb": "课程地图",
+    "title": "从第一次按键到你自己的配置",
+    "projects": "项目",
+    "continue": "继续",
+    "start": "开始"
+  },
+  "session": {
+    "title": "你的会话",
+    "prefs": "偏好设置",
+    "language": "语言"
+  },
+  "login": {
+    "title": "登录",
+    "codeLabel": "邀请码",
+    "submit": "开始"
+  },
+  "emacs": {
+    "restarted": "Emacs 已重启，你的文件是安全的。",
+    "modulesLoaded": "已加载本部分课程的配置模块。"
+  }
 }

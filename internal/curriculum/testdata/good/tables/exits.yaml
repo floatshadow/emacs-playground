@@ -1,0 +1,14 @@
+# Test exits table.
+- id: minibuffer-prompt
+  when: { "minibuffer.kind": prompt }
+  why: "A prompt is open: {minibuffer.prompt}"
+  how: "RET accepts, C-g cancels."
+- id: other-window-special
+  when: { "otherWindows.mode": { in: [help-mode, dired-mode] } }
+  why: "A second window shows {otherWindows.buf}."
+  how: "Press q inside it, or C-x 1 here."
+- id: narrowed
+  when: { narrowed: true }
+  why: "Narrowed."
+  how: "C-x n w shows everything again."
+  flag: Narrow

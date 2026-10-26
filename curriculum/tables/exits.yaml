@@ -1,6 +1,7 @@
 # Layer 1 of the advice engine (architecture.md §4, CURRICULUM.md Part B.4):
 # "Where am I" rows, evaluated in order against the latest state object
-# (api.md §5). Every matching row is shown as a reason (why) and one exit (how).
+# (api.md §5). Every matching row is shown as a reason (why) and one exit
+# (how). Rows are ordered from the most disorienting state to the least.
 #
 # Row fields (protocol.ExitRow):
 #   id    stable id
@@ -10,20 +11,301 @@
 #         {contains: v}, {regex: "re"}. Paths over a list match ANY element;
 #         "windows.length" is a count; virtual roots: otherWindows,
 #         selectedWindow. Quote keys that contain dots.
-#   why   template, {path} placeholders resolved against the state
+#   why   template, {path} placeholders resolved against the state; for a
+#         path through a list, the element that satisfied `when` is used
 #   how   template; key names are rendered as keycaps by the browser
 #   flag  optional short chip (Narrow, Def, Ovwrt)
 #
-# Example:
-#   - id: minibuffer-prompt
-#     when: { "minibuffer.kind": prompt }
-#     why: "A prompt is open: {minibuffer.prompt}"
-#     how: "RET accepts, C-g cancels. TAB completes names."
-#   - id: other-window-special
-#     when: { "otherWindows.mode": { in: [help-mode, Buffer-menu-mode, dired-mode] } }
-#     why: "A second window shows {otherWindows.buf}."
-#     how: "Press q inside it, or C-x 1 here to keep only this window."
+# Virtual root `session` (browser side, frontend.md §6): some states are
+# not in the agent's state object but in the event stream. The browser's
+# exits.ts adds them to the document before evaluating these rows:
+#   session.prefix  the pending prefix from the tap ("C-x", "C-x r"), or
+#                   null when no prefix is pending (`prefix` events)
+#   session.emacs   the supervisor condition from the latest `emacs` event
+#                   that is still current: "frame-closed", "suspended",
+#                   "restarting", "unresponsive", or null once the frame is
+#                   open and Emacs responsive again
+#   session.mode    the frame the browser shows: "terminal" or "gui"
+#   session.echo    the text of the latest `echo` event while it is still
+#                   shown (until the next key event), or null
 #
-# Localise per file: exits.zh-CN.yaml. TODO(curriculum): rows for Parts 0-3
-# (port the demo's whereAmI in design/demo/mock-emacs.js).
-[]
+# Localise per file: exits.zh-CN.yaml with the same ids.
+
+# --- The frame itself -------------------------------------------------
+
+- id: frame-closed
+  when: { "session.emacs": frame-closed }
+  why: "The Emacs frame was closed (C-x C-c closes the frame you are in)."
+  how: "Wait a moment: the playground opens it again with every buffer as it was. On your own machine, C-x C-c quits Emacs."
+
+- id: suspended
+  when: { "session.emacs": suspended }
+  why: "Emacs was suspended (C-z or C-x C-z send it to the background)."
+  how: "The playground resumes it. In a plain terminal you would type fg. Undo is C-/, not C-z."
+
+- id: restarting
+  when: { "session.emacs": restarting }
+  why: "Emacs is restarting, usually to turn on the modules of a new part of the course."
+  how: "Wait a few seconds. Your files, windows and positions come back."
+
+- id: unresponsive
+  when: { "session.emacs": unresponsive }
+  why: "Emacs is busy and has not answered for a while."
+  how: "C-g interrupts most long commands. If nothing changes, press Rescue me."
+
+# --- Waiting for you ----------------------------------------------------
+
+- id: prefix-pending
+  when: { "session.prefix": { regex: "." } }
+  why: "{session.prefix} is a prefix: Emacs is waiting for the next key."
+  how: "Press the next key of the command, or C-g to cancel. The popup lists what can follow."
+
+- id: describe-key-waiting
+  when: { "session.echo": { regex: "^Describe the following key" } }
+  why: "C-h k is waiting for a key to explain."
+  how: "Press the key you are curious about; it is explained, not run. C-g cancels."
+
+- id: prefix-argument
+  when: { prefixArg: { not: null } }
+  why: "A numeric argument ({prefixArg}) is waiting for the command it applies to."
+  how: "Type the command (C-u 4 C-n moves four lines), or C-g to drop the argument."
+
+- id: isearch
+  when: { isearch: true }
+  why: "You are searching (I-search at the bottom): {minibuffer.contents}"
+  how: "RET stops at this match. C-s goes to the next one, C-r back. C-g jumps back to where you started."
+
+- id: minibuffer-nested
+  when: { "minibuffer.kind": prompt, "minibuffer.depth": { gte: 2 } }
+  why: "Prompts are open inside prompts, {minibuffer.depth} deep."
+  how: "C-g closes the innermost one. ESC ESC ESC closes them all."
+
+- id: minibuffer-mx
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "M-x" } }
+  why: "M-x is waiting for a command name."
+  how: "Type part of the name, TAB completes, RET runs it. C-g cancels."
+
+- id: minibuffer-file
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "(?i)(find|open|write|visit|dired).*(file|directory)|file.*:" } }
+  why: "Emacs is asking for a file or folder: {minibuffer.prompt}{minibuffer.contents}"
+  how: "Type a name, TAB completes, RET accepts. A / after the path starts over from the root, ~/ from home. C-g cancels."
+
+- id: minibuffer-buffer
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "(?i)buffer" } }
+  why: "Emacs is asking for a buffer name: {minibuffer.prompt}"
+  how: "RET alone takes the default shown in the prompt. TAB lists the buffers. C-g cancels."
+
+- id: minibuffer-yes-no
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "\\((y or n|yes or no)" } }
+  why: "Emacs asks a question: {minibuffer.prompt}"
+  how: "Answer y or n. C-g cancels the whole command."
+
+- id: minibuffer-replace
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "(?i)replac" } }
+  why: "A replace command is asking what to replace, and with what."
+  how: "Type the text, RET, the replacement, RET. Then y replaces, n skips, ! replaces all, q stops."
+
+- id: minibuffer-prompt
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { not: { regex: "(?i)M-x|file|directory|buffer|replac|\\((y or n|yes or no)" } } }
+  why: "A prompt is open at the bottom: {minibuffer.prompt}"
+  how: "RET accepts, C-g cancels. TAB completes names. M-p brings back what you typed before."
+
+- id: recursive-edit
+  when: { recursive: { gt: 0 }, minibuffer: null }
+  why: "A recursive edit is running: square brackets [ ] around the mode name."
+  how: "C-M-c finishes it, C-] aborts it. ESC ESC ESC also gets out."
+
+- id: macro
+  when: { macro: true }
+  why: "Recording a keyboard macro (Def in the mode line). Every key you press is recorded."
+  how: "F4 stops recording. C-g throws the recording away."
+  flag: Def
+
+# --- Modes that change what typing does ------------------------------
+
+- id: overwrite
+  when: { overwrite: true }
+  why: "Overwrite mode: typing replaces the text under the cursor (Ovwrt in the mode line)."
+  how: "Press Insert, or M-x overwrite-mode RET, to go back to inserting."
+  flag: Ovwrt
+
+- id: multiple-cursors
+  when: { minors: { contains: multiple-cursors-mode } }
+  why: "Several cursors are active: every key you press acts at each of them."
+  how: "C-g goes back to one cursor."
+  flag: mc
+
+- id: iedit
+  when: { minors: { contains: iedit-mode } }
+  why: "iedit is on: editing one highlighted occurrence edits all of them."
+  how: "C-; again turns it off and keeps the edits."
+  flag: Iedit
+
+- id: rectangle
+  when: { minors: { contains: rectangle-mark-mode } }
+  why: "You are selecting a rectangle (C-x SPC): columns, not lines."
+  how: "C-x r k kills it, C-x r t replaces it with text, C-g cancels the selection."
+
+- id: narrowed
+  when: { narrowed: true }
+  why: "Narrowed: you see only part of this buffer (Narrow in the mode line). The rest is still there."
+  how: "C-x n w shows everything again."
+  flag: Narrow
+
+- id: view-mode
+  when: { minors: { contains: view-mode } }
+  why: "View mode: {buf} is open for reading; SPC scrolls and typing does not edit."
+  how: "q leaves view mode. C-x C-q makes the buffer editable."
+  flag: View
+
+- id: read-only-file
+  when: { readonly: true, file: { regex: "." }, minors: { not: { contains: view-mode } } }
+  why: "{buf} is read-only (%% in the mode line), so typing does nothing."
+  how: "C-x C-q makes it writable, if you really mean to edit it."
+  flag: "%%"
+
+- id: wdired
+  when: { minors: { contains: wdired-mode } }
+  why: "You are editing file names in the listing (wdired). Nothing is renamed yet."
+  how: "C-c C-c renames the files as edited. C-c ESC throws the edits away."
+
+- id: region
+  when: { markActive: true }
+  why: "A region is active: the highlighted text between the mark and the cursor."
+  how: "Commands like C-w, M-w and M-% act on it; typing replaces it. C-g deactivates it."
+
+# --- Special buffers in the selected window -------------------------
+
+- id: dired
+  when: { mode: { in: [dired-mode, dirvish-mode] } }
+  why: "This is Dired, a listing of a folder (you opened a directory)."
+  how: "RET opens the file on the line, ^ goes up a folder, q closes the listing."
+
+- id: ibuffer
+  when: { mode: ibuffer-mode }
+  why: "This is the buffer list (ibuffer): every buffer Emacs holds, grouped by project."
+  how: "RET opens the buffer on the line. m marks, D kills marked buffers, S saves them. q closes the list."
+
+- id: buffer-menu
+  when: { mode: Buffer-menu-mode }
+  why: "This is the plain buffer list (C-x C-b)."
+  how: "RET opens the buffer on the line, q closes the list."
+
+- id: help
+  when: { mode: { in: [help-mode, helpful-mode, apropos-mode] } }
+  why: "You are reading help ({buf})."
+  how: "q closes it. On a link, RET follows it; l goes back; s shows the source of a command."
+
+- id: info
+  when: { mode: Info-mode }
+  why: "You are reading the manual (Info)."
+  how: "q closes it. SPC reads on, n and p go to the next and previous node, l goes back."
+
+- id: tutorial
+  when: { buf: TUTORIAL }
+  why: "This is the Emacs tutorial, an ordinary buffer you can type in."
+  how: "C-x k RET closes it (answer n when asked to save your place). C-x b goes back to your file."
+
+- id: compilation
+  when: { mode: compilation-mode }
+  why: "This is build output (*compilation*)."
+  how: "RET on an error jumps to it, g runs the build again, q closes the window."
+
+- id: grep
+  when: { mode: grep-mode }
+  why: "These are search results (grep)."
+  how: "RET visits a match; M-g M-n walks them from any buffer. q closes the window."
+
+- id: occur
+  when: { mode: occur-mode }
+  why: "These are the lines that matched (occur)."
+  how: "RET visits a line; M-g M-n walks them from any buffer. e edits them in place. q closes."
+
+- id: xref
+  when: { mode: xref--xref-buffer-mode }
+  why: "This is a list of matches or references (xref)."
+  how: "RET visits a match, n and p preview them. q closes the list."
+
+- id: bookmarks
+  when: { mode: bookmark-bmenu-mode }
+  why: "This is the bookmark list."
+  how: "RET jumps to the bookmark on the line, d flags it for deletion and x deletes. q closes the list."
+
+- id: vundo
+  when: { mode: vundo-mode }
+  why: "This is the undo tree (vundo): every state the buffer has been in."
+  how: "b and f walk back and forward, RET keeps the state you are on, q quits where you started."
+
+- id: magit
+  when: { mode: { in: [magit-status-mode, magit-log-mode, magit-diff-mode, magit-revision-mode, magit-refs-mode, magit-stash-mode] } }
+  why: "This is Magit ({modeName})."
+  how: "? lists every key, g refreshes, q closes. Nothing is committed until you confirm with C-c C-c."
+
+- id: commit-message
+  when: { buf: { regex: "COMMIT_EDITMSG" } }
+  why: "You are writing a commit message."
+  how: "C-c C-c commits, C-c C-k cancels the commit."
+
+- id: eshell
+  when: { mode: eshell-mode }
+  why: "This is Eshell, a shell written in Emacs Lisp."
+  how: "Type commands at the prompt. C-c C-c interrupts the running one. C-x b goes back to your files."
+
+- id: eat
+  when: { mode: eat-mode }
+  why: "This is a terminal (eat): most keys go to the program running in it."
+  how: "C-c C-e switches to Emacs keys to move and copy, C-c C-j back. C-x b leaves the terminal running."
+
+- id: completions
+  when: { mode: completion-list-mode }
+  why: "The cursor is in the list of completions."
+  how: "RET picks the candidate on the line. C-g goes back to the prompt."
+
+- id: messages
+  when: { mode: messages-buffer-mode }
+  why: "This is *Messages*, the log of everything the echo area said."
+  how: "q closes it. C-x b goes back to your file."
+
+- id: scratch
+  when: { buf: "*scratch*" }
+  why: "This is *scratch*, a buffer for notes and Lisp. It is not a file and is not saved."
+  how: "C-x b goes back to your file. C-x C-f opens one."
+
+# --- Windows, tabs and frames ---------------------------------------
+
+- id: other-window-special
+  when: { "otherWindows.mode": { in: [help-mode, helpful-mode, apropos-mode, Info-mode, Buffer-menu-mode, ibuffer-mode, compilation-mode, grep-mode, occur-mode, xref--xref-buffer-mode, dired-mode, bookmark-bmenu-mode, vundo-mode, magit-status-mode, magit-diff-mode, magit-log-mode, eshell-mode, eat-mode, messages-buffer-mode, completion-list-mode] }, "windows.side": { not: { in: [left, right, top, bottom] } } }
+  why: "Another window shows {otherWindows.buf}."
+  how: "Press q inside it (C-x o gets you there), or C-x 1 here to keep only this window."
+
+- id: side-window
+  when: { "windows.side": { in: [left, right, top, bottom] } }
+  why: "A side window is open on the {windows.side} edge, showing {windows.buf}."
+  how: "C-x w s hides and shows side windows. C-x 1 keeps them; q inside one closes it."
+
+- id: many-windows
+  when: { "windows.length": { gte: 3 } }
+  why: "The frame is split into {windows.length} windows. Three or more is often an accident."
+  how: "C-x 1 keeps only this one. C-c <left> undoes the last layout change."
+
+- id: two-windows
+  when: { "windows.length": 2, "otherWindows.mode": { not: { in: [help-mode, helpful-mode, apropos-mode, Info-mode, Buffer-menu-mode, ibuffer-mode, compilation-mode, grep-mode, occur-mode, xref--xref-buffer-mode, dired-mode, bookmark-bmenu-mode, vundo-mode, magit-status-mode, magit-diff-mode, magit-log-mode, eshell-mode, eat-mode, messages-buffer-mode, completion-list-mode] } } }
+  why: "The frame is split into two windows."
+  how: "C-x o moves between them. C-x 0 closes this one, C-x 1 keeps only this one."
+
+- id: tabs
+  when: { "tabs.count": { gte: 2 } }
+  why: "There are {tabs.count} tabs; this one is {tabs.current}. Each keeps its own windows."
+  how: "C-x t o goes to the next tab, C-x t RET to one by name, C-x t 0 closes this tab (buffers stay)."
+
+- id: gui-frame
+  when: { frame: gui }
+  why: "You are in the graphical frame: the same Emacs and the same buffers, drawn with images and mouse menus."
+  how: "Switch back with the Terminal tab above the screen. Everything you did here is there too."
+
+# --- Information ------------------------------------------------------
+
+- id: diagnostic
+  when: { "diagAtPoint.severity": { in: [error, warning] } }
+  why: "There is a {diagAtPoint.severity} here: {diagAtPoint.message}"
+  how: "C-h . shows it in full. M-g n and M-g p move between problems."

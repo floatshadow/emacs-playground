@@ -1,0 +1,92 @@
+id: 03-windows-and-layouts/07-workspaces-with-tab-bar
+title: Workspaces with tab-bar
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows]
+vscode: "multiple windows, multi-root workspaces, tab groups"
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/hello/src/main.rs, projects/hello/src/lib.rs]
+  layout: "projects/hello/src/main.rs"
+  # One unnamed tab to start with, and both crates known as projects.
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (require 'tab-bar)
+      (tab-bar-close-other-tabs)
+      (tab-bar-rename-tab "")
+      (require 'project)
+      (dolist (d '("/work/projects/hello/" "/work/projects/polyglot/"))
+        (let ((p (project-current nil d)))
+          (when p (project-remember-project p)))))
+steps:
+  - id: name
+    goal: "Name this tab hello and give it a layout: main.rs over lib.rs"
+    detail: "A tab holds a whole window layout. `C-x t r` renames the current tab: call it `hello`. Then `C-x 2`, `C-x o`, `C-x b lib.rs RET`."
+    demo: 'C-x t r ~400 "hello" RET ~400 C-x 2 ~400 C-x o ~400 C-x b ~400 "lib.rs" RET'
+    conditions:
+      - text: the tab is called hello
+        state: { "tabs.current": hello }
+        hint: "C-x t r, type hello, RET."
+      - text: main.rs above lib.rs
+        layout: "(vsplit main.rs lib.rs)"
+        hint: "C-x 2 splits; C-x o moves down; C-x b lib.rs RET."
+  - id: polyglot
+    goal: "Open polyglot in a tab of its own, side by side: main.rs and README.md"
+    detail: "`C-x p p` switches project in a new tab named after it (the windows module sets this up). Pick `/work/projects/polyglot/`, press `f`, open `src/main.rs`. Then `C-x 3`, `C-x o`, `C-x C-f ../README.md RET`. The tab bar appears at the top now that there are two tabs."
+    demo: 'C-x p p ~500 "/work/projects/polyglot/" RET ~700 f ~500 "src/main.rs" RET ~500 C-x 3 ~400 C-x o ~400 C-x C-f ~400 "../README.md" RET'
+    conditions:
+      - text: there are two tabs and polyglot is current
+        state: { "tabs.count": 2, "tabs.current": polyglot }
+        hint: "C-x p p opens the project in a new tab called polyglot. (C-x t 2 makes an empty tab; C-x t r names it.)"
+      - text: main.rs beside README.md
+        layout: "(hsplit main.rs README.md)"
+        hint: "C-x 3, C-x o, then open ../README.md from src/."
+      - text: they are polyglot's files
+        elisp: '(and (seq-find (lambda (w) (equal (buffer-file-name (window-buffer w)) "/work/projects/polyglot/src/main.rs")) (window-list)) (seq-find (lambda (w) (equal (buffer-file-name (window-buffer w)) "/work/projects/polyglot/README.md")) (window-list)))'
+        hint: "Open the files under /work/projects/polyglot/, not hello's."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "C-x p p asks for a project: TAB lists them. After RET a menu asks what to do there; f finds a file."
+  - id: switch
+    goal: Switch back to hello; its layout is untouched
+    detail: "`C-x t o` goes to the next tab. hello still has main.rs over lib.rs: each tab keeps its own windows."
+    demo: "C-x t o"
+    conditions:
+      - text: you switched tabs
+        any:
+          - event: { command: tab-next }
+          - event: { command: tab-bar-switch-to-next-tab }
+          - event: { command: tab-switch }
+          - event: { command: tab-bar-select-tab }
+          - event: { command: tab-bar-switch-to-tab }
+        hint: "C-x t o, or click the tab in the tab bar."
+      - text: hello is current, with main.rs over lib.rs
+        all:
+          - state: { "tabs.current": hello }
+          - layout: "(vsplit main.rs lib.rs)"
+        hint: "If you changed hello's windows, C-c <left> undoes the change."
+  - id: close
+    goal: Close the polyglot tab by name
+    detail: "`C-x t RET` switches to a tab by name: `polyglot`. Then `C-x t 0` closes the current tab. Closing a tab closes no buffer: polyglot's files stay open."
+    demo: 'C-x t RET ~500 "polyglot" RET ~600 C-x t 0'
+    conditions:
+      - text: a tab was closed
+        any:
+          - event: { command: tab-close }
+          - event: { command: tab-bar-close-tab }
+          - event: { command: tab-bar-close-tab-by-name }
+        hint: "C-x t 0 closes the current tab. Be in polyglot when you press it."
+      - text: one tab left, hello, with its layout
+        all:
+          - state: { "tabs.count": 1, "tabs.current": hello }
+          - layout: "(vsplit main.rs lib.rs)"
+        hint: "If hello was closed instead, C-x t u reopens the last closed tab."
+      - text: polyglot's main.rs is still open as a buffer
+        elisp: '(find-buffer-visiting "/work/projects/polyglot/src/main.rs")'
+        hint: "Tabs are views; buffers stay. If you killed the buffer, open it again with C-x C-f."

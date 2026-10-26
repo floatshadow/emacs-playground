@@ -9,6 +9,8 @@
   },
   "scripts": {
     "dev": "vite",
+    "dev:fake": "node dev/fake-session.ts --vite",
+    "fake": "node dev/fake-session.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b",
@@ -17,7 +19,9 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "e2e": "node e2e/smoke.mjs"
+    "e2e": "node e2e/smoke.mjs",
+    "e2e:lesson": "node e2e/lesson.mjs",
+    "size": "node dev/size-gate.ts"
   },
   "dependencies": {
     "@novnc/novnc": "1.7.0",

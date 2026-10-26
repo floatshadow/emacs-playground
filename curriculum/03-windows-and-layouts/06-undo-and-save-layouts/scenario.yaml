@@ -1,0 +1,85 @@
+id: 03-windows-and-layouts/06-undo-and-save-layouts
+title: Undo and save layouts
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows]
+vscode: "none, or workspace state"
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/hello/src/main.rs, projects/hello/src/lib.rs, projects/hello/tests/shout.rs]
+  layout: "projects/hello/src/main.rs"
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (require 'bookmark)
+      (bookmark-maybe-load-default-file)
+      (dolist (b (copy-sequence bookmark-alist))
+        (when (string-match-p "review" (car b))
+          (bookmark-delete (car b) t))))
+steps:
+  - id: build
+    goal: "Build a review layout: main.rs left, lib.rs over shout.rs right"
+    detail: "`C-x 3`, `C-x o`, `C-x b lib.rs RET`; then `C-x 2`, `C-x o`, `C-x b shout.rs RET`."
+    demo: 'C-x 3 ~400 C-x o ~400 C-x b ~400 "lib.rs" RET ~400 C-x 2 ~400 C-x o ~400 C-x b ~400 "shout.rs" RET'
+    conditions:
+      - text: three windows
+        state: { "windows.length": 3 }
+        hint: "Two splits make three windows: C-x 3, then C-x 2 in the right-hand one."
+      - text: main.rs left; lib.rs above shout.rs right
+        layout: "(hsplit main.rs (vsplit lib.rs shout.rs))"
+        hint: "C-x 3 splits side by side, C-x 2 one above the other; C-x o moves; C-x b shows a buffer in the selected window."
+  - id: undo
+    goal: Destroy the layout, then undo that
+    detail: "`C-x 1` throws the layout away. `C-c <left>` (winner-undo) brings back the previous layout; `C-c <right>` goes forward again. Every window change is remembered."
+    demo: "C-x 1 ~800 C-c <left>"
+    conditions:
+      - text: C-x 1 was used
+        event: { command: delete-other-windows }
+        hint: "Destroy it on purpose first: C-x 1."
+      - text: C-c <left> was used
+        event: { command: winner-undo }
+        hint: "Control c, then the left arrow key."
+      - text: the review layout is back
+        layout: "(hsplit main.rs (vsplit lib.rs shout.rs))"
+        hint: "Each C-c <left> goes back one change. If you went too far, C-c <right> goes forward."
+  - id: save
+    goal: Save the layout as review
+    detail: "`M-x burly-bookmark-windows` saves the windows, their files and positions as a bookmark. The prompt starts with *Burly: *; add `review` and `RET`."
+    demo: 'M-x ~400 "burly-bookmark-windows" RET ~500 "review" RET'
+    conditions:
+      - text: burly-bookmark-windows ran
+        event: { command: burly-bookmark-windows }
+        hint: "M-x burly-bookmark-windows RET, then a name."
+      - text: a bookmark called review exists
+        elisp: '(progn (require (quote bookmark)) (seq-find (lambda (b) (string-match-p "review" (car b))) bookmark-alist))'
+        hint: "Name it review. The Burly: in front is part of the name and marks it as a layout."
+  - id: rescue
+    goal: Press Rescue me
+    detail: "The Rescue me button in the right-hand panel closes extra windows (among other things). Press it now, as if something had gone wrong. (`C-x 1` would do the same to the windows.)"
+    demo: 'M-x ~400 "playground-rescue" RET'
+    conditions:
+      - text: one window is left
+        layout: single
+        hint: "Rescue me is in the right-hand panel and at the top of the page. C-x 1 also works."
+      - text: lib.rs and shout.rs are still open as buffers
+        elisp: '(and (find-buffer-visiting "/work/projects/hello/src/lib.rs") (find-buffer-visiting "/work/projects/hello/tests/shout.rs"))'
+        hint: "Rescue closes windows, never buffers. If you killed a buffer, open it again with C-x C-f."
+  - id: restore
+    goal: Restore the review layout by name
+    detail: "Layout bookmarks open like any bookmark: `C-x r b`, `Burly: review`, `RET`."
+    demo: 'C-x r b ~500 "Burly: review" RET'
+    conditions:
+      - text: the bookmark was opened
+        any:
+          - event: { command: bookmark-jump }
+          - event: { command: burly-open-bookmark }
+          - event: { command: bookmark-bmenu-this-window }
+        hint: "C-x r b, then type Burly: review (TAB completes), RET."
+      - text: the review layout is back
+        layout: "(hsplit main.rs (vsplit lib.rs shout.rs))"
+        hint: "The bookmark restores windows, files and positions. If it shows something else, it was saved from another layout: rebuild, save again (same name), restore."

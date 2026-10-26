@@ -1,0 +1,5 @@
+common:
+  - [C-g, cancel anything]
+rust-ts-mode:
+  - [M-., go to definition]
+  - [C-c C-c, compile]

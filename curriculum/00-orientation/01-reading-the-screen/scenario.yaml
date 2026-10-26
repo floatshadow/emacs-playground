@@ -1,0 +1,74 @@
+id: 00-orientation/01-reading-the-screen
+title: What the screen is telling you
+minutes: 10
+mode: terminal
+modules: [base, agent]
+vscode: "status bar, Problems"
+setup:
+  workspace: fixtures/hello
+  root: hello
+  reset: true
+  open: [hello/src/main.rs, hello/README.md]
+  layout: "(vsplit hello/src/main.rs hello/README.md)"
+  # The modified flag is the subject of step 2: keep the optional auto-save
+  # of visited files from clearing it behind the learner's back.
+  eval: "(when (bound-and-true-p auto-save-visited-mode) (auto-save-visited-mode -1))"
+steps:
+  - id: selected
+    goal: "Question 1: which window is selected? Select the README.md window."
+    detail: "Two windows show two buffers. The selected one has the cursor and the brighter mode line. Click inside the lower window, or press `C-x o`."
+    demo: "C-x o"
+    conditions:
+      - text: README.md is in the selected window
+        state: { file: /work/hello/README.md }
+        hint: "Click anywhere in the lower window. Its mode line (the bar under it) lights up. C-x o does the same from the keyboard."
+      - text: both windows are still there
+        layout: "(vsplit main.rs README.md)"
+        hint: "Only two windows, main.rs above README.md. If the screen changed, press Rescue me in the right-hand panel, or reset this step."
+  - id: modified
+    goal: "Question 2: what does -:**- mean? Make README.md modified."
+    detail: "Type something at the end of the first line (`C-e` jumps to the end of a line). Watch the start of the mode line change from `-:---` to `-:**-`."
+    demo: 'C-e ~300 "!"'
+    conditions:
+      - text: README.md has unsaved changes
+        state: { file: /work/hello/README.md, modified: true }
+        hint: "Just type into the README.md window. The two stars ** in its mode line mean the buffer differs from the file on disk."
+      - text: main.rs is untouched
+        elisp: '(let ((b (find-buffer-visiting "/work/hello/src/main.rs"))) (and b (not (buffer-modified-p b))))'
+        hint: "The edit belongs in README.md. If main.rs shows ** too, C-/ in main.rs undoes the typing there."
+  - id: line
+    goal: "Question 3: where is the cursor? Go to line 5 of README.md."
+    detail: "The mode line shows the position as `L1`. Move down with `C-n` (or the arrow key) until it says `L5`."
+    demo: "C-n ~200 C-n ~200 C-n ~200 C-n"
+    conditions:
+      - text: the cursor is in README.md
+        state: { file: /work/hello/README.md }
+        hint: "Stay in the lower window, the one showing README.md."
+      - text: the cursor is on line 5
+        state: { file: /work/hello/README.md, line: 5 }
+        hint: "Press C-n (Control and n) to go down one line, C-p to go up. Watch L in the mode line."
+  - id: save
+    goal: "Question 4: what does the echo area say? Save README.md."
+    detail: "`C-x C-s` saves. The bottom line, the echo area, answers with *Wrote /work/hello/README.md* and the stars disappear."
+    demo: "C-x C-s"
+    conditions:
+      - text: save-buffer ran
+        event: { command: save-buffer }
+        hint: "Hold Control, press x, then s. The echo area at the very bottom reports what happened."
+      - text: README.md has no unsaved changes
+        state: { file: /work/hello/README.md, modified: false }
+        hint: "Save while the README.md window is selected: the command saves the buffer you are in."
+  - id: minibuffer
+    goal: "Question 5: what is the minibuffer? Ask Emacs for its version."
+    detail: "Press `M-x` (Alt and x, or Esc then x). The cursor jumps to the bottom line, which is now a prompt. Type `emacs-version` and press `RET`."
+    demo: 'M-x ~500 "emacs-version" ~300 RET'
+    conditions:
+      - text: emacs-version ran
+        event: { command: emacs-version }
+        hint: "M-x opens the minibuffer with the prompt M-x. Type emacs-version, then RET. TAB completes a half-typed name."
+      - text: the minibuffer is closed again
+        state: { minibuffer: null }
+        hint: "RET runs the command and closes the prompt; the answer appears in the echo area."
+    stuck:
+      - when: { minibuffer_seconds: 30 }
+        say: "The minibuffer is waiting. Type emacs-version and press RET, or C-g to cancel and try again."

@@ -1,0 +1,78 @@
+id: 03-windows-and-layouts/02-moving-between-windows
+title: Moving between windows
+minutes: 8
+mode: terminal
+modules: [base, agent, editing, files, windows]
+vscode: "Ctrl+1/2/3, focus group commands"
+setup:
+  workspace: fixtures/projects
+  root: projects
+  reset: true
+  open: [projects/hello/src/main.rs, projects/hello/src/lib.rs, projects/hello/README.md, projects/hello/Cargo.toml]
+  # Four windows in a grid: main.rs | lib.rs over README.md | Cargo.toml.
+  layout: "(vsplit (hsplit projects/hello/src/main.rs projects/hello/src/lib.rs) (hsplit projects/hello/README.md projects/hello/Cargo.toml))"
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+            (kill-buffer b))))
+      (let ((w (get-buffer-window (find-buffer-visiting "/work/projects/hello/src/main.rs"))))
+        (when w (select-window w))))
+steps:
+  - id: cycle
+    goal: Visit every window with C-x o o o
+    detail: "`C-x o` moves to the next window: left to right, then top to bottom. Right after it, a plain `o` repeats it (repeat-mode), so `C-x o o o` visits all four and stops in Cargo.toml."
+    demo: "C-x o ~500 o ~500 o"
+    conditions:
+      - text: other-window ran three times
+        event: { command: other-window, min: 3 }
+        hint: "C-x o, then o, then o. Any other key ends the repeating."
+      - text: Cargo.toml's window is selected
+        state: { buf: Cargo.toml }
+        hint: "The bottom right window shows Cargo.toml. Keep pressing o until its mode line is bright."
+      - text: the four windows are intact
+        layout: "(vsplit (hsplit main.rs lib.rs) (hsplit README.md Cargo.toml))"
+        hint: "If the layout changed, reset this step from the right-hand panel."
+  - id: arrows
+    goal: Go left, then up, with Shift and the arrows
+    detail: "Shift with an arrow key moves to the window in that direction (windmove): `S-<left>` from Cargo.toml reaches README.md, `S-<up>` from there reaches main.rs. One chord per move, no counting."
+    demo: "S-<left> ~500 S-<up>"
+    conditions:
+      - text: Shift-left was used
+        event: { command: windmove-left }
+        hint: "Hold Shift and press the left arrow."
+      - text: Shift-up was used
+        event: { command: windmove-up }
+        hint: "Hold Shift and press the up arrow."
+      - text: main.rs's window is selected
+        state: { buf: main.rs }
+        hint: "main.rs is top left. From README.md (bottom left) it is straight up."
+    stuck:
+      - when: { unbound_repeats: 2 }
+        say: "If Shift and the arrows do nothing, the browser may be catching them. Focus mode passes them on, and M-o (next step) works everywhere."
+  - id: ace
+    goal: Jump straight to Cargo.toml with M-o
+    detail: "`M-o` (ace-window) puts a letter on every window. Press the letter shown on Cargo.toml's window to jump there; with four windows they are a, s, d and f."
+    demo: "M-o ~800 f"
+    conditions:
+      - text: M-o was used
+        event: { command: ace-window }
+        hint: "Alt and o, then the letter that appears on the bottom right window."
+      - text: Cargo.toml's window is selected
+        state: { buf: Cargo.toml }
+        hint: "Look for the large letter in the top left corner of the Cargo.toml window and press it."
+      - text: the four windows are intact
+        layout: "(vsplit (hsplit main.rs lib.rs) (hsplit README.md Cargo.toml))"
+        hint: "If the layout changed, reset this step."
+  - id: alone
+    goal: Go up to lib.rs and keep only that window
+    detail: "From Cargo.toml, lib.rs is straight up: one chord. Then `C-x 1` keeps only the selected window."
+    demo: "S-<up> ~500 C-x 1"
+    conditions:
+      - text: C-x 1 was used
+        event: { command: delete-other-windows }
+        hint: "Control x, then the digit 1, in lib.rs's window."
+      - text: one window, lib.rs
+        layout: "lib.rs"
+        hint: "C-x 1 keeps the window you are in. If it kept the wrong one, C-c <left> undoes the change and you can try again."

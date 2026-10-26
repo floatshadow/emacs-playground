@@ -1,0 +1,2 @@
+buffer: "Text held in Emacs. Usually a file's contents."
+window: "A view onto a buffer."

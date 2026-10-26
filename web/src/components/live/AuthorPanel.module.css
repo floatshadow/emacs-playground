@@ -1,0 +1,32 @@
+.panel {
+  font-size: 13px;
+  background: #fff;
+  border: 1px dashed var(--violet);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+.panel p {
+  margin: 0 0 6px;
+}
+.panel ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 6px;
+}
+.panel code,
+.panel pre {
+  font: 11.5px/1.4 var(--mono);
+}
+.panel pre {
+  background: var(--paper-2);
+  padding: 4px 6px;
+  border-radius: 3px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 2px 0;
+}
+.panel summary {
+  cursor: pointer;
+  color: var(--violet-ink);
+}

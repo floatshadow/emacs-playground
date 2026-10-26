@@ -1,0 +1,63 @@
+.where {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  font-size: 13.5px;
+  margin: 0;
+}
+.where dt {
+  color: var(--ink-3);
+}
+.where dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.dim {
+  color: var(--ink-3);
+}
+.flags {
+  margin-top: 6px;
+}
+.flag {
+  display: inline-block;
+  font: 11.5px var(--mono);
+  background: var(--warn-soft);
+  color: var(--warn);
+  padding: 2px 6px;
+  border-radius: 3px;
+  margin: 4px 4px 0 0;
+}
+.exit {
+  border-left: 3px solid var(--warn);
+  padding: 7px 10px;
+  margin-top: 10px;
+  background: #fff;
+  border-radius: 0 4px 4px 0;
+  animation: appear 0.18s ease-out;
+}
+.why {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.how {
+  font-size: 13.5px;
+  color: var(--ink-2);
+  margin-top: 3px;
+  line-height: 1.7;
+}
+.calm {
+  color: var(--ok);
+  font-size: 13.5px;
+  margin-top: 6px;
+}
+.waiting {
+  font: italic 13.5px var(--serif);
+  color: var(--ink-3);
+  margin: 0;
+}
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: translateY(-3px);
+  }
+}

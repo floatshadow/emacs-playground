@@ -1,0 +1,11 @@
+id: 00-orientation/02-second
+title: Second lesson
+minutes: 8
+modules: [base, agent]
+steps:
+  - id: cancel
+    goal: Cancel a prompt
+    demo: "M-x ~300 C-g"
+    conditions:
+      - text: cancelled
+        event: { command: keyboard-quit }

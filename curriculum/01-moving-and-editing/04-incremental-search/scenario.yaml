@@ -1,0 +1,88 @@
+id: 01-moving-and-editing/04-incremental-search
+title: Incremental search
+minutes: 12
+mode: terminal
+modules: [base, agent, editing]
+vscode: "Ctrl+F, F3"
+setup:
+  workspace: fixtures/editing
+  root: editing
+  reset: true
+  open: [editing/src/main.rs]
+  layout: single
+  eval: '(with-current-buffer (find-buffer-visiting "/work/editing/src/main.rs") (goto-char (point-min)))'
+steps:
+  - id: calls
+    goal: Visit every greet( in order
+    detail: "`C-s` and type `greet(`. Each further `C-s` jumps to the next match; the prompt counts them (*1/4*). Stop at the last one, `greet(\"reader\")`, with `RET`."
+    demo: 'C-s ~300 "greet(" ~500 C-s ~500 C-s ~500 C-s ~500 RET'
+    conditions:
+      - text: C-s jumped to further matches
+        event: { command: isearch-repeat-forward, min: 2 }
+        hint: "After typing greet( press C-s again, and again: each press goes to the next match."
+      - text: the cursor is on the greet("reader") line
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (string-match-p "greet(\"reader\")" (thing-at-point (quote line) t))))'
+        hint: "There are four matches. RET stops the search at the one you are on; C-g would jump back to where you started."
+      - text: the search is finished
+        state: { isearch: false }
+        hint: "RET ends the search and leaves the cursor at the match."
+    stuck:
+      - when: { quits_in_window: { count: 3, seconds: 10 } }
+        say: "C-g jumps back to where the search started. To stay at a match, press RET instead."
+  - id: backward
+    goal: Search backward to the definition
+    detail: "`C-r` searches backward. Find `fn greet(` and press `RET`. (Without the parenthesis, `fn greet_all` would match first.)"
+    demo: 'C-r ~300 "fn greet(" ~400 RET'
+    conditions:
+      - text: C-r was used
+        event: { command: isearch-backward }
+        hint: "C-r, then type fn greet( with the parenthesis."
+      - text: the cursor is on the fn greet line
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (string-match-p "^fn greet(" (thing-at-point (quote line) t))))'
+        hint: "A backward search leaves the cursor at the start of the match."
+      - text: the search is finished
+        state: { isearch: false }
+        hint: "RET ends the search."
+  - id: symbol
+    goal: Search for the symbol at point
+    detail: "Put the cursor on `greet` (`M-f M-f M-b` from the start of the line) and press `M-s .`. It searches for the whole symbol: `greet` matches, `greet_all` does not. `C-s` for the next one, `RET` to stop."
+    demo: "M-f ~200 M-f ~200 M-b ~400 M-s . ~600 C-s ~500 RET"
+    conditions:
+      - text: M-s . was used
+        event: { command: isearch-forward-symbol-at-point }
+        hint: "M-s, then a full stop, with the cursor on the word greet."
+      - text: the search is finished
+        state: { isearch: false }
+        hint: "RET ends the search."
+  - id: regexp
+    goal: Search with a regular expression
+    detail: "`C-M-s` searches for a regexp. From the top (`M-<`), find the first `let` with no type annotation: `let [a-z]+ =`."
+    demo: 'M-< ~300 C-M-s ~300 "let [a-z]+ =" ~500 RET'
+    conditions:
+      - text: C-M-s was used
+        event: { command: isearch-forward-regexp }
+        hint: "C-M-s is Control Alt s, or Esc then C-s."
+      - text: the cursor is on the let greetings line
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (string-match-p "let greetings =" (thing-at-point (quote line) t))))'
+        hint: "let args: has a colon, so it does not match let [a-z]+ =. The first match is let greetings =."
+      - text: the search is finished
+        state: { isearch: false }
+        hint: "RET ends the search at the match."
+  - id: occur
+    goal: List every match with occur
+    detail: "`M-s o` lists every line matching a regexp in an *Occur* window. Ask for `greet(`, then `M-g M-n` visits the first match in main.rs (and again for the next one)."
+    demo: 'M-s o ~500 "greet(" RET ~1200 M-g M-n'
+    conditions:
+      - text: occur was used
+        event: { command: occur }
+        hint: "M-s, then o. Type greet( and RET."
+      - text: a match was visited from the list
+        any:
+          - event: { command: next-error }
+          - event: { command: occur-mode-goto-occurrence }
+          - event: { command: occur-mode-goto-occurrence-other-window }
+          - event: { command: occur-mode-display-occurrence }
+        hint: "M-g M-n jumps to the next match. Inside the *Occur* window, RET on a line does the same."
+      - text: the occur list is on screen
+        state: { "windows.buf": "*Occur*" }
+        hint: "The *Occur* window stays open while you work through the list. q inside it closes it."

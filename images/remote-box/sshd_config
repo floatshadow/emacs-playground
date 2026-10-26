@@ -1,0 +1,14 @@
+# sshd settings for the remote box (deployment.md §6). Keys only, one user.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin no
+AllowUsers deploy
+AuthorizedKeysFile .ssh/authorized_keys
+AuthorizedKeysCommand /usr/local/sbin/remote-box-authorized-keys %u
+AuthorizedKeysCommandUser root
+X11Forwarding no
+PrintMotd no
+ClientAliveInterval 30
+ClientAliveCountMax 4
+# TRAMP opens several channels over one connection.
+MaxSessions 20

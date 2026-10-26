@@ -1,0 +1,54 @@
+id: 01-moving-and-editing/08-jump-anywhere
+title: Jump anywhere
+minutes: 12
+mode: terminal
+modules: [base, agent, editing]
+vscode: "Ctrl+G, outline, breadcrumbs, matching bracket"
+setup:
+  workspace: fixtures/editing
+  root: editing
+  reset: true
+  open: [editing/src/main.rs]
+  layout: single
+  # Start with fn main at the top of the window, so its lets are on screen
+  # whatever the height of the learner's terminal.
+  eval: '(let* ((b (find-buffer-visiting "/work/editing/src/main.rs")) (w (get-buffer-window b))) (with-current-buffer b (goto-char (point-min)) (search-forward "fn main()") (beginning-of-line)) (when w (set-window-point w (with-current-buffer b (point))) (set-window-start w (with-current-buffer b (point)))))'
+steps:
+  - id: avy
+    goal: Jump to the third let on screen
+    detail: "`M-j` (avy) asks for characters: type `let` and pause. Every `let` on screen gets a letter. Press the letter on the third one, `let total`."
+    demo: 'M-j ~300 "let" ~1200 d'
+    conditions:
+      - text: avy was used
+        event: { command: avy-goto-char-timer }
+        hint: "M-j, type let, wait half a second, then press the letter shown on let total."
+      - text: the cursor is on let total
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (looking-at "let total")))'
+        hint: "The letters run a, s, d, f... from the top of the window. The third let is let total."
+  - id: imenu
+    goal: Jump to greet_all by name
+    detail: "`M-g i` (imenu) lists the definitions in this file, each with its kind in front: *Fn greet*, *Fn greet_all*, *Module report*. Type the start, `TAB` completes, `RET` jumps."
+    demo: 'M-g i ~600 "Fn greet_a" ~300 TAB ~300 RET'
+    conditions:
+      - text: imenu was used
+        any:
+          - event: { command: imenu }
+          - event: { command: consult-imenu }
+        hint: "M-g, then i."
+      - text: the cursor is on fn greet_all
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (string-match-p "fn greet_all" (thing-at-point (quote line) t))))'
+        hint: "In the prompt, type Fn greet_a and press TAB: it completes to Fn greet_all. Then RET."
+  - id: bookmark
+    goal: Bookmark greet_all, leave, and come back by name
+    detail: "`C-x r m` sets a bookmark here; name it `greet-all`. Open another file (`C-x C-f ../notes/journal.md`), then `C-x r b greet-all` jumps straight back."
+    demo: 'C-x r m ~400 "greet-all" RET ~400 C-x C-f ~400 "../notes/journal.md" RET ~800 C-x r b ~400 "greet-all" RET'
+    conditions:
+      - text: a bookmark was set
+        event: { command: bookmark-set }
+        hint: "C-x r m, then a name."
+      - text: you jumped to it
+        event: { command: bookmark-jump }
+        hint: "C-x r b, then the bookmark's name. TAB completes."
+      - text: the cursor is back on fn greet_all
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (string-match-p "fn greet_all" (thing-at-point (quote line) t))))'
+        hint: "Bookmarks remember the file and the position, even across restarts."

@@ -1,0 +1,77 @@
+id: 01-moving-and-editing/01-motion
+title: Motion
+minutes: 15
+mode: terminal
+modules: [base, agent, editing]
+vscode: "arrows, Ctrl+arrows, Home, End, Ctrl+G"
+setup:
+  workspace: fixtures/editing
+  root: editing
+  reset: true
+  open: [editing/src/main.rs]
+  layout: single
+  eval: '(with-current-buffer (find-buffer-visiting "/work/editing/src/main.rs") (goto-char (point-min)))'
+steps:
+  - id: spot-1
+    goal: "Spot 1: the end of the fn greet line"
+    detail: "`C-n` moves down a line, `C-e` to the end of the line. `C-u 10 C-n` moves ten lines at once. The comment marked (1) is just above the line you want."
+    demo: "C-u 1 0 C-n ~400 C-e"
+    conditions:
+      - text: C-e was used
+        event: { command: move-end-of-line }
+        hint: "C-e (Control e) jumps to the end of the line, like End."
+      - text: the cursor is at the end of the fn greet line
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (eolp) (save-excursion (beginning-of-line) (looking-at "fn greet("))))'
+        hint: "Find the line that starts with fn greet( (line 11; the mode line shows L11), then C-e."
+    stuck:
+      - when: { step_seconds: 180 }
+        say: "C-n goes down, C-p goes up. The arrow keys work too, but your fingers stay home with C-n and C-p."
+  - id: spot-2
+    goal: "Spot 2: just after the word Hello"
+    detail: "Two lines down. `M-m` jumps to the first non-blank character of the line; `M-f` moves forward one word at a time, `M-b` back."
+    demo: "C-n ~200 C-n ~300 M-m ~300 M-f ~300 M-f"
+    conditions:
+      - text: M-f was used
+        event: { command: forward-word }
+        hint: "M-f is Alt and f (or Esc, then f). It moves to the end of the next word."
+      - text: the cursor is right after Hello
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (looking-back "Hello" (line-beginning-position)) (looking-at ", {name}")))'
+        hint: "On the format! line: M-m, then M-f twice. The cursor stops after format, then after Hello."
+  - id: spot-3
+    goal: "Spot 3: the start of fn main"
+    detail: "`M->` jumps to the end of the file. `C-M-a` moves to the beginning of the function you are in (Control, Alt and a together; or Esc then C-a)."
+    demo: "M-> ~400 C-M-a"
+    conditions:
+      - text: C-M-a was used
+        any:
+          - event: { command: beginning-of-defun }
+          - event: { command: treesit-beginning-of-defun }
+        hint: "C-M-a: hold Control and Alt, press a. Esc then C-a also works."
+      - text: the cursor is on the f of fn main
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (looking-at "fn main()")))'
+        hint: "M-> takes you to the end, which is inside main. One C-M-a goes to the start of main. C-M-e goes to the end of a function."
+  - id: spot-4
+    goal: "Spot 4: just after the closing brace of the for loop"
+    detail: "Go down to the `for` line and put the cursor on its `{` (`C-e` then `C-b`). `C-M-f` jumps over the whole balanced block to just after the matching `}`."
+    demo: "C-n ~200 C-n ~200 C-n ~200 C-n ~300 C-e ~200 C-b ~300 C-M-f"
+    conditions:
+      - text: C-M-f was used
+        event: { command: forward-sexp }
+        hint: "C-M-f (Control Alt f) moves over one balanced expression: a word, a string, or a bracketed block."
+      - text: the cursor is just after the loop's closing brace
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (looking-back "^    }" (line-beginning-position)) (save-excursion (forward-line -2) (looking-at ".*for line in"))))'
+        hint: "Put the cursor ON the { at the end of the for line (C-e, then C-b), then C-M-f."
+  - id: spot-5
+    goal: "Spot 5: line 35, by number"
+    detail: "`M-g g` asks for a line number. Then `C-l` scrolls so your line is in the middle of the window (press it again for top, again for bottom)."
+    demo: 'M-g g ~500 "35" RET ~300 C-l'
+    conditions:
+      - text: M-g g was used
+        event: { command: goto-line }
+        hint: "M-g, then g. Type 35 and RET."
+      - text: the cursor is on line 35
+        state: { file: /work/editing/src/main.rs, line: 35 }
+        hint: "The mode line shows L35 when you are there."
+      - text: C-l recentred the window
+        event: { command: recenter-top-bottom }
+        hint: "C-l scrolls so the cursor line is in the middle. Press it again: top, then bottom."

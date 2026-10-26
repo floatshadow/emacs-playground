@@ -1,0 +1,59 @@
+.nudge {
+  background: #fff;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  padding: 10px 30px 10px 12px;
+  margin-top: 8px;
+  position: relative;
+  animation: appear 0.2s ease-out;
+}
+.nudge:first-child {
+  margin-top: 0;
+}
+.habit {
+  border-color: var(--violet);
+}
+.calm {
+  border-color: var(--ok);
+}
+.ask {
+  border-color: var(--warn);
+}
+.nudge h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.nudge p {
+  margin: 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+  line-height: 1.7;
+}
+.x {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-3);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: 3px;
+}
+.x:hover {
+  color: var(--ink);
+}
+.empty {
+  font-size: 13.5px;
+  color: var(--ink-3);
+  font-style: italic;
+}
+@keyframes appear {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
