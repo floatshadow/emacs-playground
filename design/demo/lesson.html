@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lesson 2.3 Opening files — Emacs Playground (design demo)</title>
+<link rel="stylesheet" href="demo.css">
+</head>
+<body class="app">
+<div class="demo-note" id="demoNote"><b>Design demo.</b> The dark pane is a simulation of about sixty Emacs commands, not Emacs. Click it and type, or press “Watch it” on a step. <button type="button" onclick="document.getElementById('demoNote').remove()">Hide</button></div>
+
+<header class="topbar">
+  <a class="brand" href="index.html"><i>E</i>Emacs Playground</a>
+  <nav class="crumbs"><a href="curriculum.html">Course</a><span>›</span><a href="curriculum.html">2. Buffers and files</a><span>›</span>2.3 Opening files</nav>
+  <div class="spacer"></div>
+  <span class="chip live">local session · terminal frame</span>
+  <button class="btn" type="button" id="focusBtn" title="Fullscreen with the keyboard locked, so Ctrl+W and friends reach Emacs">Focus mode</button>
+  <button class="btn rail-toggle" type="button" id="railBtn">Where am I</button>
+  <button class="btn primary" type="button" id="rescueTop">Rescue me</button>
+</header>
+
+<div class="work">
+  <aside class="lesson" id="lesson">
+    <h1>Opening files</h1>
+    <p class="lede">Emacs asks for a path in the minibuffer, the one-line area at the bottom of the screen. Once you trust that line, most of Emacs stops being mysterious.</p>
+
+    <div class="vscode"><b>Coming from VS Code.</b> Ctrl+P and the Explorer both become <kbd>C-x C-f</kbd>. Files you have opened are <span class="jargon" title="A buffer is text in memory. Most buffers show a file; some (like *scratch*) do not.">buffers</span>, and <kbd>C-x b</kbd> switches between them the way Ctrl+Tab does. There is no tab bar by default.</p></div>
+
+    <p>Press <span class="try" data-keys="C-x C-f"><kbd>C-x C-f</kbd> try it</span>. Emacs shows <em>Find file:</em> with the current directory already typed. Type the first letters of a name and press <kbd>TAB</kbd> to complete it. <kbd>RET</kbd> opens the file.</p>
+    <p>If the file does not exist, Emacs opens an empty buffer and says <em>(New file)</em>. Nothing is written to disk until you save with <kbd>C-x C-s</kbd>.</p>
+    <p>When something looks wrong, <kbd>C-g</kbd> cancels. It is always safe. The panel on the right tells you which state you are in and how to leave it.</p>
+
+    <ol class="steps" id="steps"></ol>
+    <div id="allDone"></div>
+  </aside>
+
+  <main class="stage">
+    <div class="screen-head"><span>Emacs 31.1, terminal frame in tmux, 90×30</span><span class="chip">which-key on</span><span class="chip">modus-vivendi-tinted</span><span class="spacer"></span><span id="playState"></span></div>
+    <div class="screen-wrap" id="screenWrap"><div class="menubar"><span>File</span><span>Edit</span><span>Options</span><span>Buffers</span><span>Tools</span><span>Help</span></div><div class="screen" id="screen" aria-label="Emacs (simulated)"></div></div>
+    <div class="ticker" id="ticker" aria-live="polite"></div>
+  </main>
+
+  <aside class="rail" id="rail">
+    <section>
+      <h2>Where am I</h2>
+      <div id="where"></div>
+    </section>
+    <section>
+      <h2>Did you mean</h2>
+      <div id="nudges"></div>
+    </section>
+    <section>
+      <h2>Rescue</h2>
+      <div class="rescue-card">
+        <p>Cancels any prompt, closes extra windows, widens, stops macros and overwrite mode. Never touches your files.</p>
+        <button class="btn primary" type="button" id="rescueBtn">Rescue me</button>
+        <button class="btn" type="button" id="resetBtn" title="Restore the files and layout for this step from its checkpoint">Reset this step</button>
+      </div>
+    </section>
+    <section>
+      <h2>Keys for this buffer <small id="cheatMode"></small></h2>
+      <table class="cheat" id="cheat"></table>
+    </section>
+  </aside>
+</div>
+
+<script src="mock-emacs.js"></script>
+<script>
+(function () {
+  const M = window.MockEmacs;
+  const ORIG = M.HELLO_FILES['main.rs'].text;
+  let eng = null, stopPlay = null;
+  const $ = id => document.getElementById(id);
+  const screen = $('screen'), ticker = $('ticker'), where = $('where'), nudgesEl = $('nudges'), stepsEl = $('steps');
+
+  function currentLine(e) { const b = e.cur(); const [l] = e.lineOf(b, b.point); return b.text.split('\n')[l] || ''; }
+
+  /* A step is a goal plus ORDERED sub-conditions. The hint shown is always the one
+     for the first unmet condition. Authors never enumerate mistakes. */
+  const STEPS = [
+    { id: 'open', goal: 'Open src/main.rs', detail: 'Hold Control, press x, then Control f. Type <kbd>ma</kbd>, press <kbd>TAB</kbd>, then <kbd>RET</kbd>.',
+      demo: [{ keys: 'C-x C-f' }, { wait: 500 }, { type: 'ma' }, { wait: 300 }, { keys: 'TAB' }, { wait: 500 }, { keys: 'RET' }],
+      conds: [
+        { text: 'the Find file prompt was used', test: s => (s.counts['find-file'] || 0) > 0, hint: 'C-x then C-f. The prompt appears in the bottom line. If you see C-x- in the bottom line, Emacs is waiting for the second key.' },
+        { text: 'main.rs is the current buffer', test: (s, e) => e.cur().name === 'main.rs' && s.visited.includes('main.rs'), hint: 'In the prompt, type ma and press TAB; it completes to main.rs. Then RET.' },
+      ] },
+    { id: 'edit', goal: 'Change the greeting', detail: 'Turn <em>Hello</em> into <em>Hi</em>. <kbd>C-s</kbd> finds text as you type. There is no insert mode: typing inserts.',
+      demo: [{ keys: 'M-<' }, { keys: 'C-s' }, { type: 'Hello' }, { wait: 400 }, { keys: 'RET' }, { keys: 'DEL DEL DEL DEL DEL' }, { type: 'Hi' }],
+      conds: [
+        { text: 'the cursor is on the greeting line', test: (s, e) => e.cur().name === 'main.rs' && /Hello|Hi,/.test(currentLine(e)), hint: 'C-s then type Hello. The cursor jumps to the match. RET leaves the search with the cursor there.' },
+        { text: 'the text changed', test: s => s.buffers['main.rs'] && s.buffers['main.rs'].text !== ORIG, hint: 'Backspace (DEL) deletes to the left. Then just type. The mode line changes from -:--- to -:**- when the buffer has unsaved changes.' },
+      ] },
+    { id: 'save', goal: 'Save it', detail: '<kbd>C-x C-s</kbd> writes the buffer to disk. Watch the mode line: <code>**</code> means unsaved.',
+      demo: [{ keys: 'C-x C-s' }],
+      conds: [
+        { text: 'save-buffer ran', test: s => (s.counts['save-buffer'] || 0) > 0, hint: 'C-x C-s. If the bottom line says (No changes need to be saved), the edit did not happen yet.' },
+        { text: 'main.rs has no unsaved changes', test: s => s.buffers['main.rs'] && !s.buffers['main.rs'].modified && s.buffers['main.rs'].text !== ORIG, hint: 'The mode line still shows **. Press C-x C-s again, in the main.rs window.' },
+      ] },
+    { id: 'oops', goal: 'Make a mess, then clean it up', detail: 'Press <kbd>C-x C-b</kbd>. A second window appears, on purpose. Then get back to one window.',
+      demo: [{ keys: 'C-x C-b' }, { wait: 1500 }, { keys: 'C-x 1' }],
+      conds: [
+        { text: 'C-x C-b opened the buffer list', test: s => (s.counts['list-buffers'] || 0) > 0, hint: 'C-x C-b lists all buffers in a second window. This is the most common "what just happened?" moment, so you are doing it on purpose.' },
+        { text: 'back to a single window', test: s => s.listedAt >= 0 && s.windows.length === 1 && s.total > s.listedAt, hint: 'C-x 1 keeps only the window the cursor is in. Or C-x o to move into the list and q to close it.' },
+      ] },
+  ];
+  const hintLevel = {};   // step id -> hints revealed
+  let doneIds = new Set();
+
+  const CHEAT = {
+    common: [['C-x C-f', 'open a file'], ['C-x C-s', 'save'], ['C-x b', 'switch buffer'], ['C-s', 'search'], ['M-x', 'run a command by name'], ['C-g', 'cancel'], ['C-h k', 'what does this key do?']],
+    'rust-ts-mode': [['M-.', 'go to definition'], ['M-,', 'go back'], ['C-c C-c', 'compile'], ['M-g M-n', 'next error'], ['C-h .', 'error under cursor']],
+    'Buffer-menu-mode': [['q', 'leave this list'], ['RET', 'open the buffer on this line'], ['n / p', 'move down / up']],
+    'help-mode': [['q', 'close help'], ['n / p', 'next / previous line']],
+    'dired-mode': [['RET', 'open file'], ['q', 'leave the listing'], ['^', 'parent directory']],
+    'compilation-mode': [['RET', 'jump to this error'], ['g', 'rebuild'], ['q', 'close']],
+    'markdown-mode': [['C-c C-c p', 'preview'], ['M-RET', 'new list item']],
+    'lisp-interaction-mode': [['C-x C-e', 'evaluate expression before cursor'], ['C-j', 'evaluate and print']],
+  };
+
+  function boot() {
+    if (eng) eng.dispose();
+    eng = M.createEngine();
+    eng.on('change', renderAll);
+    M.attachKeyboard(eng, screen, key => toast('Your browser may have grabbed ' + key + '. In the real app, Focus mode locks the keyboard so it reaches Emacs.'));
+    renderAll();
+  }
+
+  function renderAll() {
+    M.renderScreen(eng, screen, { rows: 30 });
+    M.renderTicker(eng, ticker, 6);
+    M.renderWhere(eng, where);
+    renderNudges(); renderSteps(); renderCheat();
+  }
+
+  function renderNudges() {
+    const ns = eng.nudges();
+    if (!ns.length) { nudgesEl.innerHTML = '<div class="nudge-empty">Nothing to translate yet. VS Code habits that do something else in Emacs will show up here, once each.</div>'; return; }
+    nudgesEl.innerHTML = ns.map(n => '<div class="nudge ' + n.kind + '"><button class="x" type="button" aria-label="Dismiss" data-id="' + M.esc(n.id) + '">×</button><h3>' + M.esc(n.title) + '</h3><p>' + M.keyify(n.body) + '</p></div>').join('');
+    nudgesEl.querySelectorAll('.x').forEach(b => b.addEventListener('click', () => eng.dismiss(b.dataset.id)));
+  }
+
+  function renderCheat() {
+    const mode = eng.cur().mode;
+    const rows = (CHEAT[mode] || []).concat(CHEAT.common);
+    $('cheatMode').textContent = eng.cur().modeName;
+    $('cheat').innerHTML = rows.map(([k, d]) => '<tr><td>' + k.split(' / ').map(x => x.split(' ').map(y => '<kbd>' + M.esc(y) + '</kbd>').join(' ')).join(' / ') + '</td><td>' + M.esc(d) + '</td></tr>').join('');
+  }
+
+  function renderSteps() {
+    const s = eng.st; let activeIndex = -1;
+    const results = STEPS.map(step => step.conds.map(c => !!c.test(s, eng)));
+    // A step counts as done once all conditions held at some point (progress is monotonic, like a checkpoint).
+    results.forEach((r, i) => { if (r.every(Boolean)) doneIds.add(STEPS[i].id); });
+    STEPS.forEach((st, i) => { if (activeIndex < 0 && !doneIds.has(st.id)) activeIndex = i; });
+    stepsEl.innerHTML = STEPS.map((step, i) => {
+      const done = doneIds.has(step.id); const active = i === activeIndex;
+      const firstUnmet = results[i].findIndex(x => !x);
+      const conds = step.conds.map((c, j) => '<li class="' + (done || results[i][j] ? 'met' : (j === firstUnmet && active ? 'next' : '')) + '">' + M.esc(c.text) + '</li>').join('');
+      let hints = '';
+      const lvl = hintLevel[step.id] || 0;
+      if (active && lvl > 0 && firstUnmet >= 0) hints = '<div class="hint"><div class="lvl">hint for: ' + M.esc(step.conds[firstUnmet].text) + '</div>' + M.keyify(step.conds[firstUnmet].hint) + '</div>';
+      const actions = active ? '<div class="actions"><button class="btn small" type="button" data-hint="' + step.id + '">' + (lvl ? 'Another hint' : 'Show a hint') + '</button><button class="btn small" type="button" data-watch="' + i + '">Watch it</button></div>' : '';
+      return '<li class="step' + (done ? ' done' : '') + (active ? ' active' : '') + '"><span class="mark" aria-hidden="true"></span><div><div class="goal">' + M.esc(step.goal) + '</div><div class="detail">' + step.detail + '</div><ul class="conds">' + conds + '</ul>' + hints + actions + '</div></li>';
+    }).join('');
+    stepsEl.querySelectorAll('[data-hint]').forEach(b => b.addEventListener('click', () => { hintLevel[b.dataset.hint] = (hintLevel[b.dataset.hint] || 0) + 1; renderSteps(); }));
+    stepsEl.querySelectorAll('[data-watch]').forEach(b => b.addEventListener('click', () => watch(STEPS[+b.dataset.watch])));
+    $('allDone').innerHTML = activeIndex < 0 ? '<div class="done-all">Lesson complete. Next: 2.4 Switching, saving and killing buffers.</div>' : '';
+  }
+
+  function watch(step) {
+    if (stopPlay) stopPlay();
+    $('playState').textContent = 'Playing the demo for “' + step.goal + '”…';
+    screen.focus();
+    stopPlay = eng.play(step.demo, { done: () => { $('playState').textContent = ''; stopPlay = null; } });
+  }
+
+  let toastT = null;
+  function toast(msg) { let t = document.querySelector('.toast'); if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); } t.textContent = msg; clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 4200); }
+
+  function doRescue() { const did = eng.rescue(); toast(did.length ? 'Rescue: ' + did.join(', ') + '.' : 'Rescue: you were already in a normal state. Nothing changed.'); screen.focus(); }
+  $('rescueBtn').addEventListener('click', doRescue);
+  $('rescueTop').addEventListener('click', doRescue);
+  $('resetBtn').addEventListener('click', () => {
+    // Reset to the checkpoint at the start of the active step: fresh fixtures, then replay finished steps instantly.
+    if (stopPlay) stopPlay();
+    const active = STEPS.findIndex(s => !doneIds.has(s.id));
+    doneIds = new Set(); boot();
+    STEPS.slice(0, active < 0 ? STEPS.length : active).forEach(st => st.demo.forEach(d => { if (d.keys) eng.sendKeys(d.keys); if (d.type != null) eng.typeText(d.type); }));
+    eng.st.ticker = []; eng.st.echo = 'Playground: files and layout restored from the checkpoint for this step.'; renderAll();
+    toast('Restored files and Emacs layout from the step checkpoint (git ref + buffer spec).'); screen.focus();
+  });
+  $('railBtn').addEventListener('click', () => $('rail').classList.toggle('open'));
+  $('focusBtn').addEventListener('click', async () => {
+    try { await document.getElementById('screenWrap').requestFullscreen(); if (navigator.keyboard && navigator.keyboard.lock) await navigator.keyboard.lock(); toast('Focus mode: fullscreen with the keyboard locked. Esc held for 2 s exits.'); } catch (e) { toast('Fullscreen was refused by the browser: ' + e.message); }
+    screen.focus();
+  });
+  document.querySelectorAll('.try').forEach(el => el.addEventListener('click', () => { eng.sendKeys(el.dataset.keys); toast('Sent ' + el.dataset.keys + ' to Emacs (the real app uses execute-kbd-macro over emacsclient).'); screen.focus(); }));
+
+  boot();
+  const replay = location.hash.match(/play=([^&]+)/);   // e.g. #play=C-x%20C-b to open the page in a given state
+  if (replay) { eng.sendKeys(decodeURIComponent(replay[1])); }
+  setInterval(() => { if (eng.st.mini) renderNudges(); }, 5000);   // time-based nudges (stuck in a prompt)
+  screen.focus();
+})();
+</script>
+</body>
+</html>

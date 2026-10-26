@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Course map — Emacs Playground (design demo)</title>
+<link rel="stylesheet" href="demo.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html"><i>E</i>Emacs Playground</a>
+  <nav class="crumbs">Course map</nav>
+  <div class="spacer"></div>
+  <span class="chip live">local session</span>
+  <a class="btn" href="lesson.html">Continue: 2.3 Opening files</a>
+</header>
+
+<main class="map">
+  <header>
+    <h1>From the first keystroke to your own config</h1>
+    <p>Fifteen parts, each unlocking a piece of a real development setup. Three of them cover what only Emacs does: Org-mode, text as the interface, and packages that compose because everything is a buffer. Every lesson runs inside the same pre-configured Emacs you will take home at the end.</p>
+    <div class="legend"><span><span class="tag">terminal</span> runs in the terminal frame</span><span><span class="tag gui">gui</span> needs the GUI frame</span><span><span class="tag remote">remote</span> uses the SSH box</span><span><span class="tag proj">project</span> hands-on project</span></div>
+  </header>
+  <div id="parts"></div>
+
+  <h2 style="margin-top:40px">Projects</h2>
+  <p style="color:var(--ink-2);max-width:60ch">Each project mirrors something you already do in VS Code, step by step, with checkpoints you can return to. Later projects mix languages on purpose.</p>
+  <div class="projects" id="projects"></div>
+</main>
+
+<script>
+const PARTS = [
+  { n: 0, title: 'Orientation', time: '45 min', done: 1, outcome: 'Read the screen: buffer, window, frame, mode line, echo area, minibuffer. Cancel anything with C-g. Ask Emacs about itself with C-h.',
+    lessons: [['What the screen is telling you', 'the status bar and the Problems panel'], ['C-g, and the three ways to get lost', 'Esc'], ['Asking Emacs: C-h k, C-h f, C-h m', 'hover help and the command palette'], ['Which-key and the key ticker', 'keyboard shortcut reference']] },
+  { n: 1, title: 'Moving and editing', time: '2 h', done: 1, outcome: 'Edit without the mouse: motion, kill and yank, undo, search and replace, rectangles, macros, multiple cursors, jumping.',
+    lessons: [['Motion by character, word, line, sexp, defun', 'arrow keys and Ctrl+arrows'], ['Kill, yank and the kill ring', 'cut, copy, paste, clipboard history'], ['Undo that never loses work (vundo)', 'Ctrl+Z, Ctrl+Y'], ['Incremental search', 'Ctrl+F'], ['Replace: query-replace, regexps, visual-replace', 'Ctrl+H'], ['Rectangles and keyboard macros', 'column select, repeat last edit'], ['Multiple cursors and iedit', 'Ctrl+D, rename symbol'], ['Jump anywhere: avy, imenu, bookmarks, breadcrumbs', 'Ctrl+G, outline, breadcrumbs']] },
+  { n: 2, title: 'Buffers and files', time: '1.5 h', done: 0.4, current: 3, outcome: 'Open and switch files faster than with a mouse; manage many buffers; Dired as your explorer; projects.',
+    lessons: [['Buffers are not tabs', 'editor tabs'], ['The minibuffer', 'the palette input box'], ['Opening files', 'Ctrl+P, Ctrl+O'], ['Switching, saving and killing buffers', 'Ctrl+Tab, Ctrl+S, Ctrl+W'], ['Many buffers with ibuffer', 'none'], ['Dired and the dirvish side window', 'Explorer'], ['Projects: project.el, consult-ripgrep', 'workspace search, Ctrl+Shift+F'], ['Recent files, bookmarks and registers', 'recent, Ctrl+Shift+T']] },
+  { n: 3, title: 'Windows, layouts and workspaces', time: '1.5 h', done: 0, outcome: 'Split, move, resize, open things to the side, tame pop-ups, undo and save layouts, one workspace per project, focus modes.',
+    lessons: [['Windows and frames', 'editor groups, split editor'], ['Moving between windows: windmove, ace-window', 'Ctrl+1/2/3'], ['Resizing and balancing, rotating layouts', 'drag borders, maximise group'], ['Open things elsewhere: the C-x 4 and C-x 5 prefixes', 'open to the side'], ['Taming pop-ups: display-buffer-alist, popper, side windows', 'the panel, preview editors'], ['Undo and save layouts: winner, registers, burly', 'none'], ['Workspaces with tab-bar', 'windows and multi-root workspaces'], ['Focus and layout recipes', 'zen mode, zoom']] },
+  { n: 4, title: 'Completion everywhere', time: '1 h', done: 0, outcome: 'Vertico, orderless, marginalia, consult, embark and corfu: one consistent way to pick anything.',
+    lessons: [['The minibuffer, upgraded (vertico, orderless)', 'command palette fuzzy match'], ['Consult: buffers, lines, grep, outline', 'Go to symbol, search across files'], ['Embark: act on what is under the cursor', 'right-click context menu'], ['Corfu, cape and tempel', 'IntelliSense popup, snippets']] },
+  { n: 5, title: 'Git with Magit', time: '1.5 h', done: 0, outcome: 'Stage hunks, commit, branch, rebase and resolve conflicts without leaving Emacs.',
+    lessons: [['Magit status and staging hunks', 'Source Control view'], ['Commits, log, blame', 'GitLens'], ['Branches, rebase, stash', 'branch picker'], ['Merge conflicts with smerge', 'merge editor'], ['diff-hl and git-timemachine', 'gutter indicators, file history']] },
+  { n: 6, title: 'Terminals and running things', time: '1 h', done: 0, outcome: 'Run builds and tools inside Emacs: compile, eat, eshell, async shell commands.',
+    lessons: [['compile and next-error', 'Tasks, Problems panel'], ['eat: a real terminal in a buffer', 'integrated terminal'], ['Eshell: a shell that speaks Lisp', 'none'], ['Async shell commands and Dired integration', 'run in terminal']] },
+  { n: 7, title: 'Language servers and debugging', time: '2 h', done: 0, outcome: 'Eglot with rust-analyzer, ocaml-lsp, basedpyright and tinymist. Flymake, xref, eldoc, apheleia, dape.',
+    lessons: [['Eglot: connect, hover, go to definition, rename', 'IntelliSense, F12, F2'], ['Flymake, diagnostics and code actions', 'Problems, lightbulb'], ['Format on save with apheleia', 'format on save'], ['Rust: cargo, clippy, tests from Emacs', 'rust-analyzer extension'], ['OCaml: dune, merlin, utop', 'OCaml Platform extension'], ['Python: venvs with pet, ruff, REPL', 'Python extension'], ['Debugging with dape', 'Run and Debug']] },
+  { n: 8, title: 'Writing', time: '2 h', done: 0, outcome: 'Markdown, Typst, LaTeX with previews; pdf-tools; images and SVG; citations; Unicode input methods; focused writing.',
+    lessons: [['Markdown with live preview', 'Markdown preview'], ['Typst with tinymist and typst-preview', 'Tinymist extension'], ['LaTeX with AUCTeX and latexmk', 'LaTeX Workshop'], ['pdf-tools and SyncTeX', 'PDF viewer', 'gui'], ['Images, SVG and inline previews', 'image preview', 'gui'], ['Citations with citar', 'Citation Picker'], ['Unicode and input methods: C-x 8, C-\\, rime', 'Unicode input, IME'], ['Focused writing: olivetti, jinx', 'zen mode, spell check']] },
+  { n: 9, title: 'Org-mode', time: '2 h', done: 0, outcome: 'Outlines, TODO lists and the agenda, tables that calculate, literate programming with code blocks in Rust, OCaml, Python and shell, export to HTML, PDF and slides.',
+    lessons: [['Outlining and structure editing', 'none'], ['TODO states, scheduling, the agenda, capture', 'Todo Tree'], ['Tables and spreadsheet formulas', 'none'], ['Babel: run code blocks, pass results between languages', 'Jupyter notebooks'], ['Babel on a remote host with :dir /ssh:box:', 'none', 'remote'], ['Export: HTML, PDF via LaTeX, Beamer slides, Markdown', 'Markdown export'], ['Notes with org-roam and backlinks', 'Foam'], ['A literate init.org', 'none']] },
+  { n: 10, title: 'Text is the interface', time: '1.5 h', done: 0, outcome: 'Pipe regions through Unix tools, registers and macros, ediff, calc, Eshell over TRAMP, changing Emacs while it runs, line tools, occur.',
+    lessons: [['Pipe a region through any tool: M-| with sort, jq, pandoc', 'none'], ['Registers and macros, advanced', 'none'], ['ediff for buffers, files, directories and three-way merges', 'diff editor'], ['Calc: units, symbolic algebra, embedded mode', 'none'], ['Eshell meets TRAMP: cd /ssh:box:/var/log', 'none'], ['Change Emacs while it runs: M-:, ielm, redefine a function, re-builder', 'none'], ['Line tools and dynamic abbreviations', 'Sort Lines extension'], ['occur and occur-edit', 'none']] },
+  { n: 11, title: 'Everything is a buffer: how packages compose', time: '1.5 h', done: 0, outcome: 'Packages that were never designed together still work together, because each produces or consumes a buffer with a known mode. Nine composition patterns and a pipeline capstone.',
+    lessons: [['The one abstraction: modes over text, hooks, thing-at-point', 'none'], ['C-x C-q everywhere: wdired, wgrep, occur-edit, archives', 'bulk rename, multi-file replace'], ['One list of locations: next-error across compile, grep, occur, Flymake, xref', 'Problems panel'], ['The search-to-edit pipeline: ripgrep, embark, wgrep, diff-hl, Magit', 'replace in files'], ['Shell output is a buffer', 'none'], ['Narrow and indirect buffers: LSP inside a Markdown code fence', 'none'], ['Act on the thing at point: embark, ffap, xref', 'Ctrl+click'], ['Hooks and advice as glue', 'none'], ['Capstone: a pipeline with no new package', 'none']] },
+  { n: 12, title: 'Remote editing with TRAMP', time: '1 h', done: 0, outcome: 'Edit, build and run on another machine over SSH as if it were local; Magit, Eshell and LSP over TRAMP.',
+    lessons: [['TRAMP basics: /ssh:box:/path', 'Remote-SSH', 'remote'], ['Remote compile, Eshell and LSP', 'remote terminal', 'remote'], ['Magit over TRAMP, sudo editing', 'remote source control', 'remote'], ['Containers: /docker:name:/', 'Dev Containers', 'remote']] },
+  { n: 13, title: 'Making it yours', time: '2 h', done: 0, outcome: 'Read and edit your own init.el: packages, keybindings, your first command, themes, fonts, icons, and taking the config home.',
+    lessons: [['How init.el is organised (modules you unlocked)', 'settings.json'], ['Packages: install, update, pin, remove', 'Extensions view'], ['Keybindings: global, mode, your own prefix', 'keybindings.json'], ['Your first command, hooks and advice', 'none'], ['Themes, fonts, icons and the mode line', 'themes, icon themes, fonts'], ['Take it home: cloning the config to your machine', 'Settings Sync']] },
+  { n: 14, title: 'Projects', time: '10 h', done: 0, outcome: 'Eight guided projects, from a single-language CLI to a polyglot service, a literate notebook and a repository-wide refactor.', lessons: [] },
+];
+const PROJECTS = [
+  ['P1 Hello, cargo', 'A Rust CLI with tests. Scaffold, write with rust-analyzer, fix a borrow error from the compile window, run the tests, commit with Magit.', 'rust · magit · compile'],
+  ['P2 A dune library', 'An OCaml library and its utop session. Merlin types under the cursor, dune build in a compile window, expect-tests.', 'ocaml · dune · utop'],
+  ['P3 Data script', 'A Python script in a uv venv: pet picks the interpreter, ruff formats on save, a REPL buffer, and a dape breakpoint.', 'python · uv · dape'],
+  ['P4 Paper with citations', 'A Typst paper with a bibliography and a LaTeX appendix. Live preview in the preview pane, then pdf-tools in the GUI frame.', 'typst · latex · citar · pdf-tools'],
+  ['P5 Docs site', 'A Markdown docs site with a static build. Preview on save, wgrep to rename a term across pages, Magit to commit per page.', 'markdown · wgrep · magit'],
+  ['P6 Polyglot service', 'Rust binary, Python scoring tool, OCaml proof and a Typst report in one repo. Multi-root project, several compile commands, deploy to the SSH box with TRAMP.', 'rust · python · ocaml · typst · tramp'],
+  ['P7 Literate experiment notebook', 'One Org file runs a Rust benchmark, scores the numbers in Python, checks an invariant in OCaml, and tabulates the results. Export it to PDF and HTML.', 'org-babel · rust · python · ocaml · export'],
+  ['P8 Repository-wide refactor', 'Rename a concept across code and docs with consult-ripgrep and wgrep, rename files in wdired, apply a macro to forty call sites, review in ediff, commit in Magit.', 'wgrep · wdired · macros · ediff · magit'],
+];
+document.getElementById('parts').innerHTML = PARTS.map(p => {
+  const lessons = p.lessons.map((l, i) => {
+    const [title, vs, tag] = l; const n = p.n + '.' + (i + 1); const cur = p.current === i + 1;
+    const state = p.done >= 1 || (p.done > 0 && i + 1 < p.current) ? '<span class="state done">done</span>' : cur ? '<span class="state now">you are here</span>' : '<span class="state">' + (p.done === 0 && p.n > 2 ? 'suggested after part ' + (p.n - 1) : 'not started') + '</span>';
+    return '<li' + (cur ? ' class="current"' : '') + '><span><span class="n">' + n + '</span>' + title + (tag ? '<span class="tag ' + tag + '">' + tag + '</span>' : '') + (vs && vs !== 'none' ? '<span class="vs">in VS Code: ' + vs + '</span>' : '') + '</span>' + state + '</li>';
+  }).join('');
+  const body = p.n === 14 ? '<p style="margin:0;color:var(--ink-2)">See the project list below. Each project is tagged <span class="tag proj">project</span> and has its own checkpoints.</p>' : '<ul class="lessons">' + lessons + '</ul>';
+  return '<section class="part"><div><h2>' + p.n + '. ' + p.title + '</h2><div class="meta">' + p.time + ' · ' + (p.lessons.length || 8) + ' ' + (p.n === 14 ? 'projects' : 'lessons') + '</div><div class="outcome">' + p.outcome + '</div><div class="progress"><i style="width:' + Math.round(p.done * 100) + '%"></i></div></div><div>' + body + '</div></section>';
+}).join('');
+document.getElementById('projects').innerHTML = PROJECTS.map(([t, d, l]) => '<div class="project"><h3>' + t + '</h3><p>' + d + '</p><div class="langs">' + l + '</div></div>').join('');
+</script>
+</body>
+</html>

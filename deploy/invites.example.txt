@@ -1,0 +1,3 @@
+# one invite code per line; optional label after a space; optional max uses with uses=N; optional expiry with until=YYYY-MM-DD
+spring-cohort-7f3a9c cohort-A uses=40 until=2027-03-01
+workshop-2k8q1z workshop uses=25

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emacs Playground — design demo</title>
+<link rel="stylesheet" href="demo.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="index.html"><i>E</i>Emacs Playground</a>
+  <nav class="crumbs">Design demo</nav>
+  <div class="spacer"></div>
+  <a class="btn" href="curriculum.html">Course map</a>
+  <a class="btn" href="project.html">Project view</a>
+  <a class="btn primary" href="lesson.html">Open the lesson demo</a>
+</header>
+
+<main class="hub">
+  <section class="hero">
+    <div>
+      <h1>Learn Emacs by working in it, with every keystroke explained.</h1>
+      <p class="lede">A browser tutorial around a real, fully configured Emacs. Real projects in Rust, OCaml, Python, Typst and LaTeX. A key ticker that names what you just did, a panel that always knows how to get you out, and checkpoints when you want to try again.</p>
+      <div class="cta"><a class="btn primary" href="lesson.html">Try the lesson demo</a><a class="btn" href="#modes">Two ways to run it</a><a class="btn" href="#hints">How hints stay tractable</a></div>
+    </div>
+    <div class="tickerdemo">
+      <div class="screen" id="heroScreen" aria-label="Emacs (simulated)"></div>
+      <div class="ticker" id="heroTicker"></div>
+    </div>
+  </section>
+
+  <h2>Three screens <small>static HTML, no backend; the Emacs pane is a simulation</small></h2>
+  <div class="screens">
+    <a class="screen-card" href="lesson.html"><div class="thumb" style="grid-template-columns:1fr 2fr 1fr"><i></i><i class="dark"></i><i class="violet"></i></div><h3>Lesson</h3><p>Prose on the left, live Emacs in the middle, "where am I" and translations on the right. Steps check themselves. Hints are per condition, not per mistake.</p></a>
+    <a class="screen-card" href="project.html"><div class="thumb" style="grid-template-columns:1fr 2fr 1fr;grid-template-rows:1fr 1fr"><i style="grid-row:span 2"></i><i class="dark" style="grid-row:span 2"></i><i></i><i class="violet"></i></div><h3>Project</h3><p>File tree, compiler window, checkpoints, and a preview pane that rebuilds a Typst report on save. Switch the same Emacs between terminal and GUI frames.</p></a>
+    <a class="screen-card" href="curriculum.html"><div class="thumb" style="grid-template-columns:1fr 3fr;grid-template-rows:repeat(3,1fr)"><i class="violet"></i><i></i><i class="violet"></i><i></i><i class="violet"></i><i></i></div><h3>Course map</h3><p>Fifteen parts from orientation through windows and layouts, Org-mode and package composition to your own init.el, each lesson tagged with its VS Code equivalent, plus eight projects.</p></a>
+  </div>
+
+  <h2 id="modes">Two ways to run it</h2>
+  <div class="modes">
+    <div class="mode">
+      <h3>On your machine</h3>
+      <p class="who">One learner. Build or pull the images, open a browser. Your work and your growing init.el live in a folder on the host.</p>
+<pre>git clone … emacs-playground && cd emacs-playground
+docker compose --profile local up      # pulls prebuilt images, or --build
+open http://localhost:8080
+
+# the same Emacs in your own terminal, keyboard protocol and all
+docker compose exec session tmux attach -t emacs</pre>
+      <ul><li>No login, no orchestrator: compose starts one session container.</li><li><code>./workspace</code> is bind-mounted, so projects and the config survive restarts and can be copied to a real machine.</li><li>Bring-your-own-terminal mode: kitty or WezTerm attach to the tmux session while the browser shows only the lesson and the ticker.</li></ul>
+    </div>
+    <div class="mode">
+      <h3>On a server, for a group</h3>
+      <p class="who">Many learners. The same images; the gateway starts one isolated session container per person and reaps idle ones.</p>
+<pre>cp .env.example .env     # DOMAIN, auth mode, limits
+docker compose --profile server up -d
+# Caddy terminates TLS; gateway talks to Docker through a socket proxy</pre>
+      <ul><li>Per-learner named volume for the workspace; progress in the gateway's SQLite database.</li><li>Invite codes or OIDC login; CPU, memory, pids and disk limits per session; idle stop after 30 minutes, volume kept for 30 days.</li><li>Session containers: read-only root, dropped capabilities, no Docker socket, egress only to package registries.</li></ul>
+    </div>
+  </div>
+
+  <h2>How it fits together</h2>
+  <div class="arch">
+    <div class="lane"><h3>Browser</h3>
+      <div class="node"><h4>web (React, xterm.js, PDF.js, noVNC)</h4><ul><li>lesson pane renders markdown + scenario</li><li>terminal pane: xterm.js over a PTY WebSocket</li><li>GUI pane: noVNC over a VNC WebSocket</li><li>ticker, where-am-I, nudges: pure functions of the event stream</li><li>preview pane: iframe over the workspace, reloads on file events</li></ul></div>
+    </div>
+    <div class="lane"><h3>Gateway (one per deployment)</h3>
+      <div class="node"><h4>gateway (Go)</h4><ul><li>local: proxies to the single session</li><li>server: auth, creates a session container per learner, routes /s/{id}/…</li><li>stores progress and checkpoints index</li><li>serves the curriculum bundle</li></ul></div>
+      <div class="conn">WebSocket + HTTP ↓</div>
+      <div class="node"><h4>remote-box (sshd + toolchains)</h4><ul><li>target for the TRAMP lessons and the deploy step of P6</li></ul></div>
+    </div>
+    <div class="lane"><h3>Session container (one per learner)</h3>
+      <div class="node"><h4>sessiond (Go)</h4><ul><li>keeps the Emacs daemon, tmux and Xvnc alive; restarts a closed frame</li><li>/pty, /events, /vnc WebSockets; /rpc for eval, keys, rescue, checkpoint, restore, check</li><li>watches the workspace, serves /preview</li><li>git checkpoints under refs/playground</li></ul></div>
+      <div class="node"><h4>Emacs 31.1 daemon + playground-agent.el</h4><ul><li>terminal frame: emacsclient -t inside tmux</li><li>GUI frame: emacsclient -c on Xvnc :1</li><li>agent: post-command, window and minibuffer hooks → JSON events on a Unix socket</li><li>tutor-rescue, tutor-check, tutor-reset-step</li></ul></div>
+      <div class="node"><h4>toolchains baked into the image</h4><ul><li>rustup + rust-analyzer, opam + ocaml-lsp + dune + utop, uv + basedpyright + ruff, typst + tinymist, TeX Live + texlab, marksman, ripgrep, fd, git, tmux</li><li>project dependencies pre-fetched so lessons work offline</li></ul></div>
+    </div>
+  </div>
+
+  <h2 id="hints">How "live" hints stay tractable <small>the part that looks impossible</small></h2>
+  <p>Learners can go wrong in endless ways, but Emacs can only be in a small number of <em>states that swallow input</em>. Almost every "what just happened?" is one of them. So hints are layered: three universal layers that need no per-lesson work, and one declarative layer per step.</p>
+  <ol class="layers">
+    <li><div><b>State exits</b><span>The agent reports real Emacs state after every command: minibuffer open, prefix pending, isearch, extra windows and what they show, recursive edit, narrowing, overwrite, read-only, macro recording, suspended, frame closed, Dired instead of a file. A table maps each state to one exit. This is the "Where am I" panel. It works in every lesson and project because it reads state, not intent.</span><span class="who">authoring cost: one table row per state; grows with modules (magit-status-mode, eshell, pdf-view-mode)</span></div></li>
+    <li><div><b>Habit translation and stuck patterns</b><span>Pure functions over the recent key stream. VS Code habits that mean something else in Emacs get one card each (C-z suspends, C-s searches, C-a is line start). Three C-g in a row, the same unbound key twice, typing into a read-only buffer, twenty seconds inside a prompt: each has a calm, fixed response.</span><span class="who">authoring cost: a habits table and about ten pattern rules, shared by everything</span></div></li>
+    <li><div><b>Goal distance per step</b><span>A step declares ordered conditions, each with one hint: "the prompt was used", "main.rs is current", "the text changed", "saved". The hint shown is always the first unmet condition. Authors describe the goal, never the mistakes; the engine finds where the learner stopped.</span><span class="who">authoring cost: three to five conditions per step, as YAML and elisp or shell predicates</span></div></li>
+    <li><div><b>Reset, then telemetry</b><span>When hints fail, Rescue restores Emacs's UI state and Reset restores the step's files and layout from a git checkpoint. Because the environment is fully pre-configured and reproducible, this is always safe. The event log around an "I'm stuck" click shows which new table row to add. Optionally, a model can narrate the last twenty events as a last resort.</span><span class="who">authoring cost: none per lesson</span></div></li>
+  </ol>
+
+  <h2>What a lesson author writes</h2>
+  <div class="two">
+    <div>
+<pre class="code"><span class="c"># curriculum/02-files/03-opening-files/scenario.yaml</span>
+<span class="k">id</span>: 02-files/03-opening-files
+<span class="k">mode</span>: terminal            <span class="c"># terminal | gui | any</span>
+<span class="k">modules</span>: [base, completion] <span class="c"># config modules unlocked so far</span>
+<span class="k">setup</span>:
+  <span class="k">workspace</span>: fixtures/hello-rust   <span class="c"># copied to /work/hello</span>
+  <span class="k">open</span>: [hello/README.md]
+  <span class="k">layout</span>: single
+<span class="k">steps</span>:
+  - <span class="k">id</span>: open
+    <span class="k">goal</span>: Open src/main.rs
+    <span class="k">demo</span>: <span class="s">"C-x C-f ma TAB RET"</span>
+    <span class="k">conditions</span>:
+      - <span class="k">text</span>: the Find file prompt was used
+        <span class="k">event</span>: { <span class="k">command</span>: find-file }
+        <span class="k">hint</span>: C-x then C-f. The prompt is the bottom line.
+      - <span class="k">text</span>: main.rs is the current buffer
+        <span class="k">elisp</span>: <span class="s">(equal (buffer-file-name) "/work/hello/src/main.rs")</span>
+        <span class="k">hint</span>: Type ma, press TAB, then RET.
+  - <span class="k">id</span>: save
+    <span class="k">goal</span>: Save it
+    <span class="k">conditions</span>:
+      - <span class="k">text</span>: saved
+        <span class="k">all</span>:
+          - { <span class="k">event</span>: { <span class="k">command</span>: save-buffer } }
+          - { <span class="k">file</span>: { <span class="k">path</span>: hello/src/main.rs, <span class="k">not_contains</span>: <span class="s">"Hello, world"</span> } }
+        <span class="k">hint</span>: C-x C-s. The mode line shows ** until you do.
+<span class="k">vscode</span>: Ctrl+P, Ctrl+S</pre>
+    </div>
+    <div>
+      <p>The prose is a Markdown file next to it. Key names inside backticks become keycaps; a <code>{try}</code> directive makes one clickable and sends it to Emacs. Checks come in four kinds: an <em>event</em> (a command ran), an <em>elisp</em> predicate evaluated inside Emacs over the client socket, a <em>file</em> matcher, and a <em>shell</em> test. They are re-evaluated on every agent event, debounced.</p>
+      <p>Entering a step records a checkpoint: a git ref over the workspace plus a buffer and window spec. Reset restores both. The scenario also names which config modules are unlocked, so part 0 starts close to vanilla Emacs and part 9 ends with the full setup, without hiding any of it.</p>
+      <p>Projects use the same format with longer steps, more than one <code>workspace</code> root, and a <code>remote</code> block that provisions the SSH box.</p>
+    </div>
+  </div>
+
+  <h2>Design tokens</h2>
+  <div class="two">
+    <div>
+      <div class="swatches">
+        <div class="sw" style="background:#F4F3F8;color:#1E1B2E">paper</div><div class="sw" style="background:#1E1B2E;color:#fff">ink</div><div class="sw" style="background:#6F4BB5;color:#fff">violet</div><div class="sw" style="background:#E8E1F6;color:#3B2A6B">violet soft</div><div class="sw" style="background:#0D0E1C;color:#fff">screen</div><div class="sw" style="background:#484D67;color:#fff">mode line</div><div class="sw" style="background:#1D7A46;color:#fff">ok</div><div class="sw" style="background:#8A5A00;color:#fff">warn</div>
+      </div>
+      <p>The chrome borrows Emacs's own violet and a pale lilac paper, so the dark modus-themed screen sits in a margin rather than fighting a second dark UI. Type: Source Serif 4 for prose and interface, a mono face (Iosevka when installed, JetBrains Mono otherwise) for keys and the screen.</p>
+    </div>
+    <div>
+      <p>One bold element: the keycap ticker under the screen, which names every chord, its command and a plain gloss, and shows a pending prefix as a waiting state. Everything else is quiet: rules instead of cards, no shadows, numbering only where there is a real sequence (steps). Visible focus rings, reduced-motion respected, layout collapses to two then one column.</p>
+    </div>
+  </div>
+
+  <h2>Decisions to confirm before building</h2>
+  <ol class="decisions">
+    <li><b>Terminal frame first, GUI frame for media lessons.</b> Crisp text, faithful keys, cheap sessions; the same Emacs daemon serves both frames so switching never loses buffers. Alternative: GUI-only over VNC, simpler but blurrier and heavier.</li>
+    <li><b>Vanilla Emacs keys, not evil.</b> The goal is to learn Emacs. An evil track can be added later as a module.</li>
+    <li><b>Eglot over lsp-mode, package.el + use-package over elpaca/straight.</b> Built-in first, so what you learn transfers to any Emacs; alternatives are shown in part 9.</li>
+    <li><b>Go for the gateway and sessiond, React + Vite for the web app.</b> Static binaries, a strong standard library, and a widely known stack for maintainability.</li>
+    <li><b>Emacs 31.1</b> (released August 2026: built-in which-key, completion preview, user-lisp/, mouse on by default in terminals). Fallback to 30.2 if a needed package lags.</li>
+    <li><b>xterm.js 6.1 beta with the kitty keyboard protocol</b> plus kkp.el in Emacs, so C-;, C-RET and friends work in the terminal frame. The 6.0 stable release cannot distinguish them.</li>
+    <li><b>English UI first, Chinese later</b> through the same string tables.</li>
+  </ol>
+
+  <p class="foot">Design documents: docs/DESIGN.md is the overview; architecture, deployment, backend, API, Emacs, frontend, curriculum and third-party documents sit beside it. Nothing here is implemented yet; the Emacs pane in these pages is a simulation of about sixty commands.</p>
+</main>
+
+<script src="mock-emacs.js"></script>
+<script>
+(function () {
+  const M = window.MockEmacs; const eng = M.createEngine();
+  const s = document.getElementById('heroScreen'), t = document.getElementById('heroTicker');
+  function r() { M.renderScreen(eng, s, { rows: 16 }); M.renderTicker(eng, t, 4); }
+  eng.on('change', r); r(); M.attachKeyboard(eng, s);
+  const script = [{ keys: 'C-x C-f' }, { wait: 700 }, { type: 'ma' }, { keys: 'TAB' }, { wait: 500 }, { keys: 'RET' }, { wait: 900 }, { keys: 'C-s' }, { type: 'greet' }, { wait: 700 }, { keys: 'RET' }, { wait: 900 }, { keys: 'C-x C-b' }, { wait: 1600 }, { keys: 'C-x 1' }, { wait: 1200 }, { keys: 'C-z' }, { wait: 2600 }];
+  let stop = null, userTookOver = false;
+  function loop() { if (userTookOver) return; stop = eng.play(script, { done: () => { stop = null; setTimeout(() => { if (userTookOver) return; const fresh = M.createEngine(); Object.assign(eng.st, fresh.st, { now: eng.st.now }); r(); loop(); }, 2500); } }); }
+  s.addEventListener('keydown', () => { userTookOver = true; if (stop) stop(); }, { once: true });   // typing takes over from the loop
+  loop();
+})();
+</script>
+</body>
+</html>

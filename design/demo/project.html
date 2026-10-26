@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Project P6 Polyglot service — Emacs Playground (design demo)</title>
+<link rel="stylesheet" href="demo.css">
+</head>
+<body class="app">
+<div class="demo-note" id="demoNote"><b>Design demo.</b> A capstone project view: file tree, two Emacs windows, the compiler, and a live preview of a Typst report. Fix the Rust error with <kbd>M-g M-n</kbd>, then save and rebuild with <kbd>C-c C-c</kbd>. <button type="button" onclick="document.getElementById('demoNote').remove()">Hide</button></div>
+
+<header class="topbar">
+  <a class="brand" href="index.html"><i>E</i>Emacs Playground</a>
+  <nav class="crumbs"><a href="curriculum.html">Projects</a><span>›</span>P6 Polyglot service<span>›</span>Task 4 of 7: fix the build, rebuild the report</nav>
+  <div class="spacer"></div>
+  <span class="chip live">local session</span>
+  <div class="seg" role="group" aria-label="Frame"><button type="button" class="on" id="termBtn">Terminal</button><button type="button" id="guiBtn">GUI</button></div>
+  <button class="btn" type="button" id="previewBtn">Hide preview</button>
+  <button class="btn primary" type="button" id="rescueTop">Rescue me</button>
+</header>
+
+<div class="work">
+  <aside class="side">
+    <section>
+      <h2>Files <small class="dim">dirvish side window</small></h2>
+      <ul class="tree" id="tree"></ul>
+    </section>
+    <section class="task">
+      <h2>Task 4 of 7</h2>
+      <div class="goal">Fix the build, then rebuild the report</div>
+      <ol class="steps" id="steps"></ol>
+      <div id="allDone"></div>
+    </section>
+    <section>
+      <h2>Checkpoints <small class="dim">git refs under refs/playground</small></h2>
+      <ul class="checkpoints">
+        <li><span>Task 3 done<span class="when">today 18:01 · 5 files</span></span><button class="btn small" type="button" data-restore="Task 3 done">Restore</button></li>
+        <li><span>Task 2 done<span class="when">today 17:48 · 4 files</span></span><button class="btn small" type="button" data-restore="Task 2 done">Restore</button></li>
+        <li><span>Project start<span class="when">today 17:30 · scaffold</span></span><button class="btn small" type="button" data-restore="Project start">Restore</button></li>
+      </ul>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <div class="screen-head"><span id="frameLabel">Emacs 31.1, terminal frame in tmux, 100×32</span><span class="chip">eglot: rust-analyzer, tinymist, basedpyright, ocaml-lsp</span><span class="spacer"></span><span id="playState"></span></div>
+    <div class="screen-wrap" id="screenWrap"><div class="menubar"><span>File</span><span>Edit</span><span>Options</span><span>Buffers</span><span>Tools</span><span>PDF Tools</span><span>Help</span></div><div class="screen" id="screen" aria-label="Emacs (simulated)"></div></div>
+    <div class="ticker" id="ticker" aria-live="polite"></div>
+  </main>
+
+  <aside class="rail split" id="rail">
+    <div class="preview" id="preview">
+      <div class="preview-tabs"><button class="ptab on" type="button" data-tab="pdf">report.pdf</button><button class="ptab" type="button" data-tab="md">README.md</button><button class="ptab" type="button" data-tab="html">index.html</button></div>
+      <div class="preview-body" id="previewBody"></div>
+      <div class="preview-status" id="previewStatus"><span class="dot"></span><span id="previewText">report.pdf is up to date with report.typ (typst watch, 180 ms).</span></div>
+    </div>
+    <div class="rail-bottom">
+      <section><h2>Where am I</h2><div id="where"></div></section>
+      <section><h2>Did you mean</h2><div id="nudges"></div></section>
+    </div>
+  </aside>
+</div>
+
+<script src="mock-emacs.js"></script>
+<script>
+(function () {
+  const M = window.MockEmacs;
+  const $ = id => document.getElementById(id);
+  const screen = $('screen'), ticker = $('ticker'), where = $('where'), nudgesEl = $('nudges'), stepsEl = $('steps');
+  let eng, gui = false, stopPlay = null, tab = 'pdf';
+
+  const FILES = Object.assign({}, M.POLY_FILES, {
+    'report.pdf': { mode: 'pdf-view-mode', modeName: 'PDFView', special: true, readonly: true, dir: '/work/polyglot/docs/',
+      text: 'report.pdf is a PDF.\n\nIn a terminal frame Emacs cannot draw it; use the Preview pane on the right,\nor switch this session to the GUI frame where pdf-tools renders it inline.\n' },
+  });
+
+  const STEPS = [
+    { id: 'jump', goal: 'Jump to the compiler error', detail: '<kbd>M-g M-n</kbd> moves the cursor to the first error from the *compilation* window.', demo: [{ keys: 'M-g M-n' }],
+      conds: [{ text: 'next-error ran', test: s => (s.counts['next-error'] || 0) > 0, hint: 'M-g M-n: hold Alt, press g, then Alt n. In the terminal frame Alt is Meta.' },
+              { text: 'the cursor is on the bad argument', test: (s, e) => e.cur().name === 'main.rs' && !!e.diagAtPoint(e.cur()), hint: 'The error is in main.rs line 9. M-g g 9 RET also gets you there.' }] },
+    { id: 'fix', goal: 'Borrow instead of move', detail: 'Make it <code>greet(&name)</code>. Flymake underlines the problem; <kbd>C-h .</kbd> shows the message.', demo: [{ type: '&' }],
+      conds: [{ text: 'main.rs contains greet(&name)', test: s => /println!\("\{\}", greet\(&name\)\)/.test(s.buffers['main.rs'].text), hint: 'With the cursor on name, type &. That is all: the compiler wanted a reference.' }] },
+    { id: 'build', goal: 'Save and rebuild', detail: '<kbd>C-x C-s</kbd> then <kbd>C-c C-c</kbd>. Accept the suggested command with <kbd>RET</kbd>.', demo: [{ keys: 'C-x C-s' }, { wait: 300 }, { keys: 'C-c C-c' }, { wait: 500 }, { keys: 'RET' }],
+      conds: [{ text: 'main.rs saved', test: s => !s.buffers['main.rs'].modified && /println!\("\{\}", greet\(&name\)\)/.test(s.buffers['main.rs'].text), hint: 'C-x C-s in the main.rs window.' },
+              { text: 'the build finished', test: s => s.buffers['*compilation*'].text.includes('Finished'), hint: 'C-c C-c asks for a compile command; cargo build is already filled in. RET runs it.' }] },
+    { id: 'report', goal: 'Retitle the report, watch it rebuild', detail: 'Open <code>docs/report.typ</code>, change the <code>=</code> heading, save. The preview updates in place.', demo: [{ keys: 'C-x C-f' }, { type: '~/polyglot/docs/report.typ' }, { keys: 'RET' }, { keys: 'M-< C-n C-n C-n C-e' }, { keys: 'DEL DEL DEL DEL DEL DEL DEL DEL' }, { type: 'measured twice' }, { keys: 'C-x C-s' }],
+      conds: [{ text: 'report.typ is open', test: (s, e) => e.cur().name === 'report.typ', hint: 'C-x C-f, then type the path. TAB completes each directory.' },
+              { text: 'the heading changed and was saved', test: s => s.buffers['report.typ'] && !s.buffers['report.typ'].modified && !s.buffers['report.typ'].text.includes('= Polyglot: a tiny service, measured\n'), hint: 'Lines starting with = are headings in Typst. Edit the text after =, then C-x C-s. The status line under the preview shows the rebuild.' }] },
+  ];
+  const hintLevel = {}; let doneIds = new Set();
+
+  function boot(windows) {
+    if (eng) eng.dispose();
+    eng = M.createEngine({ files: FILES, windows: windows || [{ buf: 'main.rs' }, { buf: '*compilation*' }] });
+    eng.on('change', renderAll);
+    eng.on('save', onSave);
+    M.attachKeyboard(eng, screen, key => toast('Your browser may have grabbed ' + key + '. Focus mode fixes that in the real app.'));
+    renderAll();
+  }
+
+  /* ---- preview: a tiny typst-to-html so the page is live ---- */
+  function typstToHtml(src) {
+    let html = '', inTable = false, cells = [];
+    for (const raw of src.split('\n')) {
+      const line = raw.trim();
+      if (!line || line.startsWith('#set')) continue;
+      if (line.startsWith('#table(')) { inTable = true; cells = []; continue; }
+      if (inTable) { if (line.startsWith(')')) { inTable = false; const cols = 3; let t = '<table>'; for (let i = 0; i < cells.length; i += cols) t += '<tr>' + cells.slice(i, i + cols).map(c => '<td>' + M.esc(c) + '</td>').join('') + '</tr>'; html += t + '</table>'; } else if (line.startsWith('[')) cells.push(...[...line.matchAll(/\[([^\]]*)\]/g)].map(m => m[1])); continue; }
+      if (line.startsWith('== ')) html += '<h2>' + M.esc(line.slice(3)) + '</h2>';
+      else if (line.startsWith('= ')) html += '<h1>' + M.esc(line.slice(2)) + '</h1>';
+      else if (line.startsWith('$')) html += '<div class="math">' + M.esc(line.replace(/\$/g, '').replace('sum_(i=1)^n', '∑ᵢ₌₁ⁿ')) + '</div>';
+      else html += '<p>' + M.esc(line) + '</p>';
+    }
+    return html;
+  }
+  function pageHtml() { return '<div class="page">' + typstToHtml(eng.st.buffers['report.typ'].text) + '</div>'; }
+  function renderPreview() {
+    const body = $('previewBody');
+    if (tab === 'pdf') body.innerHTML = pageHtml();
+    else if (tab === 'md') body.innerHTML = '<div class="page md"><h1>polyglot</h1><p>Three languages, one build. <code>cargo run</code> greets, <code>uv run tools/score.py</code> scores, <code>dune build proof</code> checks the proof.</p><h2>Layout</h2><p><code>src/</code> Rust CLI · <code>tools/</code> Python scoring · <code>proof/</code> OCaml · <code>docs/</code> Typst report</p></div>';
+    else body.innerHTML = '<div class="page md"><h1>Polyglot docs</h1><p>Rendered from <code>site/</code> by the static docs task. This tab is an iframe over the workspace in the real app, reloaded on file change.</p><p>Built 2 min ago · 4 pages</p></div>';
+  }
+  let buildT = null;
+  function onSave(st) {
+    const saved = eng.st.lastCmd === 'save-buffer' ? eng.cur().name : null;
+    if (saved === 'report.typ') {
+      const status = $('previewStatus'); status.classList.add('building'); $('previewText').textContent = 'report.typ saved. typst is rebuilding report.pdf…';
+      clearTimeout(buildT); buildT = setTimeout(() => { status.classList.remove('building'); $('previewText').textContent = 'report.pdf rebuilt in 190 ms. Preview reloaded, scroll position kept.'; renderPreview(); }, 900);
+    }
+    renderTree();
+  }
+
+  /* ---- file tree ---- */
+  const TREE = [['polyglot/', [['Cargo.toml', 'Cargo.toml'], ['README.md', null], ['src/', [['main.rs', 'main.rs'], ['lib.rs', 'lib.rs']]], ['tools/', [['score.py', 'score.py']]], ['proof/', [['term.ml', 'term.ml'], ['dune', null]]], ['docs/', [['report.typ', 'report.typ'], ['report.pdf', 'report.pdf', 'gen']]], ['site/', [['index.html', null, 'gen']]]]]];
+  function renderTree() {
+    const cur = eng.cur().name;
+    function node([name, kids, gen]) {
+      if (Array.isArray(kids)) return '<li><span class="dir">' + M.esc(name) + '</span><ul>' + kids.map(node).join('') + '</ul></li>';
+      const b = kids ? eng.st.buffers[kids] : null;
+      const cls = 'f' + (kids && cur === kids ? ' on' : '') + (b && b.modified ? ' mod' : '') + (gen ? ' gen' : '');
+      return '<li><span class="' + cls + '" ' + (kids ? 'data-open="' + kids + '"' : '') + '>' + M.esc(name) + '</span></li>';
+    }
+    $('tree').innerHTML = TREE.map(node).join('');
+    $('tree').querySelectorAll('[data-open]').forEach(el => el.addEventListener('click', () => { eng.sendKeys('C-x b'); eng.typeText(el.dataset.open); eng.sendKeys('RET'); screen.focus(); }));
+  }
+
+  function renderAll() {
+    M.renderScreen(eng, screen, { rows: 32, layout: gui ? 'side' : null, pdfHtml: pageHtml() });
+    M.renderTicker(eng, ticker, 6);
+    M.renderWhere(eng, where);
+    const ns = eng.nudges();
+    nudgesEl.innerHTML = ns.length ? ns.map(n => '<div class="nudge ' + n.kind + '"><button class="x" type="button" aria-label="Dismiss" data-id="' + M.esc(n.id) + '">×</button><h3>' + M.esc(n.title) + '</h3><p>' + M.keyify(n.body) + '</p></div>').join('') : '<div class="nudge-empty">Nothing to translate right now.</div>';
+    nudgesEl.querySelectorAll('.x').forEach(b => b.addEventListener('click', () => eng.dismiss(b.dataset.id)));
+    renderSteps(); renderTree(); renderPreview();
+  }
+
+  function renderSteps() {
+    const s = eng.st; let active = -1;
+    const results = STEPS.map(step => step.conds.map(c => !!c.test(s, eng)));
+    results.forEach((r, i) => { if (r.every(Boolean)) doneIds.add(STEPS[i].id); });
+    STEPS.forEach((st, i) => { if (active < 0 && !doneIds.has(st.id)) active = i; });
+    stepsEl.innerHTML = STEPS.map((step, i) => {
+      const done = doneIds.has(step.id), isActive = i === active, firstUnmet = results[i].findIndex(x => !x), lvl = hintLevel[step.id] || 0;
+      const conds = step.conds.map((c, j) => '<li class="' + (done || results[i][j] ? 'met' : (j === firstUnmet && isActive ? 'next' : '')) + '">' + M.esc(c.text) + '</li>').join('');
+      const hint = isActive && lvl > 0 && firstUnmet >= 0 ? '<div class="hint"><div class="lvl">hint for: ' + M.esc(step.conds[firstUnmet].text) + '</div>' + M.keyify(step.conds[firstUnmet].hint) + '</div>' : '';
+      const actions = isActive ? '<div class="actions"><button class="btn small" type="button" data-hint="' + step.id + '">' + (lvl ? 'Another hint' : 'Show a hint') + '</button><button class="btn small" type="button" data-watch="' + i + '">Watch it</button></div>' : '';
+      return '<li class="step' + (done ? ' done' : '') + (isActive ? ' active' : '') + '"><span class="mark" aria-hidden="true"></span><div><div class="goal">' + M.esc(step.goal) + '</div><div class="detail">' + step.detail + '</div><ul class="conds">' + conds + '</ul>' + hint + actions + '</div></li>';
+    }).join('');
+    stepsEl.querySelectorAll('[data-hint]').forEach(b => b.addEventListener('click', () => { hintLevel[b.dataset.hint] = (hintLevel[b.dataset.hint] || 0) + 1; renderSteps(); }));
+    stepsEl.querySelectorAll('[data-watch]').forEach(b => b.addEventListener('click', () => { if (stopPlay) stopPlay(); $('playState').textContent = 'Playing…'; screen.focus(); stopPlay = eng.play(STEPS[+b.dataset.watch].demo, { done: () => { $('playState').textContent = ''; stopPlay = null; } }); }));
+    $('allDone').innerHTML = active < 0 ? '<div class="done-all">Task 4 complete. Checkpoint saved. Next: task 5, score the latency table with the Python tool from an Eshell.</div>' : '';
+  }
+
+  let toastT = null;
+  function toast(msg) { let t = document.querySelector('.toast'); if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); } t.textContent = msg; clearTimeout(toastT); toastT = setTimeout(() => t.remove(), 4200); }
+  function doRescue() { const did = eng.rescue(); toast(did.length ? 'Rescue: ' + did.join(', ') + '.' : 'Rescue: nothing to undo.'); screen.focus(); }
+  $('rescueTop').addEventListener('click', doRescue);
+  $('previewBtn').addEventListener('click', () => { const p = $('preview'); const hidden = p.style.display === 'none'; p.style.display = hidden ? '' : 'none'; $('rail').style.gridTemplateRows = hidden ? '' : 'minmax(0,1fr)'; $('previewBtn').textContent = hidden ? 'Hide preview' : 'Show preview'; });
+  document.querySelectorAll('.ptab').forEach(b => b.addEventListener('click', () => { document.querySelectorAll('.ptab').forEach(x => x.classList.remove('on')); b.classList.add('on'); tab = b.dataset.tab; renderPreview(); }));
+  document.querySelectorAll('[data-restore]').forEach(b => b.addEventListener('click', () => { doneIds = new Set(); boot(); toast('Restored workspace files and Emacs buffers to checkpoint “' + b.dataset.restore + '”. In the real app: git checkout of refs/playground/<step> plus a buffer and window spec.'); }));
+  function setGui(on) {
+    gui = on; $('screenWrap').classList.toggle('gui', on); $('guiBtn').classList.toggle('on', on); $('termBtn').classList.toggle('on', !on);
+    $('frameLabel').textContent = on ? 'Emacs 31.1, GUI frame on Xvnc :1 via noVNC, 1600×900' : 'Emacs 31.1, terminal frame in tmux, 100×32';
+    const same = eng.st; // same Emacs daemon, different frame: buffers survive the switch
+    if (on) { same.windows = [{ buf: 'main.rs' }, { buf: 'report.pdf' }]; same.sel = 0; same.echo = 'Playground: switched to the GUI frame. Same Emacs, same buffers; pdf-tools can draw now.'; }
+    else { same.windows = [{ buf: 'main.rs' }, { buf: '*compilation*' }]; same.sel = 0; same.echo = 'Playground: back to the terminal frame.'; }
+    renderAll(); screen.focus();
+  }
+  $('guiBtn').addEventListener('click', () => setGui(true));
+  $('termBtn').addEventListener('click', () => setGui(false));
+
+  boot();
+  const replay = location.hash.match(/play=([^&]+)/);   // e.g. #play=C-x%20C-b to open the page in a given state
+  if (replay) { eng.sendKeys(decodeURIComponent(replay[1])); }
+  screen.focus();
+})();
+</script>
+</body>
+</html>

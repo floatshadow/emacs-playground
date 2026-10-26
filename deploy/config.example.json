@@ -1,0 +1,46 @@
+{
+  "$schema": "https://github.com/ORG/emacs-playground/raw/main/deploy/config.schema.json",
+  "mode": "server",
+  "listen": ":8080",
+  "publicUrl": "https://emacs.example.edu",
+  "dataDir": "/data",
+
+  "auth": {
+    "mode": "invite",
+    "invites": { "file": "/etc/playground/invites.txt" },
+    "oidc": {
+      "issuer": "https://login.example.edu/realms/main",
+      "clientId": "emacs-playground",
+      "clientSecretFile": "/run/secrets/oidc_client_secret",
+      "allowedEmailDomains": ["example.edu"]
+    },
+    "cookieSecretFile": "/data/cookie.secret",
+    "sessionDays": 30
+  },
+
+  "sessions": {
+    "backend": "docker",
+    "dockerHost": "tcp://socket-proxy:2375",
+    "image": "ghcr.io/ORG/emacs-playground/session:v0.1.0",
+    "network": "emacs-playground_sessions",
+    "runtime": "runc",
+    "limits": { "cpus": 2, "memory": "3g", "pids": 1024, "disk": "4g" },
+    "idleStopMinutes": 30,
+    "maxSessions": 50,
+    "volumeRetentionDays": 30,
+    "egress": "registries",
+    "remoteBox": { "enabled": true, "image": "ghcr.io/ORG/emacs-playground/remote-box:v0.1.0" },
+    "gui": { "enabled": true, "geometry": "1600x900" },
+    "terminal": { "initialSize": "120x36" }
+  },
+
+  "local": {
+    "sessionUrl": "http://session:7000",
+    "workspace": "./workspace"
+  },
+
+  "curriculum": { "dir": "/srv/curriculum", "defaultLocale": "en" },
+  "logging": { "level": "info", "format": "json" },
+  "metrics": { "enabled": false, "listen": ":9090" },
+  "features": { "stuckReports": true, "telemetryUpload": false, "authorMode": false }
+}
