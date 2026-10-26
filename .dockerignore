@@ -1,0 +1,11 @@
+.git
+**/node_modules
+web/dist
+workspace
+workspace.bak-*
+artifacts
+.dev
+.env
+deploy/secrets
+design/screenshots
+**/*.tsbuildinfo

@@ -1,0 +1,44 @@
+# Server mode (deployment.md §2, §5): Caddy for TLS, a Docker socket proxy,
+# and the gateway in orchestrator mode creating one session container per
+# learner (docker backend; experimental in slice 1).
+services:
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    networks: [front]
+    restart: unless-stopped
+  socket-proxy:
+    image: tecnativa/docker-socket-proxy:0.3
+    environment:
+      CONTAINERS: 1
+      IMAGES: 1
+      VOLUMES: 1
+      NETWORKS: 1
+      EXEC: 1
+      POST: 1
+      INFO: 1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [docker]
+    restart: unless-stopped
+  gateway:
+    environment:
+      PG_MODE: server
+    secrets: [oidc_client_secret]
+    volumes:
+      - ./deploy/invites.txt:/etc/playground/invites.txt:ro
+    networks: [front, sessions, docker]
+    depends_on: [socket-proxy]
+secrets:
+  oidc_client_secret:
+    file: ./deploy/secrets/oidc_client_secret
+volumes:
+  caddy-data: {}
+networks:
+  docker:
+    internal: true

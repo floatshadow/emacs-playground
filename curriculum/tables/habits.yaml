@@ -1,0 +1,16 @@
+# Layer 2 of the advice engine (frontend.md §6): VS Code muscle memory. One
+# card per key per session when a single-key command event matches; cards
+# expire after 12 commands.
+#
+# Row fields (protocol.HabitRow):
+#   key     the single key VS Code users press by habit, Emacs notation (C-z)
+#   vscode  what they meant ("undo")
+#   say     the card body; key names render as keycaps
+#
+# Example:
+#   - key: C-z
+#     vscode: undo
+#     say: "C-z suspends Emacs to the shell. Undo is C-/ (also C-x u)."
+#
+# TODO(curriculum): port HABITS from design/demo/mock-emacs.js.
+[]

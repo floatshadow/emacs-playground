@@ -1,0 +1,27 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+/bin/
+/out/
+*.tsbuildinfo
+.pnpm-store/
+
+# Local runtime state
+/workspace/
+/workspace.bak-*/
+/artifacts/
+/.dev/
+.env
+
+# Secrets and per-deployment files
+/deploy/secrets/
+/deploy/invites.txt
+
+# Editors and OS
+.DS_Store
+*~
+\#*\#
+.#*
+.idea/
+.vscode/

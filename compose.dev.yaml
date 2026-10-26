@@ -1,0 +1,12 @@
+# Development overlay (`make dev`, deployment.md §4): only the session
+# container runs in Docker, on the host network, so the gateway started from
+# source on the host reaches it at 127.0.0.1:7000 and it reaches the gateway
+# at 127.0.0.1:8080. Use with compose.yaml and compose.local.yaml:
+#   docker compose -f compose.yaml -f compose.local.yaml -f compose.dev.yaml up -d session
+services:
+  session:
+    network_mode: host
+    networks: !reset []
+    environment:
+      PG_LISTEN: 127.0.0.1:7000
+      PG_GATEWAY_URL: http://127.0.0.1:8080

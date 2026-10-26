@@ -1,0 +1,42 @@
+/* Element defaults from design/demo/demo.css. Components use CSS Modules. */
+body {
+  font: 15px/1.5 var(--serif);
+  color: var(--ink);
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+}
+a {
+  color: var(--violet-ink);
+}
+h1,
+h2,
+h3,
+h4 {
+  font-weight: 600;
+  line-height: 1.2;
+}
+kbd {
+  font: 600 12px/1 var(--mono);
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid #c9c3da;
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 4px 6px;
+  display: inline-block;
+  margin: 0 2px;
+  white-space: nowrap;
+  vertical-align: 1px;
+}
+:focus-visible {
+  outline: 2px solid var(--violet);
+  outline-offset: 2px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

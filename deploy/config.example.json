@@ -1,5 +1,5 @@
 {
-  "$schema": "https://github.com/ORG/emacs-playground/raw/main/deploy/config.schema.json",
+  "$schema": "./config.schema.json",
   "mode": "server",
   "listen": ":8080",
   "publicUrl": "https://emacs.example.edu",
@@ -21,7 +21,7 @@
   "sessions": {
     "backend": "docker",
     "dockerHost": "tcp://socket-proxy:2375",
-    "image": "ghcr.io/ORG/emacs-playground/session:v0.1.0",
+    "image": "ghcr.io/zsy/emacs-playground/session:v0.1.0",
     "network": "emacs-playground_sessions",
     "runtime": "runc",
     "limits": { "cpus": 2, "memory": "3g", "pids": 1024, "disk": "4g" },
@@ -29,7 +29,7 @@
     "maxSessions": 50,
     "volumeRetentionDays": 30,
     "egress": "registries",
-    "remoteBox": { "enabled": true, "image": "ghcr.io/ORG/emacs-playground/remote-box:v0.1.0" },
+    "remoteBox": { "enabled": true, "image": "ghcr.io/zsy/emacs-playground/remote-box:v0.1.0" },
     "gui": { "enabled": true, "geometry": "1600x900" },
     "terminal": { "initialSize": "120x36" }
   },

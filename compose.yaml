@@ -1,0 +1,32 @@
+# Shared by both deployment modes (deployment.md §2). `.env` selects the mode
+# through COMPOSE_FILE (written by `make local` or `make server`), so plain
+# `docker compose up` works afterwards. Everything else is configured in
+# deploy/config.json (deployment.md §3).
+name: emacs-playground
+services:
+  gateway:
+    image: ghcr.io/zsy/emacs-playground/gateway:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: images/gateway/Dockerfile
+      args:
+        VERSION: ${TAG:-dev}
+    volumes:
+      - gateway-data:/data
+      - ./deploy/config.json:/etc/playground/config.json:ro
+    networks: [front, sessions]
+    healthcheck:
+      test: ["CMD", "/gateway", "healthcheck"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+    restart: unless-stopped
+volumes:
+  gateway-data: {}
+networks:
+  front: {}
+  sessions:
+    # Session containers have no default route; egress is granted per
+    # sessions.egress (deployment.md §9.2). TODO(server, deployment.md §9.2):
+    # the registries egress proxy.
+    internal: true

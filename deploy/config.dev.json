@@ -1,0 +1,12 @@
+{
+  "$schema": "./config.schema.json",
+  "mode": "local",
+  "listen": "127.0.0.1:8080",
+  "publicUrl": "http://localhost:5173",
+  "dataDir": ".dev/data",
+  "auth": { "mode": "none" },
+  "local": { "sessionUrl": "http://127.0.0.1:7000" },
+  "curriculum": { "dir": ".dev/curriculum" },
+  "logging": { "level": "debug", "format": "text" },
+  "features": { "authorMode": true }
+}

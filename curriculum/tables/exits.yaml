@@ -1,0 +1,29 @@
+# Layer 1 of the advice engine (architecture.md §4, CURRICULUM.md Part B.4):
+# "Where am I" rows, evaluated in order against the latest state object
+# (api.md §5). Every matching row is shown as a reason (why) and one exit (how).
+#
+# Row fields (protocol.ExitRow):
+#   id    stable id
+#   when  protocol.Predicate: dotted paths into the state, all must hold.
+#         scalar = equality, list = membership, or one operator object:
+#         {in: [...]}, {not: v}, {gt|gte|lt|lte: n}, {exists: bool},
+#         {contains: v}, {regex: "re"}. Paths over a list match ANY element;
+#         "windows.length" is a count; virtual roots: otherWindows,
+#         selectedWindow. Quote keys that contain dots.
+#   why   template, {path} placeholders resolved against the state
+#   how   template; key names are rendered as keycaps by the browser
+#   flag  optional short chip (Narrow, Def, Ovwrt)
+#
+# Example:
+#   - id: minibuffer-prompt
+#     when: { "minibuffer.kind": prompt }
+#     why: "A prompt is open: {minibuffer.prompt}"
+#     how: "RET accepts, C-g cancels. TAB completes names."
+#   - id: other-window-special
+#     when: { "otherWindows.mode": { in: [help-mode, Buffer-menu-mode, dired-mode] } }
+#     why: "A second window shows {otherWindows.buf}."
+#     how: "Press q inside it, or C-x 1 here to keep only this window."
+#
+# Localise per file: exits.zh-CN.yaml. TODO(curriculum): rows for Parts 0-3
+# (port the demo's whereAmI in design/demo/mock-emacs.js).
+[]

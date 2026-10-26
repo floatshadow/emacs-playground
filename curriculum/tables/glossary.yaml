@@ -1,0 +1,9 @@
+# Glossary for :jargon[term] tooltips in lesson.md (CURRICULUM.md Part B.2):
+# term → one or two sentences. Terms are matched case-insensitively.
+#
+# Example:
+#   buffer: "Text held in Emacs. Usually a file's contents, but also lists, help and shells."
+#
+# TODO(curriculum): buffer, window, frame, mode line, echo area, minibuffer,
+# point, mark, region, kill ring, major mode, minor mode, prefix key, ...
+{}

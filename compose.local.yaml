@@ -1,0 +1,53 @@
+# Local mode (deployment.md §2, §4): the gateway in static mode with one
+# fixed session container and a shared remote box. The workspace is
+# bind-mounted from ./workspace so projects and the learner's config survive
+# restarts. `make local` creates it world-writable because the session runs as
+# uid 1000 (learner) whatever the host uid is.
+services:
+  gateway:
+    ports: ["127.0.0.1:8080:8080"]
+    environment:
+      PG_MODE: local
+    depends_on:
+      session:
+        condition: service_healthy
+  session:
+    image: ghcr.io/zsy/emacs-playground/session:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: images/session/Dockerfile
+      args:
+        VERSION: ${TAG:-dev}
+    init: true
+    environment:
+      PG_SESSION_ID: local
+      PG_SESSION_TOKEN: local
+      PG_GATEWAY_URL: http://gateway:8080
+    volumes:
+      - ./workspace:/work
+    networks: [sessions]
+    # Hardening from deployment.md §9.2 where it does not get in the way.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 2048
+    tmpfs:
+      - /tmp:size=1g
+      - /run:size=64m,mode=1777
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/sessiond", "healthcheck"]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 60s
+    stop_grace_period: 20s
+  remote-box:
+    image: ghcr.io/zsy/emacs-playground/remote-box:${TAG:-latest}
+    build:
+      context: .
+      dockerfile: images/remote-box/Dockerfile
+    environment:
+      AUTHORIZED_KEYS_FILE: /keys/authorized_keys
+    volumes:
+      - ./workspace/.playground/ssh:/keys:ro
+    networks: [sessions]
+    profiles: [remote]

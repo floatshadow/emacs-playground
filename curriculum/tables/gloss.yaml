@@ -1,0 +1,10 @@
+# Ticker glosses (frontend.md §6): command name → a short plain-language
+# gloss shown under the chord. Commands missing here fall back to the first
+# docstring line through rpc describe.
+#
+# Example:
+#   find-file: Open a file (asks for a path)
+#
+# TODO(curriculum): port GLOSS from design/demo/mock-emacs.js and add every
+# command taught in Parts 0-3.
+{}

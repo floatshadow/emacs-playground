@@ -1,0 +1,13 @@
+# Cheat sheet rows per major mode (frontend.md §6): mode → list of
+# [keys, description]. The key "common" holds rows shown in every mode.
+#
+# Example:
+#   common:
+#     - [C-g, cancel anything]
+#   rust-ts-mode:
+#     - [M-., go to definition]
+#     - [C-c C-c, compile]
+#
+# TODO(curriculum): rows for the modes met in Parts 0-3 (fundamental,
+# lisp-interaction, rust-ts, markdown, dired, Buffer-menu, help, ibuffer).
+{}

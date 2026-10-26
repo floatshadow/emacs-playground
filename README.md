@@ -2,7 +2,7 @@
 
 A browser-based, hands-on Emacs course around a real, fully configured Emacs running in Docker. Real projects in Rust, OCaml, Python, Markdown, Typst and LaTeX; a live key ticker that explains every chord; a panel that always knows how to get you out of a confusing state; checkpoints to retry any step.
 
-Status: design complete, implementation starting.
+Status: design complete; slice 1 (Parts 0 to 3, local mode) in progress. `AGENTS.md` explains how to build, test and run every component.
 
 - `docs/DESIGN.md`: the overview and reading guide: goals, system at a glance, technology choices, decision records, roadmap.
 - `docs/architecture.md`, `docs/deployment.md`, `docs/backend.md`, `docs/api.md`, `docs/emacs.md`, `docs/frontend.md`, `docs/CURRICULUM.md`, `docs/third-party.md`: one document per concern.
