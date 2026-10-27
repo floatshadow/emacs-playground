@@ -134,9 +134,7 @@ describe('RE2 patterns (B11)', () => {
     },
   }
   const matching = (prompt: string) => {
-    const d = stateDoc(
-      apiState({ minibuffer: { prompt, contents: '', depth: 1, kind: 'prompt' } }),
-    )
+    const d = stateDoc(apiState({ minibuffer: { prompt, contents: '', depth: 1, kind: 'prompt' } }))
     return Object.entries(rows)
       .filter(([, p]) => matchPredicate(p, d))
       .map(([id]) => id)
