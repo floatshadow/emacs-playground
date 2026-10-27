@@ -18,7 +18,7 @@ One window is *selected*: it has the cursor, and its mode line is drawn brighter
 
 ## Reading a mode line
 
-Read it from the left. The first characters say whether the buffer has changed since it was last saved: `-:---` means unchanged, `-:**-` means :jargon[modified], and `%%` means :jargon[read-only]. Then comes the buffer's name, then where you are: `Top`, `Bot`, `All` or a percentage, and the line and column, such as `L12 C4`. The words in parentheses are the modes. `(Rust)` is the :jargon[major mode], which decides how this buffer behaves; later you will see `(Rust Eglot)`, where Eglot is a :jargon[minor mode] that adds a language server on top.
+Read it from the left. The first characters say whether the buffer has changed since it was last saved: `-:---` means unchanged, `-:**-` means :jargon[modified], and `%%` means :jargon[read-only]. Then comes the buffer's name, then where you are: `Top`, `Bot`, `All` or a percentage, and the line and column, such as `L12 C4`. The words in parentheses are the modes. The first one, `(Rust)` here, is the :jargon[major mode], which decides how this buffer behaves. Any words after it are :jargon[minor modes], features switched on for this buffer on top of the major mode; later you will see `(Rust Eglot)`, where Eglot adds a language server. The modules of later parts switch on a few more, and `C-h m` (lesson 0.3) lists every mode that is on, with what it does.
 
 :::aside{title="Saving in the playground"}
 The playground normally saves your files a few seconds after you stop typing, so nothing is lost if a frame closes. This lesson switches that off, so the `**` stays visible until you save yourself.
