@@ -234,7 +234,8 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
       return next
     }
     case 'key': {
-      const lastKeyTs = Math.max(base.lastKeyTs, ev.ts ?? now)
+      // Server time only: prefix events carry the same clock (the client's may differ).
+      const lastKeyTs = ev.ts !== undefined ? Math.max(base.lastKeyTs, ev.ts) : base.lastKeyTs
       // Clicks and scrolling are not keys: no ticker entry, no habit card.
       if (!ev.mx && isMouseOnly(ev.keys)) return { ...base, echoLive: null, lastKeyTs }
       const ticker = tickerOnKey(base.ticker, ev, now)
