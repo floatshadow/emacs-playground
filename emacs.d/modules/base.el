@@ -46,6 +46,22 @@
 ;; terminal.  Modus themes are designed for legibility (WCAG AAA).
 (line-number-mode 1)
 (column-number-mode 1)
+
+;; The selected window's mode line must stand out: lessons say "the
+;; bright mode line marks the selected window".  The theme's own two
+;; mode lines (#484d67 and #292d48) are hard to tell apart in a browser
+;; terminal, so the active one takes the playground's violet and the
+;; inactive ones are dimmed (a background contrast of about 2.8 between
+;; them; both keep their text above 4.5:1).  Theme-specific overrides,
+;; so another Modus theme chosen later keeps its own colours.
+(defvar modus-vivendi-tinted-palette-overrides)
+(setq modus-vivendi-tinted-palette-overrides
+      '((bg-mode-line-active "#7a58c4")
+        (fg-mode-line-active "#ffffff")
+        (border-mode-line-active "#a990e6")
+        (bg-mode-line-inactive "#232639")
+        (fg-mode-line-inactive "#969696")
+        (border-mode-line-inactive "#3c3f55")))
 (load-theme 'modus-vivendi-tinted t)
 
 ;; The mode line reads the way the course describes it:

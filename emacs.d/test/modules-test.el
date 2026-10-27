@@ -79,5 +79,50 @@
   (should-not extended-command-suggest-shorter)
   (should suggest-key-bindings))
 
+;;;; Mode lines (B16, R8)
+
+(defun pg-modules--luminance (hex)
+  "WCAG relative luminance of the colour HEX (#rrggbb)."
+  (let ((channel (lambda (i)
+                   (let ((c (/ (string-to-number (substring hex i (+ i 2)) 16) 255.0)))
+                     (if (<= c 0.03928) (/ c 12.92) (expt (/ (+ c 0.055) 1.055) 2.4))))))
+    (+ (* 0.2126 (funcall channel 1))
+       (* 0.7152 (funcall channel 3))
+       (* 0.0722 (funcall channel 5)))))
+
+(defun pg-modules--contrast (a b)
+  "WCAG contrast ratio between colours A and B."
+  (let ((la (pg-modules--luminance a)) (lb (pg-modules--luminance b)))
+    (/ (+ (max la lb) 0.05) (+ (min la lb) 0.05))))
+
+(ert-deftest pg-modules/selected-mode-line-stands-out ()
+  "The selected window's mode line is clearly brighter than the others."
+  (should (memq 'modus-vivendi-tinted custom-enabled-themes))
+  (let ((active (modus-themes-get-color-value 'bg-mode-line-active t))
+        (inactive (modus-themes-get-color-value 'bg-mode-line-inactive t))
+        (fg-active (modus-themes-get-color-value 'fg-mode-line-active t))
+        (fg-inactive (modus-themes-get-color-value 'fg-mode-line-inactive t))
+        (bg-main (modus-themes-get-color-value 'bg-main t)))
+    (should (equal active "#7a58c4"))
+    (should (> (pg-modules--luminance active) (pg-modules--luminance inactive)))
+    (should (>= (pg-modules--contrast active inactive) 2.0))
+    ;; Both stay readable, and an inactive mode line still shows against
+    ;; the buffer background.
+    (should (>= (pg-modules--contrast fg-active active) 4.5))
+    (should (>= (pg-modules--contrast fg-inactive inactive) 4.5))
+    (should (> (pg-modules--luminance inactive) (pg-modules--luminance bg-main)))))
+
+(ert-deftest pg-modules/no-ws-butler-lighter ()
+  "ws-butler does its housekeeping without a \" wb\" in the mode line."
+  (require 'ws-butler)
+  (with-temp-buffer
+    (prog-mode)
+    (ws-butler-mode 1)
+    (should ws-butler-mode)
+    ;; (`format-mode-line' draws nothing in batch; read the entry.)
+    (should (equal (cdr (assq 'ws-butler-mode minor-mode-alist)) '("")))
+    ;; Other lighters are untouched.
+    (should (equal (cdr (assq 'abbrev-mode minor-mode-alist)) '(" Abbrev")))))
+
 (provide 'modules-test)
 ;;; modules-test.el ends here

@@ -122,7 +122,7 @@ on the next pong, or the connection is dropped after
   '(eglot--managed-mode flymake-mode overwrite-mode read-only-mode view-mode
     auto-revert-mode visual-line-mode auto-fill-mode follow-mode olivetti-mode
     iedit-mode multiple-cursors-mode rectangle-mark-mode corfu-mode
-    diff-hl-mode apheleia-mode ws-butler-mode subword-mode superword-mode
+    diff-hl-mode apheleia-mode subword-mode superword-mode
     outline-minor-mode hs-minor-mode display-line-numbers-mode hl-line-mode
     whitespace-mode text-scale-mode buffer-face-mode tab-line-mode
     smerge-mode git-timemachine-mode magit-blame-mode wdired-mode
@@ -130,7 +130,9 @@ on the next pong, or the connection is dropped after
     compilation-minor-mode electric-pair-mode abbrev-mode
     eldoc-box-hover-mode eldoc-box-hover-at-point-mode
     breadcrumb-local-mode pulsar-mode)
-  "Minor modes reported in the state's `minors' list when enabled."
+  "Minor modes reported in the state's `minors' list when enabled.
+Housekeeping modes that never ask anything of the learner, such as
+ws-butler (which trims the spaces you added), are left out."
   :type '(repeat symbol))
 
 (defcustom playground-agent-echo-noise

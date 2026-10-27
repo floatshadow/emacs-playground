@@ -82,9 +82,12 @@
 ;;;; Whitespace
 
 ;; Trailing whitespace is removed from the lines you edited, never from
-;; the rest of the file (so diffs stay small).
+;; the rest of the file (so diffs stay small).  It is housekeeping that
+;; never asks anything of you, so its " wb" stays out of the mode line.
 (playground-with-package ws-butler
   (add-hook 'prog-mode-hook #'ws-butler-mode)
-  (add-hook 'text-mode-hook #'ws-butler-mode))
+  (add-hook 'text-mode-hook #'ws-butler-mode)
+  (with-eval-after-load 'ws-butler
+    (setf (alist-get 'ws-butler-mode minor-mode-alist) '(""))))
 
 ;;; editing.el ends here
