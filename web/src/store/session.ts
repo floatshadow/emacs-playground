@@ -417,11 +417,18 @@ function reduceStep(base: SessionData, ev: Extract<Event, { t: 'step' }>): Sessi
       return { ...base, outcomes, lessonsComplete, activeStep, watched }
     }
     case 'dropped': {
+      // A progress reset of the lesson (here or from another page): what
+      // this page remembers of the lesson's steps goes too, or its resume
+      // target would reload the lesson at a later step (X10).
       const dropped = sameStep(base.activeStep, ev.lessonId, ev.stepId)
+      const outcomes = { ...base.outcomes }
+      delete outcomes[ev.lessonId]
       return {
         ...base,
         activeStep: dropped ? null : base.activeStep,
         checks: dropped ? {} : base.checks,
+        outcomes,
+        lessonsComplete: base.lessonsComplete.filter((x) => x !== ev.lessonId),
         watched: sameStep(base.watched, ev.lessonId, ev.stepId) ? null : base.watched,
       }
     }

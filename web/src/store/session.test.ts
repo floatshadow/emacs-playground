@@ -235,12 +235,14 @@ describe('applyEvent reducer', () => {
     )
     expect(s.outcomes['L/1']).toEqual({ open: 'skipped' })
     expect(s.activeStep?.stepId).toBe('save')
-    // Start over: sessiond drops the active step.
+    // Start over: sessiond drops the active step, and the page forgets the
+    // lesson's outcomes, so it resumes at the first step (X10).
     s = run(
       [{ t: 'step', lessonId: 'L/1', stepId: 'save', status: 'dropped', index: 1, count: 2 }],
       s,
     )
     expect(s.activeStep).toBeNull()
+    expect(s.outcomes['L/1']).toBeUndefined()
   })
 
   it('a reset from the demo’s own restore keeps the step watched', () => {

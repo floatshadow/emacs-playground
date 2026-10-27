@@ -395,6 +395,69 @@ describe('LessonScreen against a fake events stream', () => {
     await waitFor(() => expect(rpcCalls).toContainEqual({ op: 'restore', body: {} }))
   })
 
+  it('a progress reset from another page reloads the lesson at its first step (X10)', async () => {
+    let openDone = false
+    server.use(
+      http.get('/api/v1/progress', () =>
+        HttpResponse.json({
+          lessons: openDone
+            ? {
+                [LESSON]: {
+                  status: 'in-progress',
+                  counts: { done: 1, demonstrated: 0, skipped: 0, total: 4 },
+                  steps: { open: { status: 'done', hintsUsed: 0, resets: 0 } },
+                },
+              }
+            : {},
+          updatedAt: 2,
+        }),
+      ),
+    )
+    await openLesson()
+    openDone = true
+    send({
+      t: 'step',
+      seq: 40,
+      lessonId: LESSON,
+      stepId: 'open',
+      status: 'complete',
+      index: 0,
+      count: 4,
+    })
+    send({
+      t: 'step',
+      seq: 41,
+      lessonId: LESSON,
+      stepId: 'edit',
+      status: 'loaded',
+      index: 1,
+      count: 4,
+    })
+    await waitFor(() =>
+      expect(
+        screen.getByRole('list', { name: 'Steps' }).querySelector('[aria-current="step"]'),
+      ).toHaveTextContent(/./),
+    )
+    rpcCalls.length = 0
+    // Another page (or a script) resets the lesson's progress: sessiond
+    // drops the active step. This page must not reload the lesson at the
+    // step after the one it saw done.
+    openDone = false
+    send({
+      t: 'step',
+      seq: 42,
+      lessonId: LESSON,
+      stepId: 'edit',
+      status: 'dropped',
+      index: 1,
+      count: 4,
+    })
+    await waitFor(() => expect(rpcCalls.find((c) => c.op === 'scenario')).toBeDefined())
+    expect(rpcCalls.filter((c) => c.op === 'scenario').map((c) => c.body)).toEqual([
+      { lessonId: LESSON, stepId: 'open' },
+    ])
+  })
+
   it('after a stuck report the learner can skip the step (S2)', async () => {
     const user = userEvent.setup()
     server.use(

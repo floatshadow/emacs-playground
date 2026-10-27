@@ -42,8 +42,25 @@ export function useScenarioLoad(
   const requested = useRef<string | null>(null)
 
   const ready = !!hello && !!sessionId && !!scenario && !progress.isLoading
+  // The resume target is decided on fresh progress: after a progress reset
+  // (the "dropped" event, maybe from another page) the cached progress
+  // still has the old steps done, and loading at its resume target would
+  // fight the reset (X10).
   const needsLoad =
-    ready && (active?.lessonId !== lessonId || (stepId !== undefined && active?.stepId !== stepId))
+    ready &&
+    !progress.isFetching &&
+    (active?.lessonId !== lessonId || (stepId !== undefined && active?.stepId !== stepId))
+
+  // A dropped step (a progress reset) asks for a new load, even of the
+  // step this page asked for before.
+  const hadActive = useRef(false)
+  useEffect(() => {
+    if (active) hadActive.current = true
+    else if (hadActive.current) {
+      hadActive.current = false
+      requested.current = null
+    }
+  }, [active])
 
   useEffect(() => {
     if (!needsLoad || !scenario) return
