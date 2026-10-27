@@ -65,6 +65,40 @@ func buffersForm(workspace string) string {
   out)`, elispString(ws), maxBufferText, maxBufferUndo, maxBuffersSize)
 }
 
+// modifiedFilesForm returns, as a vector, the workspace-relative paths of
+// the file buffers under the workspace that have unsaved changes.
+func modifiedFilesForm(workspace string) string {
+	ws := strings.TrimSuffix(workspace, "/") + "/"
+	return fmt.Sprintf(`(let ((ws %s) out)
+  (dolist (b (buffer-list))
+    (let ((f (buffer-file-name b)))
+      (when (and f (not (buffer-base-buffer b)) (buffer-modified-p b)
+                 (string-prefix-p ws (expand-file-name f)))
+        (push (file-relative-name (expand-file-name f) ws) out))))
+  (vconcat out))`, elispString(ws))
+}
+
+// modifiedFiles asks the agent for modifiedFilesForm. Errors (a busy
+// Emacs) report none.
+func (s *Server) modifiedFiles(ctx context.Context) []string {
+	v, err := s.evalRaw(ctx, modifiedFilesForm(s.cfg.Workspace), 2*time.Second)
+	if err != nil {
+		s.log.Debug("modified buffers before a restore", "err", err)
+		return nil
+	}
+	var paths []string
+	if err := json.Unmarshal(v, &paths); err != nil {
+		return nil
+	}
+	out := paths[:0]
+	for _, rel := range paths {
+		if path.Clean(rel) == rel && !strings.HasPrefix(rel, "../") && !path.IsAbs(rel) {
+			out = append(out, rel)
+		}
+	}
+	return out
+}
+
 // bufferStates asks the agent for the buffer state to record with a
 // checkpoint. Errors (no agent, a busy Emacs) record nothing.
 func (s *Server) bufferStates(ctx context.Context) map[string]checkpoint.BufferState {

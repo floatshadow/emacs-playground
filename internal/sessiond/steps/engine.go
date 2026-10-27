@@ -21,6 +21,11 @@ const (
 	DefaultDebounce    = 40 * time.Millisecond
 	DefaultDebounceMax = 120 * time.Millisecond
 	DefaultTick        = 2 * time.Second
+	// DemoIdle ends a "Watch it" demonstration that has sent no keys (rpc
+	// keys) for this long: the page that played it went away without rpc
+	// demo end. Demo pauses are far shorter. The learner's own commands do
+	// not keep it alive.
+	DemoIdle = 10 * time.Second
 )
 
 // QuitCommands count towards quits_in_window.
@@ -150,10 +155,12 @@ type Engine struct {
 	// demonstrated, not done, and the step stays active. demoPlaying is
 	// true between StartDemo and EndDemo (stuck rules wait).
 	// demonstrated is set once the demonstrated event went out for the
-	// latch. All three clear when the step (re)starts.
+	// latch. All three clear when the step (re)starts. demoSeen is the last
+	// demo traffic (DemoIdle).
 	demoLatch    bool
 	demoPlaying  bool
 	demonstrated bool
+	demoSeen     time.Time
 	hold         hold
 
 	shellCache shellCache
@@ -506,6 +513,50 @@ func (e *Engine) StartDemo(stepID string) bool {
 		return false
 	}
 	e.demoLatch, e.demoPlaying = true, true
+	e.demoSeen = e.opt.Now()
+	return true
+}
+
+// DemoTraffic notes that keys were sent while a demonstration may be
+// playing (rpc keys), so it does not end for idleness.
+func (e *Engine) DemoTraffic() {
+	e.mu.Lock()
+	if e.demoPlaying {
+		e.demoSeen = e.opt.Now()
+	}
+	e.mu.Unlock()
+}
+
+// AbandonDemo ends a demonstration whose page went away without rpc demo
+// end (its terminal connection closed), as abandonDemoLocked does.
+func (e *Engine) AbandonDemo() {
+	e.mu.Lock()
+	ended := e.abandonDemoLocked()
+	e.mu.Unlock()
+	if ended {
+		e.Trigger()
+	}
+}
+
+// expireDemoLocked abandons a demonstration idle for DemoIdle.
+func (e *Engine) expireDemoLocked(now time.Time) {
+	if e.demoPlaying && now.Sub(e.demoSeen) >= DemoIdle {
+		e.abandonDemoLocked()
+	}
+}
+
+// abandonDemoLocked ends a playing demonstration as EndDemo would; one that
+// never completed the step also drops its latch, so the learner's own
+// completion counts as done. It reports whether a demonstration was
+// playing.
+func (e *Engine) abandonDemoLocked() bool {
+	if !e.demoPlaying {
+		return false
+	}
+	e.demoPlaying = false
+	if !e.demonstrated {
+		e.demoLatch = false
+	}
 	return true
 }
 
@@ -619,13 +670,16 @@ func (e *Engine) OnKey(ev *protocol.KeyEvent) {
 	}
 	e.commands++
 	e.lastKeyAt = now
-	if QuitCommands[ev.Cmd] {
+	// A prefix cancelled with C-g (C-x C-g) is reported as undefined; it is
+	// a quit, not an unbound key.
+	cancelled := ev.Cmd == protocol.UndefinedCommand && (ev.Keys == "C-g" || strings.HasSuffix(ev.Keys, " C-g"))
+	if QuitCommands[ev.Cmd] || cancelled {
 		e.quits = append(e.quits, now)
 		if len(e.quits) > 64 {
 			e.quits = e.quits[len(e.quits)-64:]
 		}
 	}
-	if ev.Cmd == protocol.UndefinedCommand {
+	if ev.Cmd == protocol.UndefinedCommand && !cancelled {
 		if ev.Keys == e.lastUnbound {
 			e.unboundRun++
 		} else {
@@ -810,6 +864,7 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 		e.mu.Unlock()
 		return out, true
 	}
+	e.expireDemoLocked(now)
 	var evs []protocol.Event
 	if force || !reflect.DeepEqual(results, e.lastResults) || complete != e.lastComplete {
 		e.lastResults = results

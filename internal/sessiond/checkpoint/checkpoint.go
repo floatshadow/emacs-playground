@@ -245,30 +245,35 @@ func TakeCommands(indexFile, ref, message, tree, parent string) []Command {
 
 // RestorePrepCommands run before RestoreCommands so the restore only writes
 // files that differ from the checkpoint. They load the checkpoint's tree
-// into the learner's index and refresh its stat data against the working
-// tree: git restore then keeps index entries whose blob already matches
-// and skips files whose stat data is current. The end state is the one
-// RestoreCommands alone produce, since the staging area is reset to the
-// checkpoint either way. A file the learner had staged that is not in the
-// checkpoint becomes untracked and is removed by git clean (unless it is in
-// KeepDirs or ignored). With -q, update-index does not fail on files that
-// differ.
-func RestorePrepCommands(ref string) []Command {
+// into the temporary index (indexFile, which the caller has just refreshed
+// from the working tree) and refresh its stat data: git restore then keeps
+// index entries whose blob already matches and skips files whose stat data
+// is current. The end state is the one RestoreCommands alone produce, since
+// the temporary index is reset to the checkpoint either way. With -q,
+// update-index does not fail on files that differ.
+func RestorePrepCommands(indexFile, ref string) []Command {
+	idx := "GIT_INDEX_FILE=" + indexFile
 	return []Command{
-		{Args: []string{"read-tree", ref}},
-		{Args: []string{"update-index", "-q", "--refresh"}},
+		{Env: []string{idx}, Args: []string{"read-tree", ref}},
+		{Env: []string{idx}, Args: []string{"update-index", "-q", "--refresh"}},
 	}
 }
 
 // RestoreCommands returns the commands that restore ref (backend.md §3.9).
-func RestoreCommands(ref string) []Command {
+// Like TakeCommands they use the temporary index, never the learner's: the
+// course files stay untracked in the learner's repository (no "A" in git
+// status, no Git@ in the mode line). git clean judges against the
+// temporary index, which then holds the checkpoint, so it removes every
+// file the checkpoint does not have (unless it is in KeepDirs or ignored).
+func RestoreCommands(indexFile, ref string) []Command {
+	idx := "GIT_INDEX_FILE=" + indexFile
 	clean := []string{"clean", "-fd"}
 	for _, d := range KeepDirs {
 		clean = append(clean, "-e", d)
 	}
 	return []Command{
-		{Args: []string{"restore", "--source=" + ref, "--worktree", "--staged", "--", "."}},
-		{Args: clean},
+		{Env: []string{idx}, Args: []string{"restore", "--source=" + ref, "--worktree", "--staged", "--", "."}},
+		{Env: []string{idx}, Args: clean},
 	}
 }
 
@@ -357,7 +362,33 @@ func (m *Manager) Init(ctx context.Context) error {
 			return err
 		}
 	}
+	if err := m.resetLearnerIndex(ctx); err != nil {
+		return err
+	}
 	return m.writeExclude()
+}
+
+// IndexResetMarker, under .playground, records that resetLearnerIndex ran.
+const IndexResetMarker = "learner-index-reset"
+
+// resetLearnerIndex resets the learner's index to HEAD (empty without a
+// commit) once per workspace (IndexResetMarker), so course files are
+// untracked in the learner's repository whatever staged them; checkpoints
+// themselves only use the temporary index. The working tree is not
+// touched. Caller holds m.mu.
+func (m *Manager) resetLearnerIndex(ctx context.Context) error {
+	marker := filepath.Join(m.Workspace, PlaygroundDir, IndexResetMarker)
+	if _, err := os.Stat(marker); err == nil {
+		return nil
+	}
+	args := []string{"read-tree", "--empty"}
+	if _, err := m.git(ctx, nil, "rev-parse", "-q", "--verify", "HEAD^{tree}"); err == nil {
+		args = []string{"read-tree", "HEAD"}
+	}
+	if _, err := m.git(ctx, nil, args...); err != nil {
+		return err
+	}
+	return os.WriteFile(marker, nil, 0o644)
 }
 
 // ensurePlaygroundDir creates .playground with a .gitignore that ignores
@@ -560,35 +591,35 @@ func (m *Manager) diffFiles(ctx context.Context, ref string) ([]string, error) {
 	return files, nil
 }
 
-// Restore resets the workspace to ref and returns the number of files that
-// were restored or removed, and the metadata saved with the ref (Spec may be
-// nil for checkpoints taken without the agent).
-func (m *Manager) Restore(ctx context.Context, ref string) (int, Meta, error) {
+// Restore resets the workspace to ref and returns the workspace-relative
+// paths of the files that were restored or removed, and the metadata saved
+// with the ref (Spec may be nil for checkpoints taken without the agent).
+func (m *Manager) Restore(ctx context.Context, ref string) ([]string, Meta, error) {
 	if !ValidRef(ref) {
-		return 0, Meta{}, fmt.Errorf("checkpoint: invalid ref %q", ref)
+		return nil, Meta{}, fmt.Errorf("checkpoint: invalid ref %q", ref)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, err := m.commitOf(ctx, ref); err != nil {
-		return 0, Meta{}, fmt.Errorf("checkpoint %s: %w", ref, os.ErrNotExist)
+		return nil, Meta{}, fmt.Errorf("checkpoint %s: %w", ref, os.ErrNotExist)
 	}
 	if err := m.stageWorktree(ctx); err != nil {
-		return 0, Meta{}, err
+		return nil, Meta{}, err
 	}
 	files, err := m.diffFiles(ctx, ref)
 	if err != nil {
-		return 0, Meta{}, err
+		return nil, Meta{}, err
 	}
 	// Best effort: without it the restore rewrites every file (new mtimes,
 	// a file event per path, buffers that look changed on disk).
-	for _, c := range RestorePrepCommands(ref) {
+	for _, c := range RestorePrepCommands(m.IndexFile(), ref) {
 		if _, err := m.git(ctx, c.Env, c.Args...); err != nil {
 			break
 		}
 	}
-	for _, c := range RestoreCommands(ref) {
+	for _, c := range RestoreCommands(m.IndexFile(), ref) {
 		if _, err := m.git(ctx, c.Env, c.Args...); err != nil {
-			return 0, Meta{}, err
+			return nil, Meta{}, err
 		}
 	}
 	meta, err := m.ReadMeta(ref)
@@ -598,7 +629,7 @@ func (m *Manager) Restore(ctx context.Context, ref string) (int, Meta, error) {
 	// git has no empty directories: git clean removed the ones that
 	// existed at the checkpoint if anything was put into them since.
 	m.makeDirs(meta.EmptyDirs)
-	return len(files), meta, nil
+	return files, meta, nil
 }
 
 // skipDir reports whether the empty-directory walk leaves the directory

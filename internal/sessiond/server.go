@@ -53,6 +53,9 @@ type Options struct {
 	HelloTimeout time.Duration
 	// Ready, when set, is closed once startup finished (tests).
 	Ready chan struct{}
+	// FakeAgent answers the fake agent's calls in Fake mode (tests); nil
+	// means agent.DefaultFakeHandler.
+	FakeAgent agent.FakeHandler
 }
 
 // Server is one sessiond.
@@ -191,7 +194,18 @@ func (s *Server) Run(ctx context.Context) error {
 	s.log.Info("sessiond listening", "addr", ln.Addr().String(), "session", cfg.SessionID, "fake", s.opt.Fake,
 		"proxy_auth", cfg.ProxySecret != "")
 
-	go s.engine.Run(runCtx)
+	s.bg.Add(1)
+	go func() {
+		defer s.bg.Done()
+		s.engine.Run(runCtx)
+	}()
+
+	// The snapshot of the last run stays until the saved step is resumed.
+	saved, resume := s.readState()
+	var release func()
+	if resume {
+		release = s.sup.HoldSnapshots()
+	}
 
 	// 3 and 4. Emacs, tmux, terminal frame.
 	if err := s.sup.Start(runCtx); err != nil {
@@ -199,7 +213,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	// 6. Resume the saved step.
-	s.restoreState(runCtx)
+	s.restoreState(runCtx, saved, release)
 	if s.gw != nil {
 		s.bg.Add(1)
 		go s.heartbeatLoop(runCtx)
@@ -216,6 +230,11 @@ func (s *Server) Run(ctx context.Context) error {
 	s.shutdown(srv)
 	cancel()
 	s.bg.Wait()
+	// The reporter closes last: the engine and the resume stopped with
+	// runCtx and the HTTP handlers in shutdown, so nothing reports any more.
+	if s.reporter != nil {
+		s.reporter.Close(5 * time.Second)
+	}
 	return nil
 }
 
@@ -267,6 +286,9 @@ func (s *Server) wire() {
 	fmt.Sscanf(cfg.TermSize, "%dx%d", &cols, &rows)
 	s.ptyH = &pty.Handler{
 		Spawn: attach, Tap: s.tap, DefaultCols: cols, DefaultRows: rows, Track: s.track, Done: s.done, Log: log,
+		// The page that plays a "Watch it" sends its keys while its
+		// terminal is attached; when it goes away the demo is over.
+		OnDetach: func() { s.engine.AbandonDemo() },
 		Ready: func() error {
 			if ok, reason := s.sup.Ready(); !ok {
 				return errors.New(reason)
@@ -309,6 +331,7 @@ func (s *Server) wire() {
 		RestoreStep: s.restoreStep,
 		PlayDemo:    s.playDemo,
 		Ready:       s.sup.WaitReady,
+		Snapshot:    s.sup.LastSnapshot,
 		Emit:        func(ev protocol.Event) { s.bus.Publish(ev) },
 		Log:         log.With("component", "scenario"),
 	}
@@ -545,24 +568,37 @@ func (s *Server) persist(saved steps.Saved) {
 	}
 }
 
-func (s *Server) restoreState(ctx context.Context) {
+// readState reads state.json; resume is true when it has an active step.
+func (s *Server) readState() (saved steps.Saved, resume bool) {
 	b, err := os.ReadFile(s.statePath())
 	if err != nil {
-		return
+		return saved, false
 	}
 	var st stateFile
 	if err := json.Unmarshal(b, &st); err != nil {
 		s.log.Warn("state.json is unreadable; starting fresh", "err", err)
+		return saved, false
+	}
+	return st.Saved, st.Active != nil
+}
+
+// restoreState loads the saved progress and resumes the active step in the
+// background (Loader.Resume), then calls release (when set).
+func (s *Server) restoreState(ctx context.Context, saved steps.Saved, release func()) {
+	s.engine.Restore(saved)
+	if saved.Active == nil {
+		if release != nil {
+			release()
+		}
 		return
 	}
-	s.engine.Restore(st.Saved)
-	if st.Active == nil {
-		return
-	}
-	ref := *st.Active
+	ref := *saved.Active
 	s.bg.Add(1)
 	go func() {
 		defer s.bg.Done()
+		if release != nil {
+			defer release()
+		}
 		rctx, cancel := context.WithTimeout(ctx, time.Minute)
 		defer cancel()
 		if err := s.loader.Resume(rctx, ref); err != nil {
@@ -668,7 +704,8 @@ func (s *Server) heartbeatLoop(ctx context.Context) {
 
 func (s *Server) startFakeAgent(pid int) {
 	ctx, cancel := context.WithCancel(context.Background())
-	fake := &agent.Fake{Path: s.cfg.AgentSocket, Hello: protocol.AgentHelloMsg{Emacs: "fake", PID: pid, Modules: s.modules.Current()},
+	fake := &agent.Fake{Path: s.cfg.AgentSocket, Handle: s.opt.FakeAgent,
+		Hello:   protocol.AgentHelloMsg{Emacs: "fake", PID: pid, Modules: s.modules.Current()},
 		Initial: []any{protocol.AgentFrameMsg{T: protocol.AgentFrame, Event: protocol.FrameOpened, Kind: protocol.FrameTerminal}}}
 	s.fakeMu.Lock()
 	if s.fakeCancel != nil {
@@ -716,8 +753,5 @@ func (s *Server) shutdown(srv *http.Server) {
 	hctx, hcancel := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = srv.Shutdown(hctx)
 	hcancel()
-	if s.reporter != nil {
-		s.reporter.Close(5 * time.Second)
-	}
 	s.stopFakeAgent()
 }

@@ -64,6 +64,9 @@ type Loader struct {
 	// Ready, when set, waits until Emacs is not restarting and the
 	// terminal frame is open (supervisor.WaitReady); setup runs after it.
 	Ready func(ctx context.Context, timeout time.Duration) bool
+	// Snapshot, when set, returns the last saved buffer and window spec
+	// (supervisor.LastSnapshot), or nil. Resume re-opens it.
+	Snapshot func() *protocol.WindowSpec
 
 	mu sync.Mutex
 	// pending is the lesson whose load waits for a daemon restart.
@@ -290,8 +293,11 @@ func (l *Loader) setup(ctx context.Context, sc *protocol.Scenario, reset bool) {
 	}
 }
 
-// Resume re-activates the step saved in state.json after sessiond restarts
-// (backend.md §3.2 step 6): no fixtures, setup or checkpoint.
+// Resume re-activates the step saved in state.json after sessiond, and with
+// it Emacs, restarted (backend.md §3.2 step 6). No fixtures are extracted
+// and no checkpoint is taken: the workspace stays as the learner left it.
+// The fresh Emacs gets the lesson's buffers and windows back before the step
+// is active (reopen), so the step never runs on an empty frame.
 func (l *Loader) Resume(ctx context.Context, ref protocol.StepRef) error {
 	if !gwclient.ValidLessonID(ref.LessonID) {
 		return fmt.Errorf("invalid saved lesson id %q", ref.LessonID)
@@ -309,8 +315,49 @@ func (l *Loader) Resume(ctx context.Context, ref protocol.StepRef) error {
 	if len(sc.Steps) == 0 {
 		return nil
 	}
+	l.reopen(ctx, sc)
 	l.Engine.Activate(sc, idx)
 	return nil
+}
+
+// reopen puts the lesson's buffers and windows back in a fresh Emacs: the
+// last snapshot (taken at shutdown, else at most SnapshotInterval old) when
+// it shows the lesson's files, else the lesson's setup without reset.
+func (l *Loader) reopen(ctx context.Context, sc *protocol.Scenario) {
+	if l.Agent == nil {
+		return
+	}
+	var spec *protocol.WindowSpec
+	if l.Snapshot != nil {
+		spec = l.Snapshot()
+	}
+	if !showsLesson(spec, sc.Setup.Root) {
+		l.setup(ctx, sc, false)
+		return
+	}
+	if l.Ready != nil && !l.Ready(ctx, 15*time.Second) {
+		l.log().Warn("re-opening the snapshot before the terminal frame is open", "lesson", sc.ID)
+	}
+	if err := l.Agent.Call(ctx, protocol.AgentOpOpen, spec, 10*time.Second, nil); err != nil {
+		l.log().Warn("re-opening the snapshot failed; running the lesson setup", "lesson", sc.ID, "err", err)
+		l.setup(ctx, sc, false)
+	}
+}
+
+// showsLesson reports whether spec has a file under the lesson root (any
+// file when the lesson has no root). A snapshot without one predates the
+// lesson, or shows a frame the lesson does not use.
+func showsLesson(spec *protocol.WindowSpec, root string) bool {
+	if spec == nil {
+		return false
+	}
+	root = strings.Trim(root, "/")
+	for _, f := range spec.Files {
+		if root == "" || f.Path == root || strings.HasPrefix(f.Path, root+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // SetModules implements rpc modules: it replaces the set exactly and

@@ -43,12 +43,18 @@ func TestCommandBuilding(t *testing.T) {
 	if !slices.Contains(withParent[2].Env, "GIT_AUTHOR_NAME=Emacs Playground") {
 		t.Errorf("commit-tree needs an identity: %v", withParent[2].Env)
 	}
-	rc := RestoreCommands("refs/playground/a/b")
+	rc := RestoreCommands("/i", "refs/playground/a/b")
 	if !reflect.DeepEqual(rc[0].Args, []string{"restore", "--source=refs/playground/a/b", "--worktree", "--staged", "--", "."}) {
 		t.Errorf("restore %q", rc[0].Args)
 	}
 	if strings.Join(rc[1].Args, " ") != "clean -fd -e target -e _build -e .venv -e node_modules -e .playground" {
 		t.Errorf("clean %q", rc[1].Args)
+	}
+	// A restore never touches the learner's index.
+	for i, c := range append(RestorePrepCommands("/i", "refs/playground/a/b"), rc...) {
+		if !slices.Equal(c.Env, []string{"GIT_INDEX_FILE=/i"}) {
+			t.Errorf("restore command %d %q env %v", i, c.Args, c.Env)
+		}
 	}
 }
 
@@ -243,12 +249,13 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 	write(t, ws, "hello/docs/moved.md", "moved")
 	_ = os.MkdirAll(filepath.Join(ws, "hello/extra"), 0o755)
 
-	n, rmeta, err := m.Restore(ctx, ref)
+	restored, rmeta, err := m.Restore(ctx, ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 5 || rmeta.Spec == nil {
-		t.Fatalf("restored %d meta %+v", n, rmeta)
+	slices.Sort(restored)
+	if !reflect.DeepEqual(restored, []string{"hello/README.md", "hello/docs/moved.md", "hello/notes.txt", "hello/src/main.rs", "hello/staged.txt"}) || rmeta.Spec == nil {
+		t.Fatalf("restored %v meta %+v", restored, rmeta)
 	}
 	if ents, err := os.ReadDir(filepath.Join(ws, "hello/docs")); err != nil || len(ents) != 0 {
 		t.Fatalf("hello/docs must be back and empty: %v %v", ents, err)
@@ -262,8 +269,9 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 	if _, ok := read(t, ws, "hello/staged.txt"); ok {
 		t.Fatal("staged file not in the checkpoint survived")
 	}
-	if out := gitOut(t, ws, "diff-index", "--cached", "--name-only", ref, "--"); out != "" {
-		t.Fatalf("index differs from the checkpoint: %q", out)
+	// The learner's index keeps what the learner staged and nothing else.
+	if out := gitOut(t, ws, "ls-files", "--cached"); out != "hello/staged.txt" {
+		t.Fatalf("the restore changed the learner's index: %q", out)
 	}
 	if s, _ := read(t, ws, "hello/src/main.rs"); !strings.Contains(s, "Hello, world") {
 		t.Fatalf("main.rs not restored: %q", s)
@@ -299,6 +307,52 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 	}
 	if !m.Exists(ctx, ref) || m.Exists(ctx, "refs/playground/missing/x") {
 		t.Fatal("Exists")
+	}
+}
+
+// TestInitResetsLearnerIndexOnce: Init empties an index that has the course
+// files staged, once; what the learner stages afterwards stays staged.
+func TestInitResetsLearnerIndexOnce(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	ws := t.TempDir()
+	ctx := context.Background()
+	gitOut(t, ws, "init", "-q")
+	write(t, ws, "emacs.d/init.el", ";; init")
+	write(t, ws, "hello/README.md", "# hello\n")
+	gitOut(t, ws, "add", "-A")
+	m := New(ws, "git")
+	if err := m.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if out := gitOut(t, ws, "ls-files", "--cached"); out != "" {
+		t.Fatalf("index not reset: %q", out)
+	}
+	if s, ok := read(t, ws, "hello/README.md"); !ok || s != "# hello\n" {
+		t.Fatal("the working tree changed")
+	}
+	gitOut(t, ws, "add", "hello/README.md")
+	if err := m.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if out := gitOut(t, ws, "ls-files", "--cached"); out != "hello/README.md" {
+		t.Fatalf("the learner's staging was reset again: %q", out)
+	}
+
+	// With commits, the index goes back to HEAD.
+	ws2 := t.TempDir()
+	gitOut(t, ws2, "init", "-q")
+	write(t, ws2, "a.txt", "a")
+	gitOut(t, ws2, "add", "a.txt")
+	gitOut(t, ws2, "-c", "user.name=t", "-c", "user.email=t@localhost", "commit", "-q", "-m", "a")
+	write(t, ws2, "b.txt", "b")
+	gitOut(t, ws2, "add", "b.txt")
+	if err := New(ws2, "git").Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if out := gitOut(t, ws2, "ls-files", "--cached"); out != "a.txt" {
+		t.Fatalf("index not reset to HEAD: %q", out)
 	}
 }
 

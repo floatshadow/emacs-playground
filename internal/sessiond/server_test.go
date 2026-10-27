@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 
 	"github.com/floatshadow/emacs-playground/internal/config"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
 )
 
 const testLesson = `{
@@ -112,7 +114,7 @@ type testServer struct {
 	gw     *fakeGateway
 }
 
-func startServer(t *testing.T, ws, run string, gw *fakeGateway, gwURL string) *testServer {
+func startServer(t *testing.T, ws, run string, gw *fakeGateway, gwURL string, mutate ...func(*Options)) *testServer {
 	t.Helper()
 	cfg, err := config.LoadSessiond([]string{
 		"PG_WORKSPACE=" + ws, "PG_RUN_DIR=" + run, "PG_AGENT_SOCKET=" + filepath.Join(run, "agent.sock"),
@@ -131,7 +133,11 @@ func startServer(t *testing.T, ws, run string, gw *fakeGateway, gwURL string) *t
 	if testing.Verbose() {
 		log = slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
-	s := New(cfg, Options{Fake: true, Listener: ln, Ready: ready, Log: log, HelloTimeout: 10 * time.Second})
+	opt := Options{Fake: true, Listener: ln, Ready: ready, Log: log, HelloTimeout: 10 * time.Second}
+	for _, m := range mutate {
+		m(&opt)
+	}
+	s := New(cfg, opt)
 	ctx, cancel := context.WithCancel(context.Background())
 	ts := &testServer{t: t, srv: s, base: "http://" + ln.Addr().String(), cancel: cancel, done: make(chan error, 1), ws: ws, gw: gw}
 	go func() { ts.done <- s.Run(ctx) }()
@@ -325,7 +331,16 @@ func TestServerFakeMode(t *testing.T) {
 	gwSrv := httptest.NewServer(gw.handler(t))
 	defer gwSrv.Close()
 
-	ts := startServer(t, ws, run, gw, gwSrv.URL)
+	// Buffers with unsaved changes, as the agent reports them while
+	// unsavedBuffers is set.
+	var unsavedBuffers atomic.Bool
+	fakeAgent := func(op protocol.AgentOp, args json.RawMessage) (any, error) {
+		if op == protocol.AgentOpEval && unsavedBuffers.Load() && strings.Contains(string(args), "buffer-modified-p b") {
+			return protocol.AgentEvalResult{Value: []string{"hello/notes.txt", "hello/README.md"}}, nil
+		}
+		return agent.DefaultFakeHandler(op, args)
+	}
+	ts := startServer(t, ws, run, gw, gwSrv.URL, func(o *Options) { o.FakeAgent = fakeAgent })
 	stopped := false
 	defer func() {
 		if !stopped {
@@ -451,10 +466,14 @@ func TestServerFakeMode(t *testing.T) {
 		strings.Join(list.Items[0].Files, ",") != "hello/notes.txt" {
 		t.Fatalf("checkpoints %+v", list)
 	}
+	// The count covers the files restored on disk and the buffers whose
+	// unsaved changes the restore discarded, each file once.
 	var rr protocol.RestoreResult
-	if ts.rpc("restore", protocol.RestoreRequest{Label: "Before experiments"}, &rr) != 200 || rr.RestoredFiles != 1 {
+	unsavedBuffers.Store(true)
+	if ts.rpc("restore", protocol.RestoreRequest{Label: "Before experiments"}, &rr) != 200 || rr.RestoredFiles != 2 {
 		t.Fatalf("restore %+v", rr)
 	}
+	unsavedBuffers.Store(false)
 	if b, _ := os.ReadFile(filepath.Join(ws, "hello", "notes.txt")); string(b) != "all done\n" {
 		t.Fatalf("notes after restore %q", b)
 	}
@@ -644,11 +663,27 @@ func TestServerFakeMode(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(ws, ".playground", "events.log")); err != nil {
 		t.Fatal("events.log missing")
 	}
+	// The learner's buffers and windows at shutdown come back in the new
+	// Emacs before the step is active again.
+	snap := `{"files":[{"path":"hello/README.md","point":7,"visible":true}],"layout":"single"}`
+	if err := os.WriteFile(filepath.Join(ws, ".playground", "snapshot.json"), []byte(snap), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	ts2 := startServer(t, ws, run, gw, gwSrv.URL)
 	defer ts2.stop()
 	// The resume may happen before we connect: replay from the start.
 	es3 := ts2.events("?after=0")
 	es3.wait("step:write:loaded")
+	ts2.srv.fakeMu.Lock()
+	fake := ts2.srv.fake
+	ts2.srv.fakeMu.Unlock()
+	var reopened bool
+	for _, c := range fake.Calls() {
+		reopened = reopened || (c.Op == protocol.AgentOpOpen && strings.Contains(string(c.Args), `"point":7`))
+	}
+	if !reopened {
+		t.Fatalf("the snapshot was not re-opened: %+v", fake.Calls())
+	}
 	if h := es3.first().(*protocol.HelloEvent); strings.Join(h.Modules, " ") != "base agent editing files" {
 		t.Fatalf("modules after restart %v", h.Modules)
 	}

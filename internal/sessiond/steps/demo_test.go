@@ -103,7 +103,10 @@ func TestNoStuckRulesWhileDemoPlays(t *testing.T) {
 	f.e.Activate(sc, 0)
 	f.e.StartDemo("open")
 	f.e.OnMinibuffer(&protocol.MinibufferEvent{Open: true})
-	f.clock.add(40 * time.Second)
+	for range 8 {
+		f.clock.add(5 * time.Second)
+		f.e.DemoTraffic()
+	}
 	f.sink.clear()
 	f.e.evaluate(context.Background(), false)
 	if strings.Contains(f.sink.types(), "nudge") {
@@ -113,6 +116,71 @@ func TestNoStuckRulesWhileDemoPlays(t *testing.T) {
 	f.e.evaluate(context.Background(), false)
 	if !strings.Contains(f.sink.types(), "nudge:open/stuck/1") {
 		t.Fatalf("nudge after the demo: %s", f.sink.types())
+	}
+}
+
+// TestIdleDemoEnds: a demonstration whose page went away without rpc demo
+// end stops muting stuck rules after DemoIdle without keys, or at once
+// when its terminal connection closed (AbandonDemo), and since it never
+// completed the step, the learner's own completion counts as done.
+func TestIdleDemoEnds(t *testing.T) {
+	f := newFixture(t)
+	sc := scenarioFromJSON(t, lessonJSON)
+	ctx := context.Background()
+	f.e.Activate(sc, 0)
+	f.e.StartDemo("open")
+	f.e.OnMinibuffer(&protocol.MinibufferEvent{Open: true})
+	f.clock.add(DemoIdle - time.Second)
+	f.e.DemoTraffic()
+	f.sink.clear()
+	f.e.evaluate(ctx, false)
+	if strings.Contains(f.sink.types(), "nudge") || !f.e.Latched() {
+		t.Fatalf("the demo still plays: %s latched %v", f.sink.types(), f.e.Latched())
+	}
+	// The learner's commands do not keep the demonstration alive.
+	f.clock.add(DemoIdle - time.Second)
+	f.e.OnKey(&protocol.KeyEvent{Keys: "a", Cmd: "self-insert-command"})
+	f.clock.add(15 * time.Second)
+	f.e.evaluate(ctx, false)
+	if !strings.Contains(f.sink.types(), "nudge:open/stuck/1") || f.e.Latched() {
+		t.Fatalf("an idle demo must end: %s latched %v", f.sink.types(), f.e.Latched())
+	}
+	f.sink.clear()
+	f.completeOpen()
+	f.e.Check(ctx)
+	if got := f.sink.types(); got != "check:open step:open:complete step:save:loaded" {
+		t.Fatalf("events %s", got)
+	}
+	if !strings.Contains(f.sink.statuses(), "open:done") {
+		t.Fatalf("reports %s", f.sink.statuses())
+	}
+
+	// A demonstration whose page went away ends at once.
+	a := newFixture(t)
+	a.e.Activate(sc, 0)
+	a.e.StartDemo("open")
+	a.e.AbandonDemo()
+	if a.e.Latched() {
+		t.Fatal("an abandoned demonstration kept its latch")
+	}
+	a.completeOpen()
+	a.e.Check(ctx)
+	if !strings.Contains(a.sink.statuses(), "open:done") {
+		t.Fatalf("reports after an abandoned demo %s", a.sink.statuses())
+	}
+
+	// A demonstration that completed the step keeps its latch when it ends
+	// for idleness ("Do it yourself" clears it).
+	g := newFixture(t)
+	g.e.Activate(sc, 0)
+	g.e.StartDemo("open")
+	g.completeOpen()
+	g.e.Check(ctx)
+	g.clock.add(DemoIdle + time.Second)
+	g.e.evaluate(ctx, false)
+	g.e.AbandonDemo()
+	if !g.e.Latched() {
+		t.Fatal("a demonstrated step lost its latch")
 	}
 }
 

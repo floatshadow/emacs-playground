@@ -102,6 +102,14 @@ func (t *ExecTmux) Start(ctx context.Context) error {
 	return t.configure(ctx)
 }
 
+// EscapeTime is tmux's escape-time in milliseconds: how long tmux waits
+// after an ESC from the browser for the rest of an escape sequence. With 0,
+// a sequence split across two reads (a focus report ESC [ I) reaches Emacs
+// as a lone ESC followed by text that self-inserts. It must stay well below
+// the input tap's inputtap.MetaTimeout, which assumes Emacs has a lone ESC
+// before the tap reports it.
+const EscapeTime = 10
+
 // configure applies the options sessiond relies on, whatever tmux.conf
 // says: the pane stays after its command exits so it can be respawned, and
 // the pane-died hook signals the wait channel.
@@ -112,7 +120,7 @@ func (t *ExecTmux) configure(ctx context.Context) error {
 		{"set-option", "-g", "status", "off"},
 		{"set-option", "-g", "prefix", "None"},
 		{"set-option", "-g", "prefix2", "None"},
-		{"set-option", "-s", "escape-time", "0"},
+		{"set-option", "-s", "escape-time", fmt.Sprint(EscapeTime)},
 	}
 	for _, c := range cmds {
 		if _, err := t.run(ctx, c...); err != nil {

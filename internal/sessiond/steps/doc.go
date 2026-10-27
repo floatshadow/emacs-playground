@@ -3,7 +3,8 @@
 // conditions (event, elisp batched through the agent, file through os.Root,
 // shell with timeouts, layout with protocol.MatchLayout, state with
 // protocol.Predicate, combinators all/any/not with three-valued logic)
-// debounced to one evaluation per 150 ms, emits check and step events,
+// debounced (an evaluation runs DefaultDebounce after the last trigger and
+// at most DefaultDebounceMax after the first), emits check and step events,
 // reports progress, takes the next step's checkpoint when a step completes,
 // and evaluates stuck rules on a 2 s ticker, emitting nudges.
 //

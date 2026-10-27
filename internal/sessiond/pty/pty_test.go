@@ -211,7 +211,8 @@ func TestPtyClientCloseKillsProcess(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not installed")
 	}
-	h := &Handler{Spawn: bash, DefaultCols: 80, DefaultRows: 24}
+	detached := make(chan struct{}, 1)
+	h := &Handler{Spawn: bash, DefaultCols: 80, DefaultRows: 24, OnDetach: func() { detached <- struct{}{} }}
 	srv := httptest.NewServer(h)
 	defer srv.Close()
 	a := dial(t, "ws"+strings.TrimPrefix(srv.URL, "http"))
@@ -226,6 +227,11 @@ func TestPtyClientCloseKillsProcess(t *testing.T) {
 		t.Fatalf("pid from %q: %v", out, err)
 	}
 	_ = a.c.Close(websocket.StatusNormalClosure, "")
+	select {
+	case <-detached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnDetach not called after the client closed")
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {

@@ -231,7 +231,10 @@ type Reporter struct {
 	c     *Client
 	queue chan protocol.ProgressReport
 	done  chan struct{}
-	once  sync.Once
+	// mu guards closed; queue is closed only under it, so Report never
+	// sends on a closed channel.
+	mu     sync.Mutex
+	closed bool
 }
 
 // NewReporter starts a reporter; Close drains it.
@@ -241,8 +244,15 @@ func NewReporter(c *Client) *Reporter {
 	return r
 }
 
-// Report queues a report; it drops the report when the queue is full.
+// Report queues a report; it drops the report when the queue is full or
+// the reporter is closed.
 func (r *Reporter) Report(p protocol.ProgressReport) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		r.c.Log.Warn("progress reporter closed; dropping a report", "lesson", p.LessonID, "step", p.StepID)
+		return
+	}
 	select {
 	case r.queue <- p:
 	default:
@@ -276,7 +286,12 @@ func (r *Reporter) run() {
 // Close stops accepting reports and waits up to timeout for the queue to
 // drain.
 func (r *Reporter) Close(timeout time.Duration) {
-	r.once.Do(func() { close(r.queue) })
+	r.mu.Lock()
+	if !r.closed {
+		r.closed = true
+		close(r.queue)
+	}
+	r.mu.Unlock()
 	select {
 	case <-r.done:
 	case <-time.After(timeout):

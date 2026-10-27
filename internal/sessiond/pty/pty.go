@@ -46,6 +46,9 @@ type Handler struct {
 	// OnResize observes size changes (the supervisor keeps tmux's window
 	// size in sync for other clients).
 	OnResize func(cols, rows int)
+	// OnDetach, when set, is called after an attached viewer's connection
+	// ended (the page went away, reloaded or was replaced).
+	OnDetach func()
 
 	mu  sync.Mutex
 	cur *viewer
@@ -121,6 +124,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	v := &viewer{c: c, cmd: cmd, f: f, cancel: cancel}
+	if h.OnDetach != nil {
+		defer h.OnDetach()
+	}
 
 	h.mu.Lock()
 	old := h.cur

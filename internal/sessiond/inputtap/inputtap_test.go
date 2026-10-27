@@ -304,16 +304,26 @@ func TestPrefixTracker(t *testing.T) {
 		name  string
 		steps []step
 	}{
-		{"C-x then C-f", []step{{"C-x", true, "C-x"}, {"C-f", false, ""}}},
-		{"C-x 4 f", []step{{"C-x", true, "C-x"}, {"4", true, "C-x 4"}, {"f", false, ""}}},
-		{"C-x r t", []step{{"C-x", true, "C-x"}, {"r", true, "C-x r"}, {"t", false, ""}}},
+		{"C-x then C-f", []step{{"C-x", true, "C-x"}, {"C-f", true, ""}, {"C-f", false, ""}}},
+		{"C-x 4 f", []step{{"C-x", true, "C-x"}, {"4", true, "C-x 4"}, {"f", true, ""}}},
+		{"C-x r t", []step{{"C-x", true, "C-x"}, {"r", true, "C-x r"}, {"t", true, ""}}},
+		{"C-x w r", []step{{"C-x", true, "C-x"}, {"w", true, "C-x w"}, {"r", true, ""}}},
+		{"C-x x g", []step{{"C-x", true, "C-x"}, {"x", true, "C-x x"}, {"g", true, ""}}},
 		{"C-g cancels", []step{{"C-x", true, "C-x"}, {"C-g", true, ""}, {"C-g", false, ""}}},
-		{"M-g M-g", []step{{"M-g", true, "M-g"}, {"M-g", false, ""}}},
-		{"ESC prefix", []step{{"ESC", true, "ESC"}, {"g", true, "M-g"}, {"g", false, ""}}},
-		{"ESC x", []step{{"ESC", true, "ESC"}, {"x", false, ""}}},
+		{"M-g M-g", []step{{"M-g", true, "M-g"}, {"M-g", true, ""}}},
+		{"M-o is not a prefix", []step{{"M-o", false, ""}, {"a", false, ""}}},
+		{"ESC prefix", []step{{"ESC", true, "ESC"}, {"g", true, "M-g"}, {"g", true, ""}}},
+		{"ESC o", []step{{"ESC", true, "ESC"}, {"o", true, ""}}},
+		{"ESC x", []step{{"ESC", true, "ESC"}, {"x", true, ""}}},
 		{"plain keys", []step{{"a", false, ""}, {"C-f", false, ""}}},
-		{"C-c C-c", []step{{"C-c", true, "C-c"}, {"C-c", false, ""}}},
-		{"C-h k", []step{{"C-h", true, "C-h"}, {"k", false, ""}, {"C-x", true, "C-x"}}},
+		{"C-c C-c", []step{{"C-c", true, "C-c"}, {"C-c", true, ""}}},
+		{"C-h k", []step{{"C-h", true, "C-h"}, {"k", true, ""}, {"C-x", true, "C-x"}}},
+		{"C-h ?", []step{{"C-h", true, "C-h"}, {"?", true, ""}, {"a", false, ""}}},
+		// which-key pages with C-h after a prefix; the prefix stays pending.
+		{"C-x r C-h n", []step{{"C-x", true, "C-x"}, {"r", true, "C-x r"}, {"C-h", false, ""}, {"n", false, ""}, {"t", true, ""}}},
+		{"C-x r C-h a", []step{{"C-x", true, "C-x"}, {"r", true, "C-x r"}, {"C-h", false, ""}, {"a", true, ""}, {"a", false, ""}}},
+		{"C-x r C-h u", []step{{"C-x", true, "C-x"}, {"r", true, "C-x r"}, {"C-h", false, ""}, {"u", true, "C-x"}}},
+		{"C-h C-h", []step{{"C-h", true, "C-h"}, {"C-h", true, ""}, {"n", false, ""}}},
 	}
 	for _, c := range cases {
 		p := NewPrefixTracker(nil)
@@ -349,7 +359,7 @@ func TestTapStreams(t *testing.T) {
 	mu.Lock()
 	joined := strings.Join(got, ",")
 	mu.Unlock()
-	if joined != "C-x|tap,C-x 4|tap,ESC|tap" {
+	if joined != "C-x|tap,C-x 4|tap,|tap,ESC|tap" {
 		t.Fatalf("events %q", joined)
 	}
 	if tap.Pending() != "ESC" {
@@ -370,7 +380,7 @@ func TestTapStreams(t *testing.T) {
 	_, _ = r.Write(press(xkControlL, 'g'))
 	mu.Lock()
 	defer mu.Unlock()
-	if strings.Join(got[3:], ",") != "C-c|tap,|tap" {
+	if strings.Join(got[4:], ",") != "C-c|tap,|tap" {
 		t.Fatalf("after kitty/rfb: %v", got)
 	}
 }

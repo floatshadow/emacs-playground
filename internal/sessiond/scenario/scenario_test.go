@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -237,13 +236,22 @@ func (f *fakeFetch) Fixtures(ctx context.Context, id, etag string) (gwclient.Fix
 type fakeAgent struct {
 	mu    sync.Mutex
 	calls []protocol.AgentSetupArgs
+	opens []*protocol.WindowSpec
+	// onCall, when set, observes every call.
+	onCall func(protocol.AgentOp)
 }
 
 func (a *fakeAgent) Call(ctx context.Context, op protocol.AgentOp, args any, timeout time.Duration, out any) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if op == protocol.AgentOpSetup {
+	if a.onCall != nil {
+		a.onCall(op)
+	}
+	switch op {
+	case protocol.AgentOpSetup:
 		a.calls = append(a.calls, args.(protocol.AgentSetupArgs))
+	case protocol.AgentOpOpen:
+		a.opens = append(a.opens, args.(*protocol.WindowSpec))
 	}
 	return nil
 }
@@ -462,17 +470,49 @@ func TestResume(t *testing.T) {
 	f := newLoader(t)
 	ctx := context.Background()
 	id := "02-buffers-and-files/03-opening-files"
+	// Emacs is fresh: the step becomes active only once its buffers are back.
+	activeDuringCall := false
+	f.agent.onCall = func(protocol.AgentOp) { activeDuringCall = activeDuringCall || f.engine.Active() != nil }
+
+	// No snapshot: the lesson's setup, without reset.
 	if err := f.l.Resume(ctx, protocol.StepRef{LessonID: id, StepID: "save"}); err != nil {
 		t.Fatal(err)
 	}
 	if a := f.engine.Active(); a == nil || a.StepID != "save" {
 		t.Fatalf("resume active %+v", a)
 	}
-	if len(f.agent.calls) != 0 || len(f.cps) != 0 {
-		t.Fatal("resume must not run setup or checkpoints")
+	if len(f.agent.calls) != 1 || f.agent.calls[0].Reset || len(f.agent.calls[0].Open) != 1 || len(f.agent.opens) != 0 {
+		t.Fatalf("resume without a snapshot runs the setup without reset: %+v %v", f.agent.calls, f.agent.opens)
 	}
-	var sc protocol.Scenario
-	_ = json.Unmarshal([]byte(lesson), &sc)
+	if len(f.cps) != 0 || activeDuringCall {
+		t.Fatalf("resume took checkpoints %v or activated the step before Emacs was set up", f.cps)
+	}
+
+	// A snapshot of the lesson's files is re-opened instead.
+	snap := &protocol.WindowSpec{Files: []protocol.FileSpec{{Path: "hello/src/main.rs", Point: 12, Visible: true}}, Layout: "single"}
+	g := newLoader(t)
+	g.l.Snapshot = func() *protocol.WindowSpec { return snap }
+	g.agent.onCall = func(protocol.AgentOp) { activeDuringCall = activeDuringCall || g.engine.Active() != nil }
+	if err := g.l.Resume(ctx, protocol.StepRef{LessonID: id, StepID: "save"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.agent.opens) != 1 || g.agent.opens[0] != snap || len(g.agent.calls) != 0 || activeDuringCall {
+		t.Fatalf("resume with a snapshot: opens %v setups %+v", g.agent.opens, g.agent.calls)
+	}
+	if a := g.engine.Active(); a == nil || a.StepID != "save" {
+		t.Fatalf("resume active %+v", a)
+	}
+
+	// A snapshot without the lesson's files predates the lesson: setup.
+	snap = &protocol.WindowSpec{Files: []protocol.FileSpec{{Path: "editing/src/main.rs"}}}
+	h := newLoader(t)
+	h.l.Snapshot = func() *protocol.WindowSpec { return snap }
+	if err := h.l.Resume(ctx, protocol.StepRef{LessonID: id, StepID: "save"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(h.agent.opens) != 0 || len(h.agent.calls) != 1 {
+		t.Fatalf("a stale snapshot: opens %v setups %+v", h.agent.opens, h.agent.calls)
+	}
 }
 
 func TestExtractResetPrunes(t *testing.T) {

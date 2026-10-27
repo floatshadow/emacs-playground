@@ -641,6 +641,19 @@ func TestStuckRules(t *testing.T) {
 	if len(nudges()) != 3 {
 		t.Fatal("unbound run should restart")
 	}
+	// A prefix cancelled with C-g is a quit, not an unbound key.
+	g.e.OnKey(&protocol.KeyEvent{Keys: "C-x C-g", Cmd: "undefined"})
+	g.e.OnKey(&protocol.KeyEvent{Keys: "C-x C-g", Cmd: "undefined"})
+	g.e.evaluate(ctx, false)
+	unbound := 0
+	for _, x := range nudges() {
+		if x.ID == "layout/stuck/3" {
+			unbound++
+		}
+	}
+	if unbound != 1 {
+		t.Fatalf("a cancelled prefix counted as unbound: %s", g.sink.types())
+	}
 	// Conjunction: idle 10 s and step 100 s (step is now ~85 s old).
 	g.clock.add(11 * time.Second)
 	g.e.evaluate(ctx, false)

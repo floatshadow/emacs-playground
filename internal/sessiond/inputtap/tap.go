@@ -7,10 +7,14 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
-// DefaultPrefixes is the static prefix list (backend.md §3.6).
+// DefaultPrefixes is the static prefix list (backend.md §3.6): the prefix
+// keys of Emacs's global map that the course's modules leave as prefixes.
+// M-o is not one (Emacs 28 unbound it; the windows module binds it to
+// ace-window).
 var DefaultPrefixes = []string{
-	"C-x", "C-c", "C-h", "M-g", "M-s", "M-o",
+	"C-x", "C-c", "C-h", "M-g", "M-s",
 	"C-x 4", "C-x 5", "C-x t", "C-x r", "C-x n", "C-x p", "C-x 8",
+	"C-x w", "C-x x", "C-x v", "C-x a", "C-x C-k", "C-x RET", "M-s h",
 	"ESC",
 }
 
@@ -19,6 +23,12 @@ var DefaultPrefixes = []string{
 type PrefixTracker struct {
 	prefixes map[string]bool
 	pending  []protocol.Key
+	// paging is set by C-h after a pending prefix: which-key's paging
+	// dispatcher (which-key-C-h-dispatch) reads the next key itself and
+	// then reads the prefix again, so the prefix stays pending. Without
+	// which-key, C-h runs describe-prefix-bindings, whose key event resets
+	// the tracker.
+	paging bool
 }
 
 // NewPrefixTracker returns a tracker for the given prefix sequences (Emacs
@@ -40,12 +50,36 @@ var keyCg = protocol.Key{Mods: protocol.ModCtrl, Base: "g"}
 
 // Key feeds one key. It returns the prefix event payload and true when the
 // pending prefix changed in a way the browser should hear about: a sequence
-// that is (still) a prefix, or "" when C-g cancelled a pending prefix. A key
-// that completes a sequence clears the pending prefix silently: the agent's
-// key event is authoritative and arrives right after.
+// that is (still) a prefix, or "" when a key ended a pending prefix (C-g, or
+// a key that makes the sequence a command or a prefix the tracker does not
+// know). The agent's key event for the completed sequence may come much
+// later (describe-key reads its own key first), so the browser must not keep
+// showing the old prefix meanwhile.
 func (t *PrefixTracker) Key(k protocol.Key) (string, bool) {
+	had := len(t.pending) > 0
+	if t.paging {
+		t.paging = false
+		switch {
+		case k == keyCg || k == keyA || k == keyH:
+			// a aborts; C-g goes back to the prefix, but Rescue and
+			// learners press it to leave; h shows the help buffer.
+			t.pending = t.pending[:0]
+			return "", had
+		case k == keyN || k == keyP || k == keyD:
+			// Another page, or docstrings toggled: still the same prefix.
+			return "", false
+		case k == keyU:
+			// Undo the last key of the prefix.
+			t.pending = t.pending[:len(t.pending)-1]
+			if len(t.pending) == 0 {
+				return "", true
+			}
+			return canonical(t.pending), true
+		}
+		t.pending = t.pending[:0]
+		return "", had
+	}
 	if k == keyCg {
-		had := len(t.pending) > 0
 		t.pending = t.pending[:0]
 		return "", had
 	}
@@ -55,9 +89,25 @@ func (t *PrefixTracker) Key(k protocol.Key) (string, bool) {
 		t.pending = seq
 		return s, true
 	}
+	if had && k == keyCh && s != "C-h C-h" {
+		// The prefix stays pending (see paging); nothing to tell.
+		t.paging = true
+		return "", false
+	}
 	t.pending = t.pending[:0]
-	return "", false
+	return "", had
 }
+
+// Keys of which-key's paging dispatcher.
+var (
+	keyCh = protocol.Key{Mods: protocol.ModCtrl, Base: "h"}
+	keyA  = protocol.Key{Base: "a"}
+	keyD  = protocol.Key{Base: "d"}
+	keyH  = protocol.Key{Base: "h"}
+	keyN  = protocol.Key{Base: "n"}
+	keyP  = protocol.Key{Base: "p"}
+	keyU  = protocol.Key{Base: "u"}
+)
 
 // Pending returns the pending prefix ("" when none).
 func (t *PrefixTracker) Pending() string {
@@ -68,7 +118,7 @@ func (t *PrefixTracker) Pending() string {
 }
 
 // Reset forgets the pending prefix (the agent reported a command).
-func (t *PrefixTracker) Reset() { t.pending = t.pending[:0] }
+func (t *PrefixTracker) Reset() { t.pending, t.paging = t.pending[:0], false }
 
 // canonical renders a sequence the way key-description does for the
 // prefixes we track: "ESC g" is "M-g".
@@ -119,12 +169,13 @@ func (t *Tap) Keys(keys []protocol.Key) {
 }
 
 // late handles keys a stream reports only after MetaTimeout (a lone ESC,
-// an unterminated sequence) whose bytes arrived at arrived. tmux
-// (escape-time 0) hands such a byte to Emacs at once, so when the agent has
-// reported a command since the bytes arrived, Emacs has already used them
-// (ESC ESC ESC is keyboard-escape-quit) and reporting them now would show a
-// pending prefix after the command that consumed it. Such keys are
-// dropped and the pending prefix is cleared; other keys go through Keys.
+// an unterminated sequence) whose bytes arrived at arrived. tmux hands such
+// a byte to Emacs after its escape-time (supervisor.EscapeTime, far below
+// MetaTimeout), so when the agent has reported a command since the bytes
+// arrived, Emacs has already used them (ESC ESC ESC is
+// keyboard-escape-quit) and reporting them now would show a pending prefix
+// after the command that consumed it. Such keys are dropped and the
+// pending prefix is cleared; other keys go through Keys.
 func (t *Tap) late(keys []protocol.Key, arrived time.Time) {
 	if len(keys) == 0 {
 		return

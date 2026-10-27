@@ -425,6 +425,25 @@ func TestSupervisorLifecycle(t *testing.T) {
 	if spec := h.sup.LastSnapshot(); spec == nil || spec.Files[0].Point != 42 {
 		t.Fatalf("snapshot %+v", spec)
 	}
+	// While held, snapshots are taken but do not replace the file.
+	if err := os.WriteFile(h.sup.opt.SnapshotFile, []byte(`{"files":[{"path":"kept.md","point":1}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	release := h.sup.HoldSnapshots()
+	if spec, err := h.sup.Snapshot(ctx); err != nil || spec.Files[0].Point != 42 {
+		t.Fatalf("held snapshot %+v %v", spec, err)
+	}
+	if spec := h.sup.LastSnapshot(); spec == nil || spec.Files[0].Path != "kept.md" {
+		t.Fatalf("a held snapshot replaced the file: %+v", spec)
+	}
+	release()
+	release()
+	if _, err := h.sup.Snapshot(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if spec := h.sup.LastSnapshot(); spec == nil || spec.Files[0].Point != 42 {
+		t.Fatalf("snapshot after release %+v", spec)
+	}
 
 	// Crash: the daemon dies, restarts with backoff, buffers are restored.
 	oldPID := h.sup.Status().PID

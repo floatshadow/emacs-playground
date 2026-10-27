@@ -187,6 +187,7 @@ func (s *Server) rpcKeys(ctx context.Context, req protocol.KeysRequest) (any, er
 	if ok, reason := s.sup.Ready(); !ok {
 		return nil, httpx.EmacsUnavailable(reason)
 	}
+	s.engine.DemoTraffic()
 	if err := s.sup.SendKeys(ctx, req.Frame, req.Keys, req.Text); err != nil {
 		if strings.Contains(err.Error(), "cannot be sent") {
 			return nil, httpx.BadRequest(err.Error())
@@ -366,7 +367,10 @@ func (s *Server) rpcRestore(ctx context.Context, req protocol.RestoreRequest) (a
 }
 
 // restoreCheckpoint puts the workspace files back to ref and asks the agent
-// to restore the windows recorded with it (reset-step). The module set
+// to restore the windows recorded with it (reset-step). It returns the
+// number of files the restore changed: those restored or removed on disk
+// and those whose buffer had unsaved changes, which reset-step discards.
+// The module set
 // (emacs.d/modules.el) is kept: modules only ever grow (emacs.md §4), and
 // the running Emacs has the current set loaded. A missing checkpoint is
 // os.ErrNotExist. Once started, a restore runs to the end even when the
@@ -377,9 +381,20 @@ func (s *Server) rpcRestore(ctx context.Context, req protocol.RestoreRequest) (a
 func (s *Server) restoreCheckpoint(ctx context.Context, ref string) (int, checkpoint.Meta, error) {
 	ctx = context.WithoutCancel(ctx)
 	mods := s.modules.Current()
-	n, meta, err := s.ckpt.Restore(ctx, ref)
+	var unsaved []string
+	if s.agent.Connected() {
+		unsaved = s.modifiedFiles(ctx)
+	}
+	files, meta, err := s.ckpt.Restore(ctx, ref)
 	if err != nil {
 		return 0, meta, err
+	}
+	changed := make(map[string]bool, len(files)+len(unsaved))
+	for _, f := range files {
+		changed[f] = true
+	}
+	for _, f := range unsaved {
+		changed[f] = true
 	}
 	if after := s.modules.Current(); !slices.Equal(after, mods) {
 		if err := s.modules.Write(mods); err != nil {
@@ -400,7 +415,7 @@ func (s *Server) restoreCheckpoint(ctx context.Context, ref string) (int, checkp
 		s.restoreBuffers(ctx, meta.Buffers, spec)
 		s.restoreGlobals(ctx, meta.Globals)
 	}
-	return n, meta, nil
+	return len(changed), meta, nil
 }
 
 // restoreStep restores a step's checkpoint for the scenario loader ("Go to

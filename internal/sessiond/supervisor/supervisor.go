@@ -128,6 +128,8 @@ type Supervisor struct {
 	guiSeen       chan struct{}
 
 	restarting bool // RestartEmacs is running (under mu)
+	// snapHolds counts HoldSnapshots not yet released (under mu).
+	snapHolds int
 
 	restartMu sync.Mutex
 	modeMu    sync.Mutex
@@ -570,6 +572,12 @@ func (s *Supervisor) Snapshot(ctx context.Context) (*protocol.WindowSpec, error)
 	if spec.TakenAt == 0 {
 		spec.TakenAt = time.Now().UnixMilli()
 	}
+	s.mu.Lock()
+	held := s.snapHolds > 0
+	s.mu.Unlock()
+	if held {
+		return &spec, nil
+	}
 	if err := s.saveSnapshot(&spec); err != nil {
 		s.log.Warn("saving snapshot", "err", err)
 	}
@@ -592,6 +600,24 @@ func (s *Supervisor) saveSnapshot(spec *protocol.WindowSpec) error {
 		return err
 	}
 	return os.Rename(tmp, s.opt.SnapshotFile)
+}
+
+// HoldSnapshots keeps Snapshot from overwriting the snapshot file until
+// release is called: after a cold start the file holds the learner's
+// buffers and windows until the resume has re-opened them, and a snapshot
+// of the fresh Emacs (*scratch*) must not replace it meanwhile.
+func (s *Supervisor) HoldSnapshots() (release func()) {
+	s.mu.Lock()
+	s.snapHolds++
+	s.mu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.mu.Lock()
+			s.snapHolds--
+			s.mu.Unlock()
+		})
+	}
 }
 
 // LastSnapshot returns the saved spec, or nil.

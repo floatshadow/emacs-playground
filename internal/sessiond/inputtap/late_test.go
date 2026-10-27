@@ -43,19 +43,23 @@ func TestLateEscAfterCommand(t *testing.T) {
 	}
 	s.Input([]byte("\x1b"))
 	time.Sleep(3 * MetaTimeout)
+	// ESC ESC is not a prefix the tracker knows: the pending ESC is cleared.
+	if log.String() != "ESC," {
+		t.Fatalf("the second ESC ends the ESC prefix: %q", log.String())
+	}
 	// The third ESC: Emacs runs keyboard-escape-quit before the tap's timer.
 	s.Input([]byte("\x1b"))
 	time.Sleep(MetaTimeout / 5)
 	tap.Reset() // the agent's key event
 	time.Sleep(3 * MetaTimeout)
-	if log.String() != "ESC" || tap.Pending() != "" {
+	if log.String() != "ESC," || tap.Pending() != "" {
 		t.Fatalf("a prefix followed the command that used the ESC: %q, pending %q", log.String(), tap.Pending())
 	}
 
 	// A lone ESC typed after the command is a prefix again.
 	s.Input([]byte("\x1b"))
 	time.Sleep(3 * MetaTimeout)
-	if log.String() != "ESC,ESC" || tap.Pending() != "ESC" {
+	if log.String() != "ESC,,ESC" || tap.Pending() != "ESC" {
 		t.Fatalf("a fresh lone ESC: %q, pending %q", log.String(), tap.Pending())
 	}
 
@@ -72,7 +76,7 @@ func TestLateEscAfterCommand(t *testing.T) {
 	tap.Reset()
 	time.Sleep(2 * MetaTimeout)
 	s2.Input([]byte("\x18"))
-	if log.String() != "ESC,ESC,C-x" {
+	if log.String() != "ESC,,ESC,C-x" {
 		t.Fatalf("stale ESC before C-x: %q", log.String())
 	}
 }

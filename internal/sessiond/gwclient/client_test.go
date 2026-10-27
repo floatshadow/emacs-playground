@@ -131,4 +131,12 @@ func TestClient(t *testing.T) {
 	if len(progress) != 1 || progress[0].StepID != "open" {
 		t.Fatalf("progress %+v", progress)
 	}
+	mu.Unlock()
+	// Reports after Close are dropped, not sent on the closed queue.
+	r.Report(protocol.ProgressReport{LessonID: "l/x", StepID: "save", Status: protocol.ProgressDone})
+	r.Close(time.Second)
+	mu.Lock()
+	if len(progress) != 1 {
+		t.Fatalf("a report after Close was sent: %+v", progress)
+	}
 }
