@@ -88,6 +88,7 @@ type Server struct {
 
 	fakeMu     sync.Mutex
 	fakeCancel context.CancelFunc
+	fake       *agent.Fake // fake mode's agent, for tests
 }
 
 // New builds a server from cfg; Run starts it.
@@ -665,6 +666,9 @@ func (s *Server) startFakeAgent(pid int) {
 	s.fakeMu.Unlock()
 	fake := &agent.Fake{Path: s.cfg.AgentSocket, Hello: protocol.AgentHelloMsg{Emacs: "fake", PID: pid, Modules: s.modules.Current()},
 		Initial: []any{protocol.AgentFrameMsg{T: protocol.AgentFrame, Event: protocol.FrameOpened, Kind: protocol.FrameTerminal}}}
+	s.fakeMu.Lock()
+	s.fake = fake
+	s.fakeMu.Unlock()
 	go func() {
 		// The socket may not accept for a moment after a restart.
 		for i := 0; i < 50 && ctx.Err() == nil; i++ {

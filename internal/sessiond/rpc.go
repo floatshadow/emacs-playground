@@ -386,8 +386,13 @@ func (s *Server) rpcRestore(ctx context.Context, req protocol.RestoreRequest) (a
 // to restore the windows recorded with it (reset-step). The module set
 // (emacs.d/modules.el) is kept: modules only ever grow (emacs.md §4), and
 // the running Emacs has the current set loaded. A missing checkpoint is
-// os.ErrNotExist.
+// os.ErrNotExist. Once started, a restore runs to the end even when the
+// request that asked for it goes away (a page navigating away while "Go to
+// this step" restores): files restored without reset-step, buffers and
+// session variables would leave the step half restored. Each agent call
+// keeps its own timeout.
 func (s *Server) restoreCheckpoint(ctx context.Context, ref string) (int, checkpoint.Meta, error) {
+	ctx = context.WithoutCancel(ctx)
 	mods := s.modules.Current()
 	n, meta, err := s.ckpt.Restore(ctx, ref)
 	if err != nil {

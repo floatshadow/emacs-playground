@@ -1,6 +1,7 @@
 package sessiond
 
 import (
+	"context"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -10,6 +11,8 @@ import (
 	"time"
 
 	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 )
 
 // TestDemoSkipAndDropAll covers rpc demo, rpc skip and drop-step {} in fake
@@ -136,4 +139,70 @@ func waitProgress(t *testing.T, gw *fakeGateway, want ...string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("progress %s lacks one of %v", joined, want)
+}
+
+// TestRestoreOutlivesTheRequest: a restore that has started finishes when
+// the request goes away (a page navigating away during "Go to this step"):
+// git does not die holding the index lock, and the agent still gets
+// reset-step (X9).
+func TestRestoreOutlivesTheRequest(t *testing.T) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		t.Skip("bash not installed")
+	}
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	base := t.TempDir()
+	ws := filepath.Join(base, "work")
+	run, err := os.MkdirTemp("", "pgrun")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(run)
+	_ = os.MkdirAll(filepath.Join(base, "pristine"), 0o755)
+	gw := &fakeGateway{tarball: makeTarball(t, map[string]string{"README.md": "# hello\n"})}
+	gwSrv := httptest.NewServer(gw.handler(t))
+	defer gwSrv.Close()
+	ts := startServer(t, ws, run, gw, gwSrv.URL)
+	defer ts.stop()
+	es := ts.events("")
+	lesson := "00-orientation/02-first-steps"
+	if code := ts.rpc("scenario", protocol.ScenarioRequest{LessonID: lesson}, nil); code != 200 {
+		t.Fatalf("scenario %d", code)
+	}
+	es.wait("step:open:loaded")
+	ref := checkpoint.StepRef(lesson, "open")
+	deadline := time.Now().Add(10 * time.Second)
+	for !ts.srv.ckpt.Exists(context.Background(), ref) {
+		if time.Now().After(deadline) {
+			t.Fatal("no checkpoint for the first step")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	ts.srv.fakeMu.Lock()
+	fake := ts.srv.fake
+	ts.srv.fakeMu.Unlock()
+	before := countCalls(fake, protocol.AgentOpResetStep)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := ts.srv.restoreCheckpoint(ctx, ref); err != nil {
+		t.Fatalf("restore with a cancelled request: %v", err)
+	}
+	if got := countCalls(fake, protocol.AgentOpResetStep); got != before+1 {
+		t.Fatalf("reset-step calls %d, want %d", got, before+1)
+	}
+	if _, err := os.Stat(filepath.Join(ws, ".git", "index.lock")); !os.IsNotExist(err) {
+		t.Fatalf("index.lock left behind: %v", err)
+	}
+}
+
+func countCalls(f *agent.Fake, op protocol.AgentOp) int {
+	n := 0
+	for _, c := range f.Calls() {
+		if c.Op == op {
+			n++
+		}
+	}
+	return n
 }
