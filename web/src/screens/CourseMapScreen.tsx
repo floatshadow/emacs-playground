@@ -32,10 +32,11 @@ export default function CourseMapScreen() {
   }, [t])
 
   // Scroll to #part-N or #projects after the map renders.
+  const rendered = !!curriculum.data && !progress.isPending
   useEffect(() => {
-    if (!curriculum.data || !location.hash) return
+    if (!rendered || !location.hash) return
     document.getElementById(location.hash.slice(1))?.scrollIntoView()
-  }, [curriculum.data, location.hash])
+  }, [rendered, location.hash])
 
   return (
     <AppShell
@@ -60,7 +61,8 @@ export default function CourseMapScreen() {
           <h1>{t('course.loadError')}</h1>
           <p>{curriculum.error instanceof Error ? curriculum.error.message : ''}</p>
         </main>
-      ) : !curriculum.data ? (
+      ) : !curriculum.data || progress.isPending ? (
+        // Rows wait for progress too, or every lesson would flash "not started".
         <main className={styles.message} aria-busy="true">
           <p>{t('common.loading')}</p>
         </main>

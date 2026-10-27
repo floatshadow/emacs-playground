@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import { describeDemo, parseDemo } from '../../lib/demo'
 import type { StepView } from '../../store/selectors'
+import { useUiStore } from '../../store/ui'
 import { Button } from '../common/Button'
 import { DemoPlayer } from './DemoPlayer'
 import { doItYourself } from './demoPlayer'
@@ -48,6 +49,7 @@ export function Step({
   flash?: boolean
 }) {
   const { t } = useTranslation()
+  const playing = useUiStore((s) => s.demo?.stepId === view.step.id)
   const active = view.status === 'active'
   const done = view.status === 'done'
   const cls = [
@@ -96,14 +98,14 @@ export function Step({
             keys={view.hintLevel >= 2 ? demoKeys(view.step.demo) : null}
           />
         )}
-        {active && view.watched && (
+        {active && view.watched && !playing && (
           <p className={styles.watchedNote} role="status">
             {t('demo.watched')}
           </p>
         )}
         {active && (
           <div className={styles.actions}>
-            {view.watched && (
+            {view.watched && !playing && (
               <Button
                 variant="primary"
                 size="small"

@@ -27,38 +27,51 @@ export function useStepTransition(
   pane: RefObject<HTMLElement | null>,
 ): { flash: string | null; announce: string } {
   const { t, i18n } = useTranslation()
-  const [flash, setFlash] = useState<string | null>(null)
+  // The step that just ended, with a counter so the same step ending twice
+  // (redo) flashes again.
+  const [ended, setEnded] = useState<{ stepId: string; n: number; reduced: boolean } | null>(null)
   const [announce, setAnnounce] = useState('')
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const latest = useRef({ scenario, t, language: i18n.language })
   useEffect(() => {
-    const off = onSessionEvent((ev) => {
-      if (ev.t !== 'step' || ev.lessonId !== lessonId) return
-      if (ev.status !== 'complete' && ev.status !== 'skipped') return
-      const step = scenario?.steps.find((s) => s.id === ev.stepId)
-      const goal = step ? lt(step.goal, i18n.language) : ev.stepId
-      setAnnounce(
-        t(ev.status === 'complete' ? 'steps.completedAnnounce' : 'steps.skippedAnnounce', {
-          goal,
-        }),
-      )
-      const reduced = prefersReducedMotion()
-      if (timer.current) clearTimeout(timer.current)
-      if (!reduced) setFlash(ev.stepId)
-      timer.current = setTimeout(
-        () => {
-          timer.current = null
-          setFlash(null)
-          pane.current
-            ?.querySelector<HTMLElement>('li[aria-current="step"]')
-            ?.scrollIntoView?.({ block: 'nearest', behavior: reduced ? 'auto' : 'smooth' })
-        },
-        reduced ? 0 : STEP_FLASH_MS,
-      )
-    })
-    return () => {
-      off()
-      if (timer.current) clearTimeout(timer.current)
-    }
-  }, [lessonId, scenario, pane, t, i18n.language])
-  return { flash, announce }
+    latest.current = { scenario, t, language: i18n.language }
+  })
+
+  useEffect(
+    () =>
+      onSessionEvent((ev) => {
+        if (ev.t !== 'step' || ev.lessonId !== lessonId) return
+        if (ev.status !== 'complete' && ev.status !== 'skipped') return
+        const { scenario: sc, t: tr, language } = latest.current
+        const step = sc?.steps.find((s) => s.id === ev.stepId)
+        const goal = step ? lt(step.goal, language) : ev.stepId
+        setAnnounce(
+          tr(ev.status === 'complete' ? 'steps.completedAnnounce' : 'steps.skippedAnnounce', {
+            goal,
+          }),
+        )
+        setEnded((cur) => ({
+          stepId: ev.stepId,
+          n: (cur?.n ?? 0) + 1,
+          reduced: prefersReducedMotion(),
+        }))
+      }),
+    [lessonId],
+  )
+
+  // Highlight, then bring the next step into view.
+  useEffect(() => {
+    if (!ended) return
+    const timer = setTimeout(
+      () => {
+        setEnded((cur) => (cur && cur.n === ended.n ? null : cur))
+        pane.current
+          ?.querySelector<HTMLElement>('li[aria-current="step"]')
+          ?.scrollIntoView?.({ block: 'nearest', behavior: ended.reduced ? 'auto' : 'smooth' })
+      },
+      ended.reduced ? 0 : STEP_FLASH_MS,
+    )
+    return () => clearTimeout(timer)
+  }, [ended, pane])
+
+  return { flash: ended && !ended.reduced ? ended.stepId : null, announce }
 }
