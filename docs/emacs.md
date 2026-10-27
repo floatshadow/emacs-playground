@@ -4,203 +4,192 @@ Everything that lives inside the session container except sessiond: the Emacs bu
 
 ## 1. Session image
 
-Debian trixie, multi-stage `images/session/Dockerfile`:
+Debian trixie, multi-stage `images/session/Dockerfile` (build context: the repository root). Heavy stages are cached independently and rebuild only when their own pins in `images/session/versions.env` change:
 
-| Stage | Produces | Cached independently |
-|---|---|---|
-| `emacs-build` | Emacs 31.1 from the release tarball, installed to `/usr/local` | yes, changes rarely |
-| `toolchains` | rustup, opam, uv, typst, TeX Live, node (for a few LSP servers), ripgrep, fd, git, delta, pandoc, enchant, poppler, fonts | yes |
-| `packages` | the Emacs packages in `packages.lock`, byte- and native-compiled | yes, changes with the lock |
-| `config` | `/opt/playground/emacs.d`, tmux config, Xvnc helpers, prefetched project dependencies | small |
-| `final` | sessiond binary, `tini`, user `learner`, entrypoint | small |
+| Stage | Produces |
+|---|---|
+| `pins` | `versions.env` split per stage |
+| `sessiond` | static sessiond binary |
+| `emacs-build` | Emacs 31.1 in `/usr/local`, native code for every Lisp file, tree-sitter grammars |
+| `rust`, `python`, `fonts` | the pinned Rust toolchain in `/opt/rust`; uv, basedpyright and ruff in `/opt/uv`; Iosevka Nerd Font |
+| `toolchains` | runtime base: Debian packages (tmux 3.5a, TigerVNC Xvnc, xdotool, ripgrep, fd, git, Noto CJK, gcc for native code) plus the stages above |
+| `packages` | the packages of `packages.lock`, sha256-checked, byte- and native-compiled into `/opt/playground/{elpa,eln-cache}` |
+| `config` | `/opt/playground/emacs.d` (pristine config, agent compiled), `/etc/tmux.conf`, helpers in `/opt/playground/bin`, `versions.env` |
+| `final` | sessiond, user `learner`, environment, entrypoint |
 
-Emacs configure flags: `--with-native-compilation=aot --with-tree-sitter --with-modules --with-x --with-x-toolkit=lucid --with-cairo --with-harfbuzz --with-xinput2 --with-rsvg --with-webp --with-imagemagick --with-gnutls --with-sqlite3 --without-pop` (plus the default PNG, JPEG, GIF, TIFF and XPM support, with their dev libraries in the build stage). JSON support is built in since Emacs 30, and Emacs 31's configure rejects `--with-json`. Image support matters: `image-mode`, `image-dired`, SVG rendering and inline Org previews depend on librsvg, libwebp and ImageMagick being present at build time. Lucid rather than GTK: lighter, no GTK-under-VNC quirks, no daemon crash when the X connection drops (an old GTK issue). Not pgtk: that build cannot create terminal frames from a daemon that also serves X frames in the way we need, and we run under X anyway. Fallback: Emacs 30.2 with the same flags if a required package breaks on 31.
+Emacs configure flags: `--with-native-compilation=aot --with-tree-sitter --with-modules --with-x --with-x-toolkit=lucid --with-cairo --with-harfbuzz --with-xinput2 --with-rsvg --with-webp --with-imagemagick --with-gnutls --with-sqlite3 --without-pop`, plus the default image formats. JSON support is built in (Emacs 31's configure rejects `--with-json`). Image libraries matter: `image-mode`, `image-dired`, SVG and inline Org previews need them at build time. Lucid rather than GTK: lighter, no GTK-under-VNC quirks, and the daemon survives the X connection going away. Not pgtk: that build cannot serve terminal and X frames from one daemon the way the playground needs. Fallback: Emacs 30.2 with the same flags if a required package breaks on 31.
 
-Users and paths: `learner` (uid 1000), home `/home/learner`, workspace `/work`, pristine config at `/opt/playground/emacs.d` (read-only), live config at `/work/emacs.d` symlinked from `~/.config/emacs`, Emacs server socket in `/run/playground/emacs/`, agent socket `/run/playground/agent.sock`. The root filesystem is read-only in server mode; `/tmp`, `/run` and `/home/learner/.cache` are tmpfs.
+Users and paths: `learner` (uid 1000), home `/home/learner`, workspace `/work`, pristine config `/opt/playground/emacs.d` (read-only), live config `/work/emacs.d` (symlinked from `~/.config/emacs`; the daemon runs with `--init-directory=/work/emacs.d`), `XDG_RUNTIME_DIR=/run/playground` so the server socket is `/run/playground/emacs/playground`, agent socket `/run/playground/agent.sock`, toolchain versions in `/opt/playground/versions.env` (reported by `GET /status`). The root filesystem may be read-only; `/tmp`, `/run` and `/home/learner/.cache` are tmpfs. Native code compiled at run time (only the learner's own Lisp) goes to `~/.cache/emacs/eln-cache`, else `/work/.playground/eln-cache` when the cache is mounted `noexec`, else nowhere (`early-init.el`).
 
-Size budget: Emacs 400 MB, toolchains 3.5 GB (TeX Live medium is the largest), packages 300 MB, prefetched dependencies 800 MB, fonts 100 MB; total about 5.5 GB.
+Size: the slice-1 image is about 3.4 GB unpacked; a cold build takes about 9 minutes, a config-only change about 15 seconds. With every toolchain of §2 the budget is about 5.5 GB (TeX Live is the largest part).
 
 ## 2. Toolchains
 
 | Language or tool | Install | Pieces |
 |---|---|---|
-| Rust | rustup, stable channel pinned to a release | rust-analyzer, clippy, rustfmt, cargo-nextest, codelldb (for dape) |
-| OCaml | opam 2.x, switch `5.3` or current | dune, ocaml-lsp-server, ocamlformat, utop, merlin, ocamlearlybird, ppx_expect |
-| Python | uv | basedpyright, ruff, debugpy, ipython, pytest |
+| Rust | rustup, pinned stable release | rust-analyzer, clippy, rustfmt, rust-src; cargo-nextest, codelldb (for dape) |
+| Python | uv | basedpyright, ruff; debugpy, ipython, pytest |
+| OCaml | opam 2.x | dune, ocaml-lsp-server, ocamlformat, utop, merlin, ocamlearlybird, ppx_expect |
 | Typst | release binary | typst, tinymist |
 | TeX | TeX Live scheme-medium | latexmk, texlab, synctex, biber, a curated package list |
 | Markdown | | marksman, pandoc |
-| Shell and misc | | bash-language-server, shellcheck, ripgrep, fd, git, delta, jq, tmux 3.5, TigerVNC `Xvnc`, xdotool, enchant with `en_US` and `zh_CN` dictionaries, poppler utils, fontconfig |
-| Fonts | | Iosevka Nerd Font (also served to the browser), Libertinus (Typst samples), Noto CJK, Noto Color Emoji |
+| Shell and misc | | bash-language-server, shellcheck, ripgrep, fd, git, delta, jq, tmux 3.5, TigerVNC `Xvnc`, xdotool, enchant (`en_US`, `zh_CN`), poppler utils, fontconfig |
+| Fonts | | Iosevka Nerd Font (also served to the browser), Noto CJK, Libertinus, Noto Color Emoji |
 
-Versions are pinned in `images/session/versions.env` and surfaced in `GET /status`.
+Slice 1 installs Rust (toolchain, rust-analyzer, clippy, rustfmt, rust-src), Python (uv, basedpyright, ruff), the shell basics, tmux, Xvnc, xdotool, Iosevka Nerd Font and Noto CJK; the rest is `TODO(emacs, emacs.md §2)` in the Dockerfile. Versions are pinned in `versions.env`.
 
 ## 3. Configuration layout
 
 ```
 emacs.d/
-  early-init.el       GC tuning, no package.el at startup, frame defaults (no toolbar, no scrollbars)
-  init.el             loads modules named in modules.el; never edited by the course
-  modules.el          written by sessiond: (setq playground-modules '(base agent ...))
+  early-init.el       GC tuning, no package.el at startup, frame defaults, where run-time native code goes
+  init.el             makes packages available, reads modules.el, loads the modules; never edited by the course
+  modules.el          written by the playground: (setq playground-modules '(base agent ...))
   modules/
-    base.el           which-key, modus-themes, savehist, recentf, saveplace, auto-revert, auto-save-visited,
-                      uniquify, repeat-mode, sane defaults, C-z and C-x C-z unbound, xterm-mouse, OSC 52, kkp
-    agent.el          playground-agent minor mode, always on
+    base.el           modus theme and mode-line colours, savehist, recentf, saveplace, auto-revert,
+                      auto-save-visited, uniquify, sane defaults, C-x C-c closes the frame only,
+                      xterm-mouse, OSC 52, kkp in tmux frames, GUI fonts and frame fit
+    agent.el          playground-agent-mode, always on in the playground
     editing.el        avy, expreg, multiple-cursors, iedit, vundo, visual-replace, kmacro helpers, ws-butler
-    completion.el     vertico, orderless, marginalia, consult, embark, embark-consult, corfu, cape, tempel
-    files.el          dired defaults, dirvish, project.el config, consult-dir, bookmarks, ibuffer groups
-    windows.el        windmove, ace-window, winner, popper, display-buffer-alist rules, tab-bar setup,
-                      burly, olivetti, follow-mode helpers, resize keys, golden-ratio (off by default)
-    git.el            magit, diff-hl, git-timemachine, forge (optional)
-    terminals.el      eat (default), vterm (alternative, compiled at image time), eshell config, compile tweaks (ansi colours, auto-scroll), async-shell
-    lsp.el            eglot config and server programs, flymake, eldoc-box, apheleia, dape, consult-eglot
-    lang-rust.el      rust-ts-mode, cargo via compile, clippy flymake backend, rustfmt via apheleia
-    lang-ocaml.el     tuareg, dune, utop, merlin-eldoc, ocamlformat
-    lang-python.el    python-ts-mode, pet, ruff via apheleia, python shell
-    writing.el        markdown-mode, typst-ts-mode, auctex, cdlatex, reftex, pdf-tools, citar, jinx, olivetti
-    org.el            org, agenda files, capture templates, babel languages, ox exporters, org-roam, org-present
-    power.el          wgrep, wdired, ediff layout, calc, eshell + tramp, ielm, re-builder, line tools
-    remote.el         tramp defaults, connection sharing, tramp-container
-    ui.el             nerd-icons (dired, completion, corfu, ibuffer), mode line, breadcrumb, pulsar, line numbers, ligature (GUI frame only)
-    power.el also     edit-indirect for fenced code blocks (Part 11.6)
-    input.el          C-x 8 helpers, TeX input method default, rime (optional)
-  lisp/
-    playground-agent.el
-  user-lisp/          Emacs 31 feature: the learner's own files, auto-compiled and autoloaded
-  packages.lock       name, version, archive, sha256 per package
+    completion.el     vertico, orderless, marginalia, consult, embark, corfu, cape, tempel
+    files.el          dired, dirvish, project.el, consult-dir, bookmarks, ibuffer groups
+    windows.el        windmove, ace-window, winner, popper, display-buffer-alist rules, tab-bar, burly, olivetti
+    ui.el             nerd-icons, mode line, breadcrumb, pulsar, line numbers, ligatures (GUI frame only)
+    terminals.el      eat (default), eshell, compile tweaks, async-shell
+    lsp.el            eglot, flymake, eldoc-box, apheleia, dape, consult-eglot
+    lang-rust.el      rust-ts-mode, cargo via compile, clippy, rustfmt
+    lang-python.el    python-ts-mode, ruff, the Python shell
+    git.el            magit, diff-hl, git-timemachine
+    lang-ocaml.el, writing.el, org.el, power.el, remote.el, input.el
+                      stubs in slice 1 (tuareg; markdown, typst, auctex, pdf-tools, jinx; org; wgrep, wdired,
+                      ediff, edit-indirect; tramp; input methods)
+  lisp/playground-agent.el
+  user-lisp/          the learner's own files (Emacs 31 compiles and autoloads them)
+  packages.el         top-level packages per module; tools/lock.el resolves them into packages.lock
+  packages.lock       name, version, archive, file, sha256 per package, dependencies first
+  vendor/             MELPA tarballs the lock pins (MELPA does not keep old snapshots)
+  tools/              lock.el (regenerate the lock), install.el (the image's installer)
+  test/               ERT tests (§10.6)
 ```
 
-Every module is a readable file with a header explaining what it adds and why, grouped by the lesson that introduces it. `init.el` loads modules in the order listed in `modules.el` and reports load errors to the agent instead of failing silently.
+Every module is a readable file with a header saying what it adds, why, and which lesson introduces it. `init.el` loads the modules in the order of `modules.el`; a module that fails is reported (a warning, and the agent's `hello` carries `moduleErrors`) and the others still load. The agent is part of the playground, not of the learner's configuration: `agent.el` prefers the compiled copy in the image (`/opt/playground/emacs.d/lisp`) so it always speaks the same protocol as sessiond.
+
+The pristine config is copied to `/work/emacs.d` on the first start only. After changing `emacs.d/modules`, rebuild the session image and reset the workspace (`make reset-workspace`).
 
 ## 4. Module unlocking
 
-Scenarios declare `modules`. sessiond writes `modules.el` and restarts the daemon with buffer restore (architecture.md §5.2). Part 0 runs `base agent`; the full set is reached in Part 12, where the learner reads and edits these files. Unlocking is monotonic by default; the course map shows what each part turns on.
+Scenarios declare `modules`. Unlocking is monotonic: a scenario load adds its modules to the enabled set and never removes any (`rpc modules` can still set any set). sessiond writes `modules.el` and restarts the daemon with buffer restore (backend.md §3.3, §3.12); checkpoint restores keep `modules.el` as it is. Part 0 runs `base agent`; the full set is reached in Part 12, where the learner reads and edits these files.
+
+Consequence for authors: a lesson must pass with more modules than it lists, because a learner who has gone further, or replays an earlier lesson, has more on. For example lesson 0.2's buffer-list step accepts both the plain buffer list and ibuffer (the files module makes `C-x C-b` ibuffer), and the windows module closes a project's own tab after `C-x p k`. Replays meant to match a learner going through the course in order start from a fresh workspace.
 
 ## 5. Terminal frame
 
-`tmux.conf` (socket `-L pg`):
+tmux (socket `-L pg`, session `emacs`) holds the terminal frame so it survives browser reconnects and so `make shell` can attach to the same Emacs. The learner never interacts with tmux. `images/session/tmux.conf` (installed as `/etc/tmux.conf`):
 
-```
-set -g default-terminal "tmux-256color"
-set -as terminal-features ",xterm*:RGB:extkeys:clipboard:hyperlinks"
-set -s extended-keys always
-set -s extended-keys-format csi-u
-set -s escape-time 0
-set -g focus-events on
-set -g mouse on
-set -g set-clipboard on
-set -g allow-passthrough on
-set -g status off
-set -g prefix None
-unbind -a
-set -g window-size latest
-set -g remain-on-exit off
-set -g history-limit 0
-```
+- `default-terminal tmux-256color`; `terminal-features` for `xterm*`: RGB, extkeys, clipboard, hyperlinks. The outer terminal (xterm.js) is `xterm-256color` with `COLORTERM=truecolor`.
+- `extended-keys always`, `extended-keys-format csi-u`, `escape-time 0`, `focus-events on`.
+- `set-clipboard on`, `allow-passthrough on`.
+- No tmux user interface: `status off`, no prefix, every binding removed, `history-limit 0`, `window-size latest`, `mouse on` with every mouse event sent to Emacs.
+- `C-S-<letter>` re-sent as CSI u (`ESC [ <code> ; 6 u`): tmux 3.5a turns Control+Shift+letter into plain Control+letter. These bindings see only keys typed through an attached client; `tmux send-keys` bypasses them.
+- `remain-on-exit on` and a global `pane-died` hook that respawns the pane. sessiond overrides the hook per session, so in the playground only sessiond respawns it (backend.md §3.3).
 
-The learner never interacts with tmux. It exists for reconnection and for bring-your-own-terminal attachment. All key bindings are removed; the prefix is unset.
+Keys: tmux never forwards Emacs's kitty-keyboard push to the outer terminal, so xterm.js stays in the legacy encoding. The browser's terminal pane sends CSI u itself for exactly the chords the legacy encoding cannot carry (C-;, C-=, C-?, C->, C-1, C-S-a, C-RET, S-RET, C-DEL; `web/src/components/screen/extkeys.ts`); tmux parses them and passes them to Emacs as CSI u. In Emacs, `kkp` decodes them. kkp switches itself on only after the terminal answers the kitty protocol query, which tmux never does, so `base.el` installs kkp's decoders directly in tmux frames (`playground--kkp-tmux` on `tty-setup-hook`) for every `ESC [ <digit>` and `ESC [ <letter>` sequence.
 
-Keys: xterm.js runs with the kitty keyboard protocol extension on; tmux passes CSI u through with `extended-keys always`; `kkp.el` in `base.el` enables the protocol in Emacs (`kkp-enable-in-terminal`). This is what makes `C-;`, `C-RET`, `C-S-s` and `C-M-%` distinguishable. Milestone 1 verifies the full path and falls back to legacy encoding (with those bindings avoided in lessons) if any link fails.
+Those decoders also see the keys tmux spells its own way: Home `ESC [ 1 ~`, End `ESC [ 4 ~`, Delete `ESC [ 3 ~`. `base.el` adds 1 and 4 to kkp's table of `~` keys (`<home>`, `<end>`; kkp only knows rxvt's 7 and 8) and reads unmodified Delete as `<deletechar>` (`delete-forward-char`), because `<delete>` would become DEL through `local-function-key-map`. Modified keys keep kkp's names: `C-<delete>` is `kill-word`, `C-<end>` is `end-of-buffer`.
 
-kkp's decoders are installed for every `ESC [ <digit>` and `ESC [ <letter>` sequence of a tmux frame (`playground--kkp-tmux`), so they also see the keys tmux spells its own way: Home `ESC [ 1 ~`, End `ESC [ 4 ~`, Delete `ESC [ 3 ~` (tmux-256color). `base.el` adds 1 and 4 to kkp's table of `~` keys (`<home>`, `<end>`; kkp knew only rxvt's 7 and 8 and fell back to the code point, so End arrived as `C-d` and deleted a character) and reads unmodified Delete as `<deletechar>` (`delete-forward-char`) instead of `<delete>`, which a terminal's `local-function-key-map` turns into DEL (`delete-backward-char`). Modified keys keep kkp's names: `C-<delete>` is `kill-word`, `C-<end>` is `end-of-buffer`.
+Mode lines: the selected window's mode line is violet (`#7a58c4`, white text), the others dim (`#232639`, grey text); lessons point at "the bright mode line" to show which window is selected. These are `modus-vivendi-tinted-palette-overrides`, set before the theme loads. Housekeeping minor modes stay out of the mode line (ws-butler's lighter is hidden) and out of the state's `minors`.
 
-Mode lines: the selected window's mode line is the playground's violet (`#7a58c4`, white text) and the others are dimmed (`#232639`, grey text), a background contrast of 2.8; lessons point at "the bright mode line" to show which window is selected. These are `modus-vivendi-tinted-palette-overrides`, set before the theme loads, so another Modus theme keeps its own colours. Housekeeping minor modes stay out of the mode line: ws-butler's " wb" is hidden (`editing.el`), and the agent leaves it out of the state's `minors`.
+Clipboard: Emacs sets the selection through OSC 52 (`xterm-tmux-extra-capabilities` includes `setSelection`); tmux forwards it with `set-clipboard on`; the browser writes it to the system clipboard when the page has focus and ignores refusals. Paste from the browser goes through bracketed paste.
 
-Clipboard: Emacs 31 sets the terminal selection through OSC 52 when `xterm-extra-capabilities` includes `setSelection`; tmux forwards it with `set-clipboard on`; xterm.js's clipboard addon writes it to the browser clipboard. Paste from the browser goes through bracketed paste.
+Mouse: `base.el` turns on `xterm-mouse-mode` (behind tmux Emacs does not by itself); clicks, dragging window dividers and the wheel work.
 
-Mouse: Emacs 31 enables `xterm-mouse-mode` by default; clicks, drags on window dividers and scrolling work in the terminal frame.
-
-Font: the browser loads Iosevka Nerd Font so nerd-icons glyphs render; `TERM=tmux-256color`, `COLORTERM=truecolor`.
+Font: the browser loads Iosevka Nerd Font so nerd-icons glyphs render.
 
 ## 6. GUI frame
 
-`Xvnc :1 -geometry 1600x900 -depth 24 -rfbport 5901 -localhost -SecurityTypes None -dpi 110 -AcceptSetDesktopSize=1`, no window manager; the geometry is the initial size, the browser pane's size follows through RandR, and the Emacs frame covers the whole screen (below; sized by the config, not by `fullscreen`, which needs a window manager). Fonts through fontconfig: Iosevka Nerd Font 12 pt as default, Noto CJK as fallback. `pdf-tools` is built at image time (`pdf-tools-install` non-interactive) so `pdf-view-mode` opens PDFs instantly; `image-mode`, SVG, inline Org images and LaTeX previews work. `posframe`-based popups are allowed in GUI frames only; the config checks `(display-graphic-p)`.
+Xvnc on `:1` (command line in backend.md §3.3), no window manager. The GUI frame is started on demand and torn down when the learner switches back; its only consumer is the noVNC pane through sessiond. Fonts through fontconfig: Iosevka Nerd Font as default, Noto CJK as fallback for Han, Kana and Hangul (set when the first graphical frame appears). Popups such as posframe are used in GUI frames only (the config checks `display-graphic-p`); `pop-up-frames` is off.
 
-The GUI frame is started on demand and torn down when the learner switches back; its only consumer is the noVNC pane through sessiond.
-
-The frame covers the X screen exactly and follows it when the screen changes size: the browser asks Xvnc for a screen as large as its pane (noVNC `resizeSession`, RandR in X), so the frame is drawn at the size it is shown instead of being scaled. Without a window manager `fullscreen` only takes effect when a frame is made, so `base.el` fits every GUI frame of the playground daemon itself (`playground-fit-frame-to-display`): from `after-make-frame-functions` and from `display-monitors-changed-functions`, it moves the frame to the monitor's origin and gives its text area the monitor's size minus what the menu bar, internal border and fringes take (`frame-resize-pixelwise`), and clears `fullscreen`, which would fight an explicit size. Nothing happens when a window manager runs (`_NET_SUPPORTING_WM_CHECK` on the root window) or outside the playground daemon.
+The frame covers the X screen exactly and follows it when the screen changes size: the browser asks Xvnc for a screen as large as its pane (noVNC `resizeSession`, RandR in X), so the frame is drawn at the size it is shown instead of being scaled. Without a window manager `fullscreen` only takes effect when a frame is made, so `base.el` fits every GUI frame of the playground daemon itself (`playground-fit-frame-to-display`, from `after-make-frame-functions` and `display-monitors-changed-functions`): it moves the frame to the monitor's origin, gives its text area the monitor's size minus what the menu bar, internal border and fringes take (`frame-resize-pixelwise`), and clears `fullscreen`, which would fight an explicit size. Nothing happens when a window manager runs (`_NET_SUPPORTING_WM_CHECK` on the root window) or outside the playground daemon.
 
 ## 7. Daemon and frames
 
-`emacs --fg-daemon=playground` with `server-socket-dir` in `/run/playground/emacs`. The terminal frame is `emacsclient -t -s playground` inside tmux; the GUI frame is `emacsclient -c -s playground` on `:1`. `C-x C-c` in either runs `save-buffers-kill-terminal`, which only closes that frame; sessiond respawns it and the browser explains. `C-x C-c` is additionally advised in `base.el` to skip the "save buffers?" prompt in the playground (auto-save-visited covers it) and to message what happened.
+`emacs --fg-daemon=playground`. The terminal frame is `emacsclient -t -s playground` inside tmux; the GUI frame is `emacsclient -c -s playground` on `:1`. In the playground, `C-x C-c` (`save-buffers-kill-terminal`, advised in `base.el`) closes only that frame without asking about unsaved files, and says so; sessiond respawns the terminal frame and the browser explains. A frame that opens again shows the most recent file buffer, not `*scratch*`.
 
-Buffer restore after a daemon restart: sessiond asks the agent for a `snapshot` periodically (every 30 s and on each checkpoint): the list of file-visiting buffers with point, the window layout, the current tab. After restart, `open {files, layout}` re-applies it. Unsaved edits are covered by `auto-save-visited-mode` (5 s).
+Saving: `auto-save-visited-mode` saves file buffers 5 s after the last edit, silently, and never over a file that changed on disk since it was visited (`auto-save-visited-predicate`): after a lesson reset that would ask "Save anyway?" from a timer. `global-auto-revert-mode` makes unmodified buffers follow their files. No backup, auto-save or lock files are written. Before the daemon stops (restart, module change, shutdown) sessiond saves the remaining modified file buffers whatever the mode (backend.md §3.3).
+
+Buffer restore after a daemon restart: sessiond takes a `snapshot` (api.md §7) every 30 s and before each restart and checkpoint; after the restart, `open` re-applies it, deferring the layout to the first client frame when none exists yet.
 
 ## 8. Packages and pinning
 
-Sources: GNU ELPA, NonGNU ELPA, MELPA (stable where available). `packages.lock` pins name, version, archive and tarball sha256. `playctl packages update` refreshes the lock against the archives; the image build installs exactly the lock and fails on mismatch. The learner may install more packages at any time (their `elpa/` lives in `/work/emacs.d/elpa`), which is what Part 12 teaches.
+Sources: GNU ELPA, NonGNU ELPA, MELPA Stable and MELPA, in that order of preference. `packages.el` lists the top-level packages per module (with `:pin` and `:prefer-snapshot` exceptions); `tools/lock.el` resolves dependencies, skips what Emacs already ships recent enough, and writes `packages.lock` with name, version, archive, file and sha256. MELPA snapshot tarballs the lock pins are vendored in `vendor/`. The image build installs exactly the lock, in order, with no archive configured, and fails on a missing file or sha256 mismatch. The pinned set lives read-only in `/opt/playground/elpa`; packages the learner installs go to `/work/emacs.d/elpa`, which is what Part 12 teaches.
 
-Package list by module (abridged): which-key (built in), modus-themes and ef-themes, kkp, clipetty (fallback), vertico, orderless, marginalia, consult, embark, embark-consult, corfu, cape, tempel, avy, expreg, multiple-cursors, iedit, vundo, visual-replace, ws-butler, dirvish, consult-dir, ace-window, popper, burly, olivetti, magit, diff-hl, git-timemachine, eat, vterm, eglot (built in), flymake (built in), eldoc-box, apheleia, dape, consult-eglot, rust-ts-mode (built in), tuareg, dune, utop, merlin-eldoc, pet, markdown-mode, edit-indirect, typst-ts-mode, auctex, cdlatex, pdf-tools, citar, jinx, org (built in), org-roam, org-present, ob-rust, wgrep, nerd-icons, nerd-icons-dired, nerd-icons-completion, nerd-icons-corfu, nerd-icons-ibuffer, breadcrumb, ligature, pulsar, helpful, rime (optional). third-party.md lists versions and licenses.
+Package list by module (abridged; third-party.md has versions and licenses): kkp, clipetty (Emacs < 29 only), modus-themes, ef-themes, vertico, orderless, marginalia, consult, embark, embark-consult, corfu, cape, tempel, avy, expreg, multiple-cursors, iedit, vundo, visual-replace, ws-butler, dirvish, consult-dir, ace-window, popper, burly, olivetti, magit, diff-hl, git-timemachine, eat, eldoc-box, apheleia, dape, consult-eglot, pet, markdown-mode, nerd-icons and its dired, completion, corfu and ibuffer companions, breadcrumb, ligature, pulsar, helpful. Built in: eglot, flymake, project, transient, rust-ts-mode, which-key, org. Planned with their modules: tuareg, dune, utop, merlin-eldoc, edit-indirect, typst-ts-mode, auctex, cdlatex, pdf-tools, citar, jinx, org-roam, org-present, wgrep, rime.
 
 ## 9. Prefetched project dependencies
 
-For every curriculum project, the image runs the project's dependency fetch at build time (`cargo fetch` into a shared `CARGO_HOME`, `opam` switch with the lesson's libraries, `uv sync` caches, `typst` package downloads, TeX packages). Lessons therefore work with egress blocked. The learner adding new dependencies needs egress to the registries (deployment.md §3, `PG_EGRESS_MODE`).
+For every curriculum project, the image runs the project's dependency fetch at build time (`cargo fetch` into a shared `CARGO_HOME`, the opam switch with the lesson's libraries, `uv sync` caches, typst packages, TeX packages), so lessons work with egress blocked; adding new dependencies needs egress to the registries (deployment.md §3). Not in slice 1: `TODO(emacs, emacs.md §9)`.
 
 ## 10. playground-agent.el
 
-A global minor mode, about 400 lines, no dependencies beyond built-ins. It reports; it does not change editing behaviour.
+A global minor mode with no dependencies beyond built-in libraries (`emacs --batch -l lisp/playground-agent.el` loads it alone). It reports what happens and answers sessiond's calls; it does not change editing behaviour. Everything it runs from hooks is wrapped so that an agent bug can never break a command.
 
 ### 10.1 Hooks and emissions
 
 | Hook | Emits | Notes |
 |---|---|---|
-| `post-command-hook` | `key` then `state` | `keys` from `(key-description (this-command-keys-vector))`, `cmd` from `real-this-command` (symbol name; lambdas reported as `<lambda>`): `this-command` is what commands rewrite to steer the next one (`kill-line` leaves `kill-region`, `yank-pop` leaves `yank`, `yank` on an empty kill ring leaves `t`, minibuffer TAB leaves `completion-at-point`), so the ticker would name a command the learner never ran. M-x sets both to the command run by name; prefix-argument commands are recognised in `pre-command-hook`. `state` coalesced to one per command |
-| `window-configuration-change-hook`, `window-selection-change-functions`, `window-buffer-change-functions` | `state` | layout and window list |
-| `minibuffer-setup-hook`, `minibuffer-exit-hook` | `minibuffer`, `state` | prompt from `(minibuffer-prompt)`, contents from `(minibuffer-contents-no-properties)` |
-| `isearch-mode-hook`, `isearch-mode-end-hook` | `minibuffer {kind: isearch}` | isearch does not use the minibuffer; reported as a prompt-like state |
-| `kmacro` start and end (`kmacro-start-macro`, `kmacro-end-macro` advice, `defining-kbd-macro` watch) | `state` | |
-| `after-change-major-mode-hook` | `state` | |
-| `server-after-make-frame-hook`, `delete-frame-functions` | `frame` | which frame kind opened or closed |
-| `echo-area` watcher via `set-message-function` (Emacs 28+) | `echo` | filters out messages matching a noise list (`Mark set`, `Quit` are kept; `Wrote …` kept; eldoc noise dropped) |
-| `tramp` and `eglot` connection hooks | `echo` | "connecting to rust-analyzer…" style progress |
+| `pre-command-hook`, `post-command-hook` | `key`, then `state` | `keys` are the keys saved before the command ran (commands that read keys, like C-h k, change `this-command-keys`; a command that signals has lost them by `post-command-hook`). `cmd` is `real-this-command`, not `this-command`: commands rewrite the latter to steer the next one (`kill-line` leaves `kill-region`, `yank-pop` leaves `yank`, `yank` on an empty kill ring leaves `t`, TAB in a prompt leaves `completion-at-point`). Prefix-argument commands are recognised before they run. M-x (`execute-extended-command`, advised) reports the command run by name with `mx: true` and the reader's keys. Internal events (focus, frame switches, mouse movement) send nothing |
+| `set-message-function`, `command-error-function` | `echo` | noise filtered (`playground-agent-echo-noise`; "Mark set", "Quit" and "Wrote …" are kept, isearch's prompt and eldoc are dropped), duplicates within 1 s sent once. "X is undefined" also emits a `key` with `cmd` `undefined`, since Emacs runs no command for an unbound sequence |
+| `minibuffer-setup-hook`, `minibuffer-exit-hook` | `minibuffer`, `state` | the command that opened a prompt is reported when the prompt opens |
+| `isearch-mode-hook`, `isearch-mode-end-hook` | `minibuffer {kind: isearch}` | isearch does not use the minibuffer |
+| window configuration, selection and buffer change hooks, `after-change-major-mode-hook`, `kbd-macro-termination-hook`, kmacro start and end advice | `state` | coalesced to one per command or change |
+| `server-after-make-frame-hook`, `delete-frame-functions` | `frame` | `closed` only when the last frame of its terminal goes away |
+| `compilation-start-hook` | | stamps each compilation run with its start time (for `reset-step`) |
+| `eglot--connect` advice | `echo` | "Starting the language server … for …" |
 
 ### 10.2 State snapshot
 
-```elisp
-(defun playground--state ()
-  (let* ((buf (window-buffer (selected-window))))
-    (with-current-buffer buf
-      `((t . "state")
-        (buf . ,(buffer-name)) (file . ,(buffer-file-name)) (mode . ,(symbol-name major-mode))
-        (modeName . ,(format-mode-line mode-name)) (minors . ,(playground--active-minors))
-        (modified . ,(buffer-modified-p)) (readonly . ,buffer-read-only)
-        (narrowed . ,(buffer-narrowed-p)) (overwrite . ,(and overwrite-mode t))
-        (line . ,(line-number-at-pos)) (col . ,(current-column)) (point . ,(point))
-        (markActive . ,(region-active-p))
-        (windows . ,(playground--windows)) (layout . ,(playground--layout))
-        (frame . ,(if (display-graphic-p) "gui" "terminal")) (frames . ,(length (frame-list)))
-        (tabs . ,(playground--tabs))
-        (minibuffer . ,(playground--minibuffer)) (isearch . ,(and isearch-mode t))
-        (recursive . ,(recursion-depth)) (macro . ,(and defining-kbd-macro t))
-        (prefixArg . ,(and current-prefix-arg (format "%S" current-prefix-arg)))
-        (diagAtPoint . ,(playground--diag-at-point))))))
-```
+`playground--state` builds the state object of api.md §5 for the learner's window (§10.3) and serialises it with `json-serialize` (the builders use `:false`, `:null` and vectors explicitly). `windows` lists the live windows of the learner's frame with a stable small id per window; `layout` reduces the window tree to `("vsplit"|"hsplit" child…)` over those ids; `minors` keeps only `playground-agent-interesting-minor-modes`; `diagAtPoint` reads Flymake diagnostics at point. A state identical to the last one sent is suppressed.
 
-`playground--windows` lists each live window of the selected frame with id, buffer, mode, selected, dedicated and side (`window-parameter w 'window-side`). `playground--layout` reduces `window-state-get` to a nested `("hsplit"|"vsplit" child…)` list of window ids. `playground--diag-at-point` reads Flymake diagnostics at point for the echo fallback. Serialisation uses `json-serialize` with alists.
+### 10.3 Ops and commands
 
-### 10.3 Commands
+Ops run with the learner's window selected in the learner's frame: the frame of the last command (or the client frame made last), not whatever frame Emacs has selected when a timer runs, which after a client frame closes can be the daemon's invisible frame. Checks, states, snapshots and setups all use it.
 
-- `playground-rescue`: in order: `(while (> (minibuffer-depth) 0) (abort-recursive-edit))`; `(isearch-exit)` if searching; `(kmacro-end-macro)` if defining; `(overwrite-mode -1)`; `(widen)`; `(exit-recursive-edit)` loop; delete other windows keeping a window that visits a file if any; bury buffers whose mode derives from `special-mode` except `*scratch*`; `(deactivate-mark)`; `(keyboard-quit)` equivalents via `(discard-input)`. Returns the list of actions taken as strings. Never saves, kills file buffers, or reverts.
-- `playground-check FORMS`: evaluates each form with `condition-case`, returns `t`, `nil`, or `"unknown"` on error, with a 1 s `with-timeout` per form. Forms run with the learner's window selected in the learner's frame: the frame of the last command (or the client frame made last), not whatever frame Emacs has selected when the timer runs, which after a client frame closes can be the daemon's own frame (then `(selected-window)` was its `*scratch*` window and lesson 3.1's "the lower window is selected" read false). States, snapshots, setups and the other ops use the same window.
-- `playground-reset-step SPEC`: for each file-visiting buffer: revert if the file exists, kill otherwise (`kill-buffer` without prompts for unmodified; modified buffers are reverted since the checkpoint is authoritative); unmodified file buffers in the workspace that the spec does not list (opened during the step) are killed, so the step's conditions are false again and uniquify gives the step's own buffers back their names; then the help buffers and the tabs are made those of the spec, build output made after the spec was taken is killed, and `playground-open` with the spec's files and layout. Each window comes back on the file it showed, the selected window last. Help buffers the spec does not list (or that now describe something else) are killed and the listed ones that are gone are made again by their help command (`help-xref-stack-item`), so a demo's `* h D` in ibuffer (lesson 2.5) does not leave the learner without the help buffers the step is about. Named tabs the spec does not list are closed (the last tab loses its name instead), unnamed tabs are closed down to the spec's number, and listed named tabs that are gone come back from `tab-bar-closed-tabs` or as new tabs; the current tab is chosen by position when the tab list matches, else by name, and never created by name (`tab-bar-switch-to-tab` makes a tab for a name it does not find). The agent stamps every compilation run (compile, grep) with its start time (`compilation-start-hook`); a compilation buffer whose run started after the spec's `takenAt` is killed, process and all, unless one of the spec's windows shows it, so a demonstration's build does not satisfy "the build finished" for the learner (lesson 2.7). The snapshot's `windowState` is printed with every string's text properties removed: uniquify can leave the buffer itself in a name's `uniquify-orig-buffer` property, which would print as an unreadable `#<buffer …>` and make the restore fall back to the layout pattern, losing side windows; states saved with such objects read them as nil.
-- `playground-open {files, layout}`: `find-file-noselect` each file, apply the layout with `window-state-put` from a serialised state when present, else a simple split description. The state's buffer entries carry their files (below) and are renamed to whatever buffer visits that file now; an entry without a file whose buffer is gone is matched to the one spec file with the same base name (and directories named by a uniquify suffix). The tab is switched before the windows are put back.
-- `playground-snapshot`: the inverse of `playground-open`, used for checkpoints and restart restore. Its `windowState` is `(window-state-get nil t)` with `(file . NAME)` added to each window's buffer entry and the file name as a fourth element of each `prev-buffers` entry; `window-state-put` ignores both. Buffer names do not identify buffers across a step: when a second `README.md` opens, uniquify renames the first `README.md<hello>`. A window on a list buffer gets what it takes to make it again: Dired `(dired . DIR)`, the file on the window's line and the marks; ibuffer `(ibuffer . t)`, its filters, marks and the buffer on the line; the buffer list `(buffer-menu . t)`. `playground-open` visits the directory again and reverts it (the restore has just put its files back), recreates ibuffer with its filters and marks, and regenerates the buffer list, with point on the recorded line: lesson 2.6's steps start in the inbox listing even after a reset setup killed it. The spec also has `tabs` (the tab names in order, `""` for a tab without an explicit name), `tabIndex` and `specialBuffers` (the help buffers and the help command that made each, printed readably with buffers and frames dropped).
-- `setup` with `reset`: the files of `open` start at their first line, in their buffers and in the windows showing them (window start too, and the windows' remembered positions for them are dropped), before the setup's `eval`; a `.eld` layout keeps the positions it stores.
-- `playground-set-modules LIST`: writes `modules.el`; the restart is sessiond's job.
-- `playground-describe KEYS`: `(key-binding (kbd KEYS))` and the first docstring line, used by the ticker for commands it does not have a gloss for.
-- `playground-gui-frame`: `(make-frame-on-display ":1" …)` as an alternative to `emacsclient -c`.
+- `check {forms}` (`playground-check`): each form under `condition-case` and a 1 s `with-timeout`: `t`, `false`, or `"unknown"` on error or timeout.
+- `eval {form}`: the value as JSON; alists with symbol keys become objects, unserialisable values their printed form.
+- `rescue` (`playground-rescue`): leaves minibuffers and recursive edits (a throw to top level; the rest runs from a timer and replies from there), stops isearch and macro recording, and in the visible buffers turns off overwrite mode, widens, leaves multiple cursors and iedit; deletes the other windows keeping a normal window that visits a file if any, and makes a sole former side window ordinary again; buries `special-mode` buffers except `*scratch*`; drops the selection; discards pending input. Returns the actions as sentences and shows them in the echo area. Never saves, kills file buffers or reverts.
+- `snapshot` (`playground-snapshot`) returns the `WindowSpec` of api.md §7 for the learner's frame:
+  - `windowState` is `(window-state-get root t)` with `(file . NAME)` added to each window's buffer entry and the file as a fourth element of each `prev-buffers` entry (`window-state-put` ignores both), printed with text properties removed (uniquify can leave a buffer object in a name's properties, which would print unreadably). Buffer names do not identify buffers across a step: a second `README.md` renames the first `README.md<hello>`.
+  - A window on a list buffer records how to make it again: Dired `(dired . DIR)` with the file on the window's line and the marks; ibuffer `(ibuffer . t)` with filters, marks and the buffer on the line; the buffer list `(buffer-menu . t)`.
+  - `tabs` are the tab names in order (`""` for a tab named after its buffer), `tabIndex` the current one; `specialBuffers` the help buffers and the help command that made each (`help-xref-stack-item`), printed readably.
+- `open {spec}` (`playground-open`): visits the files, restores points, switches to the spec's tab, then puts the windows back with `window-state-put`, renaming each buffer entry to whatever buffer visits that file now (an entry without a file whose buffer is gone is matched by base name), remaking Dired listings (reverted), ibuffer and the buffer list with point on the recorded line; else applies the `layout` pattern. Without a client frame (right after a daemon restart) the layout is kept for the next client frame (`layoutDeferred`).
+- `reset-step {spec}` (`playground-reset-step`), run by every checkpoint restore: reverts file buffers whose file changed or that are modified (the checkpoint is authoritative), kills buffers of files that are gone and Dired buffers of missing directories, kills unmodified workspace file buffers the spec does not list (so the step's conditions are false again and uniquify gives the step's own buffers back their names), makes the help buffers those of the spec, kills compilation buffers whose run started after the spec was taken unless a spec window shows them (a demo's build must not satisfy "the build finished" for the learner), makes the tabs those of the spec (named tabs it lacks are closed, listed ones reopened from `tab-bar-closed-tabs` or made; the current tab chosen by position when the list matches, else by name, never created by name), then `open`s the spec, the selected window last.
+- `setup {open, layout, eval, compile, workspace, reset, root}`: leaves any open prompt first (from a timer, like rescue); reverts buffers whose files changed on disk and kills those whose files are gone (sessiond has just extracted the fixtures, and `find-file-noselect` would otherwise ask). With `reset` it also turns `auto-save-visited-mode` back on when the base module is loaded (some lessons turn it off in their `eval`), closes other tabs, clears the desk (unmodified buffers of other files under the workspace, Dired and buffer lists with stale marks, empty stray buffers made by `C-x b`; modified buffers are kept), forgets save-place positions under `root`, and starts the `open` files at their first line, in their buffers and windows. Then it opens the files, applies the layout (a pattern, a `.eld` window state, or one window on the first file), evaluates `eval` in the learner's window and runs `compile` in the project root of the first file.
+- `set-modules {enabled}` (`playground-set-modules`): writes `modules.el` atomically; the restart is sessiond's job.
+- `describe {keys}` or `{cmd}` (`playground-describe`): the binding of the keys (`key-binding` in the learner's window) and the first docstring line; prefixes and unbound keys give `cmd ""`.
+- `frame {display?}` (`playground-gui-frame`): `make-frame-on-display` as an alternative to `emacsclient -c`.
+
+Layouts, window states, single-window setups and Rescue never leave a side window as the frame's only window: they select a normal window before deleting the others (`playground--leave-side-window`), and a sole window still marked as a side window is made ordinary again (`playground--unside-sole-window`; splitting such a window recurses until `max-lisp-eval-depth`).
 
 ### 10.4 Socket client
 
-`make-network-process :family 'local :service "/run/playground/agent.sock" :coding 'utf-8 :nowait t` with a filter that accumulates lines and dispatches `call` messages, and a sentinel that schedules reconnects with backoff (1 to 16 s) through `run-with-timer`. Outgoing events are queued when disconnected, capped at 1000. `call` handlers run on the main thread between commands, from a timer (so they may throw to the command loop: setup, rescue); long `eval`s are bounded by `with-timeout`. Timers, like process filters, run with quitting inhibited, so three C-g in a row (or sessiond's SIGUSR2) are what stop a runaway eval. A C-g that Emacs reads while redisplay runs Lisp is not a key either: it quits that Lisp, redisplay catches the quit ("Error during redisplay: (jit-lock-function N) signaled (quit)" in *Messages*) and `keyboard-quit` never runs, so the region stays active. Emacs reads input at that point in its C code, before the Lisp is entered, so the agent cannot recover the key. The refontification 0.5 s after an edit (`jit-lock-context-time`) is the usual moment: a demo that presses C-g about half a second after an edit loses it about one run in ten (lesson 1.3's redo step waits a second first, and its hint tells the learner what a lost C-g looks like). A `ping` timer runs every 2 s.
+`make-network-process :family 'local :nowait t` to `/run/playground/agent.sock` with a filter that splits lines (a line over 1 MB is dropped) and a sentinel that reconnects with backoff (1 to 16 s). `ping` every 2 s. Writes use `process-send-string`, which waits when the socket buffer is full; so while sessiond has not answered a ping for 5 s, events and replies are queued instead of sent, and a peer silent for 10 s is dropped. The queue holds 1000 entries; the oldest events are dropped first, replies never.
+
+`call` messages run from a timer at top level, under `with-timeout` and `inhibit-interaction` (an op that would prompt fails instead of blocking the agent and every later call); ops may throw to the command loop (setup, rescue) and then reply from a follow-up timer. Timers run with quitting inhibited, so three C-g in a row (or sessiond's SIGUSR2) stop a runaway eval.
+
+A C-g that Emacs reads while redisplay runs Lisp is not a key: it quits that Lisp (typically the refontification `jit-lock-context-time`, 0.5 s after an edit), redisplay catches the quit ("Error during redisplay: (jit-lock-function N) signaled (quit)" in `*Messages*`) and `keyboard-quit` never runs, so the region stays active. The quit is raised before any Lisp is entered, so the agent cannot recover the key. Demos that press C-g right after an edit pause about a second first.
 
 ### 10.5 Performance
 
-`post-command-hook` cost is measured in CI and must stay under 0.3 ms median (building the alist and `json-serialize`). `state` is emitted at most once per command and once per layout change; identical consecutive states are suppressed by comparing a hash. No polling timers other than the ping.
+`post-command-hook` cost must stay under 0.3 ms median (building the alist and `json-serialize`). `state` is emitted at most once per command and once per layout change; identical consecutive states are suppressed. No polling timers other than the ping.
 
 ### 10.6 Testing
 
-ERT tests run with `emacs --batch -l lisp/playground-agent.el -l test/agent-test.el` against a fake socket server written in Elisp (`make-network-process :server t`), covering: event shapes, rescue from each trap state, reset with a spec, check timeouts, reconnection. `test/config-test.el` covers early-init.el and, in the session image, loads `test/modules-test.el`, which loads init.el with the base and editing modules and checks what lessons rely on: Home, End and Delete as tmux sends them, the M-x messages, the mode-line colours (WCAG contrast computed from the Modus palette), hidden lighters, Part 1's M-y, and the GUI frame fit. The Go agent integration test (backend.md §6) runs the same scripted scenarios through sessiond.
+Run in the session image (`make emacs-test`):
+
+- `test/agent-test.el`: `emacs --batch -L lisp -l playground-agent -l test/agent-test.el` against a fake socket server in Elisp: event shapes, rescue from each trap state, reset with a spec, check timeouts, reconnection.
+- `test/config-test.el`: early-init.el's helpers; in the image it also loads `test/modules-test.el`, which loads init.el with the base and editing modules and checks what lessons rely on: Home, End and Delete as tmux sends them, the M-x messages, the mode-line colours (WCAG contrast from the Modus palette), hidden lighters, Part 1's M-y (`yank-pop` until the completion module binds `consult-yank-pop` in lesson 4.2), and the GUI frame fit.
+
+Compile the agent with `byte-compile-error-on-warn` after editing it: a docstring with an unescaped quote can turn into a runtime error in a hook that is otherwise silent. sessiond's integration test (backend.md §6) exercises the agent through sessiond.
 
 ## 11. Standalone use
 
@@ -210,4 +199,4 @@ The image is a complete Emacs development environment without the playground:
 docker run -it --rm -v "$PWD:/work" ghcr.io/floatshadow/emacs-playground/session emacs -nw
 ```
 
-`PLAYGROUND=0` disables the agent module; everything else works. The config in `emacs.d/` also runs on a normal machine with Emacs 31 once the toolchains it expects are installed; Part 12 of the course walks through that.
+`PLAYGROUND=0` turns the playground behaviour off (the agent and the frame-only `C-x C-c`); everything else works. The config in `emacs.d/` also runs on a normal machine with Emacs 31 once the toolchains it expects are installed; Part 12 of the course walks through that.

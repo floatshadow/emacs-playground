@@ -1,3 +1,8 @@
+> **Status: historical record.** This is the newcomer usability review of 2026-10-27, kept as written.
+> Every numbered item (B1..B18, R1..R10, the stuck moments and smaller things) was triaged in
+> [2026-10-27-fix-plan.md](2026-10-27-fix-plan.md) and resolved; the remaining known limitations are in `docs/notes.md` §6.
+> Current behaviour is documented in the spec docs (`docs/api.md`, `backend.md`, `emacs.md`, `frontend.md`, `CURRICULUM.md`) and `docs/notes.md`.
+
 # Emacs Playground: a newcomer's evening with it (2026-10-27)
 
 Reviewer profile: daily VS Code user, never used Emacs. Clean-room test: I only used the web app at

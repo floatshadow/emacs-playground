@@ -2,21 +2,21 @@
 
 Part A is the course: fifteen parts and eight projects, each lesson with its objective, keys, the VS Code habit it replaces, and its exercise. Part B is the authoring format that turns a lesson into something the system can run: the Markdown dialect, the scenario schema, checks, hints, tables and the validation workflow.
 
-Conventions: lessons run in the terminal frame unless tagged `gui` (needs the GUI frame) or `remote` (uses the SSH box). "Modules" names the config modules unlocked when a part starts (emacs.md §3). Times are rough.
+Conventions: lessons run in the terminal frame unless tagged `gui` (needs the GUI frame) or `remote` (uses the SSH box). "Modules" names the config modules unlocked when a part starts (emacs.md §3). Times are rough. Part A is the course design; for the parts that ship (Parts 0 to 3, `status: ready` in `curriculum/index.yaml`), each lesson's `lesson.md` and `scenario.yaml` are authoritative for the exact steps.
 
 ## A. The course
 
 ### Part 0 — Orientation (45 min; modules: base, agent)
 
 - **0.1 What the screen is telling you** (10 min). VS Code: status bar, Problems. You can: name buffer, window, frame, mode line, echo area, minibuffer; read `-:**-`, `L12 C4`, `(Rust Eglot)`. Keys: none new. Exercise: the lesson asks five questions about the screen; answers are checked against the live state (which window is selected, is the buffer modified).
-- **0.2 C-g and the three ways to get lost** (12 min). VS Code: Esc. You can: cancel a prompt, a pending prefix and a search; close an extra window; leave a help buffer. Keys: `C-g`, `ESC ESC ESC`, `C-x 1`, `q`. Exercise: open `C-x C-b`, `C-h t` and an isearch on purpose, escape each; the step completes only when every trap has been entered and left.
+- **0.2 C-g and the three ways to get lost** (12 min). VS Code: Esc. You can: cancel a prompt, a pending prefix and a search; close an extra window; leave a help buffer. Keys: `C-g`, `ESC ESC ESC`, `C-x 1`, `q`. Exercise: open a prompt, an isearch, the buffer list (`C-x C-b`), a help window and the tutorial (`C-h t`) on purpose and leave each; each step completes only when its trap has been entered and left; then make a mess and escape it with `ESC ESC ESC`.
 - **0.3 Asking Emacs** (12 min). VS Code: hover help, command palette. You can: find what a key does, read a command's documentation, see the current mode's bindings, jump to the source of any command. Keys: `C-h k`, `C-h f`, `C-h v`, `C-h m`, `C-h o`, `C-h b`, `C-h ?`, helpful buffers. Exercise: find out what `C-x C-s` runs, read its docstring, follow the link to its source.
 - **0.4 Which-key and the key ticker** (8 min). VS Code: keyboard shortcut reference. You can: explore a prefix map without memorising it; read the ticker and the Where am I panel. Keys: any prefix, `M-x`. Exercise: discover three commands under `C-x r` using only the popup.
 
 ### Part 1 — Moving and editing (2 h; + editing)
 
 - **1.1 Motion** (15 min). VS Code: arrows, Ctrl+arrows, Home, End, Ctrl+G. Keys: `C-f C-b C-n C-p`, `M-f M-b`, `C-a C-e`, `M-m`, `M-a M-e`, `C-M-f C-M-b` (sexp), `C-M-a C-M-e` (defun), `C-M-n C-M-p`, `M-< M->`, `C-v M-v`, `C-l`, `M-g g`, `C-M-l`. Exercise: navigate `main.rs` to five marked spots without arrow keys; the step counts arrow-key use and nudges after ten.
-- **1.2 Kill, yank and the kill ring** (15 min). VS Code: cut, copy, paste, clipboard history. Keys: `C-SPC`, `C-w`, `M-w`, `C-y`, `M-y` (consult-yank-pop), `C-k`, `M-d`, `M-DEL`, `C-x h`, `C-x C-x`, `M-z`. Exercise: reorder three functions in a file using only kill and yank.
+- **1.2 Kill, yank and the kill ring** (15 min). VS Code: cut, copy, paste, clipboard history. Keys: `C-SPC`, `C-w`, `M-w`, `C-y`, `M-y` (built-in `yank-pop`; `consult-yank-pop` from Part 4), `C-k`, `M-d`, `M-DEL`, `C-x h`, `C-x C-x`, `M-z`. Exercise: reorder three functions in a file using only kill and yank.
 - **1.3 Undo that never loses work** (10 min). VS Code: Ctrl+Z, Ctrl+Y. Keys: `C-/`, `C-?` (undo-redo), `C-x u` opens vundo, undo in region. Exercise: recover a deleted paragraph after making five further edits.
 - **1.4 Incremental search** (12 min). VS Code: Ctrl+F, F3. Keys: `C-s`, `C-r`, `C-s C-s`, `M-s .`, `M-s o` (occur), `C-M-s` (regexp), `M-c` toggles case, `M-s SPC`, `RET`, `C-g`, lazy match count. Exercise: find every `greet` call and visit them in order; then an occur listing.
 - **1.5 Replace** (12 min). VS Code: Ctrl+H, regex mode. Keys: `M-%`, `C-M-%`, `y n ! ^ .`, `\&`, `\1`, visual-replace (`M-%` with preview), case preservation. Exercise: rename a variable using a capture group without touching a similarly named one.
@@ -49,7 +49,7 @@ Conventions: lessons run in the terminal frame unless tagged `gui` (needs the GU
 ### Part 4 — Completion everywhere (1 h; + completion)
 
 - **4.1 The minibuffer, upgraded** (10 min). VS Code: fuzzy palette. Keys: `M-x`, space-separated orderless terms, `!` negation, `=` literal, `M-RET` (accept input as typed), marginalia annotations. Exercise: find a command you do not know the name of by describing it in two words.
-- **4.2 Consult** (12 min). VS Code: Go to symbol, search across files, Go to line with preview. Keys: `C-x b` (consult-buffer with narrowing `b SPC`, `f SPC`), `M-s l` (consult-line), `M-s r` (consult-ripgrep), `M-g i`, `M-g o`, `M-g m` (marks), `C-x r j` (registers), live preview. Exercise: find the line anywhere in the project where `p99` is defined, through ripgrep with preview.
+- **4.2 Consult** (12 min). VS Code: Go to symbol, search across files, Go to line with preview. Keys: `C-x b` (consult-buffer with narrowing `b SPC`, `f SPC`), `M-s l` (consult-line), `M-s r` (consult-ripgrep), `M-g i`, `M-g o`, `M-g m` (marks), `C-x r j` (registers), `M-y` (consult-yank-pop), live preview. Exercise: find the line anywhere in the project where `p99` is defined, through ripgrep with preview.
 - **4.3 Embark** (10 min). VS Code: right-click context menu. Keys: `C-.` (act), `C-;` (dwim), `embark-export`, `embark-collect`, acting on files, buffers, symbols, URLs. Exercise: export a ripgrep search to a buffer (prepares 11.4).
 - **4.4 Corfu, cape and tempel** (10 min). VS Code: IntelliSense popup, snippets. Keys: `TAB`, `RET`, `C-n C-p`, `M-SPC` separator, `C-M-i`, `cape-file`, `cape-dabbrev`, `M-+` (tempel insert), snippet fields. Exercise: write a function using completion and one snippet only.
 
@@ -162,21 +162,24 @@ Each project ends with a short "again, without hints" lap: the same tasks with h
 
 ```
 curriculum/
-  index.yaml                        parts, order, titles, outcomes, modules per part
+  index.yaml                        parts, order, numbering, status, modules per part
   00-orientation/
     01-reading-the-screen/
       lesson.md                     prose (en); lesson.zh-CN.md for other locales
       scenario.yaml                 the runnable part
       fixtures/                     files copied into the workspace
-      assets/                       images used by lesson.md
+      assets/                       images used by lesson.md (optional)
   …
   projects/p6-polyglot/
     project.md  scenario.yaml  fixtures/  remote.yaml
   tables/
     exits.yaml  habits.yaml  gloss.yaml  cheats.yaml  glossary.yaml
+  tools/                            validate.py, sync_fixtures.py, the replay harness (tools/README.md)
 ```
 
-`playctl curriculum build` turns this into `curriculum.json` (index plus every scenario), per-lesson bundles and zstd fixture tarballs (deployment.md §1).
+The lesson id is the lesson directory relative to `curriculum/` (`02-buffers-and-files/03-opening-files`, `projects/p6-polyglot`); it contains one slash and appears in URLs literally. `index.yaml` is authoritative for order, numbering (`n: "2.3"`) and status (`ready` lessons must exist; `planned` ones are listed on the course map without a directory); a scenario's own `title`, `minutes`, `mode`, `tags` and `vscode` win over the index at build time. Lessons in a part share a fixture tree kept once in `tools/fixture-src/` and copied into each lesson by `tools/sync_fixtures.py`.
+
+`playctl curriculum build` turns this into `curriculum.json` (index, tables), per-lesson bundles and zstd fixture tarballs (deployment.md §1).
 
 ### B.2 lesson.md
 
@@ -186,139 +189,165 @@ CommonMark plus GFM tables, plus directives (`remark-directive`):
 |---|---|
 | `` `C-x C-f` `` | a keycap; any backticked text that parses as a key sequence |
 | `:kbd[C-x C-f]` | a keycap, explicit |
-| `:try[C-x C-f]` | a keycap with a "try it" button that sends the keys to Emacs |
-| `:jargon[buffer]` | the word with a tooltip from `tables/glossary.yaml` |
+| `:try[C-x C-f]` | a keycap with a "try it" button that sends the keys to Emacs (learner input: it can complete a step) |
+| `:jargon[buffer]` | the word with a tooltip from `tables/glossary.yaml` (case-insensitive; a plural `s` is ignored) |
 | `:::vscode … :::` | the "Coming from VS Code" box |
 | `:::aside{title="…"} … :::` | a side note |
 | `:::gui-only … :::` | shown only when the GUI frame is active |
 | `::steps` | where the step list renders (default: end of the lesson) |
 
-Front matter: `title`, `summary`, `minutes`. Images are relative paths into `assets/`.
+Front matter: `title`, `summary`, `minutes`. Images are relative paths into `assets/`. Keys the lesson mentions (backticked, `:kbd`, `:try`) also silence the browser's habit cards for those keys (frontend.md §6).
 
 ### B.3 scenario.yaml
 
+The schema is `protocol.Scenario` (internal/protocol/scenario.go); YAML keys are its JSON tags, and unknown keys are errors.
+
 ```yaml
-id: 02-buffers-and-files/03-opening-files
+id: 02-buffers-and-files/03-opening-files   # must equal the lesson directory
 title: Opening files
 minutes: 12
-mode: terminal                 # terminal | gui | any
+mode: terminal                 # terminal (default) | gui | any
 tags: []                       # remote, gui, project
-modules: [base, agent, editing, files]
+modules: [base, agent, editing, files]   # the full set, in load order; base and agent always
 vscode: "Ctrl+P, Ctrl+O"
 preview:                       # optional
   tabs: [docs/report.pdf, README.md]
   follow: { docs/report.typ: docs/report.pdf }
 remote: { box: true }          # optional; provisions and expects the SSH box
 setup:
-  workspace: fixtures/hello-rust       # relative to the lesson directory
-  root: hello                          # extracted to /work/hello
-  reset: false                         # true restores root to the fixtures (overwrites edits, removes extra files, forgets saved cursor positions) and turns base's auto-save-visited-mode back on before eval
-  open: [hello/README.md]
-  layout: single                       # single | "(vsplit FILE BUFFER)" | "(hsplit …)" | a window-state file
+  workspace: fixtures/hello    # fixture directory, relative to the lesson directory
+  root: hello                  # extracted to /work/hello
+  reset: true                  # restore root to the fixtures on every load (see below)
+  open: [hello/src/lib.rs]     # workspace-relative
+  layout: single               # single | a layout pattern | a window-state file (.eld)
   eval: "(goto-char (point-min))"
-  compile: null                        # a command to run once so *compilation* exists
+  compile: null                # a command run once so *compilation* exists
 steps:
-  - id: open
+  - id: open                   # [a-z0-9-]+, unique in the scenario
     goal: Open src/main.rs
     detail: "Hold Control, press x, then Control f. Type `ma`, press `TAB`, then `RET`."
-    demo: 'C-x C-f "ma" TAB ~400 RET'  # key names; quoted text is typed; ~N pauses N ms
+    demo: 'C-x C-f ~500 "ma" ~300 TAB ~500 RET'
     conditions:
       - text: the Find file prompt was used
-        event: { command: find-file, min: 1 }
-        hint: "C-x then C-f. The prompt is the bottom line."
+        event: { command: find-file }
+        hint: "C-x then C-f. The prompt appears in the bottom line. If you see C-x- there, Emacs is waiting for the second key."
       - text: main.rs is the current buffer
-        elisp: '(equal (buffer-file-name) "/work/hello/src/main.rs")'
-        hint: "Type ma, press TAB, then RET."
+        state: { file: /work/hello/src/main.rs }
+        hint: "In the prompt, type ma and press TAB; it completes to main.rs. Then RET."
     stuck:
       - when: { minibuffer_seconds: 30 }
-        say: "Still in the prompt? RET accepts, C-g cancels."
-      - when: { step_seconds: 300 }
-        say: "Reset this step from the right-hand panel if the files look wrong."
-    checkpoint: true
-  - id: save
-    goal: Save it
-    conditions:
-      - text: saved
-        all:
-          - { event: { command: save-buffer } }
-          - { file: { path: hello/src/main.rs, not_contains: "Hello, world" } }
-        hint: "C-x C-s. The mode line shows ** until you do."
+        say: "Still in the prompt? RET accepts what you typed, C-g cancels, TAB completes names."
+      - when: { quits_in_window: { count: 3, seconds: 10 } }
+        say: "C-g is always safe, but you do not need it here."
+    checkpoint: true           # default; false skips the checkpoint at step start
   - id: layout
     goal: Code above, compile below
+    demo: 'C-x 2 C-x o C-x b "*compilation*" RET'
     conditions:
       - text: the layout matches
         layout: "(vsplit main.rs *compilation*)"
         hint: "C-x 2 splits; C-x o moves; C-x b *compilation* RET shows the compile buffer there."
 ```
 
-Condition kinds and their fields:
+**Setup** runs on every `scenario` load: sessiond extracts the fixtures into `/work/<root>` (existing files are kept unless `reset`), writes the module set, then the agent opens the files, applies the layout, evaluates `eval` and runs `compile` (in the project root of the first `open` file, or that file's directory), in that order. It waits up to 15 s for an Emacs restart in progress and for the terminal frame, so layouts never land in the daemon's invisible initial frame. Modules unlock monotonically: a scenario's `modules` are added to the session's set, never removed, so a lesson may run with modules from later parts.
+
+`setup.reset: true` (requires `workspace`) makes the lesson replayable in any order:
+
+- sessiond restores the root to its fixtures: edited files are overwritten, files and directories the fixtures do not contain are removed, except `target`, `_build`, `.venv`, `node_modules` and `.git`;
+- the agent reverts buffers whose files changed, kills buffers of removed files, closes other tabs, and clears unmodified leftovers (other workspace file buffers, Dired and buffer lists with stale marks, empty stray buffers made by `C-x b`); modified buffers outside the root are kept;
+- save-place positions under the root are forgotten, so the `open` files start on line 1;
+- `auto-save-visited-mode` is turned back on (when the base module is loaded) before `eval`, so a lesson whose `eval` turns it off does not leave it off for the next one.
+
+**Steps.** A step completes when all its top-level conditions hold at once; sessiond's engine evaluates them after relevant events (debounced) and every 2 s. A checkpoint (workspace files, buffers, windows, unsaved text and the session variables steps rely on) is taken when a step starts; Reset this step, Do it yourself and Go to this step restore it.
+
+**Conditions.** Exactly one kind field per condition. Top-level conditions carry `text` (shown in the step list) and `hint`; nested ones inside `all`, `any`, `not` only need the kind. Ids default to `<stepId>/<n>`, 1-based (`open/1`); an explicit `id` overrides.
 
 | Kind | Fields | True when |
 |---|---|---|
-| `event` | `command`, `min` (default 1), `since` (`step` default or `lesson`) | the command ran at least `min` times |
-| `elisp` | a form | the form returns non-nil inside Emacs (2 s timeout; errors count as unknown) |
-| `file` | `path`, one of `exists`, `contains`, `not_contains`, `regex`, `json_path` + `equals` | the predicate holds on the workspace file |
-| `shell` | `run`, `cwd` (default the root), `timeout` (default 5) | exit status 0 |
-| `layout` | an s-expression of `vsplit`, `hsplit`, buffer names, `*` wildcard | the window tree matches (buffer names compared by `uniquify` base name) |
-| `state` | any state field and a value, e.g. `{ state: { narrowed: true } }` | the latest state has that value |
-| `all`, `any`, `not` | lists or a condition | combinators |
+| `event` | `command`, `min` (default 1), `since` (`step` default, or `lesson`) | the command ran at least `min` times (the agent reports `real-this-command`: `C-k` is `kill-line`, `M-y` is `yank-pop`) |
+| `elisp` | a form | the form returns non-nil inside Emacs (2 s timeout; an error or timeout is unknown) |
+| `file` | `path`, one of `exists`, `contains`, `not_contains`, `regex` (RE2), `json_path` + `equals` | the predicate holds on the workspace file (read up to 1 MB; `not_contains` also requires the file to exist) |
+| `shell` | `run`, `cwd` (default the setup root), `timeout` (seconds, default 5) | `sh -c run` exits 0 (a timeout is unknown) |
+| `layout` | a layout pattern | the selected frame's window tree matches |
+| `state` | a predicate (B.4), e.g. `{ narrowed: true }`, `{ "windows.length": 2, "windows.1.selected": true }` | it holds on the latest state |
+| `all`, `any`, `not` | a list of conditions, or one condition for `not` | combinators |
 
-Hints belong to conditions; the hint shown is the first unmet condition's. `stuck` rules use `minibuffer_seconds`, `idle_seconds`, `step_seconds`, `quits_in_window` and `unbound_repeats`. `demo` strings must complete the step when replayed; `playctl curriculum play` enforces this.
+A condition that cannot be evaluated is reported `unknown` (not met). Layout patterns: `single` (one window), a buffer name (one window showing it), or s-expressions of `vsplit` (stacked top to bottom, `C-x 2`) and `hsplit` (side by side, `C-x 3`) over buffer names and `*` (any window): `(hsplit * (vsplit a b))`. Names compare by uniquify base name (`main.rs<hello>` matches `main.rs`), a name with `/` by its base name; quote names with spaces or parentheses; same-orientation nesting is flattened.
 
-Rules learned from the newcomer review (docs/feedback/2026-10-27-fix-plan.md):
+**Hints** belong to conditions. "Show a hint" shows the hint of the first unmet condition; the second level shows the exact keys of the step's `demo`.
 
-- **A hint adds something.** The learner asking for a hint has read the step. Say what to look for on the screen or the usual mistake (Control still held on the second key, the wrong copy of a project, the first match being in a comment), not only the keys the goal or detail already gave. `curriculum/tools/validate.py` rejects a hint whose keys all appear in the step's goal or detail and which has at most eight other words.
-- **Conditions accept the learner's own way.** Check the effect the step asks for (a new `//` comment, the lower window selected), never the demo's exact text. Prefer `state` predicates for what the state reports (`{ "windows.length": 2, "windows.1.selected": true }`; the state lists windows from the frame's first, top-left window) over elisp that depends on which frame or buffer the check runs in.
-- **A demo works from the step's checkpoint, twice.** Watch it restores the step's checkpoint before playing when the learner has run commands, Do it yourself restores it again, and Skip and "Go to this step" replay demos server-side. A demo that opens a file by path types the absolute path right after the directory the prompt offers (`C-x C-f "/work/projects/hello/src/main.rs"`; the second `/` starts over from the root) unless the step teaches relative paths from its own starting buffer. A restore puts back files and windows but not a buffer's minor modes, so a step whose demo toggles a mode either accepts both directions when running the command is the lesson (0.4's `display-line-numbers-mode`), or its setup turns the mode off at lesson load (3.8).
-- **Text holds with every module set.** Modules unlock monotonically, so a Part 0 lesson may run with Part 3's modules: describe both outcomes where a module changes what a key does (0.2's `C-x C-b`: a second window, or ibuffer taking over this one).
+**Stuck rules** produce server-side nudges while the step is active (not while a demo plays). `when` is a conjunction of `minibuffer_seconds`, `idle_seconds`, `step_seconds`, `quits_in_window: {count, seconds}` (quits are `keyboard-quit`, `abort-minibuffers`, `abort-recursive-edit`) and `unbound_repeats` (the same unbound key this many times in a row); `say` is the body, `title` defaults to its first sentence, `kind` defaults to `calm`. Ids default to `<stepId>/stuck/<n>`.
+
+**Demo strings.** Every step needs a `demo` that completes it when replayed from the step's checkpoint (`protocol.ParseDemo`, ported to `web/src/lib/demo.ts`):
+
+- whitespace-separated tokens; a key in Emacs notation (`C-x`, `M-<`, `TAB`, `RET`, `<f3>`; bare `F1` to `F35` are accepted as `<f1>` to `<f35>`);
+- `"typed text"`, typed literally, with escapes `\"`, `\\`, `\n` (typed as RET) and `\t` (TAB); a string must be non-empty and followed by whitespace or the end;
+- `~N` pauses N ms (0 to 60000).
+
+Demos are played by "Watch it" in the browser (600 ms per chord, 120 ms per character, as a demonstration that does not count as done), and at 170 ms per chord and 70 ms per character (`protocol.DemoChordDelayMs`, `DemoCharDelayMs`) by `playctl curriculum play`, by "Skip this step" (recorded `skipped`) and by "Go to this step" when it fast-forwards through earlier steps without a checkpoint. A `C-g` that Emacs reads while redisplay runs Lisp (refontification about 0.5 s after an edit) is lost, so a demo that presses `C-g` right after an edit pauses about a second first (`~1000`).
+
+**Authoring rules** (enforced where noted by `curriculum/tools/validate.py`):
+
+- **A hint adds something.** The learner asking for a hint has read the step. Say what to look for on the screen or the usual mistake (Control still held on the second key, the wrong copy of a project, the first match being in a comment), not only the keys the goal or detail already gave. `validate.py` rejects a hint whose keys all appear in the step's goal or detail and which has at most eight other words.
+- **Conditions accept the learner's own way.** Check the effect the step asks for (a new `//` comment, the lower window selected), never the demo's exact text. Prefer `state` predicates for what the state reports (windows are listed from the frame's first, top-left window) over elisp that depends on which frame or buffer the check runs in; the agent evaluates checks in the learner's frame (the frame of the last command).
+- **A demo works from the step's checkpoint, twice.** Watch it restores the checkpoint before playing when the learner has run commands, Do it yourself restores it again, and Skip and Go to this step replay demos server-side. A demo that opens a file by path types the absolute path right after the directory the prompt offers (`C-x C-f "/work/projects/hello/src/main.rs"`; the second `/` starts over from the root) unless the step teaches relative paths from its own starting buffer. A restore puts back files, windows, unsaved text and session variables but not a buffer's minor modes, so a step whose demo toggles a mode either accepts both directions (0.4's `display-line-numbers-mode`) or its setup turns the mode off at lesson load (3.8).
+- **Text and conditions hold with every module set.** Since modules only grow, a Part 0 lesson may run with Part 3's modules: describe and accept both outcomes where a module changes what a key does (0.2's `C-x C-b`: a second window with the buffer list, or ibuffer taking over this one).
+- **A lesson sees only its own build.** A lesson whose conditions read build output and that must not see a build from an earlier lesson kills `*compilation*` in its setup's `eval` with `kill-buffer-query-functions` bound to nil (a build may still be running), as 2.7 and 3.5 do.
+- **Every checked command has a gloss** in `tables/gloss.yaml` (`validate.py` warns otherwise).
 
 ### B.4 Tables
 
 ```yaml
-# tables/exits.yaml — layer 1, evaluated in order against the state object
+# tables/exits.yaml: layer 1 ("Where am I"), evaluated in order; every matching row is shown
+- id: prefix-pending
+  when: { "session.prefix": { regex: "." } }
+  why: "{session.prefix} is a prefix: Emacs is waiting for the next key."
+  how: "Press the next key of the command, or C-g to cancel. The popup lists what can follow."
 - id: minibuffer-number
   when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "^(Goto|Go to) (line|char)|([Ll]ine number|[Cc]olumn|[Cc]ounter|[Nn]umber)[^?]*$" } }
   why: "Emacs is asking for a number: {minibuffer.prompt}"
   how: "Type a number, RET. C-g cancels."
-- id: minibuffer-prompt               # the rest: not any other prompt row
-  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { not: { regex: "M-x|…|^(Goto|Go to) (line|char)|…" } } }
-  why: "A prompt is open at the bottom: {minibuffer.prompt}"
-  how: "RET accepts, C-g cancels. M-p brings back what you typed before."
-- id: isearch
-  when: { isearch: true }
-  why: "You are searching (I-search)."
-  how: "RET stops at this match. C-g jumps back to where you started."
-- id: other-window-special
-  when: { otherWindows.mode in [help-mode, Buffer-menu-mode, compilation-mode, grep-mode, occur-mode, dired-mode, magit-status-mode, magit-diff-mode, eshell-mode] }
-  why: "A second window shows {otherWindows.buf}."
-  how: "Press q inside it, or C-x 1 here to keep only this window."
 - id: narrowed
   when: { narrowed: true }
-  why: "Narrowed: you see only part of this buffer (Narrow in the mode line)."
+  why: "Narrowed: you see only part of this buffer (Narrow in the mode line). The rest is still there."
   how: "C-x n w shows everything again."
+  flag: Narrow                       # optional short chip
+- id: other-window-special
+  when: { "otherWindows.mode": { in: [help-mode, Buffer-menu-mode, compilation-mode, dired-mode] } }
+  why: "Another window shows {otherWindows.buf}."
+  how: "Press q inside it (C-x o gets you there), or C-x 1 here to keep only this window."
 
-# tables/habits.yaml — layer 2
+# tables/habits.yaml: layer 2, one card per single key per session
 - key: C-z
   vscode: undo
   say: "C-z suspends Emacs to the shell. Undo is C-/ (also C-x u)."
 
-# tables/gloss.yaml — ticker glosses
+# tables/gloss.yaml: ticker glosses; missing commands fall back to rpc describe
 find-file: Open a file (asks for a path)
 
-# tables/cheats.yaml — per major mode
+# tables/cheats.yaml: per major mode; "common" rows follow every mode's own
 rust-ts-mode:
   - [M-., go to definition]
   - [C-c C-c, compile]
+
+# tables/glossary.yaml: :jargon tooltips
+buffer: "Text that Emacs holds in memory. Most buffers show a file; some, like *scratch* or a help page, do not."
 ```
 
-`when` predicates support equality, `in`, `not`, `>`, and dotted paths into the state object; `otherWindows` is the list of non-selected windows. Tables are localised per file (`exits.zh-CN.yaml`).
+**Predicates** (`protocol.Predicate`, used by exit rows and `state` conditions; ported to `web/src/advice/predicate.ts`, the Go code is the reference). A predicate maps dotted paths to expectations; it holds when every entry holds. Quote keys that contain dots.
 
-The browser shows every exit row that matches, so the prompt rows are one per kind of question (command name, file, buffer, number, help, bookmark, search, replace, yes or no, multiple choice) and mutually exclusive; `minibuffer-prompt` is the rest. `validate.py` checks them against the prompts Emacs 31 really shows (`EXIT_PROMPT_SAMPLES`). Their regular expressions are evaluated by the browser's JavaScript `RegExp` and by Go's RE2, so they use the syntax both read alike: no inline flags (JavaScript has none; the browser turns a leading `(?i)` into a `RegExp` flag, but the tables spell case out with classes such as `[Ff]ile` so that they work in any browser), no lookaround, no `\A`, `\z`, `\p` or POSIX classes. `validate.py` refuses everything else and, when node is installed, compiles every pattern with `RegExp`. Questions, whose prompts end with `?` and the answers, are kept out of the name rows with anchors or a trailing `[^?]*$`.
+- Paths: object keys and array indices (`minibuffer.kind`, `windows.0.buf`); `length` gives an array's or string's length (`windows.length`); a non-index segment applied to an array maps over its elements, and the expectation then holds if it holds for any element (`otherWindows.mode`). Virtual roots: `otherWindows` (the non-selected windows), `selectedWindow`, and, for exit rows only, `session` (frontend.md §6: `session.prefix`, `session.emacs`, `session.mode`, `session.echo`). A missing path equals null.
+- Expectations: a scalar or null (equality; numbers compare as numbers), a list (membership), or an object with exactly one operator: `in: [...]`, `not: v` (negates equality or a nested operator), `gt`, `gte`, `lt`, `lte`, `exists: bool`, `contains: v` (substring, or element of a list), `regex: "re"` (RE2).
+- Templates (`why`, `how`) expand `{path}` placeholders against the same document; for a path through a list, the element that satisfied `when` is used (`{otherWindows.buf}` names the window whose mode matched). Missing values become empty.
+
+Tables are localised per file (`exits.zh-CN.yaml` with the same ids).
+
+The browser shows every exit row that matches, so the prompt rows are one per kind of question (command name, file, buffer, number, help, bookmark, search, replace, yes or no, multiple choice) and mutually exclusive; `minibuffer-prompt` is the rest. `validate.py` checks them against the prompts Emacs 31 really shows (`EXIT_PROMPT_SAMPLES`: each sample matches exactly its own row). Exit-row regular expressions are read by Go's RE2 and by the browser's `RegExp`, so they use the syntax both read alike: no lookaround or backreferences, no inline flags except a leading `(?i)`, `(?m)` or `(?s)` (the tables spell case out with classes such as `[Ff]ile` instead), no `\A`, `\z`, `\p`, `\x{…}` or POSIX classes. `validate.py` refuses everything else and, when node is installed, compiles every pattern with `RegExp`. Questions, whose prompts end with `?`, are kept out of the name rows with anchors or a trailing `[^?]*$`.
 
 ### B.5 Validation and workflow
 
-1. Write `lesson.md` and `scenario.yaml`; put fixtures in place.
-2. `playctl curriculum validate`: schema checks, key names parse, fixture paths exist, every `demo` tokenises, every lesson referenced by `index.yaml` exists, tables reference known state fields.
-3. `playctl curriculum play <lesson>`: in a headless session, loads the scenario, replays each step's `demo`, and asserts each step completes. Runs in CI for every lesson; a lesson whose demo cannot solve its own steps does not ship.
-4. `playctl dev` with author mode on: the lesson screen shows condition results live, the raw state, and the exits rows that matched, so authors see what the learner will see.
-5. Localisation: add `lesson.<locale>.md`; the scenario is shared, so step `text`, `goal`, `detail`, `hint` and `say` accept per-locale maps (`hint: { en: …, zh-CN: … }`).
+1. Write `lesson.md` and `scenario.yaml`; put fixtures in place (`tools/fixture-src/`, then `python3 curriculum/tools/sync_fixtures.py`).
+2. `playctl curriculum validate curriculum`: schema (unknown keys are errors), the id equals the directory, modules are known and include base and agent, every step has a goal, a demo that tokenises and at least one condition, ids are unique, fixture paths and window-state files exist, `reset` has a `workspace`, elisp is balanced, predicates and regexes are valid, exit rows reference known state fields or `session.*`, every ready lesson in `index.yaml` exists. `python3 curriculum/tools/validate.py` adds the content rules of B.3 and B.4 and fixture drift.
+3. `playctl curriculum play <lesson | n.m | part:N | all> -session <url>`: loads each lesson in a live session, replays each step's demo and requires each step to complete; `-watch` first plays each step as a "Watch it" demonstration, resets it and then plays it as the learner; `-repeat N` replays N times. Run it on a fresh workspace (`make reset-workspace`) for results that match a learner going through the course in order. A lesson whose demo cannot solve its own steps does not ship. `tools/play/play.py` replays demos in a plain Emacs 31.1 without the stack and reports steps that complete early or never.
+4. `playctl dev` (or `make dev`) with author mode on: the lesson screen shows condition results live, the exit rows that matched and the raw state, so authors see what the learner will see.
+5. Localisation: add `lesson.<locale>.md`; the scenario is shared, so `title`, `goal`, `detail`, condition `text` and `hint`, and stuck `say` and `title` accept per-locale maps (`hint: { en: …, zh-CN: … }`).

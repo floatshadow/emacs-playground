@@ -12,7 +12,7 @@ import (
 // protocolTypescript implements `playctl protocol typescript [-o file]
 // [-src dir] [-check]`. With -check it exits 1 when the file is out of date
 // (CI drift check, frontend.md §14). Types come from internal/protocol/tsgen
-// (AGENTS.md §5), not from JSON Schema.
+// (api.md §8), not from JSON Schema.
 func protocolTypescript(args []string) int {
 	fs := flag.NewFlagSet("protocol typescript", flag.ExitOnError)
 	out := fs.String("o", "", "output file (default stdout)")

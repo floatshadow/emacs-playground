@@ -114,7 +114,7 @@ export const api = {
   del: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
 }
 
-/** Lesson ids contain one slash and go into URLs literally (AGENTS.md §5). */
+/** Lesson ids contain one slash and go into URLs literally (api.md §1). */
 export function lessonPath(lessonId: string): string {
   return lessonId
     .split('/')
