@@ -20,7 +20,10 @@ setup:
           (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
             (kill-buffer b))))
       (dolist (f '("/work/projects/hello/CHANGES.md"))
-        (let ((b (find-buffer-visiting f))) (when b (kill-buffer b)))))
+        (let ((b (find-buffer-visiting f))) (when b (kill-buffer b)))
+        ;; Written by C-x C-w in an earlier attempt: the fixtures do not
+        ;; contain it, so remove it or C-x C-w would ask to overwrite.
+        (when (file-exists-p f) (delete-file f))))
 steps:
   - id: open
     goal: Open four files, two of them called main.rs

@@ -1,0 +1,307 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zsy/emacs-playground/deploy/config.schema.json",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Schema is the optional \"$schema\" reference; ignored."
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "local",
+        "server"
+      ],
+      "description": "Mode is local (default) or server."
+    },
+    "listen": {
+      "type": "string",
+      "description": "Listen is the gateway listen address, default \":8080\"."
+    },
+    "publicUrl": {
+      "type": "string",
+      "description": "PublicURL is used for cookies, OIDC redirects and Origin checks;\ndefault \"http://localhost:8080\"."
+    },
+    "dataDir": {
+      "type": "string",
+      "description": "DataDir holds the SQLite database, the local progress file, the\ncurriculum cache and the cookie secret; default \"/data\"."
+    },
+    "auth": {
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "none",
+            "invite",
+            "oidc"
+          ],
+          "description": "Mode is none (local only, default), invite or oidc."
+        },
+        "invites": {
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "File has one code per line with optional label, uses=N and\nuntil=YYYY-MM-DD (deploy/invites.example.txt)."
+            }
+          },
+          "additionalProperties": false,
+          "type": "object"
+        },
+        "oidc": {
+          "properties": {
+            "issuer": {
+              "type": "string"
+            },
+            "clientId": {
+              "type": "string"
+            },
+            "clientSecretFile": {
+              "type": "string"
+            },
+            "allowedEmailDomains": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array",
+              "description": "AllowedEmailDomains restricts logins; empty allows any."
+            }
+          },
+          "additionalProperties": false,
+          "type": "object"
+        },
+        "cookieSecretFile": {
+          "type": "string",
+          "description": "CookieSecretFile holds the HMAC key; generated on first start if\nmissing; default \"\u003cdataDir\u003e/cookie.secret\"."
+        },
+        "sessionDays": {
+          "type": "integer",
+          "description": "SessionDays is the cookie lifetime, default 30."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "sessions": {
+      "properties": {
+        "backend": {
+          "type": "string",
+          "enum": [
+            "static",
+            "docker"
+          ],
+          "description": "Backend is static (default in local mode) or docker (default in server\nmode)."
+        },
+        "dockerHost": {
+          "type": "string",
+          "description": "DockerHost is the Engine API endpoint, normally the socket proxy\n(\"tcp://socket-proxy:2375\"); empty uses DOCKER_HOST."
+        },
+        "image": {
+          "type": "string",
+          "description": "Image is the session image."
+        },
+        "network": {
+          "type": "string",
+          "description": "Network is the Docker network shared by session containers with\nisolation shared."
+        },
+        "isolation": {
+          "type": "string",
+          "enum": [
+            "network",
+            "shared"
+          ],
+          "description": "Isolation is network (default): every session gets its own internal\nnetwork pg-net-\u003cid\u003e that the gateway joins, so sessions cannot reach\neach other; or shared: all sessions join Network."
+        },
+        "subnetPool": {
+          "type": "string",
+          "description": "SubnetPool is the IPv4 range session networks take their /28 subnets\nfrom, default \"10.231.0.0/16\" (4096 sessions). Empty lets the Docker\ndaemon choose from its default-address-pools, which hold about 30\nnetworks unless configured."
+        },
+        "gatewayContainer": {
+          "type": "string",
+          "description": "GatewayContainer is the gateway's own container (name or id), which\njoins every session network; default the gateway's hostname, which\nDocker sets to the container id."
+        },
+        "runtime": {
+          "type": "string",
+          "description": "Runtime is runc (default) or runsc (gVisor)."
+        },
+        "limits": {
+          "properties": {
+            "cpus": {
+              "type": "number",
+              "description": "CPUs, default 2."
+            },
+            "memory": {
+              "type": "string",
+              "description": "Memory, default \"3g\" (Docker size syntax: b, k, m, g)."
+            },
+            "pids": {
+              "type": "integer",
+              "description": "Pids, default 1024."
+            },
+            "disk": {
+              "type": "string",
+              "description": "Disk is a volume size hint, default \"4g\"; enforced only on storage\ndrivers with quotas."
+            }
+          },
+          "additionalProperties": false,
+          "type": "object"
+        },
+        "idleStopMinutes": {
+          "type": "integer",
+          "description": "IdleStopMinutes stops a session with no WebSocket for this long,\ndefault 30."
+        },
+        "maxSessions": {
+          "type": "integer",
+          "description": "MaxSessions refuses new sessions beyond this, default 50."
+        },
+        "volumeRetentionDays": {
+          "type": "integer",
+          "description": "VolumeRetentionDays removes workspace volumes unused for this long,\ndefault 30."
+        },
+        "egress": {
+          "type": "string",
+          "enum": [
+            "none",
+            "registries",
+            "all"
+          ],
+          "description": "Egress is none, registries (default) or all."
+        },
+        "remoteBox": {
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enabled provisions an SSH box per learner, default true."
+            },
+            "image": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false,
+          "type": "object"
+        },
+        "gui": {
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Enabled makes the GUI frame available, default true."
+            },
+            "geometry": {
+              "type": "string",
+              "description": "Geometry is the Xvnc screen size, default \"1600x900\"."
+            }
+          },
+          "additionalProperties": false,
+          "type": "object"
+        },
+        "terminal": {
+          "properties": {
+            "initialSize": {
+              "type": "string",
+              "description": "InitialSize is \"COLSxROWS\" until the browser resizes, default\n\"120x36\"."
+            }
+          },
+          "additionalProperties": false,
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "local": {
+      "properties": {
+        "sessionUrl": {
+          "type": "string",
+          "description": "SessionURL is the fixed session's sessiond, default\n\"http://session:7000\"."
+        },
+        "workspace": {
+          "type": "string",
+          "description": "Workspace is documented for the Makefile; Compose mounts it."
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "SessionID is the fixed session's id (PG_SESSION_ID of the session\ncontainer), default \"local\". Extension over deployment.md §3."
+        },
+        "sessionToken": {
+          "type": "string",
+          "description": "SessionToken is the fixed session's bearer token for /internal\n(PG_SESSION_TOKEN of the session container), default \"local\".\nExtension over deployment.md §3."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "curriculum": {
+      "properties": {
+        "dir": {
+          "type": "string",
+          "description": "Dir holds curriculum.json, lesson bundles and fixture tarballs,\ndefault \"/srv/curriculum\"."
+        },
+        "defaultLocale": {
+          "type": "string",
+          "description": "DefaultLocale, default \"en\"."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "logging": {
+      "properties": {
+        "level": {
+          "type": "string",
+          "enum": [
+            "debug",
+            "info",
+            "warn",
+            "error"
+          ],
+          "description": "Level is debug, info (default), warn or error."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "json",
+            "text"
+          ],
+          "description": "Format is json (default) or text."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "metrics": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enabled, default false."
+        },
+        "listen": {
+          "type": "string",
+          "description": "Listen, default \":9090\"."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "features": {
+      "properties": {
+        "stuckReports": {
+          "type": "boolean",
+          "description": "StuckReports allows \"I'm stuck\" reports, default true."
+        },
+        "telemetryUpload": {
+          "type": "boolean",
+          "description": "TelemetryUpload is never on by default."
+        },
+        "authorMode": {
+          "type": "boolean",
+          "description": "AuthorMode shows condition results and raw state in lessons and\nenables rpc eval through the gateway, default false."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "type": "object",
+  "title": "Emacs Playground gateway configuration",
+  "description": "Config is the gateway configuration file."
+}

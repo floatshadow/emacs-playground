@@ -53,6 +53,9 @@ type Loader struct {
 	Log        *slog.Logger
 	// SetupTimeout bounds the agent's setup op (default 10 s).
 	SetupTimeout time.Duration
+	// Ready, when set, waits until Emacs is not restarting and the
+	// terminal frame is open (supervisor.WaitReady); setup runs after it.
+	Ready func(ctx context.Context, timeout time.Duration) bool
 
 	mu sync.Mutex
 	// pending is the lesson whose load waits for a daemon restart.
@@ -140,11 +143,11 @@ func (l *Loader) Load(ctx context.Context, req protocol.ScenarioRequest) (protoc
 			l.mu.Lock()
 			defer l.mu.Unlock()
 			l.pending = ""
-			l.finish(bctx, sc, idx, forceCheckpoint)
+			l.finish(bctx, sc, idx, reset, forceCheckpoint)
 		}()
 		return res, nil
 	}
-	l.finish(ctx, sc, idx, forceCheckpoint)
+	l.finish(ctx, sc, idx, reset, forceCheckpoint)
 	return res, nil
 }
 
@@ -168,8 +171,8 @@ func (l *Loader) alreadyActive(req protocol.ScenarioRequest) (protocol.ScenarioR
 
 // finish runs setup, takes the checkpoint and activates the step. Caller
 // holds l.mu.
-func (l *Loader) finish(ctx context.Context, sc *protocol.Scenario, idx int, forceCheckpoint bool) {
-	l.setup(ctx, sc)
+func (l *Loader) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset, forceCheckpoint bool) {
+	l.setup(ctx, sc, reset)
 	st := &sc.Steps[idx]
 	if st.TakesCheckpoint() && l.Checkpoint != nil {
 		if err := l.Checkpoint(ctx, sc.ID, st.ID, forceCheckpoint); err != nil {
@@ -179,7 +182,7 @@ func (l *Loader) finish(ctx context.Context, sc *protocol.Scenario, idx int, for
 	l.Engine.Activate(sc, idx)
 }
 
-func (l *Loader) setup(ctx context.Context, sc *protocol.Scenario) {
+func (l *Loader) setup(ctx context.Context, sc *protocol.Scenario, reset bool) {
 	s := sc.Setup
 	layout := s.Layout
 	if strings.HasSuffix(layout, ".eld") {
@@ -194,11 +197,16 @@ func (l *Loader) setup(ctx context.Context, sc *protocol.Scenario) {
 	if l.Agent == nil {
 		return
 	}
+	// Wait for a restart in progress and for the learner's frame, or the
+	// layout would go to the daemon's invisible initial frame.
+	if l.Ready != nil && !l.Ready(ctx, 15*time.Second) {
+		l.log().Warn("setting up the lesson before the terminal frame is open", "lesson", sc.ID)
+	}
 	timeout := l.SetupTimeout
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
-	args := protocol.AgentSetupArgs{Open: s.Open, Layout: layout, Eval: s.Eval, Compile: s.Compile, Workspace: l.Workspace}
+	args := protocol.AgentSetupArgs{Open: s.Open, Layout: layout, Eval: s.Eval, Compile: s.Compile, Workspace: l.Workspace, Reset: reset, Root: s.Root}
 	if err := l.Agent.Call(ctx, protocol.AgentOpSetup, args, timeout, nil); err != nil {
 		l.log().Warn("scenario setup in Emacs failed", "lesson", sc.ID, "err", err)
 		l.emit(&protocol.ErrorEvent{Code: protocol.ErrEmacsUnavailable, Message: "Emacs could not open the lesson's files; they are in the workspace."})
@@ -371,6 +379,6 @@ func (l *Loader) fixtures(ctx context.Context, sc *protocol.Scenario, reset bool
 	if err != nil {
 		return res.Written, httpx.Internal("could not unpack the lesson's files").Wrap(err)
 	}
-	l.log().Info("fixtures extracted", "lesson", sc.ID, "root", sc.Setup.Root, "written", res.Written, "skipped", res.Skipped)
+	l.log().Info("fixtures extracted", "lesson", sc.ID, "root", sc.Setup.Root, "written", res.Written, "skipped", res.Skipped, "removed", res.Removed)
 	return res.Written, nil
 }

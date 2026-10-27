@@ -191,7 +191,7 @@ export const PtyReplaced = "replaced" satisfies PtyControlType;
 export const PtyPong = "pong" satisfies PtyControlType;
 
 /** RPCOp names a session RPC: POST /s/{id}/rpc/{op} (api.md §3.4). */
-export type RPCOp = "keys" | "eval" | "rescue" | "scenario" | "check" | "hint" | "checkpoint" | "checkpoints" | "restore" | "mode" | "modules" | "restart-emacs" | "stuck" | "status" | "describe" | "drop-step";
+export type RPCOp = "keys" | "eval" | "rescue" | "scenario" | "check" | "hint" | "checkpoint" | "checkpoints" | "restore" | "mode" | "modules" | "restart-emacs" | "stuck" | "status" | "describe" | "drop-step" | "open";
 export const OpKeys = "keys" satisfies RPCOp;
 export const OpEval = "eval" satisfies RPCOp;
 export const OpRescue = "rescue" satisfies RPCOp;
@@ -208,11 +208,20 @@ export const OpStuck = "stuck" satisfies RPCOp;
 export const OpStatus = "status" satisfies RPCOp;
 export const OpDescribe = "describe" satisfies RPCOp;
 export const OpDropStep = "drop-step" satisfies RPCOp;
+export const OpOpen = "open" satisfies RPCOp;
 
 /** SessionBackend selects how sessions are provided. */
 export type SessionBackend = "static" | "docker";
 export const BackendStatic = "static" satisfies SessionBackend;
 export const BackendDocker = "docker" satisfies SessionBackend;
+
+/**
+ * SessionIsolation says how the docker backend networks sessions
+ * (deployment.md §9.2).
+ */
+export type SessionIsolation = "network" | "shared";
+export const IsolationNetwork = "network" satisfies SessionIsolation;
+export const IsolationShared = "shared" satisfies SessionIsolation;
 
 /**
  * SessionState is the gateway's session lifecycle state (architecture.md
@@ -782,6 +791,28 @@ export interface ExitRow {
   flag?: string;
 }
 
+/**
+ * ExitSession is the virtual root "session" that exit-table rows (and only
+ * they) may use (frontend.md §6, the header of curriculum/tables/exits.yaml).
+ * These facts live in the event stream rather than in the agent's State, so
+ * the browser adds them to the document before evaluating the rows:
+ * "session.prefix", "session.emacs", "session.mode", "session.echo".
+ * Step conditions are evaluated by sessiond and cannot use it.
+ */
+export interface ExitSession {
+  /** Pending prefix from the input tap ("C-x", "C-x r"), null when none. */
+  prefix: string | null;
+  /**
+   * Supervisor condition still current: "frame-closed", "suspended",
+   * "restarting", "unresponsive", or null.
+   */
+  emacs: string | null;
+  /** Frame the browser shows: "terminal" or "gui". */
+  mode: FrameKind;
+  /** Latest echo text until the next key event, or null. */
+  echo: string | null;
+}
+
 /** FeaturesConfig toggles optional features. */
 export interface FeaturesConfig {
   /** StuckReports allows "I'm stuck" reports, default true. */
@@ -1203,6 +1234,21 @@ export interface OIDCConfig {
   allowedEmailDomains: string[];
 }
 
+/**
+ * OpenRequest visits a workspace file in the learner's selected window
+ * (the project file tree, frontend.md §9 and §10). Not in api.md §3.4: it
+ * replaces the author-only eval the tree would otherwise need.
+ */
+export interface OpenRequest {
+  /** Path is workspace-relative ("polyglot/docs/report.typ"). */
+  path: string;
+}
+
+/** OpenResult names the buffer now shown. */
+export interface OpenResult {
+  buffer: string;
+}
+
 /** Part is one part of the course (CURRICULUM.md Part A). */
 export interface Part {
   /** N is the part number, 0 to 14. */
@@ -1487,8 +1533,30 @@ export interface SessionsConfig {
   dockerHost: string;
   /** Image is the session image. */
   image: string;
-  /** Network is the Docker network for session containers. */
+  /**
+   * Network is the Docker network shared by session containers with
+   * isolation shared.
+   */
   network: string;
+  /**
+   * Isolation is network (default): every session gets its own internal
+   * network pg-net-<id> that the gateway joins, so sessions cannot reach
+   * each other; or shared: all sessions join Network.
+   */
+  isolation: SessionIsolation;
+  /**
+   * SubnetPool is the IPv4 range session networks take their /28 subnets
+   * from, default "10.231.0.0/16" (4096 sessions). Empty lets the Docker
+   * daemon choose from its default-address-pools, which hold about 30
+   * networks unless configured.
+   */
+  subnetPool: string;
+  /**
+   * GatewayContainer is the gateway's own container (name or id), which
+   * joins every session network; default the gateway's hostname, which
+   * Docker sets to the container id.
+   */
+  gatewayContainer: string;
   /** Runtime is runc (default) or runsc (gVisor). */
   runtime: string;
   limits: LimitsConfig;
@@ -1523,7 +1591,12 @@ export interface Setup {
    * "hello" for /work/hello.
    */
   root?: string;
-  /** Reset overwrites learner files with the fixtures. */
+  /**
+   * Reset restores Root to the fixtures: learner edits are overwritten and
+   * files the fixtures do not contain are removed (build directories such
+   * as target/ and .venv/ are kept). Emacs reverts the affected buffers
+   * and clears unmodified leftovers (AgentSetupArgs.Reset).
+   */
   reset?: boolean;
   /** Open lists workspace-relative files to visit, e.g. "hello/README.md". */
   open?: string[];
@@ -1537,7 +1610,8 @@ export interface Setup {
   eval?: string;
   /**
    * Compile is a command run once so *compilation* exists; null or empty
-   * for none.
+   * for none. It runs in the project root (project.el) of the first Open
+   * file, or that file's directory when it is in no project.
    */
   compile?: string;
 }
@@ -1886,6 +1960,7 @@ export interface RpcOps {
   "status": { request: Empty; result: StatusResult };
   "describe": { request: DescribeRequest; result: DescribeResult };
   "drop-step": { request: DropStepRequest; result: Empty };
+  "open": { request: OpenRequest; result: OpenResult };
 }
 
 // Constants.
@@ -1909,6 +1984,7 @@ export const DemoChordDelayMs = 170;
 export const DemoCharDelayMs = 70;
 export const ProblemContentType = "application/problem+json";
 export const UndefinedCommand = "undefined";
+export const ExitSessionRoot = "session";
 export const TagRemote = "remote";
 export const TagGUI = "gui";
 export const TagProject = "project";
@@ -1929,6 +2005,7 @@ export const QueryCols = "cols";
 export const QueryRows = "rows";
 export const HeaderUser = "X-Playground-User";
 export const HeaderRequestID = "X-Request-Id";
+export const HeaderProxySecret = "X-Playground-Proxy";
 export const Version = 1;
 export const APIPrefix = "/api/v1";
 export const AgentVersion = "0.1.0";

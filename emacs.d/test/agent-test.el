@@ -23,6 +23,8 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'playground-agent)
+(require 'ibuffer)
+(require 'dired)
 
 ;;;; The fake sessiond
 
@@ -727,6 +729,207 @@ Pings are left out unless TYPE is \"ping\"."
     (should (equal (playground--layout-string (playground--tree (selected-frame)))
                    "(vsplit hello/src/main.rs hello/README.md)"))))
 (defvar pg-test--setup-ran nil)
+
+(ert-deftest pg-agent/op-setup-after-fixture-reset ()
+  "setup visits files rewritten on disk without asking, even if their buffers were edited."
+  (pg-test-with-agent
+    (let ((main (pg-test-file "hello/src/main.rs" "fn main() {}\n"))
+          (gone (pg-test-file "hello/old.rs" "// old\n")))
+      (with-current-buffer (find-file-noselect main)
+        (goto-char (point-max))
+        (insert "// unsaved edit\n"))
+      (find-file-noselect gone)
+      ;; sessiond extracts the fixtures again (setup.reset).
+      (with-temp-file main (insert "fn main() { println!(\"fresh\"); }\n"))
+      (set-file-times main (time-add nil 2))
+      (delete-file gone)
+      (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/src/main.rs"))
+                                             (layout . "single")
+                                             (workspace . ,pg-test--dir))))
+      (with-current-buffer (get-file-buffer main)
+        (should-not (buffer-modified-p))
+        (should (string-match-p "fresh" (buffer-string))))
+      (should-not (get-file-buffer gone)))))
+
+(ert-deftest pg-agent/op-setup-reset-clears-the-desk ()
+  "With reset, setup kills unmodified leftovers and keeps modified buffers."
+  (pg-test-with-agent
+    (let ((a (pg-test-file "p/a.rs" "a\n"))
+          (b (pg-test-file "p/b.rs" "b\n"))
+          (c (pg-test-file "p/c.rs" "c\n")))
+      (find-file-noselect a)
+      (find-file-noselect b)
+      (with-current-buffer (find-file-noselect c) (insert "edit"))
+      (get-buffer-create "junk.rs")
+      (dired-noselect (file-name-directory a))
+      (with-current-buffer (get-buffer-create "*Ibuffer*") (ibuffer-mode))
+      (pg-test-value (pg-test-call "setup" `((open . ,(vector "p/a.rs"))
+                                             (layout . "single")
+                                             (reset . t)
+                                             (workspace . ,pg-test--dir))))
+      (should (get-file-buffer a))
+      (should-not (get-file-buffer b))
+      (should (get-file-buffer c))
+      (should-not (get-buffer "junk.rs"))
+      (should-not (get-buffer "*Ibuffer*"))
+      (should-not (seq-find (lambda (x) (eq (buffer-local-value 'major-mode x) 'dired-mode)) (buffer-list)))
+      (should (get-buffer "*scratch*"))
+      (with-current-buffer (get-file-buffer c) (set-buffer-modified-p nil)))))
+
+(ert-deftest pg-agent/op-setup-reset-forgets-places ()
+  "With reset and a root, setup forgets saved places under the root only."
+  (require 'saveplace)
+  (pg-test-with-agent
+    (let* ((a (pg-test-file "p/a.rs" "line 1\nline 2\nline 3\n"))
+           (b (pg-test-file "p/b.rs" "line 1\nline 2\nline 3\n"))
+           (c (pg-test-file "q/c.rs" "line 1\nline 2\nline 3\n"))
+           (save-place-file (expand-file-name "places" pg-test--dir))
+           (save-place-loaded t)
+           ;; An earlier attempt left a.rs on line 3; c.rs is another lesson's.
+           (save-place-alist (list (cons a 15) (cons c 8)))
+           (was-on save-place-mode))
+      (unwind-protect
+          (progn
+            (save-place-mode 1)
+            ;; A leftover buffer: killing it (the desk is cleared) saves its place.
+            (with-current-buffer (find-file-noselect b) (goto-char 10))
+            (pg-test-value (pg-test-call "setup" `((open . ,(vector "p/a.rs"))
+                                                   (layout . "single")
+                                                   (reset . t)
+                                                   (root . "p")
+                                                   (workspace . ,pg-test--dir))))
+            (should-not (get-file-buffer b))
+            (should-not (assoc a save-place-alist))
+            (should-not (assoc b save-place-alist))
+            (should (equal (cdr (assoc c save-place-alist)) 8))
+            (should (= (with-current-buffer (get-file-buffer a) (point)) 1)))
+        (unless was-on (save-place-mode -1))))))
+
+(ert-deftest pg-agent/op-setup-without-reset-keeps-places ()
+  "Without reset, saved places stay (save-place is taught in lesson 2.8)."
+  (require 'saveplace)
+  (pg-test-with-agent
+    (let* ((a (pg-test-file "p/a.rs" "line 1\nline 2\nline 3\n"))
+           (save-place-file (expand-file-name "places" pg-test--dir))
+           (save-place-loaded t)
+           (save-place-alist (list (cons a 15))))
+      (pg-test-value (pg-test-call "setup" `((open . ,(vector "p/a.rs"))
+                                             (layout . "single")
+                                             (root . "p")
+                                             (workspace . ,pg-test--dir))))
+      (should (equal (cdr (assoc a save-place-alist)) 15)))))
+
+(ert-deftest pg-agent/op-setup-leaves-open-prompt ()
+  "With a prompt open, setup unwinds first, then runs at top level and replies."
+  (pg-test-with-agent
+    (pg-test-file "hello/README.md" "# hello\n")
+    (let* ((unwound nil)
+           (playground-agent-rescue-unwind-function (lambda () (setq unwound t)))
+           (depth 1))
+      (cl-letf (((symbol-function 'recursion-depth) (lambda () depth)))
+        (let ((reply (pg-test-call "setup" `((open . ,(vector "hello/README.md"))
+                                             (layout . "hello/README.md")
+                                             (workspace . ,pg-test--dir)))))
+          (should unwound)
+          (pg-test-value reply)
+          (should (equal (buffer-name (window-buffer (selected-window))) "README.md")))))))
+
+(ert-deftest pg-agent/delete-frame-reports-the-last-frame ()
+  "Deleting the only frame of a terminal emits frame closed."
+  (pg-test-with-agent
+    (cl-letf (((symbol-function 'playground--top-level-frame-p) (lambda (_f) t)))
+      (should (eq (playground--last-frame-on-terminal-p (selected-frame)) t))
+      (playground--on-delete-frame (selected-frame))
+      (should (pg-test-wait
+               (lambda () (seq-find (lambda (m) (equal (alist-get 'event m) "closed"))
+                                    (pg-test-messages "frame"))))))))
+
+(ert-deftest pg-agent/ops-never-prompt ()
+  "An op that would prompt fails with an error reply instead of blocking."
+  (pg-test-with-agent
+    (let* ((reply (pg-test-call "eval" '((form . "(y-or-n-p \"Really? \")"))))
+           (ok (alist-get 'ok reply)))
+      (should (memq ok '(:false nil)))
+      (should (= (minibuffer-depth) 0)))))
+
+;;;; Side windows and automatic saving across setups
+
+(defun pg-test--side-window (buffer-name)
+  "Show a new special buffer BUFFER-NAME in a right side window and select it."
+  (let* ((b (get-buffer-create buffer-name))
+         (w (progn (with-current-buffer b (special-mode))
+                   (display-buffer-in-side-window b '((side . right) (window-width . 0.3))))))
+    (select-window w)
+    w))
+
+(defun pg-test--splits-p ()
+  "Non-nil when the selected window splits both ways (C-x 2, C-x 3)."
+  (let ((ok (and (window-live-p (split-window-below))
+                 (window-live-p (split-window-right)))))
+    (delete-other-windows)
+    ok))
+
+(ert-deftest pg-agent/op-setup-from-a-side-window ()
+  "A setup started while a side window is selected leaves normal windows."
+  (pg-test-with-agent
+    (pg-test-file "hello/README.md" "# hello\n")
+    (pg-test-file "hello/src/main.rs" "fn main() {}\n")
+    (delete-other-windows)
+    (dolist (layout '("single" "(vsplit main.rs README.md)" "hello/src/main.rs"))
+      (pg-test--side-window "*pg-side-help*")
+      (should (window-parameter (selected-window) 'window-side))
+      (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/src/main.rs" "hello/README.md"))
+                                             (layout . ,layout)
+                                             (workspace . ,pg-test--dir))))
+      (should-not (seq-find (lambda (w) (window-parameter w 'window-side)) (window-list nil 'nomini)))
+      (should-not (window-dedicated-p (selected-window)))
+      (should (buffer-file-name (window-buffer (selected-window))))
+      (should (= (length (window-list nil 'nomini)) (if (string-prefix-p "(vsplit" layout) 2 1)))
+      (should (pg-test--splits-p)))
+    (kill-buffer "*pg-side-help*")))
+
+(ert-deftest pg-agent/rescue-sole-side-window ()
+  "Rescue repairs a side window that became the frame's only window."
+  (pg-test-with-agent
+    (delete-other-windows)
+    (find-file (pg-test-file "s.txt"))
+    (pg-test--side-window "*pg-side-help*")
+    ;; What the old setup did: delete the other windows from the side window.
+    (let ((ignore-window-parameters t)) (delete-other-windows))
+    (should (= (length (window-list nil 'nomini)) 1))
+    (should (window-parameter (selected-window) 'window-side))
+    (should (member "made the window splittable again" (pg-test-rescue)))
+    (should-not (window-parameter (selected-window) 'window-side))
+    (should (pg-test--splits-p))
+    (switch-to-buffer "*scratch*")
+    (kill-buffer "*pg-side-help*")))
+
+(ert-deftest pg-agent/op-setup-reset-restores-auto-save ()
+  "A reset setup turns base's auto-save-visited-mode back on before its eval."
+  (pg-test-with-agent
+    (pg-test-file "hello/README.md" "# hello\n")
+    (let ((was auto-save-visited-mode))
+      (unwind-protect
+          (cl-letf (((symbol-function 'playground-module-p) (lambda (m) (eq m 'base))))
+            (auto-save-visited-mode -1)
+            ;; A lesson that teaches the modified flag turns it off again.
+            (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/README.md")) (layout . "single")
+                                                   (reset . t)
+                                                   (eval . "(progn (setq pg-test--saw-auto-save auto-save-visited-mode) (auto-save-visited-mode -1))")
+                                                   (workspace . ,pg-test--dir))))
+            (should pg-test--saw-auto-save)
+            (should-not auto-save-visited-mode)
+            ;; The next lesson starts with it on.
+            (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/README.md")) (layout . "single")
+                                                   (reset . t) (workspace . ,pg-test--dir))))
+            (should auto-save-visited-mode)
+            ;; Without reset (a step's own setup) nothing changes.
+            (auto-save-visited-mode -1)
+            (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/README.md")) (layout . "single")
+                                                   (workspace . ,pg-test--dir))))
+            (should-not auto-save-visited-mode))
+        (auto-save-visited-mode (if was 1 -1))))))
+(defvar pg-test--saw-auto-save nil)
 
 ;;;; Rescue from each trap state (emacs.md 10.3)
 

@@ -55,7 +55,7 @@ States: `creating`, `starting`, `ready`, `idle`, `stopping`, `stopped`, `failed`
 
 ### 2.6 Internal (sessiond → gateway)
 
-Authenticated with `Authorization: Bearer <PG_SESSION_TOKEN>`; reachable only on the sessions network.
+Authenticated with `Authorization: Bearer <PG_SESSION_TOKEN>`; reachable only on the sessions networks (requests carrying `X-Forwarded-For` or `Forwarded`, which arrive through Caddy, get 404 in server mode). The learner can read their own session's token, so the bodies are not trusted: progress is accepted only for lessons and steps of the loaded curriculum bundle (400 otherwise), and stuck reports count against the same per-user hourly limit as `POST /stuck` (429 beyond it).
 
 | Method and path | Purpose |
 |---|---|
@@ -67,7 +67,7 @@ Authenticated with `Authorization: Bearer <PG_SESSION_TOKEN>`; reachable only on
 
 ## 3. Session API (`/s/{id}`)
 
-Proxied verbatim by the gateway to sessiond. Inside the container the same paths are served on `:7000` without the prefix.
+Proxied verbatim by the gateway to sessiond. Inside the container the same paths are served on `:7000` without the prefix. The gateway adds `X-Playground-User` and, in server mode, `X-Playground-Proxy` with the session's proxy secret; a sessiond started with `PG_PROXY_SECRET` answers every request without the right value with 401 `unauthenticated`, except `GET /healthz` (deployment.md §9.3).
 
 ### 3.1 `GET /pty` (WebSocket)
 
@@ -108,6 +108,9 @@ Request body JSON; response `{"ok":true,"result":…}` or a problem+json error. 
 | `restart-emacs` | `{}` | `{}` | last resort; buffer restore from the last snapshot |
 | `stuck` | `{note}` | `{events:[…]}` | returns the last 200 events and files a report |
 | `status` | | `{emacs:{version, pid, uptimeMs, agent:bool}, frames:{terminal:bool, gui:bool}, mode, step, modules}` | also `GET /status` |
+| `open` | `{path}` | `{buffer}` | visits a workspace-relative file in the learner's window (the project file tree); no author mode needed |
+| `describe` | `{keys}` | `{cmd, doc}` | ticker glosses for commands missing from `tables.gloss` |
+| `drop-step` | `{lessonId}` | `{}` | internal: sent by the gateway after `POST /progress/reset`; the proxy refuses it from browsers |
 
 ### 3.5 `GET /preview/{path}`
 

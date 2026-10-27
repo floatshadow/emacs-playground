@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zsy/emacs-playground/internal/gateway/store"
 	"github.com/zsy/emacs-playground/internal/httpx"
@@ -15,6 +17,7 @@ import (
 type steps map[string][]string
 
 func (s steps) StepIDs(id string) ([]string, bool) { v, ok := s[id]; return v, ok }
+func (s steps) Loaded() (bool, string)             { return s != nil, "test" }
 
 func ip(n int) *int { return &n }
 
@@ -65,13 +68,18 @@ func TestProgress(t *testing.T) {
 		{LessonID: "00-a/01-b", Status: protocol.ProgressDone},
 		{LessonID: "00-a/01-b", StepID: "open", Status: "finished"},
 		{LessonID: "00-a/01-b", StepID: "open", Status: protocol.ProgressDone, HintsUsed: ip(-1)},
+		// A lesson the loaded bundle does not have: rows only for real
+		// lessons, so a session cannot grow the store with made-up ids.
+		{LessonID: "09-x/01-y", StepID: "a", Status: protocol.ProgressDone},
+		{LessonID: string(make([]byte, 300)), StepID: "a", Status: protocol.ProgressDone},
 	} {
 		if err := s.Apply(ctx, "u1", bad); !errors.As(err, &he) || he.Status != 400 {
 			t.Errorf("%+v: %v", bad, err)
 		}
 	}
-	// Unknown lessons are recorded (bundle may be older than the session).
-	if err := s.Apply(ctx, "u1", protocol.ProgressReport{LessonID: "09-x/01-y", StepID: "a", Status: protocol.ProgressDone}); err != nil {
+	// Without a bundle nothing can be checked: unknown lessons are recorded.
+	unloaded := &Service{Store: st, Steps: steps(nil), Now: s.Now}
+	if err := unloaded.Apply(ctx, "u1", protocol.ProgressReport{LessonID: "09-x/01-y", StepID: "a", Status: protocol.ProgressDone}); err != nil {
 		t.Fatal(err)
 	}
 	// Reset clears one lesson only.
@@ -120,6 +128,23 @@ func TestStuckDedupe(t *testing.T) {
 	_ = json.Unmarshal(reps[0].Events, &got)
 	if len(got) != MaxStuckEvents {
 		t.Fatalf("events kept %d", len(got))
+	}
+	// Big events: only the newest that fit in MaxStuckEventBytes; the note
+	// is cut on a rune boundary.
+	big := make([]json.RawMessage, 50)
+	for i := range big {
+		big[i] = json.RawMessage(`"` + strings.Repeat("x", 20<<10) + `"`)
+	}
+	big[49] = json.RawMessage(`"last"`)
+	_, _ = s.File(ctx, "u3", "", "", strings.Repeat("é", 3000), big)
+	reps, _ = st.Stuck().List(ctx, 1)
+	got = nil
+	_ = json.Unmarshal(reps[0].Events, &got)
+	if len(reps[0].Events) > MaxStuckEventBytes+len(got)+2 || len(got) == 0 || string(got[len(got)-1]) != `"last"` {
+		t.Fatalf("big events: %d kept, %d bytes", len(got), len(reps[0].Events))
+	}
+	if n := len(reps[0].Note); n > MaxStuckNote || !utf8.ValidString(reps[0].Note) {
+		t.Fatalf("note %d bytes, valid %v", n, utf8.ValidString(reps[0].Note))
 	}
 	for i := 0; i < 10; i++ {
 		s.Allow("u9")

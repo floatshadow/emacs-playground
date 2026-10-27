@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"sort"
 	"strings"
 	"time"
@@ -29,10 +30,39 @@ const (
 	RoleSession   = "session"
 	RoleRemoteBox = "remote-box"
 	RoleWorkspace = "workspace"
+	// RoleNetwork labels a session's own network.
+	RoleNetwork = "network"
 )
 
-// ErrNotFound is returned for missing containers and volumes.
+// ErrNotFound is returned for missing containers, volumes and networks.
 var ErrNotFound = errors.New("docker: not found")
+
+// ErrConflict is returned when a name is already taken.
+var ErrConflict = errors.New("docker: name in use")
+
+// ErrSubnetTaken is returned by CreateNetwork when the requested subnet
+// overlaps another network's.
+var ErrSubnetTaken = errors.New("docker: subnet overlaps another network")
+
+// NetworkSpec describes a bridge network to create.
+type NetworkSpec struct {
+	Name   string
+	Labels map[string]string
+	// Internal networks have no route out of the host.
+	Internal bool
+	// Subnet is the IPv4 subnet; the zero value lets the daemon pick one
+	// from its default-address-pools.
+	Subnet netip.Prefix
+}
+
+// Network is a listed network.
+type Network struct {
+	ID       string
+	Name     string
+	Labels   map[string]string
+	Internal bool
+	Subnets  []netip.Prefix
+}
 
 // VolumeMount mounts a named volume.
 type VolumeMount struct {
@@ -116,6 +146,18 @@ type Client interface {
 	CreateVolume(ctx context.Context, name string, labels map[string]string) error
 	RemoveVolume(ctx context.Context, name string) error
 	ListVolumes(ctx context.Context, labels map[string]string) ([]Volume, error)
+	// CreateNetwork creates a bridge network: ErrConflict when the name is
+	// taken, ErrSubnetTaken when spec.Subnet overlaps another network.
+	CreateNetwork(ctx context.Context, spec NetworkSpec) (id string, err error)
+	// RemoveNetwork removes a network (name or id).
+	RemoveNetwork(ctx context.Context, name string) error
+	// ConnectNetwork attaches a container (name, id or id prefix) to a
+	// network with DNS aliases; one already attached is left as it is.
+	ConnectNetwork(ctx context.Context, network, container string, aliases []string) error
+	// DisconnectNetwork detaches a container; one not attached is fine.
+	DisconnectNetwork(ctx context.Context, network, container string) error
+	// ListNetworks lists the networks carrying every label (all for nil).
+	ListNetworks(ctx context.Context, labels map[string]string) ([]Network, error)
 	Close() error
 }
 
@@ -137,7 +179,11 @@ func Harden(spec *ContainerSpec) {
 	if spec.MemorySwap == 0 {
 		spec.MemorySwap = spec.Memory // no swap beyond the memory limit
 	}
-	spec.Ulimits = []Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}, {Name: "nproc", Soft: 2048, Hard: 2048}}
+	// No nproc ulimit: RLIMIT_NPROC counts every process and thread of the
+	// uid on the whole host, and every session runs as uid 1000 (no user
+	// namespace with runc), so it would be one budget shared by all
+	// sessions. The cgroup pids limit (PidsLimit) bounds each container.
+	spec.Ulimits = []Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}}
 	if spec.StopTimeout == 0 {
 		spec.StopTimeout = 20
 	}
@@ -229,6 +275,9 @@ func wrap(op string, err error) error {
 	}
 	if isNotFound(err) {
 		return fmt.Errorf("docker: %s: %w", op, ErrNotFound)
+	}
+	if cerrdefs.IsConflict(err) || strings.Contains(err.Error(), "already exists") {
+		return fmt.Errorf("docker: %s: %w: %v", op, ErrConflict, err)
 	}
 	return fmt.Errorf("docker: %s: %w", op, err)
 }
@@ -332,6 +381,88 @@ func (e *Engine) ListVolumes(ctx context.Context, labels map[string]string) ([]V
 	for _, v := range res.Items {
 		created, _ := time.Parse(time.RFC3339Nano, v.CreatedAt)
 		out = append(out, Volume{Name: v.Name, Labels: v.Labels, CreatedAt: created})
+	}
+	return out, nil
+}
+
+func (e *Engine) CreateNetwork(ctx context.Context, spec NetworkSpec) (string, error) {
+	opts := client.NetworkCreateOptions{Driver: "bridge", Internal: spec.Internal, Labels: spec.Labels}
+	if spec.Subnet.IsValid() {
+		opts.IPAM = &network.IPAM{Driver: "default", Config: []network.IPAMConfig{{Subnet: spec.Subnet}}}
+	}
+	res, err := e.c.NetworkCreate(ctx, spec.Name, opts)
+	if err != nil {
+		// "invalid pool request: Pool overlaps with other one on this
+		// address space"
+		if spec.Subnet.IsValid() && strings.Contains(strings.ToLower(err.Error()), "overlaps") {
+			return "", fmt.Errorf("docker: create network %s (%s): %w", spec.Name, spec.Subnet, ErrSubnetTaken)
+		}
+		return "", wrap("create network "+spec.Name, err)
+	}
+	return res.ID, nil
+}
+
+func (e *Engine) RemoveNetwork(ctx context.Context, name string) error {
+	_, err := e.c.NetworkRemove(ctx, name, client.NetworkRemoveOptions{})
+	return wrap("remove network "+name, err)
+}
+
+// attached reports whether container (name, id or id prefix) has an
+// endpoint on the network.
+func (e *Engine) attached(ctx context.Context, netName, ctr string) (bool, error) {
+	res, err := e.c.NetworkInspect(ctx, netName, client.NetworkInspectOptions{})
+	if err != nil {
+		return false, wrap("inspect network "+netName, err)
+	}
+	for id, ep := range res.Network.Containers {
+		if ep.Name == ctr || (len(ctr) >= 12 && strings.HasPrefix(id, ctr)) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (e *Engine) ConnectNetwork(ctx context.Context, netName, ctr string, aliases []string) error {
+	_, err := e.c.NetworkConnect(ctx, netName, client.NetworkConnectOptions{
+		Container:      ctr,
+		EndpointConfig: &network.EndpointSettings{Aliases: aliases},
+	})
+	if err == nil {
+		return nil
+	}
+	// "endpoint with name … already exists in network …"
+	if ok, ierr := e.attached(ctx, netName, ctr); ierr == nil && ok {
+		return nil
+	}
+	return wrap("connect "+ctr+" to "+netName, err)
+}
+
+func (e *Engine) DisconnectNetwork(ctx context.Context, netName, ctr string) error {
+	_, err := e.c.NetworkDisconnect(ctx, netName, client.NetworkDisconnectOptions{Container: ctr, Force: true})
+	if err == nil || isNotFound(err) {
+		return nil
+	}
+	// "container … is not connected to network …", or the network is gone.
+	if ok, ierr := e.attached(ctx, netName, ctr); (ierr == nil && !ok) || errors.Is(ierr, ErrNotFound) {
+		return nil
+	}
+	return wrap("disconnect "+ctr+" from "+netName, err)
+}
+
+func (e *Engine) ListNetworks(ctx context.Context, labels map[string]string) ([]Network, error) {
+	res, err := e.c.NetworkList(ctx, client.NetworkListOptions{Filters: labelFilters(labels)})
+	if err != nil {
+		return nil, wrap("list networks", err)
+	}
+	out := make([]Network, 0, len(res.Items))
+	for _, n := range res.Items {
+		nw := Network{ID: n.ID, Name: n.Name, Labels: n.Labels, Internal: n.Internal}
+		for _, c := range n.IPAM.Config {
+			if c.Subnet.IsValid() {
+				nw.Subnets = append(nw.Subnets, c.Subnet)
+			}
+		}
+		out = append(out, nw)
 	}
 	return out, nil
 }

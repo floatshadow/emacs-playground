@@ -24,7 +24,14 @@ type ExtractResult struct {
 	Written int
 	Skipped int
 	Dirs    int
+	// Removed counts files and directories deleted because the fixture does
+	// not contain them (overwrite into a non-empty dest only).
+	Removed int
 }
+
+// KeepOnReset are directory names a reset never removes: build output
+// costs a rebuild, and .git is the learner's own history (backend.md §3.9).
+var KeepOnReset = map[string]bool{"target": true, "_build": true, ".venv": true, "node_modules": true, ".git": true}
 
 // Extract unpacks a zstd-compressed tar stream into dest (a slash path
 // relative to root). Existing files are kept unless overwrite. Only regular
@@ -32,7 +39,73 @@ type ExtractResult struct {
 // (the bundle contract in protocol/curriculum.go). Writing through os.Root
 // means a symlink the learner created cannot redirect files outside the
 // workspace.
+//
+// With overwrite and a non-empty dest (setup.reset), dest is made to match
+// the fixture: files and directories the tarball does not contain are
+// removed afterwards (except the KeepOnReset directories), so a lesson
+// replayed after a learner moved, renamed or created files starts from the
+// same tree again.
 func Extract(r io.Reader, root *os.Root, dest string, overwrite bool) (ExtractResult, error) {
+	seen := map[string]bool{}
+	res, err := extract(r, root, dest, overwrite, seen)
+	if err != nil || !overwrite {
+		return res, err
+	}
+	dest = strings.Trim(path.Clean("/"+dest), "/")
+	if dest == "" {
+		return res, nil
+	}
+	n, err := prune(root, dest, seen)
+	res.Removed = n
+	return res, err
+}
+
+// prune removes what is under dest but not in seen (paths relative to
+// dest), keeping KeepOnReset directories.
+func prune(root *os.Root, dest string, seen map[string]bool) (int, error) {
+	removed := 0
+	var walk func(rel string) error
+	walk = func(rel string) error {
+		dir := dest
+		if rel != "" {
+			dir = dest + "/" + rel
+		}
+		f, err := root.Open(dir)
+		if err != nil {
+			return nil
+		}
+		entries, err := f.ReadDir(-1)
+		f.Close()
+		if err != nil {
+			return nil
+		}
+		for _, e := range entries {
+			child := e.Name()
+			if rel != "" {
+				child = rel + "/" + e.Name()
+			}
+			if e.IsDir() && KeepOnReset[e.Name()] {
+				continue
+			}
+			if !seen[child] {
+				if err := root.RemoveAll(dest + "/" + child); err != nil {
+					return fmt.Errorf("fixtures: removing %s: %w", child, err)
+				}
+				removed++
+				continue
+			}
+			if e.IsDir() {
+				if err := walk(child); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	return removed, walk("")
+}
+
+func extract(r io.Reader, root *os.Root, dest string, overwrite bool, seen map[string]bool) (ExtractResult, error) {
 	var res ExtractResult
 	zr, err := zstd.NewReader(r, zstd.WithDecoderMaxMemory(256<<20))
 	if err != nil {
@@ -66,6 +139,9 @@ func Extract(r io.Reader, root *os.Root, dest string, overwrite bool) (ExtractRe
 		target := clean
 		if dest != "" {
 			target = dest + "/" + clean
+		}
+		for p := clean; p != "." && p != "/"; p = path.Dir(p) {
+			seen[p] = true
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:

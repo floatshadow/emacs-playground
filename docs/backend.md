@@ -111,6 +111,10 @@ type Authenticator interface {
 
 `staticBackend` (local mode) implements `Backend` with a single pre-existing session whose endpoint is `PG_SESSION_URL`; `Create` and `Remove` are no-ops. This keeps the request path identical in both modes.
 
+The docker backend gives each session its own internal bridge network, `pg-net-<id>` with a `/28` from `sessions.subnetPool`, created before the container and removed with it; the gateway joins it under the alias `gateway` (`sessions.gatewayContainer`, default its hostname). After a gateway restart the registry rebuild joins the running sessions' networks again (a new gateway container after an upgrade is not on them yet), and the rebuild and the reaper remove networks whose session has no container (deployment.md §7). `sessions.isolation: shared` puts every session on `sessions.network` instead.
+
+Every request the gateway sends to a session's sessiond (proxy, `Call`, `Status`) carries the session's proxy secret in `X-Playground-Proxy`: `hex(HMAC-SHA256(key, "playground session proxy\0" + id))`, with the key in `<dataDir>/session-proxy.secret`. The container gets the same value as `PG_PROXY_SECRET` (§3.13). The static session has none.
+
 ### 2.4 Session lifecycle
 
 `Ensure` is idempotent per user and serialised per user with a keyed mutex. Steps in server mode: look up the registry; if a running container exists and is healthy, return it; if a stopped session exists, re-create the container on the same volume; otherwise create the volume, the remote box (if `PG_REMOTE_IMAGE` is set) and the session container, start it, poll `GET /healthz` up to 30 s, then mark `ready`. Failures mark the session `failed` with a reason and remove the container; the volume is kept.
@@ -121,7 +125,7 @@ On gateway start, `List` by label rebuilds the registry so that a gateway restar
 
 ### 2.5 Proxying
 
-One `httputil.ReverseProxy` per session, cached, with `Rewrite` setting the target, `X-Playground-User` and stripping the cookie. `ReverseProxy` handles the `101 Switching Protocols` upgrade for WebSockets since Go 1.12, so no custom tunnelling is needed. The proxy wraps the response writer to count open WebSockets per session for the reaper, and enforces a per-user limit of 6 concurrent WebSockets.
+One `httputil.ReverseProxy` per session, cached, with `Rewrite` setting the target, `X-Playground-User` and `X-Playground-Proxy` (the session's proxy secret, §2.3; any value from the browser is dropped) and stripping the cookie and `Authorization`. `ReverseProxy` handles the `101 Switching Protocols` upgrade for WebSockets since Go 1.12, so no custom tunnelling is needed. The proxy wraps the response writer to count open WebSockets per session for the reaper, and enforces a per-user limit of 6 concurrent WebSockets.
 
 ### 2.6 Authentication
 
@@ -167,7 +171,7 @@ At start the gateway loads `PG_CURRICULUM_DIR/curriculum.json` (the index produc
 
 ### 2.9 Progress
 
-Progress is written by sessiond through `POST /internal/sessions/{id}/progress` when a step completes, when hints are shown (the browser calls `/rpc/hint` so sessiond can count), and on reset. The browser reads `GET /api/v1/progress`. Writing from sessiond rather than the browser keeps progress correct when a tab is closed mid-step.
+Progress is written by sessiond through `POST /internal/sessions/{id}/progress` when a step completes, when hints are shown (the browser calls `/rpc/hint` so sessiond can count), and on reset. The browser reads `GET /api/v1/progress`. Writing from sessiond rather than the browser keeps progress correct when a tab is closed mid-step. While a curriculum bundle is loaded, reports for lessons or steps it does not have are refused with 400 (the learner can call `/internal` with their own session's token, so the ids are not trusted).
 
 ## 3. sessiond
 
@@ -192,7 +196,7 @@ A small process tree manager with per-child restart policies:
 |---|---|---|
 | daemon | `emacs --fg-daemon=playground` | restart with backoff 1, 2, 4, 8 s, max 5 per 10 min; then `emacs` event `unresponsive` and give up until `/rpc/restart-emacs` |
 | tmux server | `tmux -L pg new-session -d -s emacs -x 120 -y 36` | restart immediately |
-| terminal frame | `tmux send-keys`-free: the session's initial command is `emacsclient -t -s playground`; tmux `remain-on-exit off` and sessiond re-runs `tmux respawn-pane` when the pane dies | respawn within 500 ms; emit `emacs {event: frame-closed}` then `frame-opened` |
+| terminal frame | `tmux send-keys`-free: the session's initial command is `emacsclient -t -s playground`; tmux `remain-on-exit on` (respawn-pane needs the dead pane) and sessiond's session-level `pane-died` hook re-runs `tmux respawn-pane` | respawn within 500 ms; emit `emacs {event: frame-closed}` then `frame-opened` |
 | Xvnc | `Xvnc :1 -geometry 1600x900 -depth 24 -rfbport 5901 -localhost -SecurityTypes None` | restart if GUI mode is active |
 | GUI frame | `emacsclient -c -s playground --frame-parameters='((fullscreen . fullboth))'` with `DISPLAY=:1` | re-run while GUI mode is active |
 
@@ -273,6 +277,8 @@ Files are served with `http.FileServerFS(root.FS())` where `root` is `os.OpenRoo
 ### 3.13 Configuration
 
 Flags mirror the `PG_*` environment variables (deployment.md §3). `sessiond healthcheck` is the Compose health command: it returns 0 when the HTTP server is up and the agent has said hello.
+
+With `PG_PROXY_SECRET` set (server mode), a middleware in front of every route compares `X-Playground-Proxy` with it in constant time and answers 401 otherwise; only `GET`/`HEAD /healthz` is open (the gateway's start-up probe and the health check). The header is removed before the handlers run, and Emacs, tmux and shell conditions get the environment without `PG_PROXY_SECRET` and `PG_SESSION_TOKEN`. Without it (local mode, `make dev`) every request is served, as only the learner's own gateway and host reach the session.
 
 ## 4. playctl
 

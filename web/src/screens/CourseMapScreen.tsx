@@ -17,9 +17,12 @@ export default function CourseMapScreen() {
   const progress = useProgress()
   const active = useSessionStore((s) => s.activeStep)
   const location = useLocation()
-  const current = curriculum.data
-    ? currentLesson(curriculum.data, progress.data, active?.lessonId ?? null)
-    : null
+  // Wait for progress too: without it every learner would briefly be told
+  // to start at 0.1.
+  const current =
+    curriculum.data && !progress.isPending
+      ? currentLesson(curriculum.data, progress.data, active?.lessonId ?? null)
+      : null
 
   useEffect(() => {
     document.title = `${t('course.crumb')} — Emacs Playground`

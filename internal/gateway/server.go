@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"os/signal"
@@ -214,11 +215,40 @@ func (a *App) buildSessions(ctx context.Context) error {
 				a.log.Warn("sessions: the Docker Engine is not reachable yet", "host", cfg.Sessions.DockerHost, "err", err)
 			}
 		}
-		so.Backend = &sessions.DockerBackend{Client: dc, Version: buildinfo.Version}
+		db := &sessions.DockerBackend{Client: dc, Version: buildinfo.Version}
+		if cfg.Sessions.Isolation == protocol.IsolationNetwork {
+			db.Isolate = true
+			db.GatewayAlias = internalGatewayHost
+			db.Internal = cfg.Sessions.Egress != protocol.EgressAll
+			if cfg.Sessions.SubnetPool != "" {
+				db.SubnetPool, err = netip.ParsePrefix(cfg.Sessions.SubnetPool)
+				if err != nil {
+					return fmt.Errorf("sessions.subnetPool: %w", err)
+				}
+			}
+			db.Gateway = cfg.Sessions.GatewayContainer
+			if db.Gateway == "" {
+				// Docker sets a container's hostname to its id.
+				db.Gateway, _ = os.Hostname()
+			}
+			a.log.Info("sessions: one network per session", "gateway_container", db.Gateway,
+				"subnet_pool", cfg.Sessions.SubnetPool, "internal", db.Internal)
+		}
+		so.Backend = db
 		a.log.Warn("sessions: the docker backend is experimental in this release (slice 1)")
 	}
 	if so.Static {
 		so.StaticID, so.StaticToken = cfg.Local.SessionID, cfg.Local.SessionToken
+	} else {
+		// Per-session proxy secrets (PG_PROXY_SECRET) derive from a key kept
+		// with the gateway's data, apart from the cookie secret so that
+		// rotating that one does not lock the gateway out of running
+		// sessions.
+		key, err := auth.LoadOrCreateSecret(filepath.Join(cfg.DataDir, ProxyKeyFile))
+		if err != nil {
+			return fmt.Errorf("sessions: proxy key: %w", err)
+		}
+		so.ProxyKey = key
 	}
 	a.Sessions, err = sessions.New(ctx, so)
 	if err != nil {
@@ -230,14 +260,23 @@ func (a *App) buildSessions(ctx context.Context) error {
 	return nil
 }
 
+// ProxyKeyFile, in the data directory, holds the key the per-session proxy
+// secrets derive from (sessions.ProxySecret); created on first use.
+const ProxyKeyFile = "session-proxy.secret"
+
+// internalGatewayHost is the gateway's name for sessions: its Compose
+// service name on the shared sessions network, and its alias on every
+// per-session network.
+const internalGatewayHost = "gateway"
+
 // internalGatewayURL is PG_GATEWAY_URL for session containers: the
-// gateway's Compose service name on the sessions network and its port.
+// gateway's name on the sessions network and its port.
 func internalGatewayURL(listen string) string {
 	_, port, err := net.SplitHostPort(listen)
 	if err != nil || port == "" {
 		port = "8080"
 	}
-	return "http://gateway:" + port
+	return "http://" + internalGatewayHost + ":" + port
 }
 
 // Handler is the gateway's HTTP handler.
@@ -626,6 +665,12 @@ func (a *App) internalStuck(w http.ResponseWriter, r *http.Request) error {
 	sess := internalSession(r)
 	if !a.cfg.Features.StuckReports {
 		return httpx.Forbidden("stuck reports are turned off")
+	}
+	// The same per-user hourly limit as POST /api/v1/stuck (deployment.md
+	// §9.3): sessiond files these for rpc stuck calls through the proxy,
+	// and a learner can call /internal with their own session's token.
+	if !a.Stuck.Allow(sess.UserID) {
+		return httpx.RateLimited("many reports in the last hour; try again later")
 	}
 	var rep protocol.InternalStuckReport
 	if err := httpx.DecodeJSON(w, r, &rep); err != nil {

@@ -22,6 +22,8 @@
     "backend": "docker",
     "dockerHost": "tcp://socket-proxy:2375",
     "image": "ghcr.io/zsy/emacs-playground/session:v0.1.0",
+    "isolation": "network",
+    "subnetPool": "10.231.0.0/16",
     "network": "emacs-playground_sessions",
     "runtime": "runc",
     "limits": { "cpus": 2, "memory": "3g", "pids": 1024, "disk": "4g" },

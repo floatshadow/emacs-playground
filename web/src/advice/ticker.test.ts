@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { record, type Recorder } from '../test/recorder'
 import { DEFAULT_GLOSS } from './defaults'
 import {
+  isMouseOnly,
   missingGlosses,
   selectTicker,
   tickerGap,
@@ -24,6 +25,27 @@ const key = (keys: string, cmd: string, extra: Record<string, unknown> = {}) =>
     frame: 'terminal',
     ...extra,
   }) as const
+
+describe('isMouseOnly', () => {
+  it('matches clicks, presses, drags, wheels and area-prefixed clicks', () => {
+    for (const k of [
+      '<mouse-1>',
+      '<down-mouse-1>',
+      '<drag-mouse-1>',
+      '<double-mouse-1>',
+      '<wheel-down>',
+      '<C-wheel-up>',
+      '<S-down-mouse-3>',
+      '<mode-line> <mouse-1>',
+      '<vertical-line> <down-mouse-1>',
+    ])
+      expect(isMouseOnly(k), k).toBe(true)
+  })
+  it('keeps keys and key sequences that only end in a click', () => {
+    for (const k of ['C-x', 'C-x <mouse-1>', '<f1>', '<mode-line>', 'RET', '<down>', ''])
+      expect(isMouseOnly(k), k).toBe(false)
+  })
+})
 
 describe('ticker reducer', () => {
   it('a prefix adds a pending entry, the completed command replaces it', () => {

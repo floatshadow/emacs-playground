@@ -3,6 +3,7 @@ package sessiond
 import (
 	"bufio"
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -184,7 +185,8 @@ func (s *Server) Run(ctx context.Context) error {
 			httpErr <- err
 		}
 	}()
-	s.log.Info("sessiond listening", "addr", ln.Addr().String(), "session", cfg.SessionID, "fake", s.opt.Fake)
+	s.log.Info("sessiond listening", "addr", ln.Addr().String(), "session", cfg.SessionID, "fake", s.opt.Fake,
+		"proxy_auth", cfg.ProxySecret != "")
 
 	go s.engine.Run(runCtx)
 
@@ -274,7 +276,7 @@ func (s *Server) wire() {
 		Root:      s.preview.Root(),
 		Workspace: cfg.Workspace,
 		Checker:   checker{s.agent},
-		Shell:     steps.ExecShell{Env: append([]string{"PG_SESSION_TOKEN="}, checkpoint.SafeDirectoryEnv...)},
+		Shell:     steps.ExecShell{Env: append([]string{"PG_SESSION_TOKEN=", "PG_PROXY_SECRET="}, checkpoint.SafeDirectoryEnv...)},
 		Log:       log.With("component", "steps"),
 		Hooks: steps.Hooks{
 			Emit: func(ev protocol.Event) { s.bus.Publish(ev) },
@@ -301,6 +303,7 @@ func (s *Server) wire() {
 		Workspace: cfg.Workspace, Root: s.preview.Root(), CacheDir: filepath.Join(s.playgroundDir(), "cache"),
 		Fetch: fetch, Agent: s.agent, Restart: s.sup, Modules: s.modules, Engine: s.engine,
 		Checkpoint: s.stepCheckpoint,
+		Ready:      s.sup.WaitReady,
 		Emit:       func(ev protocol.Event) { s.bus.Publish(ev) },
 		Log:        log.With("component", "scenario"),
 	}
@@ -343,7 +346,35 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET "+protocol.PathPreview+"{path...}", s.preview)
 	mux.Handle("HEAD "+protocol.PathPreview+"{path...}", s.preview)
 	mux.Handle("POST "+protocol.PathRPC+"{op}", httpx.Handle(s.rpc))
-	return httpx.Chain(mux, httpx.RequestID, httpx.Logging(s.log), httpx.Recover)
+	return httpx.Chain(mux, httpx.RequestID, httpx.Logging(s.log), httpx.Recover, ProxyAuth(s.cfg.ProxySecret))
+}
+
+// ProxyAuth requires the session's proxy secret (PG_PROXY_SECRET) in the
+// X-Playground-Proxy header of every request except GET /healthz, compared
+// in constant time; others get 401. In server mode the gateway sets it on
+// everything it sends (proxy, RPC, status), and session containers can
+// reach each other's :7000 only on a shared network: without the check a
+// learner could drive another learner's Emacs (deployment.md §9.1). An
+// empty secret disables the check (local mode, development).
+func ProxyAuth(secret string) httpx.Middleware {
+	return func(next http.Handler) http.Handler {
+		if secret == "" {
+			return next
+		}
+		want := []byte(secret)
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == protocol.PathHealthz && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+				next.ServeHTTP(w, r)
+				return
+			}
+			if subtle.ConstantTimeCompare([]byte(r.Header.Get(protocol.HeaderProxySecret)), want) != 1 {
+				httpx.WriteError(w, r, httpx.Unauthenticated("this session only answers its gateway"))
+				return
+			}
+			r.Header.Del(protocol.HeaderProxySecret)
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
 func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
@@ -650,10 +681,6 @@ func (s *Server) stopFakeAgent() {
 
 // --- shutdown ----------------------------------------------------------------
 
-// flushForm saves visited buffers the way auto-save-visited-mode would.
-const flushForm = `(when (bound-and-true-p auto-save-visited-mode)
-  (save-some-buffers t (lambda () (and buffer-file-name (buffer-modified-p) (not buffer-read-only)))))`
-
 // shutdown is backend.md §5: emit stopping, snapshot, flush, stop Emacs
 // (SIGTERM, 15 s), close WebSockets with 4003, stop HTTP.
 func (s *Server) shutdown(srv *http.Server) {
@@ -663,9 +690,7 @@ func (s *Server) shutdown(srv *http.Server) {
 	if _, err := s.sup.Snapshot(ctx); err != nil {
 		s.log.Info("no snapshot at shutdown", "err", err)
 	}
-	if s.agent.Connected() && !s.sup.Unresponsive() {
-		_ = s.agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: flushForm}, 3*time.Second, nil)
-	}
+	s.sup.Flush(ctx)
 	cancel()
 	close(s.done)
 	s.sup.Stop()

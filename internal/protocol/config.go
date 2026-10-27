@@ -48,6 +48,19 @@ const (
 	EgressAll        EgressPolicy = "all"
 )
 
+// SessionIsolation says how the docker backend networks sessions
+// (deployment.md §9.2).
+type SessionIsolation string
+
+// Session isolation modes.
+const (
+	// IsolationNetwork gives every session its own internal network that
+	// only the gateway joins: sessions cannot reach each other.
+	IsolationNetwork SessionIsolation = "network"
+	// IsolationShared puts every session on sessions.network.
+	IsolationShared SessionIsolation = "shared"
+)
+
 // Config is the gateway configuration file.
 type Config struct {
 	// Schema is the optional "$schema" reference; ignored.
@@ -110,8 +123,22 @@ type SessionsConfig struct {
 	DockerHost string `json:"dockerHost"`
 	// Image is the session image.
 	Image string `json:"image"`
-	// Network is the Docker network for session containers.
+	// Network is the Docker network shared by session containers with
+	// isolation shared.
 	Network string `json:"network"`
+	// Isolation is network (default): every session gets its own internal
+	// network pg-net-<id> that the gateway joins, so sessions cannot reach
+	// each other; or shared: all sessions join Network.
+	Isolation SessionIsolation `json:"isolation" jsonschema:"enum=network,enum=shared"`
+	// SubnetPool is the IPv4 range session networks take their /28 subnets
+	// from, default "10.231.0.0/16" (4096 sessions). Empty lets the Docker
+	// daemon choose from its default-address-pools, which hold about 30
+	// networks unless configured.
+	SubnetPool string `json:"subnetPool"`
+	// GatewayContainer is the gateway's own container (name or id), which
+	// joins every session network; default the gateway's hostname, which
+	// Docker sets to the container id.
+	GatewayContainer string `json:"gatewayContainer"`
 	// Runtime is runc (default) or runsc (gVisor).
 	Runtime string       `json:"runtime"`
 	Limits  LimitsConfig `json:"limits"`
@@ -224,6 +251,11 @@ type FeaturesConfig struct {
 type SessiondConfig struct {
 	SessionID    string `json:"sessionId" env:"PG_SESSION_ID" default:"local"`
 	SessionToken string `json:"sessionToken" env:"PG_SESSION_TOKEN" default:"local" secret:"true"`
+	// ProxySecret, when set, is required in the X-Playground-Proxy header
+	// of every request but GET /healthz (the gateway derives it per session
+	// in server mode). Empty serves without it: local mode and development,
+	// where only the learner's own gateway or host can reach :7000.
+	ProxySecret string `json:"proxySecret" env:"PG_PROXY_SECRET" secret:"true"`
 	// GatewayURL is where sessiond fetches fixtures and reports progress.
 	GatewayURL string `json:"gatewayUrl" env:"PG_GATEWAY_URL" default:"http://gateway:8080"`
 	Listen     string `json:"listen" env:"PG_LISTEN" default:":7000"`

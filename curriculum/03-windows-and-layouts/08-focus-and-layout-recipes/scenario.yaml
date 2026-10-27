@@ -10,16 +10,24 @@ setup:
   reset: true
   open: [projects/hello/src/main.rs, projects/hello/src/lib.rs, projects/hello/tests/shout.rs, projects/notes/reading.md]
   layout: "projects/notes/reading.md"
+  # Only hello's and the notes' files stay open, so main.rs and lib.rs have
+  # their plain names and C-x b main.rs RET finds them (no polyglot twins).
   eval: >-
     (progn
       (dolist (b (buffer-list))
         (let ((f (buffer-file-name b)))
-          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
+          (when (and f (not (buffer-modified-p b))
+                     (not (string-prefix-p "/work/projects/hello/" f))
+                     (not (string-prefix-p "/work/projects/notes/" f)))
             (kill-buffer b))))
       (with-current-buffer (find-buffer-visiting "/work/projects/notes/reading.md")
         (goto-char (point-min))
         (when (bound-and-true-p olivetti-mode) (olivetti-mode -1))
         (when (bound-and-true-p follow-mode) (follow-mode -1))))
+# The rendered notes, for recipe 3 (writing): the preview pane reloads
+# whenever reading.md is saved (frontend.md §9).
+preview:
+  tabs: [projects/notes/reading.md]
 steps:
   - id: follow
     goal: Read reading.md as one long page in two columns

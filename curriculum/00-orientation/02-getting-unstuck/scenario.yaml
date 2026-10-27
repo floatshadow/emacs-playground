@@ -52,8 +52,8 @@ steps:
         say: "Pressing C-g many times is fine: it is always safe. Look at the bottom line; when it no longer says I-search, the search is over."
   - id: buffer-list
     goal: Open the buffer list, then close it
-    detail: "`C-x C-b` lists every buffer in a second window. It appears without moving your cursor. `C-x 1` keeps only the window you are in."
-    demo: "C-x C-b ~1500 C-x 1"
+    detail: "`C-x C-b` lists every buffer in a second window, without moving your cursor. `C-x 1` keeps only the window you are in; or `C-x o` moves into the list and `q` closes it. (From Part 2 on, `C-x C-b` opens ibuffer in the current window instead, and `q` closes it.)"
+    demo: "C-x C-b ~1500 C-x o ~300 q"
     conditions:
       - text: the buffer list was opened
         any:
@@ -62,7 +62,7 @@ steps:
         hint: "Press C-x, then C-b."
       - text: back to one window showing main.rs
         layout: "main.rs"
-        hint: "C-x 1 keeps only the selected window. If you moved into the list, q closes it instead."
+        hint: "C-x 1 keeps only the selected window. If the cursor is in the list, q closes it instead."
   - id: help
     goal: Open help for a key, then leave the help window
     detail: "`C-h k` then `C-f` explains what `C-f` does, in a *Help* window. The cursor moves into it, so `q` closes it straight away."

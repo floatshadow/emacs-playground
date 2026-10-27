@@ -80,7 +80,7 @@ func Logging(base *slog.Logger) Middleware {
 			rec := &StatusRecorder{ResponseWriter: w, Status: http.StatusOK}
 			next.ServeHTTP(rec, r.WithContext(WithLogger(r.Context(), l)))
 			level := slog.LevelInfo
-			if r.URL.Path == "/healthz" || r.URL.Path == "/metrics" || strings.HasSuffix(r.URL.Path, "/healthz") {
+			if rec.Status < 400 && isPollPath(r.URL.Path) {
 				level = slog.LevelDebug
 			}
 			l.Log(r.Context(), level, "http",
@@ -88,6 +88,20 @@ func Logging(base *slog.Logger) Middleware {
 				"bytes", rec.Bytes, "duration_ms", time.Since(start).Milliseconds())
 		})
 	}
+}
+
+// pollSuffixes are endpoints called every few hundred milliseconds or
+// seconds (health checks, status and check polling by the browser and
+// playctl, heartbeats); their successful requests are logged at debug.
+var pollSuffixes = []string{"/healthz", "/metrics", "/status", "/rpc/check", "/heartbeat"}
+
+func isPollPath(p string) bool {
+	for _, s := range pollSuffixes {
+		if strings.HasSuffix(p, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // Recover turns panics into 500 responses and logs the stack.
@@ -156,6 +170,12 @@ func (s *StatusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter 
 
 // SameOrigin reports whether the request's Origin header equals the origin
 // (scheme://host[:port]) of publicURL. A missing Origin is not same-origin.
+//
+// Loopback names are interchangeable: when publicURL's host is localhost,
+// 127.0.0.1 or [::1] (local mode), an Origin with any of those hosts and the
+// same scheme and port matches too, so http://127.0.0.1:8080 works as well
+// as http://localhost:8080. A page on another host can never present a
+// loopback Origin, so this does not widen what a remote site can do.
 func SameOrigin(r *http.Request, publicURL string) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -169,7 +189,32 @@ func SameOrigin(r *http.Request, publicURL string) bool {
 	if err != nil {
 		return false
 	}
-	return strings.EqualFold(got.Scheme, want.Scheme) && strings.EqualFold(got.Host, want.Host)
+	if !strings.EqualFold(got.Scheme, want.Scheme) {
+		return false
+	}
+	if strings.EqualFold(got.Host, want.Host) {
+		return true
+	}
+	return isLoopbackName(want.Hostname()) && isLoopbackName(got.Hostname()) &&
+		effectivePort(got) == effectivePort(want)
+}
+
+func isLoopbackName(host string) bool {
+	switch strings.ToLower(host) {
+	case "localhost", "127.0.0.1", "::1":
+		return true
+	}
+	return false
+}
+
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	if strings.EqualFold(u.Scheme, "https") {
+		return "443"
+	}
+	return "80"
 }
 
 // IsWebSocketUpgrade reports whether r asks for a WebSocket upgrade.

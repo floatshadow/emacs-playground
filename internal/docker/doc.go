@@ -11,8 +11,9 @@
 // Harden applies the session container profile of deployment.md §9.2:
 // uid 1000, read-only root filesystem with tmpfs /tmp, /run and
 // /home/learner/.cache, cap_drop ALL, no-new-privileges, pids, CPU and
-// memory limits with memory-swap equal to memory, nofile and nproc ulimits,
-// no published ports, an init process and the configured runtime.
+// memory limits with memory-swap equal to memory, a nofile ulimit (no nproc
+// ulimit: it counts per uid across the host, and every session is uid
+// 1000), no published ports, an init process and the configured runtime.
 //
 // The gateway only ever acts on containers and volumes carrying its labels
 // (LabelRole and LabelSession).

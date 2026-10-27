@@ -13,14 +13,10 @@ import styles from './Project.module.css'
 
 const HIDDEN = new Set(['.git', 'target', '_build', '.venv', 'node_modules', '.playground'])
 
-/** An Emacs Lisp string literal for a path. */
-function elispString(s: string): string {
-  return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
-}
-
+/** Visits a workspace file in Emacs (rpc open; eval is author-mode only). */
 async function openInEmacs(path: string): Promise<void> {
   try {
-    await rpc('eval', { form: `(progn (find-file ${elispString('/work/' + path)}) nil)` })
+    await rpc('open', { path })
   } catch {
     // toasted
   }

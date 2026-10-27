@@ -59,6 +59,29 @@ export function kindForCommand(cmd: string): TickerKind {
   return 'ok'
 }
 
+// A mouse event as `key-description' prints it (<mouse-1>, <down-mouse-1>,
+// <C-wheel-up>, <drag-mouse-1>) and the screen areas it can be prefixed with
+// (<mode-line> <mouse-1>).
+const MOUSE_TOKEN =
+  /^<(?:[ACHMSs]-)*(?:(?:down|drag|double|triple|up)-)*(?:mouse-\d+|wheel-(?:up|down|left|right))>$/
+const AREA_TOKEN =
+  /^<(?:mode-line|header-line|tab-line|tab-bar|menu-bar|vertical-line|vertical-scroll-bar|horizontal-scroll-bar|left-margin|right-margin|left-fringe|right-fringe)>$/
+
+/**
+ * True when a key event is a mouse action only: clicking into the terminal
+ * to focus it, scrolling, dragging. The ticker teaches keys, and a single
+ * click reports two commands (mouse-drag-region on the press,
+ * mouse-set-point on the release) that would push the learner's last keys
+ * out of view, so such events are not shown.
+ */
+export function isMouseOnly(keys: string): boolean {
+  const ks = keys.trim().split(/\s+/).filter(Boolean)
+  return (
+    ks.some((k) => MOUSE_TOKEN.test(k)) &&
+    ks.every((k) => MOUSE_TOKEN.test(k) || AREA_TOKEN.test(k))
+  )
+}
+
 /** Splits an event's key description into keys; an M-x invocation shows as M-x. */
 export function splitKeys(keys: string, mx?: boolean): string[] {
   if (mx) return ['M-x']

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"strings"
 	"sync"
@@ -463,5 +464,103 @@ func TestDockerRebuild(t *testing.T) {
 	}
 	if again, err := s2.Ensure(ctx, "u1"); err != nil || again.ID != a.ID || len(f.fake.Live()) != 1 {
 		t.Fatalf("ensure after restart: %v %+v", err, again)
+	}
+}
+
+func TestDockerIsolatedNetworks(t *testing.T) {
+	pool := netip.MustParsePrefix("10.231.0.0/16")
+	backend := func(gw string) *DockerBackend {
+		return &DockerBackend{Version: "v1.2.3", Isolate: true, Gateway: gw, Internal: true, SubnetPool: pool}
+	}
+	f := newDockerFixture(t, func(o *Options) { o.Backend = backend("gw-one") })
+	f.opts.Backend.(*DockerBackend).Client = f.fake
+	ctx := context.Background()
+	// Somebody else's network holds the first /28 of the pool.
+	f.fake.AddNetwork(docker.NetworkSpec{Name: "operator", Subnet: netip.MustParsePrefix("10.231.0.0/28")})
+
+	a, err := f.s.Ensure(ctx, "u1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca := f.container(t, a.ID)
+	if ca.Spec.Network != "pg-net-"+a.ID || ca.Spec.Aliases[0] != "pg-session-"+a.ID {
+		t.Fatalf("session container network %q %v", ca.Spec.Network, ca.Spec.Aliases)
+	}
+	na, ok := f.fake.Network("pg-net-" + a.ID)
+	if !ok || !na.Spec.Internal || na.Spec.Subnet.String() != "10.231.0.16/28" ||
+		na.Spec.Labels[docker.LabelRole] != docker.RoleNetwork || na.Spec.Labels[docker.LabelSession] != a.ID {
+		t.Fatalf("network %+v", na)
+	}
+	// Two members only: the session and the gateway, as "gateway".
+	if len(na.Members) != 2 || strings.Join(na.Members["gw-one"], ",") != "gateway" {
+		t.Fatalf("members %v", na.Members)
+	}
+	b, err := f.s.Ensure(ctx, "u2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nb, _ := f.fake.Network("pg-net-" + b.ID)
+	if nb.Spec.Subnet.String() != "10.231.0.32/28" || f.container(t, b.ID).Spec.Network != "pg-net-"+b.ID {
+		t.Fatalf("second session network %+v", nb)
+	}
+	if _, ok := nb.Members["pg-session-"+a.ID]; ok {
+		t.Fatal("a session joined another session's network")
+	}
+
+	// Stop removes the network; Ensure makes it again.
+	if err := f.s.Stop(ctx, a.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.fake.Network("pg-net-" + a.ID); ok {
+		t.Fatal("network left after stop")
+	}
+	if _, err := f.s.Ensure(ctx, "u1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := f.fake.Network("pg-net-" + a.ID); !ok {
+		t.Fatal("network not re-created")
+	}
+
+	// A new gateway container (upgrade): the rebuild joins the running
+	// sessions' networks and removes networks nobody uses.
+	f.fake.AddNetwork(docker.NetworkSpec{Name: "pg-net-gone", Labels: map[string]string{docker.LabelRole: docker.RoleNetwork, docker.LabelSession: "gone"}})
+	o2 := f.opts
+	b2 := backend("gw-two")
+	b2.Client = f.fake
+	o2.Backend = b2
+	s2, err := New(ctx, o2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s2.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{a.ID, b.ID} {
+		n, _ := f.fake.Network("pg-net-" + id)
+		if strings.Join(n.Members["gw-two"], ",") != "gateway" {
+			t.Fatalf("new gateway not on %s: %v", n.Spec.Name, n.Members)
+		}
+	}
+	if names := strings.Join(f.fake.NetworkNames(), " "); strings.Contains(names, "pg-net-gone") || !strings.Contains(names, "operator") {
+		t.Fatalf("networks after rebuild: %s", names)
+	}
+
+	// Without the gateway's container the session cannot be wired.
+	f3 := newDockerFixture(t, func(o *Options) { o.Backend = &DockerBackend{Isolate: true} })
+	f3.opts.Backend.(*DockerBackend).Client = f3.fake
+	if _, err := f3.s.Ensure(ctx, "u1"); err == nil || len(f3.fake.Live()) != 0 {
+		t.Fatalf("no gateway container: %v", err)
+	}
+	// A full pool is an error, not a shared network.
+	f4 := newDockerFixture(t, func(o *Options) {
+		o.Backend = &DockerBackend{Isolate: true, Gateway: "gw", SubnetPool: netip.MustParsePrefix("10.9.0.0/28")}
+	})
+	f4.opts.Backend.(*DockerBackend).Client = f4.fake
+	f4.fake.AddNetwork(docker.NetworkSpec{Name: "x", Subnet: netip.MustParsePrefix("10.9.0.0/24")})
+	if _, err := f4.s.Ensure(ctx, "u1"); err == nil || !strings.Contains(err.Error(), "the session container") && !strings.Contains(err.Error(), "create") {
+		t.Fatalf("full pool: %v", err)
+	}
+	if len(f4.fake.Live()) != 0 {
+		t.Fatal("container created without a network")
 	}
 }

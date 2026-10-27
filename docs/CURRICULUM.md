@@ -212,7 +212,7 @@ remote: { box: true }          # optional; provisions and expects the SSH box
 setup:
   workspace: fixtures/hello-rust       # relative to the lesson directory
   root: hello                          # extracted to /work/hello
-  reset: false                         # true overwrites learner files
+  reset: false                         # true restores root to the fixtures (overwrites edits, removes extra files, forgets saved cursor positions) and turns base's auto-save-visited-mode back on before eval
   open: [hello/README.md]
   layout: single                       # single | "(vsplit FILE BUFFER)" | "(hsplit …)" | a window-state file
   eval: "(goto-char (point-min))"

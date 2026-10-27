@@ -82,6 +82,26 @@ describe('applyEvent reducer', () => {
     expect(selectWhereAmI(s)?.exits).toEqual([])
   })
 
+  it('mouse clicks and scrolling add no ticker entry and count as no command', () => {
+    const key = (keys: string, cmd: string): Event => ({
+      t: 'key',
+      keys,
+      cmd,
+      buf: 'main.rs',
+      mode: 'rust-ts-mode',
+      frame: 'terminal',
+    })
+    const s = run([
+      hello(),
+      key('C-n', 'next-line'),
+      key('<down-mouse-1>', 'mouse-drag-region'),
+      key('<mouse-1>', 'mouse-set-point'),
+      key('<wheel-down>', 'mwheel-scroll'),
+    ])
+    expect(s.ticker.map((e) => e.cmd)).toEqual(['next-line'])
+    expect(s.totalCommands).toBe(1)
+  })
+
   it('a pending prefix is kept until the command arrives', () => {
     rec = record()
     rec.keys('C-x')
@@ -105,7 +125,10 @@ describe('applyEvent reducer', () => {
   })
 
   it('emacs events drive the overlays', () => {
-    let s = run([{ t: 'emacs', event: 'frame-closed', frame: 'terminal', reason: 'C-x C-c' }])
+    // The GUI frame closing while the terminal is shown covers nothing.
+    let s = run([{ t: 'emacs', event: 'frame-closed', frame: 'gui' }])
+    expect(s.emacs.overlay).toBeNull()
+    s = run([{ t: 'emacs', event: 'frame-closed', frame: 'terminal', reason: 'C-x C-c' }])
     expect(s.emacs.overlay).toBe('frame-closed')
     s = run([{ t: 'emacs', event: 'frame-opened', frame: 'terminal' }], s)
     expect(s.emacs.overlay).toBeNull()

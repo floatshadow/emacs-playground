@@ -26,7 +26,9 @@ volumes:
 networks:
   front: {}
   sessions:
-    # Session containers have no default route; egress is granted per
+    # The local session and remote box; in server mode each session gets
+    # its own internal network instead (sessions.isolation, deployment.md
+    # §7). Session containers have no default route; egress is granted per
     # sessions.egress (deployment.md §9.2). TODO(server, deployment.md §9.2):
     # the registries egress proxy.
     internal: true

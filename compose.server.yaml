@@ -1,6 +1,9 @@
 # Server mode (deployment.md §2, §5): Caddy for TLS, a Docker socket proxy,
 # and the gateway in orchestrator mode creating one session container per
-# learner (docker backend; experimental in slice 1).
+# learner, each on its own internal network that the gateway joins
+# (docker backend; experimental in slice 1). Do not set a hostname on the
+# gateway: it finds its own container by its hostname, the container id
+# (or set sessions.gatewayContainer).
 services:
   caddy:
     image: caddy:2

@@ -284,6 +284,7 @@ func newHarness(t *testing.T, mutate func(*Options)) *harness {
 		HelloTimeout: 3 * time.Second,
 		PingInterval: 50 * time.Millisecond,
 		RespawnDelay: 10 * time.Millisecond,
+		FrameWait:    300 * time.Millisecond,
 		DaemonPolicy: &Policy{Backoff: []time.Duration{50 * time.Millisecond}, MaxRestarts: 3, Window: time.Minute},
 	}
 	opt.OnDaemonStart = func(pid int) {
@@ -430,12 +431,19 @@ func TestSupervisorLifecycle(t *testing.T) {
 
 	// Requested restart.
 	before := len(h.evs.emacs())
+	callsBefore := len(h.agentCalls())
 	if err := h.sup.RestartEmacs(ctx, "module set changed"); err != nil {
 		t.Fatal(err)
 	}
 	got := h.evs.emacs()[before:]
 	if got[0] != "restarting" || got[len(got)-1] != "daemon-restarted" {
 		t.Fatalf("restart events %v", got)
+	}
+	// Snapshot, then the modified buffers are saved, then the new daemon
+	// re-opens the snapshot.
+	calls := strings.Join(h.agentCalls()[callsBefore:], " ")
+	if !strings.HasPrefix(calls, "snapshot eval") || !strings.Contains(calls, "open") {
+		t.Fatalf("agent calls around the restart: %s", calls)
 	}
 }
 
@@ -471,6 +479,9 @@ func TestSupervisorGUIMode(t *testing.T) {
 	if err := h.sup.SendKeys(ctx, protocol.FrameGUI, "C-x C-f", ""); err != nil {
 		t.Fatalf("xdotool: %v", err)
 	}
+	h.mu.Lock()
+	evalsBefore := strings.Count(strings.Join(h.calls, ","), "eval")
+	h.mu.Unlock()
 	if _, err := h.sup.SetMode(ctx, protocol.FrameTerminal); err != nil {
 		t.Fatal(err)
 	}
@@ -480,7 +491,15 @@ func TestSupervisorGUIMode(t *testing.T) {
 	if len(modes) != 2 || modes[1] != protocol.FrameTerminal {
 		t.Fatalf("mode callbacks %v", modes)
 	}
-	want := []string{"frame-opened:gui", "mode:gui", "frame-closed:gui", "mode:terminal"}
+	// The GUI frame is deleted inside Emacs (an eval) before Xvnc stops,
+	// and an intentional switch emits no frame-closed event.
+	h.mu.Lock()
+	evalsAfter := strings.Count(strings.Join(h.calls, ","), "eval")
+	h.mu.Unlock()
+	if evalsAfter != evalsBefore+1 {
+		t.Fatalf("agent calls %v: want one eval deleting the GUI frame", h.calls)
+	}
+	want := []string{"frame-opened:gui", "mode:gui", "mode:terminal"}
 	got := h.evs.emacs()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("events %v", got)
@@ -646,4 +665,27 @@ func fmtSscan(s string, v *int) (int, error) {
 	}
 	*v = n
 	return 1, nil
+}
+
+func TestSupervisorWaitReady(t *testing.T) {
+	h := newHarness(t, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := h.sup.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer h.sup.Stop()
+	h.sup.mu.Lock()
+	h.sup.frames.Terminal = false
+	h.sup.mu.Unlock()
+	if h.sup.WaitReady(ctx, 100*time.Millisecond) {
+		t.Fatal("ready without a terminal frame")
+	}
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		h.sup.OnFrame(&protocol.AgentFrameMsg{Event: protocol.FrameOpened, Kind: protocol.FrameTerminal})
+	}()
+	if !h.sup.WaitReady(ctx, 3*time.Second) {
+		t.Fatal("not ready after the terminal frame opened")
+	}
 }

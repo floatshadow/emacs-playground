@@ -10,7 +10,7 @@ import '@xterm/xterm/css/xterm.css'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { ClipboardAddon } from '@xterm/addon-clipboard'
+import { ClipboardAddon, type IClipboardProvider } from '@xterm/addon-clipboard'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { PtyClient } from '../../api/session/pty'
 import { sessionBase, wsUrl } from '../../api/session/rpc'
@@ -20,7 +20,8 @@ import { useSessionStore } from '../../store/session'
 import { toast, useUiStore } from '../../store/ui'
 import i18n from '../../i18n'
 import { MODUS_VIVENDI_TINTED, TERMINAL_FONT } from './theme'
-import { emitTerminalInput, registerTerminalFocus } from './focus'
+import { emitTerminalInput, isLearnerKeydown, registerTerminalFocus } from './focus'
+import { extendedKeySequence } from './extkeys'
 import { LESSON_PANE_ID } from './paneIds'
 
 /** The exact xterm.js options from frontend.md §5. */
@@ -37,6 +38,29 @@ export function terminalOptions(screenReaderMode: boolean): ITerminalOptions {
     vtExtensions: { kittyKeyboard: true },
     screenReaderMode,
   }
+}
+
+/**
+ * OSC 52 clipboard access for the clipboard addon. The browser refuses
+ * writes when the page is not focused or the permission was denied; Emacs
+ * cannot do anything about that, so failures are dropped instead of
+ * surfacing as unhandled promise rejections on every kill.
+ */
+const clipboardProvider: IClipboardProvider = {
+  async readText() {
+    try {
+      return (await navigator.clipboard?.readText()) ?? ''
+    } catch {
+      return ''
+    }
+  },
+  async writeText(_selection, text) {
+    try {
+      await navigator.clipboard?.writeText(text)
+    } catch {
+      // not focused or not permitted
+    }
+  },
 }
 
 const isFirefox = () => typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent)
@@ -86,11 +110,16 @@ class TerminalHost {
   private observer: ResizeObserver | null = null
   private sessionId: string | null = null
   private fontsReady = false
+  /** e.key of the last keydown sent as CSI u, until its keypress. */
+  private extKeyDown: string | null = null
   constructor() {
     this.el = document.createElement('div')
     this.el.className = 'pg-terminal'
     this.el.style.width = '100%'
     this.el.style.height = '100%'
+    // Pasting into the terminal is learner input too (capture: xterm.js
+    // handles the event on its textarea).
+    this.el.addEventListener('paste', () => emitTerminalInput(), true)
   }
 
   private create() {
@@ -101,7 +130,7 @@ class TerminalHost {
     const unicode = new Unicode11Addon()
     term.loadAddon(unicode)
     term.unicode.activeVersion = '11'
-    term.loadAddon(new ClipboardAddon())
+    term.loadAddon(new ClipboardAddon(undefined, clipboardProvider))
     term.loadAddon(
       new WebLinksAddon((_e, uri) => {
         window.open(uri, '_blank', 'noopener,noreferrer')
@@ -122,6 +151,9 @@ class TerminalHost {
         focusLessonPane()
         return false
       }
+      // Learner input is a real keypress, not whatever reaches onData
+      // (focus reports, mouse reports and OSC 52 replies go there too).
+      if (isLearnerKeydown(e)) emitTerminalInput()
       if (verdict === 'reserved') {
         const s = useUiStore.getState()
         if (!s.reservedKeyToastShown) {
@@ -129,12 +161,33 @@ class TerminalHost {
           toast(i18n.t('terminal.reservedKey'))
         }
       }
+      // Chords the legacy encoding cannot carry go out as CSI u (extkeys.ts).
+      const ext = extendedKeySequence({
+        type: e.type,
+        key: e.key,
+        ctrlKey: e.ctrlKey,
+        altKey: e.altKey,
+        shiftKey: e.shiftKey,
+        metaKey: e.metaKey,
+        altGraph: e.getModifierState?.('AltGraph') ?? false,
+      })
+      if (ext !== null) {
+        e.preventDefault()
+        this.pty?.send(ext)
+        this.extKeyDown = e.key
+        return false
+      }
+      if (e.type === 'keypress' && this.extKeyDown !== null) {
+        // The keypress that follows a consumed keydown (Shift+Enter) must
+        // not reach xterm.js, which would send the legacy byte too.
+        const consumed = this.extKeyDown === e.key
+        this.extKeyDown = null
+        if (consumed) return false
+      }
+      if (e.type === 'keydown') this.extKeyDown = null
       return true
     })
-    term.onData((d) => {
-      emitTerminalInput()
-      this.pty?.send(d)
-    })
+    term.onData((d) => this.pty?.send(d))
     term.onBinary((d) => {
       const bytes = new Uint8Array(d.length)
       for (let i = 0; i < d.length; i++) bytes[i] = d.charCodeAt(i) & 0xff
@@ -150,6 +203,16 @@ class TerminalHost {
   }
 
   private readonly refit = debounce(() => this.doFit(), 100)
+
+  /**
+   * Makes xterm.js measure its cells again. Assigning the same fontFamily is
+   * a no-op, so the value alternates between two equivalent spellings.
+   */
+  private remeasure() {
+    if (!this.term) return
+    const cur = this.term.options.fontFamily
+    this.term.options.fontFamily = cur === TERMINAL_FONT ? TERMINAL_FONT + ' ' : TERMINAL_FONT
+  }
 
   private doFit() {
     if (!this.term || !this.fit || !this.container || !this.fontsReady) return
@@ -190,10 +253,17 @@ class TerminalHost {
         : Promise.resolve()
       void ready.then(() => {
         this.fontsReady = true
-        // Cell metrics depend on the font: re-apply it so xterm measures again.
-        if (this.term) this.term.options.fontFamily = TERMINAL_FONT
+        this.remeasure()
         this.doFit()
         this.maybeConnect()
+      })
+      // A face that arrives after the 2.5 s cut-off (a cold cache, a slow
+      // link) changes the cell size: measure and fit again, or the last
+      // rows (mode line, echo area) end up below the pane.
+      fonts?.addEventListener?.('loadingdone', () => {
+        if (!this.fontsReady) return
+        this.remeasure()
+        this.refit()
       })
     } else {
       this.refit()
@@ -248,6 +318,18 @@ class TerminalHost {
 
   focus() {
     this.term?.focus()
+  }
+
+  /** The visible screen as text, one string per row (tests and debugging). */
+  screenText(): string[] {
+    const term = this.term
+    if (!term) return []
+    const buf = term.buffer.active
+    const out: string[] = []
+    for (let y = 0; y < term.rows; y++) {
+      out.push(buf.getLine(buf.viewportY + y)?.translateToString(true) ?? '')
+    }
+    return out
   }
 }
 
@@ -311,6 +393,10 @@ export function getTerminalHost(): TerminalHost {
   if (!terminalHost) {
     const host = new TerminalHost()
     terminalHost = host
+    // End-to-end tests read the canvas-rendered screen through this hook
+    // (web/e2e/smoke.mjs); it exposes nothing the learner cannot see.
+    ;(window as unknown as { __pgScreenText?: () => string[] }).__pgScreenText = () =>
+      host.screenText()
     host.setSession(useSessionStore.getState().sessionId)
     useSessionStore.subscribe((s, prev) => {
       if (s.sessionId !== prev.sessionId) host.setSession(s.sessionId)

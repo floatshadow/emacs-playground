@@ -456,8 +456,10 @@ dropped) or `ping' (never queued).  While the peer is stalled (see
        (when (and playground--queue playground--connected)
          (playground--flush-queue)))
       ("call"
-       ;; Run outside the process filter: filters run with quitting
-       ;; inhibited, timers do not, so C-g can still stop a runaway eval.
+       ;; Run outside the process filter, at top level from a timer: ops
+       ;; may throw to the command loop (setup, rescue).  Timers, like
+       ;; filters, run with quitting inhibited: three C-g in a row (or
+       ;; sessiond's SIGUSR2) are what stop a runaway eval.
        (run-at-time 0 nil #'playground--run-call msg))
       (_ (playground--log "ignored: %s" line)))))
 
@@ -480,8 +482,12 @@ dropped) or `ping' (never queued).  While the peer is stalled (see
     (if (not fn)
         (playground--reply id nil nil (format "unknown op %s" op))
       (condition-case err
+          ;; Ops never ask the learner anything: a prompt would block the
+          ;; agent (and every later call) until someone answers it, so
+          ;; `inhibit-interaction' turns it into an error reply instead.
           (let ((value (with-timeout (timeout 'playground--timeout)
-                         (funcall fn args id))))
+                         (let ((inhibit-interaction t))
+                           (funcall fn args id)))))
             (pcase value
               ('playground--deferred nil)
               ('playground--timeout (playground--reply id nil nil "timeout"))
@@ -896,10 +902,23 @@ kind of frame it was typed in, by default the selected window's."
     (when playground--pending-layout
       (run-at-time 0 nil #'playground--apply-pending-layout (selected-frame)))))
 
+(defun playground--last-frame-on-terminal-p (frame)
+  "Non-nil when no other real frame shares FRAME's terminal.
+\[make-frame-command] in the terminal frame adds a second frame to the
+same tty; deleting it again with \[delete-frame] closes nothing the
+learner would call \"the terminal frame\"."
+  (let ((term (frame-terminal frame)))
+    (not (seq-some (lambda (f)
+                     (and (not (eq f frame))
+                          (eq (frame-terminal f) term)
+                          (playground--top-level-frame-p f)))
+                   (frame-list)))))
+
 (defun playground--on-delete-frame (frame)
   "FRAME is about to be deleted."
   (playground--safely "delete-frame"
-    (playground--frame-event "closed" frame)
+    (when (playground--last-frame-on-terminal-p frame)
+      (playground--frame-event "closed" frame))
     (playground--schedule-state)))
 
 ;;;; Echo area
@@ -1055,6 +1074,38 @@ level and the reply is sent from there."
         (car normal)
         user)))
 
+(defun playground--leave-side-window ()
+  "Select a normal window of the frame when a side window is selected.
+Deleting the other windows from a side window (with
+`ignore-window-parameters', as layouts and rescue do) leaves it as
+the frame's only window, still marked as a side window; splitting it
+then recurses until `max-lisp-eval-depth', so C-x 2 and C-x 3 fail.
+The learner is in a side window after a help popup with
+`help-window-select' (lesson 3.5's popups.el) or in dirvish-side.
+Returns the selected window."
+  (let ((w (selected-window)))
+    (when (window-parameter w 'window-side)
+      (let ((main (playground--main-window (window-frame w))))
+        (when (and (window-live-p main) (not (window-parameter main 'window-side)))
+          (select-window main))))
+    (selected-window)))
+
+(defun playground--unside-sole-window (&optional frame)
+  "Make FRAME's only window an ordinary window again.
+A side window that became the only window (see
+`playground--leave-side-window') keeps its `window-side' parameter
+and its dedication, and nothing can be split.  Clear them.  Returns
+non-nil when there was something to repair."
+  (let ((wins (window-list frame 'nomini)))
+    (when (and (= (length wins) 1)
+               (or (window-parameter (car wins) 'window-side)
+                   (window-parameter (car wins) 'window-slot)))
+      (let ((w (car wins)))
+        (set-window-parameter w 'window-side nil)
+        (set-window-parameter w 'window-slot nil)
+        (set-window-dedicated-p w nil)
+        t))))
+
 (defun playground--rescue-rest (did)
   "Second phase of rescue; DID lists actions so far.  Returns all actions."
   (let ((did (reverse did)))
@@ -1091,6 +1142,8 @@ level and the reply is sent from there."
             (let ((ignore-window-parameters t))
               (delete-other-windows keep))
             (push (format "closed %d other window%s" others (if (= others 1) "" "s")) did))
+          (when (playground--unside-sole-window frame)
+            (push "made the window splittable again" did))
           (select-window keep)))
       (playground--safely "rescue special"
         (let ((shown (window-buffer keep)))
@@ -1192,7 +1245,9 @@ With CREATE, visit the file (or create the special buffer) when needed."
   (let ((node (car (read-from-string layout)))
         (ignore-window-parameters t))
     (playground--in-user-window
+      (playground--leave-side-window)
       (delete-other-windows)
+      (playground--unside-sole-window)
       (playground--build-layout node (selected-window))
       (balance-windows))))
 
@@ -1200,7 +1255,9 @@ With CREATE, visit the file (or create the special buffer) when needed."
   "Apply STATE, a printed `window-state-get' value."
   (let ((ignore-window-parameters t))
     (playground--in-user-window
+      (playground--leave-side-window)
       (delete-other-windows)
+      (playground--unside-sole-window)
       (window-state-put (car (read-from-string state)) (frame-root-window) 'safe))))
 
 (defun playground--select-leaf (name)
@@ -1293,8 +1350,132 @@ and applied to the next client frame."
       (when spec (playground--op-open spec)))
     `((reverted . ,reverted) (killed . ,killed))))
 
-(defun playground--op-setup (args &rest _)
-  "Run a scenario's setup: open, layout, eval, compile (ARGS)."
+(defun playground--sync-changed-buffers (root)
+  "Revert buffers under ROOT whose file changed on disk; kill orphans.
+sessiond extracts a scenario's fixtures before `setup', so a buffer
+left over from an earlier lesson may visit a file that was just
+rewritten or removed.  Visiting it again would make
+`find-file-noselect' ask whether to reread it and block the
+agent, and a modified buffer would later be saved over the fresh
+fixture.  Returns the number of buffers reverted or killed."
+  (let ((root (file-name-as-directory (expand-file-name root)))
+        (n 0))
+    (dolist (b (buffer-list))
+      (let ((file (buffer-file-name b)))
+        (when (and file (string-prefix-p root (expand-file-name file)))
+          (cond
+           ((not (file-exists-p file))
+            (with-current-buffer b (set-buffer-modified-p nil))
+            (let ((kill-buffer-query-functions nil))
+              (kill-buffer b))
+            (cl-incf n))
+           ((not (verify-visited-file-modtime b))
+            (with-current-buffer b
+              (let ((revert-without-query '(".")))
+                (revert-buffer t t t)))
+            (cl-incf n))))))
+    n))
+
+(defun playground--op-setup (args &optional id)
+  "Run a scenario's setup: open, layout, eval, compile (ARGS).
+A prompt or recursive edit still open (the learner switched lessons
+in the middle of a command) would swallow the lesson's first keys, so
+it is left first.  That needs a throw to the command loop, so, as in
+rescue, the setup then runs from a timer at top level and the reply
+to call ID is sent from there."
+  (when (bound-and-true-p isearch-mode)
+    (playground--safely "setup isearch" (isearch-done)))
+  (if (and id (> (recursion-depth) 0))
+      (progn
+        (run-at-time 0 nil
+                     (lambda ()
+                       (condition-case err
+                           (let ((inhibit-interaction t))
+                             (playground--reply id t (playground--setup-now args)))
+                         (error (playground--reply id nil nil (error-message-string err))))))
+        (funcall playground-agent-rescue-unwind-function)
+        'playground--deferred)
+    (playground--setup-now args)))
+
+(defconst playground--list-modes
+  '(ibuffer-mode Buffer-menu-mode bookmark-bmenu-mode dired-mode)
+  "Modes of buffers that list things and keep marks; rebuilt on demand.")
+
+(defun playground--clear-desk (root keep)
+  "Kill unmodified buffers a fresh lesson under ROOT could trip over.
+KEEP lists the absolute file names the lesson opens.  Killed: buffers
+visiting files under ROOT that are not in KEEP (so names such as
+main.rs are unique again), Dired and buffer lists (their marks would
+carry over: ibuffer's * h D after % f in another lesson), and empty
+buffers in Fundamental mode with ordinary names (made by C-x b with a
+name that did not exist).  Modified buffers, *scratch*, *Messages*,
+help and build output are kept.  Returns the number killed."
+  (let ((root (file-name-as-directory (expand-file-name root)))
+        (n 0))
+    (dolist (b (buffer-list))
+      (when (and (buffer-live-p b) (not (buffer-modified-p b)))
+        (let ((file (buffer-file-name b))
+              (name (buffer-name b))
+              (mode (buffer-local-value 'major-mode b))
+              (dir (buffer-local-value 'default-directory b)))
+          (when (cond
+                 (file (and (string-prefix-p root (expand-file-name file))
+                            (not (member (expand-file-name file) keep))))
+                 ((memq mode playground--list-modes)
+                  (or (not (eq mode 'dired-mode))
+                      (and dir (string-prefix-p root (expand-file-name dir)))))
+                 ((eq mode 'fundamental-mode)
+                  (and (not (string-match-p "\\`[ *]" name))
+                       (zerop (buffer-size b)))))
+            (let ((kill-buffer-query-functions nil))
+              (kill-buffer b))
+            (cl-incf n)))))
+    n))
+
+(defvar save-place-alist)
+(defvar save-place-loaded)
+
+(defun playground--forget-places (root)
+  "Forget the cursor positions `save-place-mode' keeps for files under ROOT.
+ROOT has just been restored to a lesson's fixtures, so a position
+saved during an earlier attempt points into text that may no longer
+be there, and replaying the lesson would open its files where the
+last attempt left them, with a step's \"the cursor is on ...\"
+already true.  Killing the leftover buffers (`playground--clear-desk')
+saves their positions too, so this runs after it.  Returns the number
+of entries removed."
+  (if (not (and (boundp 'save-place-alist) (stringp root) (not (string-empty-p root))))
+      0
+    ;; The alist is read from `save-place-file' lazily, on the first visit,
+    ;; and reading it replaces the variable: read it first.
+    (when (and (boundp 'save-place-loaded) (not save-place-loaded))
+      (cond ((fboundp 'save-place-load-alist-from-file) (funcall 'save-place-load-alist-from-file))
+            ((fboundp 'load-save-place-alist-from-file) (funcall 'load-save-place-alist-from-file))))
+    (let* ((root (file-name-as-directory (expand-file-name root)))
+           (before (length save-place-alist)))
+      (setq save-place-alist
+            (seq-remove (lambda (entry)
+                          (and (consp entry) (stringp (car entry))
+                               (string-prefix-p root (expand-file-name (car entry)))))
+                        save-place-alist))
+      (- before (length save-place-alist)))))
+
+(defun playground--restore-auto-save ()
+  "Turn `auto-save-visited-mode' back on when the base module turns it on.
+Lessons about the modified flag (0.1, 2.3, 2.4, 2.5) turn it off in
+their setup's eval.  A setup with reset turns it on again first, so
+that switch never outlives the lesson that made it: the next lesson,
+or the same lesson's eval, decides again.  Returns non-nil when it
+turned the mode on."
+  (when (and (fboundp 'playground-module-p)
+             (funcall 'playground-module-p 'base)
+             (fboundp 'auto-save-visited-mode)
+             (not (bound-and-true-p auto-save-visited-mode)))
+    (auto-save-visited-mode 1)
+    t))
+
+(defun playground--setup-now (args)
+  "The work of `playground--op-setup' (ARGS), at top level."
   (let* ((playground-agent-workspace
           (file-name-as-directory (or (alist-get 'workspace args) playground-agent-workspace)))
          (open (append (alist-get 'open args) nil))
@@ -1302,6 +1483,20 @@ and applied to the next client frame."
          (form (alist-get 'eval args))
          (compile-cmd (alist-get 'compile args))
          (first nil))
+    (playground--sync-changed-buffers playground-agent-workspace)
+    (when (eq (alist-get 'reset args) t)
+      (playground--restore-auto-save)
+      (playground--in-user-window
+        ;; Tabs from an earlier lesson (3.7, project tabs) are not part of
+        ;; this lesson's layout.
+        (when (and (bound-and-true-p tab-bar-mode)
+                   (> (length (funcall tab-bar-tabs-function)) 1))
+          (playground--safely "setup tabs" (tab-bar-close-other-tabs)))
+        (playground--clear-desk playground-agent-workspace
+                                (mapcar #'playground--absolute open)))
+      (let ((root (alist-get 'root args)))
+        (when (and (stringp root) (not (string-empty-p root)))
+          (playground--forget-places (playground--absolute root)))))
     (dolist (path open)
       (let ((b (find-file-noselect (playground--absolute path))))
         (unless first (setq first b))))
@@ -1320,7 +1515,9 @@ and applied to the next client frame."
               (unless (derived-mode-p 'compilation-mode) (compilation-mode))))
           (playground--apply-layout layout))
          (first
+          (playground--leave-side-window)
           (delete-other-windows)
+          (playground--unside-sole-window)
           (switch-to-buffer first)))))
     (when (and form (not (string-empty-p form)))
       (playground--in-user-window (eval (car (read-from-string form)) t)))

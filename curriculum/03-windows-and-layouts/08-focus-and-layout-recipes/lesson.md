@@ -18,6 +18,8 @@ Split a long file side by side with `C-x 3`, then :try[M-x] `follow-mode`. The r
 
 `M-x olivetti-mode` draws the text in a column in the middle of the window and leaves the margins empty. Nothing in the file changes. It suits prose and notes; for code, a narrow window does the same job.
 
+The preview pane above the live panels shows `notes/reading.md` rendered. It reloads each time you save the file with `C-x C-s`, so you can write in Emacs and read the result next to it.
+
 :::gui-only
 In the graphical frame, :try[C-x C-+] makes the text larger in this buffer and `C-x C--` smaller; `C-x C-0` resets. `C-x C-M-+` zooms every buffer at once. A terminal cannot change its font size, so these keys only work here.
 :::

@@ -3,3 +3,4 @@ node_modules
 coverage
 src/protocol.gen.ts
 pnpm-lock.yaml
+e2e/*.local.mjs

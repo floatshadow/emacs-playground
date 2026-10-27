@@ -56,8 +56,8 @@ var (
 	keyDirectiveRe = regexp.MustCompile(`:(kbd|try)\[([^\]]*)\]`)
 	jargonRe       = regexp.MustCompile(`:jargon\[([^\]]*)\]`)
 	// Container directives (:::name) and leaf directives (::name).
-	containerRe = regexp.MustCompile(`(?m)^\s*:::\s*([A-Za-z][\w-]*)`)
-	leafRe      = regexp.MustCompile(`(?m)^\s*::([A-Za-z][\w-]*)`)
+	containerRe = regexp.MustCompile(`(?m)^[ \t]*:::[ \t]*([A-Za-z][\w-]*)`)
+	leafRe      = regexp.MustCompile(`(?m)^[ \t]*::([A-Za-z][\w-]*)`)
 	imageRe     = regexp.MustCompile(`!\[[^\]]*\]\(([^)\s]+)`)
 	fenceRe     = regexp.MustCompile("(?m)^\\s*(```|~~~)")
 )
@@ -112,7 +112,10 @@ func checkJargon(body string, glossary map[string]string, r reporter) {
 		lower[strings.ToLower(k)] = true
 	}
 	for _, m := range jargonRe.FindAllStringSubmatch(stripFences(body), -1) {
-		if !lower[strings.ToLower(strings.TrimSpace(m[1]))] {
+		// Same lookup as web/src/components/lesson/Markdown.tsx: exact
+		// (case-insensitive), then with a trailing plural "s" removed.
+		term := strings.ToLower(strings.TrimSpace(m[1]))
+		if !lower[term] && !lower[strings.TrimSuffix(term, "s")] {
 			r.warnf(":jargon["+m[1]+"]", "term is not in tables/glossary.yaml")
 		}
 	}

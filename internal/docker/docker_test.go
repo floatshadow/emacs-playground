@@ -55,8 +55,12 @@ func TestHardenAndCreateOptions(t *testing.T) {
 	for _, u := range hc.Ulimits {
 		ul[u.Name] = u.Hard
 	}
-	if ul["nofile"] != 65536 || ul["nproc"] != 2048 {
+	if ul["nofile"] != 65536 {
 		t.Fatalf("ulimits %v", ul)
+	}
+	// RLIMIT_NPROC is per uid across the host: one budget for every session.
+	if _, ok := ul["nproc"]; ok {
+		t.Fatalf("nproc ulimit set: %v", ul)
 	}
 	if o.Config.User != "1000:1000" || o.Config.Env[0] != "PG_SESSION_ID=s1" || o.Config.StopTimeout == nil {
 		t.Fatalf("config %+v", o.Config)

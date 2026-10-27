@@ -10,7 +10,7 @@ setup:
   reset: true
   open: [projects/hello/src/main.rs]
   layout: "(vsplit projects/hello/src/main.rs *compilation*)"
-  compile: "sh hello/build.sh"
+  compile: "sh build.sh"
   eval: >-
     (progn
       (dolist (b (buffer-list))

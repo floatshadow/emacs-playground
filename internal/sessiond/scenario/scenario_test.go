@@ -346,7 +346,7 @@ func TestLoaderFlow(t *testing.T) {
 	if readFile(t, filepath.Join(f.ws, "hello/src/main.rs")) != "fn main() {}\n" {
 		t.Fatal("fixtures not extracted under the root")
 	}
-	if len(f.agent.calls) != 1 || f.agent.calls[0].Open[0] != "hello/README.md" || f.agent.calls[0].Workspace != f.ws || f.agent.calls[0].Layout != "single" {
+	if len(f.agent.calls) != 1 || f.agent.calls[0].Open[0] != "hello/README.md" || f.agent.calls[0].Workspace != f.ws || f.agent.calls[0].Layout != "single" || f.agent.calls[0].Root != "hello" {
 		t.Fatalf("setup %+v", f.agent.calls)
 	}
 	if strings.Join(f.cps, ",") != id+"/open" {
@@ -473,4 +473,57 @@ func TestResume(t *testing.T) {
 	}
 	var sc protocol.Scenario
 	_ = json.Unmarshal([]byte(lesson), &sc)
+}
+
+func TestExtractResetPrunes(t *testing.T) {
+	ws := filepath.Join(t.TempDir(), "work")
+	_ = os.MkdirAll(ws, 0o755)
+	root := openRoot(t, ws)
+	tb := tarball(t,
+		entry{name: "inbox/brief.md", body: "brief\n"},
+		entry{name: "inbox/scratch.tmp", body: "tmp\n"},
+		entry{name: "hello/src/main.rs", body: "fn main() {}\n"},
+	)
+	if _, err := Extract(bytes.NewReader(tb), root, "projects", true); err != nil {
+		t.Fatal(err)
+	}
+	// A learner moves, deletes and creates files, and builds.
+	p := func(s string) string { return filepath.Join(ws, "projects", s) }
+	_ = os.MkdirAll(p("inbox/docs"), 0o755)
+	_ = os.Rename(p("inbox/brief.md"), p("inbox/docs/brief.md"))
+	_ = os.Remove(p("inbox/scratch.tmp"))
+	_ = os.WriteFile(p("hello/CHANGES.md"), []byte("new"), 0o644)
+	_ = os.MkdirAll(p("hello/target/debug"), 0o755)
+	_ = os.WriteFile(p("hello/target/debug/hello"), []byte("bin"), 0o755)
+	_ = os.WriteFile(filepath.Join(ws, "outside.txt"), []byte("keep"), 0o644)
+
+	// Without reset nothing is removed.
+	res, err := Extract(bytes.NewReader(tb), root, "projects", false)
+	if err != nil || res.Removed != 0 {
+		t.Fatalf("no reset: %+v %v", res, err)
+	}
+	if _, err := os.Stat(p("hello/CHANGES.md")); err != nil {
+		t.Fatal("a re-extraction without reset removed a learner file")
+	}
+	// With reset the tree matches the fixture again, build output kept.
+	res, err = Extract(bytes.NewReader(tb), root, "projects", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Removed != 2 {
+		t.Fatalf("removed %d, want 2 (inbox/docs and hello/CHANGES.md): %+v", res.Removed, res)
+	}
+	for _, gone := range []string{"inbox/docs", "hello/CHANGES.md"} {
+		if _, err := os.Stat(p(gone)); err == nil {
+			t.Fatalf("%s survived the reset", gone)
+		}
+	}
+	for _, kept := range []string{"inbox/brief.md", "inbox/scratch.tmp", "hello/target/debug/hello"} {
+		if _, err := os.Stat(p(kept)); err != nil {
+			t.Fatalf("%s missing after the reset", kept)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(ws, "outside.txt")); err != nil {
+		t.Fatal("a reset touched files outside its root")
+	}
 }

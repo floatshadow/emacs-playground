@@ -114,7 +114,7 @@ networks:
 
 `deploy/Caddyfile` is in the repository. Caddy obtains certificates automatically for `DOMAIN`; WebSockets pass through `reverse_proxy` unchanged.
 
-In server mode the gateway creates session containers itself with: the configured image, name `pg-session-<id>`, labels `playground.session`, `playground.user`, `playground.version`, the sessions network, volume `pg-ws-<uid>:/work`, env `PG_SESSION_ID`, `PG_SESSION_TOKEN`, `PG_GATEWAY_URL`, and the hardening options from §9. A remote box per learner is created the same way with the learner's public key in `AUTHORIZED_KEYS`.
+In server mode the gateway creates session containers itself with: the configured image, name `pg-session-<id>`, labels `playground.session`, `playground.user`, `playground.version`, the session's own network (§7), volume `pg-ws-<uid>:/work`, env `PG_SESSION_ID`, `PG_SESSION_TOKEN`, `PG_PROXY_SECRET`, `PG_GATEWAY_URL`, and the hardening options from §9. A remote box per learner is created the same way with the learner's public key in `AUTHORIZED_KEYS`.
 
 ## 3. Configuration file
 
@@ -134,7 +134,10 @@ The gateway reads one JSON file, `deploy/config.json`, mounted at `/etc/playgrou
 | `sessions.backend` | `static` in local, `docker` in server | `static` points at `local.sessionUrl` |
 | `sessions.dockerHost` | | Engine API endpoint, normally the socket proxy |
 | `sessions.image`, `sessions.remoteBox.image` | release images | images for sessions and remote boxes |
-| `sessions.network` | | network name for session containers |
+| `sessions.isolation` | `network` | `network`: every session gets its own internal network `pg-net-<id>` that only the gateway joins (§7); `shared`: all sessions join `sessions.network` |
+| `sessions.subnetPool` | `10.231.0.0/16` | IPv4 range the per-session networks take their `/28` subnets from (4096 sessions); empty lets the Docker daemon choose from its `default-address-pools`, which hold about 30 networks unless configured |
+| `sessions.gatewayContainer` | the gateway's hostname | the gateway's own container (name or id), which joins every per-session network; Docker sets a container's hostname to its id, so the default works unless Compose sets `hostname:` |
+| `sessions.network` | `emacs-playground_sessions` | the shared network for `isolation: shared` |
 | `sessions.runtime` | `runc` | `runsc` for gVisor |
 | `sessions.limits.cpus`, `memory`, `pids`, `disk` | `2`, `3g`, `1024`, `4g` | per session; `disk` is a volume size hint, enforced only on storage drivers with quotas |
 | `sessions.idleStopMinutes` | `30` | stop a session with no WebSocket for this long |
@@ -153,7 +156,7 @@ The gateway reads one JSON file, `deploy/config.json`, mounted at `/etc/playgrou
 | `features.telemetryUpload` | `false` | never on by default |
 | `features.authorMode` | `false` | shows condition results and raw state in lessons |
 
-sessiond is configured only by environment (set by the gateway or Compose): `PG_SESSION_ID`, `PG_SESSION_TOKEN`, `PG_GATEWAY_URL`, `PG_LISTEN` (`:7000`), `PG_WORKSPACE` (`/work`), `PG_AGENT_SOCKET`, `PG_VNC_GEOMETRY`, `PG_TERM_SIZE`. The gateway derives the last two from `sessions.gui.geometry` and `sessions.terminal.initialSize`.
+sessiond is configured only by environment (set by the gateway or Compose): `PG_SESSION_ID`, `PG_SESSION_TOKEN`, `PG_PROXY_SECRET`, `PG_GATEWAY_URL`, `PG_LISTEN` (`:7000`), `PG_WORKSPACE` (`/work`), `PG_AGENT_SOCKET`, `PG_VNC_GEOMETRY`, `PG_TERM_SIZE`. The gateway derives the last two from `sessions.gui.geometry` and `sessions.terminal.initialSize`. `PG_PROXY_SECRET` is the session's proxy secret (§9.3): `hex(HMAC-SHA256(key, "playground session proxy\0" + id))` with a key the gateway keeps in `<dataDir>/session-proxy.secret` (created on first use, separate from the cookie secret so rotating that one does not lock the gateway out of running sessions). In local mode Compose does not set it and sessiond serves without it: only the learner's own gateway can reach the session.
 
 A JSON Schema for the file (`deploy/config.schema.json`) is generated from the Go config struct by `playctl config schema`, and `playctl config check deploy/config.json` validates a file without starting anything. The gateway prints its effective configuration at start with secrets redacted.
 
@@ -203,11 +206,13 @@ A minimal Debian container with sshd, a `deploy` user and the session toolchains
 |---|---|---|---|
 | internet | Caddy | 443 | HTTPS and WSS |
 | Caddy | gateway | 8080 | HTTP |
-| gateway | sessiond | 7000 | proxy, health, RPC |
+| gateway | sessiond | 7000 | proxy, health, RPC; every request but `/healthz` carries the session's proxy secret (§9.3) |
 | gateway | socket proxy | 2375 | Engine API |
 | sessiond | gateway | 8080 | fixtures, progress, stuck reports |
 | session | remote box | 22 | TRAMP |
 | session | internet | 443 | package registries only, per `sessions.egress` |
+
+In server mode (`sessions.isolation: network`, the default) every session container sits alone on its own bridge network, `pg-net-<id>`, labelled `playground.role=network`. The gateway creates it before the container, with a `/28` from `sessions.subnetPool` and `internal` unless `sessions.egress` is `all`, joins it under the alias `gateway` (so `PG_GATEWAY_URL=http://gateway:8080` resolves there), and removes it with the container. The session's remote box and the egress proxy will join the same network (M6). A replaced gateway container joins the running sessions' networks again when it rebuilds its registry, and networks of sessions without a container are removed then and by the reaper. Session containers therefore reach the gateway and nothing else of the playground; they cannot resolve or reach each other. The shared `sessions` network of the Compose file remains for `isolation: shared`.
 
 ## 8. Storage
 
@@ -232,21 +237,23 @@ user: learner (uid 1000), no sudo
 read_only: true; tmpfs: /tmp (1g, noexec off: builds need it), /run (64m), /home/learner/.cache (2g)
 volumes: pg-ws-<uid>:/work only
 cap_drop: ALL; security_opt: no-new-privileges:true, seccomp: default, apparmor: docker-default
-pids_limit: 1024; cpus: 2; memory: 3g; memory-swap: 3g; ulimits: nofile 65536, nproc 2048
-network: sessions (internal) only; no published ports; no Docker socket
+pids_limit: 1024; cpus: 2; memory: 3g; memory-swap: 3g; ulimits: nofile 65536 (no nproc: see below)
+network: pg-net-<id> (internal, the session and the gateway only, §7); no published ports; no Docker socket
 runtime: runc, or runsc (gVisor) for public deployments
 ```
 
-Egress: the sessions network is internal (no default route). `sessions.egress: registries` adds a small egress proxy container (Squid with an allowlist: crates.io and static.crates.io, index.crates.io, opam.ocaml.org and GitHub release URLs for opam, pypi.org and files.pythonhosted.org, packages.typst.org, CTAN mirrors) that sessions reach through `HTTP(S)_PROXY`; `all` gives a NAT route; `none` keeps sessions offline (lessons still work, see emacs.md §9).
+There is no `nproc` ulimit. `RLIMIT_NPROC` counts every process and thread of a uid on the whole host, and every session runs as uid 1000 (runc has no user namespace here), so a per-container `nproc` would be one budget shared by all sessions: around 50 sessions of sessiond, Emacs, tmux, rust-analyzer and cargo threads exceed 2048 and then every session fails to fork. The cgroup `pids_limit` bounds each container on its own. (`userns-remap` or a uid per session would make a per-session `nproc` meaningful.)
+
+Egress: session networks are internal (no default route). `sessions.egress: registries` adds a small egress proxy container (Squid with an allowlist: crates.io and static.crates.io, index.crates.io, opam.ocaml.org and GitHub release URLs for opam, pypi.org and files.pythonhosted.org, packages.typst.org, CTAN mirrors) that sessions reach through `HTTP(S)_PROXY`; `all` gives a NAT route; `none` keeps sessions offline (lessons still work, see emacs.md §9).
 
 ### 9.3 Gateway and web application
 
 - Authentication and cookies as in backend.md §2.6: HMAC-signed cookie, `HttpOnly`, `Secure`, `SameSite=Lax`; constant-time invite comparison; invite codes hashed at rest; OIDC with PKCE and issuer verification.
 - CSRF: `Origin` must match `publicUrl` on every state-changing request and WebSocket upgrade. No cross-origin resource sharing is enabled.
-- Session isolation: `/s/{id}` is served only to the session's owner; per-user WebSocket limit; session tokens for `/internal` are random 256-bit values, hashed in the database, scoped to one session.
+- Session isolation: `/s/{id}` is served only to the session's owner; per-user WebSocket limit; session tokens for `/internal` are random 256-bit values, hashed in the database, scoped to one session. sessiond itself answers only its gateway: the gateway sends the session's proxy secret (`X-Playground-Proxy`, derived per session, §3) on every proxied request, RPC and status call, and sessiond started with `PG_PROXY_SECRET` refuses anything else with 401 except `GET /healthz` (constant-time comparison; the header is not passed on). Together with the per-session networks (§7), a learner's code cannot drive another learner's Emacs, read their files through `/preview` or call their RPCs.
 - Preview content: files are read through `os.Root` so paths cannot escape the workspace; HTML is served with a sandboxing CSP and `nosniff`; the preview iframe is sandboxed; nothing in a preview can read the app's cookies or call the API with the learner's credentials beyond what the learner could do anyway.
 - Headers: HSTS (via Caddy), `X-Frame-Options: DENY` for the app, a strict CSP for the app bundle (self plus the fonts path, `wss:` for WebSockets, `blob:` for the PDF worker).
-- Rate limits: login attempts per IP and per code; session creation per user; stuck reports per hour.
+- Rate limits: login attempts per IP and per code; session creation per user; stuck reports per user and hour (10), whether they come from the browser (`POST /api/v1/stuck`) or from sessiond (`/internal`, also reachable by a learner with their own session's token); a report keeps at most 200 events and 512 KiB of them and a 4000-byte note. Progress reports are accepted only for lessons and steps of the loaded curriculum bundle, so a session cannot grow the database with made-up ids.
 - Docker API: only through the socket proxy with the minimal endpoint set; the gateway never runs privileged containers, never mounts host paths into sessions, and only acts on containers carrying its own labels.
 
 ### 9.4 Data and privacy

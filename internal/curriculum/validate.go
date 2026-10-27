@@ -529,6 +529,27 @@ func knownStatePath(p string) bool {
 	return stateFields[root]
 }
 
+// exitSessionFields are the fields of the virtual root "session" that exit
+// rows may use besides state fields (protocol.ExitSession).
+var exitSessionFields = func() map[string]bool {
+	m := map[string]bool{}
+	t := reflect.TypeOf(protocol.ExitSession{})
+	for i := 0; i < t.NumField(); i++ {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		m[name] = true
+	}
+	return m
+}()
+
+// knownExitPath accepts state paths and session.<field> (frontend.md §6).
+func knownExitPath(p string) bool {
+	if root, rest, ok := strings.Cut(p, "."); ok && root == protocol.ExitSessionRoot {
+		field, _, _ := strings.Cut(rest, ".")
+		return exitSessionFields[field]
+	}
+	return knownStatePath(p)
+}
+
 // validateTables checks the advice tables of one locale.
 func validateTables(t *protocol.Tables, diags *Diagnostics, suffix string) {
 	er := reporter{diags: diags, file: path.Join(TablesDir, TableExits+suffix+".yaml")}
@@ -549,8 +570,8 @@ func validateTables(t *protocol.Tables, diags *Diagnostics, suffix string) {
 			er.errorf(w+".when", "%v", err)
 		}
 		for p := range row.When {
-			if !knownStatePath(p) {
-				er.errorf(w+".when", "%q does not start with a state field (api.md §5)", p)
+			if !knownExitPath(p) {
+				er.errorf(w+".when", "%q does not start with a state field or session.{prefix,emacs,mode,echo} (api.md §5, frontend.md §6)", p)
 			}
 		}
 		if strings.TrimSpace(row.Why) == "" || strings.TrimSpace(row.How) == "" {
@@ -558,7 +579,7 @@ func validateTables(t *protocol.Tables, diags *Diagnostics, suffix string) {
 		}
 		for _, tmpl := range []string{row.Why, row.How} {
 			for _, m := range templateRe.FindAllStringSubmatch(tmpl, -1) {
-				if !knownStatePath(m[1]) {
+				if !knownExitPath(m[1]) {
 					er.errorf(w, "template placeholder {%s} does not start with a state field", m[1])
 				}
 			}

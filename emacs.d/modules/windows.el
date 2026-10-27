@@ -105,6 +105,24 @@ it, so each project keeps its own window layout."
 (with-eval-after-load 'project
   (keymap-set project-prefix-map "p" #'playground-project-tab))
 
+(defun playground--close-project-tab (orig &rest args)
+  "Around advice for `project-kill-buffers' (ORIG with ARGS).
+When the project had a tab of its own (`playground-project-tab') and
+its buffers are gone, close that tab too, so C-x p k lands back where
+you were before switching to the project."
+  (let* ((proj (project-current))
+         (name (and proj (file-name-nondirectory
+                          (directory-file-name (project-root proj))))))
+    (prog1 (apply orig args)
+      (when (and name
+                 (bound-and-true-p tab-bar-mode)
+                 (equal (alist-get 'name (tab-bar--current-tab)) name)
+                 (> (length (funcall tab-bar-tabs-function)) 1)
+                 (not (seq-find (lambda (b) (not (string-prefix-p " " (buffer-name b))))
+                                (project-buffers proj))))
+        (tab-bar-close-tab)))))
+(advice-add 'project-kill-buffers :around #'playground--close-project-tab)
+
 ;;;; Lesson 3.8  Focus and layout recipes
 
 (playground-with-package olivetti

@@ -53,7 +53,7 @@ func roots() []any {
 		protocol.StuckRequest{}, protocol.Created{}, protocol.ProgressReport{},
 		protocol.InternalStuckReport{}, protocol.Heartbeat{},
 		protocol.CurriculumIndex{}, protocol.LessonBundle{}, protocol.Scenario{},
-		protocol.DemoToken{}, protocol.WindowSpec{},
+		protocol.DemoToken{}, protocol.WindowSpec{}, protocol.ExitSession{},
 		protocol.AgentHelloMsg{}, protocol.AgentFrameMsg{}, protocol.AgentPingMsg{},
 		protocol.AgentReplyMsg{}, protocol.AgentCallMsg{}, protocol.AgentPongMsg{},
 		protocol.AgentCheckResult{},

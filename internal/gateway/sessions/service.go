@@ -3,6 +3,7 @@ package sessions
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -43,6 +44,9 @@ type Session struct {
 	GUI    bool
 	// ActiveWebSockets is the proxy's count of open WebSockets.
 	ActiveWebSockets int
+	// ProxySecret goes in the X-Playground-Proxy header of everything sent
+	// to this session's sessiond; empty for the static session.
+	ProxySecret string
 }
 
 // Usable reports whether the session accepts traffic (ready or idle).
@@ -91,7 +95,10 @@ type Options struct {
 	// Env is passed to every session container (PG_GATEWAY_URL,
 	// PG_VNC_GEOMETRY, PG_TERM_SIZE, PG_GUI_ENABLED, PG_AUTHOR_MODE).
 	Env map[string]string
-	GUI bool
+	// ProxyKey derives each session's proxy secret (ProxySecret), which
+	// the container gets as PG_PROXY_SECRET. Unused in static mode.
+	ProxyKey []byte
+	GUI      bool
 
 	// IdleStop stops sessions without WebSockets for this long (0: never).
 	IdleStop time.Duration
@@ -184,6 +191,25 @@ func New(ctx context.Context, o Options) (*Service, error) {
 
 func (s *Service) now() time.Time { return s.o.Now() }
 
+// ProxySecret derives the proxy secret of session id from key:
+// hex(HMAC-SHA256(key, "playground session proxy\x00" + id)). It is stable
+// across gateway restarts and re-creations of the session on its volume.
+func ProxySecret(key []byte, id string) string {
+	if len(key) == 0 {
+		return ""
+	}
+	m := hmac.New(sha256.New, key)
+	m.Write([]byte("playground session proxy\x00" + id))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+func (s *Service) proxySecret(id string) string {
+	if s.o.Static {
+		return ""
+	}
+	return ProxySecret(s.o.ProxyKey, id)
+}
+
 // HashToken returns the hex SHA-256 stored for a session token.
 func HashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
@@ -231,6 +257,7 @@ func (s *Service) snapshot(e *entry) *Session {
 		ID: e.rec.ID, UserID: e.rec.UserID, State: e.rec.State, Endpoint: &ep,
 		Image: e.rec.Image, CreatedAt: e.rec.CreatedAt, LastActiveAt: e.rec.LastActiveAt,
 		Failure: e.rec.Failure, Shared: s.o.Static, GUI: s.o.GUI, ActiveWebSockets: e.ws,
+		ProxySecret: s.proxySecret(e.rec.ID),
 	}
 }
 
@@ -495,7 +522,7 @@ func (s *Service) ensureDocker(ctx context.Context, userID string) (*Session, er
 
 	start := time.Now()
 	spec := Spec{
-		ID: id, UserID: userID, Token: token, Image: s.o.Image, RemoteImage: s.o.RemoteImage,
+		ID: id, UserID: userID, Token: token, ProxySecret: s.proxySecret(id), Image: s.o.Image, RemoteImage: s.o.RemoteImage,
 		Limits: s.o.Limits, Network: s.o.Network, Runtime: s.o.Runtime, Volume: volume, Env: s.o.Env,
 	}
 	h, err := s.o.Backend.Create(ctx, spec)
@@ -701,6 +728,8 @@ func (s *Service) Reap(ctx context.Context) error {
 	var errs []error
 	if s.o.Static {
 		s.refreshStatic(ctx)
+	} else if err := s.pruneNetworks(ctx); err != nil {
+		errs = append(errs, err)
 	}
 	for _, it := range items {
 		switch it.state {
@@ -869,7 +898,13 @@ func (s *Service) Rebuild(ctx context.Context) error {
 		}
 		if st.Running && (rec.State == protocol.SessionReady || rec.State == protocol.SessionIdle) {
 			// Running sessions survive a gateway restart; nobody is
-			// connected through this gateway yet.
+			// connected through this gateway yet. A new gateway container
+			// (an upgrade) joins their networks again.
+			if nw, ok := s.o.Backend.(Networker); ok {
+				if err := nw.Attach(ctx, h); err != nil {
+					errs = append(errs, fmt.Errorf("sessions: re-attaching to session %s: %w", rec.ID, err))
+				}
+			}
 			s.update(ctx, rec.ID, func(e *entry) { e.rec.State = protocol.SessionIdle })
 			continue
 		}
@@ -883,7 +918,32 @@ func (s *Service) Rebuild(ctx context.Context) error {
 			e.h.ContainerID = ""
 		})
 	}
+	if err := s.pruneNetworks(ctx); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
+}
+
+// pruneNetworks removes the networks of sessions that have no container
+// (Networker backends): left behind by a crash or a failed removal.
+func (s *Service) pruneNetworks(ctx context.Context) error {
+	nw, ok := s.o.Backend.(Networker)
+	if !ok || s.o.Static {
+		return nil
+	}
+	return nw.Prune(ctx, func(id string) bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		e := s.entries[id]
+		if e == nil {
+			return false
+		}
+		switch e.rec.State {
+		case protocol.SessionStopped, protocol.SessionFailed, protocol.SessionRemoved:
+			return false
+		}
+		return true
+	})
 }
 
 // Counts returns the number of sessions per state and open WebSockets
@@ -914,6 +974,9 @@ func (s *Service) Call(ctx context.Context, sess *Session, op protocol.RPCOp, re
 	}
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set(protocol.HeaderUser, sess.UserID)
+	if sess.ProxySecret != "" {
+		r.Header.Set(protocol.HeaderProxySecret, sess.ProxySecret)
+	}
 	if id := httpx.RequestIDFrom(ctx); id != "" {
 		r.Header.Set(protocol.HeaderRequestID, id)
 	}
@@ -942,6 +1005,9 @@ func (s *Service) Status(ctx context.Context, sess *Session) (*protocol.StatusRe
 		return nil, err
 	}
 	r.Header.Set(protocol.HeaderUser, sess.UserID)
+	if sess.ProxySecret != "" {
+		r.Header.Set(protocol.HeaderProxySecret, sess.ProxySecret)
+	}
 	resp, err := s.o.HTTPClient.Do(r)
 	if err != nil {
 		return nil, httpx.SessionUnavailable("the session did not answer").Wrap(err)

@@ -71,7 +71,9 @@ Modules:
 - **base**: `help-window-select t`, so help takes the cursor and `q` closes
   it (0.2, 0.3); `use-short-answers t`, so confirmations take `y` (2.4,
   2.6, 2.7); `auto-save-visited-mode` on, which 0.1, 2.3, 2.4 and 2.5 turn
-  off in `setup.eval` because they teach the modified flag;
+  off in `setup.eval` because they teach the modified flag (the agent turns
+  it back on at the start of every setup with `reset`, so it never stays
+  off after those lessons);
   `delete-selection-mode`; `repeat-mode` (3.2 `C-x o o o`, 3.8 `C-x } }`);
   savehist, recentf and save-place (2.2, 2.8); uniquify
   `post-forward-angle-brackets` (2.4 expects `main.rs<hello>`); `C-z`

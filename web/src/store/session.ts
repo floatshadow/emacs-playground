@@ -18,6 +18,7 @@ import { expireCards, habitCardFor, type HabitCard, type Nudge } from '../advice
 import {
   tickerGap,
   tickerNote,
+  isMouseOnly,
   tickerOnKey,
   tickerOnPrefix,
   type TickerEntry,
@@ -88,6 +89,8 @@ export interface SessionData {
   totalCommands: number
   emacs: EmacsStatusView
   echo: { text: string; at: number } | null
+  /** Echo text still shown: set by echo events, cleared by the next key (exits.yaml session.echo). */
+  echoLive: string | null
   minibufferSince: number | null
   files: Record<string, FileMark>
   /** Increments on checkpoint events; checkpoint lists refetch on change. */
@@ -131,6 +134,7 @@ export function initialSessionData(): SessionData {
     totalCommands: 0,
     emacs: { overlay: null, busy: false },
     echo: null,
+    echoLive: null,
     minibufferSince: null,
     files: {},
     checkpointsVersion: 0,
@@ -197,6 +201,8 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
       return next
     }
     case 'key': {
+      // Clicks and scrolling are not keys: no ticker entry, no habit card.
+      if (!ev.mx && isMouseOnly(ev.keys)) return { ...base, echoLive: null }
       const ticker = tickerOnKey(base.ticker, ev, now)
       const entry = ticker[ticker.length - 1]
       const totalCommands = base.totalCommands + 1
@@ -209,7 +215,7 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
           cards = [...cards, card]
         }
       }
-      return { ...base, ticker, prefix: null, totalCommands, cards, habitsSeen }
+      return { ...base, ticker, prefix: null, totalCommands, cards, habitsSeen, echoLive: null }
     }
     case 'prefix': {
       const keys = ev.keys.trim()
@@ -223,7 +229,7 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
       return { ...base, state: ev, minibufferSince }
     }
     case 'echo':
-      return { ...base, echo: { text: ev.text, at: ev.ts ?? now } }
+      return { ...base, echo: { text: ev.text, at: ev.ts ?? now }, echoLive: ev.text }
     case 'minibuffer': {
       if (ev.open) {
         return base.minibufferSince === null ? { ...base, minibufferSince: ev.ts ?? now } : base
@@ -234,6 +240,9 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
       const e = base.emacs
       switch (ev.event) {
         case 'frame-closed': {
+          // The GUI frame closing while the terminal is shown (a switch back
+          // to the terminal) is not something to cover the screen for.
+          if (ev.frame === 'gui' && base.mode !== 'gui') return base
           const next: EmacsStatusView = { ...e, overlay: 'frame-closed' }
           if (ev.frame) next.frame = ev.frame
           if (ev.reason) next.reason = ev.reason

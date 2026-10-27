@@ -25,3 +25,6 @@ coverage/
 .#*
 .idea/
 .vscode/
+
+# Local exploratory browser scripts
+web/e2e/*.local.mjs

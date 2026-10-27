@@ -17,6 +17,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/netip"
 	"net/url"
 	"os"
 	"reflect"
@@ -52,6 +53,8 @@ func Defaults() protocol.Config {
 		Sessions: protocol.SessionsConfig{
 			Image:               "ghcr.io/zsy/emacs-playground/session:latest",
 			Network:             "emacs-playground_sessions",
+			Isolation:           protocol.IsolationNetwork,
+			SubnetPool:          "10.231.0.0/16",
 			Runtime:             "runc",
 			Limits:              protocol.LimitsConfig{CPUs: 2, Memory: "3g", Pids: 1024, Disk: "4g"},
 			IdleStopMinutes:     30,
@@ -245,8 +248,19 @@ func Validate(cfg *protocol.Config) error {
 		if s.Image == "" {
 			bad("sessions.image: required with the docker backend")
 		}
-		if s.Network == "" {
-			bad("sessions.network: required with the docker backend")
+		switch s.Isolation {
+		case protocol.IsolationNetwork:
+			if s.SubnetPool != "" {
+				if p, err := netip.ParsePrefix(s.SubnetPool); err != nil || !p.Addr().Is4() || p.Bits() > 28 {
+					bad("sessions.subnetPool: %q is not an IPv4 range of /28 or larger", s.SubnetPool)
+				}
+			}
+		case protocol.IsolationShared:
+			if s.Network == "" {
+				bad("sessions.network: required with isolation shared")
+			}
+		default:
+			bad("sessions.isolation: %q is not network or shared", s.Isolation)
 		}
 		if s.RemoteBox.Enabled && s.RemoteBox.Image == "" {
 			bad("sessions.remoteBox.image: required when the remote box is enabled")

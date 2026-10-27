@@ -20,6 +20,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "e2e": "node e2e/smoke.mjs",
+    "e2e:smoke": "node e2e/smoke.mjs",
     "e2e:lesson": "node e2e/lesson.mjs",
     "size": "node dev/size-gate.ts"
   },

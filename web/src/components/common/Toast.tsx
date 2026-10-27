@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { useUiStore } from '../../store/ui'
 import styles from './Toast.module.css'
 
-/** Toasts at the bottom centre (the demo's .toast), announced politely. */
+/** Toasts at the top centre, under the top bar, announced politely. */
 export function Toasts() {
   const toasts = useUiStore((s) => s.toasts)
   const dismiss = useUiStore((s) => s.dismissToast)

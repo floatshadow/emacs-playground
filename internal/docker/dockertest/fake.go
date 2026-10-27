@@ -5,6 +5,7 @@ package dockertest
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"sort"
 	"sync"
 	"time"
@@ -29,6 +30,7 @@ type Fake struct {
 	next       int
 	containers map[string]*FakeContainer
 	volumes    map[string]docker.Volume
+	networks   map[string]*FakeNetwork
 	Calls      []string
 
 	// FailCreate, FailStart make the next CreateContainer or StartContainer
@@ -41,9 +43,18 @@ type Fake struct {
 	Now     func() time.Time
 }
 
+// FakeNetwork is a network held by Fake.
+type FakeNetwork struct {
+	ID   string
+	Spec docker.NetworkSpec
+	// Members maps attached container names or ids to their aliases.
+	Members map[string][]string
+}
+
 // New returns an empty fake.
 func New() *Fake {
-	return &Fake{containers: map[string]*FakeContainer{}, volumes: map[string]docker.Volume{}, Now: time.Now}
+	return &Fake{containers: map[string]*FakeContainer{}, volumes: map[string]docker.Volume{},
+		networks: map[string]*FakeNetwork{}, Now: time.Now}
 }
 
 func (f *Fake) call(name string) { f.Calls = append(f.Calls, name) }
@@ -73,6 +84,9 @@ func (f *Fake) CreateContainer(_ context.Context, spec docker.ContainerSpec) (st
 			// Docker creates missing named volumes implicitly.
 			f.volumes[v.Volume] = docker.Volume{Name: v.Volume, Labels: map[string]string{}, CreatedAt: f.Now()}
 		}
+	}
+	if n := f.networks[spec.Network]; n != nil {
+		n.Members[spec.Name] = spec.Aliases
 	}
 	f.next++
 	id := fmt.Sprintf("c%04d", f.next)
@@ -138,6 +152,10 @@ func (f *Fake) RemoveContainer(_ context.Context, id string, force bool) error {
 		return fmt.Errorf("container %s is running", id)
 	}
 	c.Removed = true
+	for _, n := range f.networks {
+		delete(n.Members, c.Spec.Name)
+		delete(n.Members, id)
+	}
 	return nil
 }
 
@@ -227,6 +245,124 @@ func (f *Fake) ListVolumes(_ context.Context, labels map[string]string) ([]docke
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil
+}
+
+// CreateNetwork implements docker.Client.
+func (f *Fake) CreateNetwork(_ context.Context, spec docker.NetworkSpec) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.call("network create " + spec.Name)
+	if _, ok := f.networks[spec.Name]; ok {
+		return "", fmt.Errorf("network %s: %w", spec.Name, docker.ErrConflict)
+	}
+	if spec.Subnet.IsValid() {
+		for _, n := range f.networks {
+			if n.Spec.Subnet.IsValid() && n.Spec.Subnet.Overlaps(spec.Subnet) {
+				return "", fmt.Errorf("network %s: %w", spec.Name, docker.ErrSubnetTaken)
+			}
+		}
+	}
+	f.next++
+	id := fmt.Sprintf("n%04d", f.next)
+	f.networks[spec.Name] = &FakeNetwork{ID: id, Spec: spec, Members: map[string][]string{}}
+	return id, nil
+}
+
+// RemoveNetwork implements docker.Client.
+func (f *Fake) RemoveNetwork(_ context.Context, name string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.call("network remove " + name)
+	n, ok := f.networks[name]
+	if !ok {
+		return fmt.Errorf("network %s: %w", name, docker.ErrNotFound)
+	}
+	if len(n.Members) > 0 {
+		return fmt.Errorf("network %s has active endpoints", name)
+	}
+	delete(f.networks, name)
+	return nil
+}
+
+// ConnectNetwork implements docker.Client.
+func (f *Fake) ConnectNetwork(_ context.Context, network, container string, aliases []string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.call("network connect " + network + " " + container)
+	n, ok := f.networks[network]
+	if !ok {
+		return fmt.Errorf("network %s: %w", network, docker.ErrNotFound)
+	}
+	if _, ok := n.Members[container]; !ok {
+		n.Members[container] = aliases
+	}
+	return nil
+}
+
+// DisconnectNetwork implements docker.Client.
+func (f *Fake) DisconnectNetwork(_ context.Context, network, container string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.call("network disconnect " + network + " " + container)
+	if n, ok := f.networks[network]; ok {
+		delete(n.Members, container)
+	}
+	return nil
+}
+
+// ListNetworks implements docker.Client.
+func (f *Fake) ListNetworks(_ context.Context, labels map[string]string) ([]docker.Network, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []docker.Network
+	for _, n := range f.networks {
+		if !matches(n.Spec.Labels, labels) {
+			continue
+		}
+		nw := docker.Network{ID: n.ID, Name: n.Spec.Name, Labels: n.Spec.Labels, Internal: n.Spec.Internal}
+		if n.Spec.Subnet.IsValid() {
+			nw.Subnets = []netip.Prefix{n.Spec.Subnet}
+		}
+		out = append(out, nw)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// AddNetwork injects a network (an operator's, or one left behind).
+func (f *Fake) AddNetwork(spec docker.NetworkSpec) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.next++
+	f.networks[spec.Name] = &FakeNetwork{ID: fmt.Sprintf("n%04d", f.next), Spec: spec, Members: map[string][]string{}}
+}
+
+// Network returns a copy of a network by name.
+func (f *Fake) Network(name string) (FakeNetwork, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n, ok := f.networks[name]
+	if !ok {
+		return FakeNetwork{}, false
+	}
+	cp := *n
+	cp.Members = map[string][]string{}
+	for k, v := range n.Members {
+		cp.Members[k] = v
+	}
+	return cp, true
+}
+
+// NetworkNames lists the networks by name.
+func (f *Fake) NetworkNames() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for name := range f.networks {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Container returns a copy of a container by id (removed ones included).

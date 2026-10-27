@@ -83,7 +83,10 @@ type Setup struct {
 	// Root is the directory under /work the fixtures extract to, e.g.
 	// "hello" for /work/hello.
 	Root string `json:"root,omitempty"`
-	// Reset overwrites learner files with the fixtures.
+	// Reset restores Root to the fixtures: learner edits are overwritten and
+	// files the fixtures do not contain are removed (build directories such
+	// as target/ and .venv/ are kept). Emacs reverts the affected buffers
+	// and clears unmodified leftovers (AgentSetupArgs.Reset).
 	Reset bool `json:"reset,omitempty"`
 	// Open lists workspace-relative files to visit, e.g. "hello/README.md".
 	Open []string `json:"open,omitempty"`
@@ -94,7 +97,8 @@ type Setup struct {
 	// Eval is an Emacs Lisp form run after Open and Layout.
 	Eval string `json:"eval,omitempty"`
 	// Compile is a command run once so *compilation* exists; null or empty
-	// for none.
+	// for none. It runs in the project root (project.el) of the first Open
+	// file, or that file's directory when it is in no project.
 	Compile string `json:"compile,omitempty"`
 }
 

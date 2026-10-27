@@ -14,6 +14,36 @@ export function focusTerminal(): void {
   focusFn?.()
 }
 
+/** Keys that only modify others: pressing one alone is not input. */
+const MODIFIER_KEYS = new Set([
+  'Shift',
+  'Control',
+  'Alt',
+  'AltGraph',
+  'Meta',
+  'OS',
+  'Super',
+  'Hyper',
+  'Fn',
+  'FnLock',
+  'CapsLock',
+  'NumLock',
+  'ScrollLock',
+  'Symbol',
+  'SymbolLock',
+])
+
+/**
+ * True for a keydown the learner typed (not a lone modifier). The terminal
+ * reports learner input from its key handler and paste path, never from
+ * xterm.js's onData: that also carries what the terminal answers on its own
+ * (focus-in and focus-out reports with tmux's focus-events, mouse reports,
+ * OSC 52 replies), which must not stop a demo.
+ */
+export function isLearnerKeydown(e: Pick<KeyboardEvent, 'type' | 'key'>): boolean {
+  return e.type === 'keydown' && e.key !== '' && !MODIFIER_KEYS.has(e.key)
+}
+
 /** Subscribes to learner keyboard input in the terminal (the demo player cancels on it). */
 export function onTerminalInput(fn: () => void): () => void {
   inputFns.add(fn)

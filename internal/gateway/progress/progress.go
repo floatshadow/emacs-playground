@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/zsy/emacs-playground/internal/gateway/limit"
 	"github.com/zsy/emacs-playground/internal/gateway/store"
@@ -15,8 +16,16 @@ import (
 
 // Steps resolves a lesson's step ids (the curriculum bundle).
 type Steps interface {
+	// StepIDs returns the steps of a ready lesson; false for lessons the
+	// bundle does not have.
 	StepIDs(lessonID string) ([]string, bool)
+	// Loaded reports whether a bundle is loaded (and its version); without
+	// one, reports cannot be checked against it.
+	Loaded() (bool, string)
 }
+
+// maxIDLen bounds lesson and step ids in reports.
+const maxIDLen = 200
 
 // Service records and aggregates progress.
 type Service struct {
@@ -37,14 +46,23 @@ func (s *Service) Apply(ctx context.Context, userID string, rep protocol.Progres
 	if rep.LessonID == "" || rep.StepID == "" {
 		return httpx.BadRequest("lessonId and stepId are required")
 	}
+	if len(rep.LessonID) > maxIDLen || len(rep.StepID) > maxIDLen {
+		return httpx.BadRequest("lessonId and stepId must be shorter than 200 bytes")
+	}
 	switch rep.Status {
 	case protocol.ProgressInProgress, protocol.ProgressDone, protocol.ProgressNotStarted:
 	default:
 		return httpx.BadRequest("status must be in-progress, done or not-started")
 	}
 	if s.Steps != nil {
-		if steps, ok := s.Steps.StepIDs(rep.LessonID); ok && !containsStr(steps, rep.StepID) {
+		steps, ok := s.Steps.StepIDs(rep.LessonID)
+		if ok && !containsStr(steps, rep.StepID) {
 			return httpx.BadRequest("step " + rep.StepID + " is not in lesson " + rep.LessonID)
+		}
+		// Every row is a lesson and step of the bundle: a session cannot
+		// grow the store with made-up ids.
+		if loaded, _ := s.Steps.Loaded(); !ok && loaded {
+			return httpx.BadRequest("lesson " + rep.LessonID + " is not in the curriculum")
 		}
 	}
 	if (rep.HintsUsed != nil && *rep.HintsUsed < 0) || (rep.Resets != nil && *rep.Resets < 0) {
@@ -145,8 +163,14 @@ func containsStr(list []string, s string) bool {
 	return false
 }
 
-// MaxStuckEvents bounds the events kept per report (api.md §2.5: 200).
-const MaxStuckEvents = 200
+// Bounds on what one stuck report stores: the last 200 events (api.md
+// §2.5), at most MaxStuckEventBytes of them (the newest that fit), and a
+// note of MaxStuckNote bytes.
+const (
+	MaxStuckEvents     = 200
+	MaxStuckEventBytes = 512 << 10
+	MaxStuckNote       = 4000
+)
 
 // Stuck files stuck reports with deduplication and a per-user rate limit.
 type Stuck struct {
@@ -192,19 +216,13 @@ func (s *Stuck) File(ctx context.Context, userID, lessonID, stepID, note string,
 		return r.id, nil
 	}
 	s.mu.Unlock()
-	if len(events) > MaxStuckEvents {
-		events = events[len(events)-MaxStuckEvents:]
-	}
-	if events == nil {
-		events = []json.RawMessage{}
-	}
+	events = capEvents(events)
 	raw, err := json.Marshal(events)
 	if err != nil {
 		return 0, httpx.BadRequest("events must be JSON")
 	}
-	if len(note) > 4000 {
-		note = note[:4000]
-	}
+	note = truncate(note, MaxStuckNote)
+	lessonID, stepID = truncate(lessonID, maxIDLen), truncate(stepID, maxIDLen)
 	id, err := s.Store.Stuck().Add(ctx, &store.StuckReport{UserID: userID, LessonID: lessonID, StepID: stepID, CreatedAt: now.UnixMilli(), Note: note, Events: raw})
 	if err != nil {
 		return 0, err
@@ -213,4 +231,32 @@ func (s *Stuck) File(ctx context.Context, userID, lessonID, stepID, note string,
 	s.recent[key] = recentReport{id: id, at: now}
 	s.mu.Unlock()
 	return id, nil
+}
+
+// capEvents keeps the newest events within MaxStuckEvents and
+// MaxStuckEventBytes.
+func capEvents(events []json.RawMessage) []json.RawMessage {
+	if len(events) > MaxStuckEvents {
+		events = events[len(events)-MaxStuckEvents:]
+	}
+	size, first := 0, len(events)
+	for first > 0 && size+len(events[first-1]) <= MaxStuckEventBytes {
+		first--
+		size += len(events[first])
+	}
+	if events = events[first:]; events == nil {
+		events = []json.RawMessage{}
+	}
+	return events
+}
+
+// truncate cuts s to at most n bytes on a UTF-8 boundary.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }

@@ -1,5 +1,8 @@
 """Stand-in sessiond for a server-mode gateway test: /healthz, /status,
-/rpc/<op>; on start it posts a heartbeat to the gateway with its token."""
+/rpc/<op>; on start it posts a heartbeat to the gateway with its token.
+Like sessiond, it answers only requests carrying PG_PROXY_SECRET in
+X-Playground-Proxy (all but /healthz)."""
+import hmac
 import json
 import os
 import threading
@@ -10,6 +13,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 SID = os.environ.get("PG_SESSION_ID", "")
 TOKEN = os.environ.get("PG_SESSION_TOKEN", "")
 GW = os.environ.get("PG_GATEWAY_URL", "")
+SECRET = os.environ.get("PG_PROXY_SECRET", "")
 
 
 class H(BaseHTTPRequestHandler):
@@ -21,7 +25,17 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def authorised(self):
+        if not SECRET or self.path == "/healthz":
+            return True
+        if hmac.compare_digest(self.headers.get("X-Playground-Proxy", ""), SECRET):
+            return True
+        self.reply(401, {"status": 401, "code": "unauthenticated", "message": "this session only answers its gateway"})
+        return False
+
     def do_GET(self):
+        if not self.authorised():
+            return
         if self.path == "/healthz":
             self.reply(200, {"ok": True})
         elif self.path == "/status":
@@ -32,6 +46,8 @@ class H(BaseHTTPRequestHandler):
             self.reply(404, {"status": 404, "code": "not_found", "message": "no"})
 
     def do_POST(self):
+        if not self.authorised():
+            return
         self.reply(200, {"ok": True, "result": {}})
 
 

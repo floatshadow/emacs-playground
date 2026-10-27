@@ -5,7 +5,7 @@
 #   make server           select the server overlay (deployment.md §5); then `docker compose up -d`
 #   make shell            attach a terminal to the local session's Emacs (tmux)
 #   make dev              session container + gateway from source + Vite dev server
-#   make images           build the gateway and session images (and remote-box with REMOTE=1)
+#   make images           build the gateway, session and remote-box images
 #   make reset-workspace  move ./workspace aside and start fresh
 #   make check            everything CI runs: build, vet, tests, lint, generated-file drift
 
@@ -35,7 +35,7 @@ help: ## show targets
 local: ## local mode: .env, deploy/config.json, ./workspace; pull images (BUILD=1 builds)
 	@printf 'COMPOSE_FILE=compose.yaml:compose.local.yaml\nTAG=%s\nDOMAIN=\n' '$(TAG)' > .env
 	@test -f deploy/config.json || printf '{ "mode": "local", "auth": { "mode": "none" } }\n' > deploy/config.json
-	@mkdir -p workspace && chmod 777 workspace
+	@mkdir -p workspace/.playground/ssh && chmod 777 workspace workspace/.playground workspace/.playground/ssh
 	@if [ -n "$${BUILD:-}" ]; then $(COMPOSE) $(LOCAL_FILES) build; else $(COMPOSE) $(LOCAL_FILES) pull --ignore-buildable || true; fi
 	@echo "local mode ready: docker compose up, then open http://localhost:8080"
 
@@ -59,15 +59,14 @@ shell: ## attach your terminal to the local session's Emacs
 reset-workspace: ## move ./workspace aside (workspace.bak-<time>) and start fresh
 	-$(COMPOSE) $(LOCAL_FILES) stop session
 	@if [ -d workspace ]; then mv workspace "workspace.bak-$$(date +%Y%m%d-%H%M%S)"; fi
-	@mkdir -p workspace && chmod 777 workspace
+	@mkdir -p workspace/.playground/ssh && chmod 777 workspace workspace/.playground workspace/.playground/ssh
 	@echo "fresh ./workspace; docker compose up -d session to start again"
 
 # ---- images -------------------------------------------------------------------
 
 .PHONY: images
-images: ## build images (gateway, session; REMOTE=1 adds remote-box)
-	$(COMPOSE) $(LOCAL_FILES) build gateway session
-	@if [ -n "$${REMOTE:-}" ]; then $(COMPOSE) $(LOCAL_FILES) --profile remote build remote-box; fi
+images: ## build images (gateway, session, remote-box)
+	$(COMPOSE) $(LOCAL_FILES) build gateway session remote-box
 
 .PHONY: image-gateway image-session
 image-gateway: ## build only the gateway image
@@ -109,7 +108,13 @@ protocol: ## regenerate web/src/protocol.gen.ts from internal/protocol
 config-schema: ## regenerate deploy/config.schema.json
 	$(GO) run ./cmd/playctl config schema > deploy/config.schema.json
 
-.PHONY: curriculum-validate curriculum-build
+.PHONY: fonts
+fonts: ## web fonts for make dev (.dev/fonts, served at /fonts by the dev gateway)
+	$(GO) run ./cmd/playctl fonts -o .dev/fonts
+
+.PHONY: curriculum-validate curriculum-build curriculum-play
+curriculum-play: ## replay every ready lesson's demos against the running local stack
+	$(GO) run ./cmd/playctl curriculum play all -session $${PG_PLAY_SESSION:-http://127.0.0.1:8080/s/local}
 curriculum-validate: ## validate curriculum/
 	$(GO) run ./cmd/playctl curriculum validate curriculum
 curriculum-build: ## build the curriculum bundle into artifacts/curriculum
@@ -135,6 +140,14 @@ web-lint: web/node_modules
 	cd web && $(PNPM) typecheck
 
 check: go-build lint test web-build ## everything CI runs
+	cd web && $(PNPM) size
+
+.PHONY: e2e emacs-test
+e2e: ## browser smoke scenarios against the running local stack (needs Chrome on CDP :9222)
+	cd web && $(PNPM) e2e:smoke
+emacs-test: ## the agent's and the config's ERT tests inside the session image
+	docker run --rm --entrypoint sh ghcr.io/zsy/emacs-playground/session:$(TAG) -c \
+	  'cd /opt/playground/emacs.d && emacs --batch -L lisp -l playground-agent -l test/agent-test.el -f ert-run-tests-batch-and-exit && emacs --batch -l early-init.el -l test/config-test.el -f ert-run-tests-batch-and-exit'
 
 .PHONY: clean
 clean: ## remove build output (not the workspace)

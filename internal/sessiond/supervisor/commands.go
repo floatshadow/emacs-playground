@@ -30,6 +30,7 @@ func Env(cfg *protocol.SessiondConfig) []string {
 		"PG_EMACS_SERVER":  cfg.EmacsServer,
 		"PG_PLAYGROUND":    "1",
 		"PG_SESSION_TOKEN": "",
+		"PG_PROXY_SECRET":  "",
 	}
 	// git refuses a workspace owned by another uid; see
 	// checkpoint.SafeDirectoryEnv.

@@ -69,6 +69,12 @@ const (
 	HeaderUser = "X-Playground-User"
 	// HeaderRequestID carries the request id across services.
 	HeaderRequestID = "X-Request-Id"
+	// HeaderProxySecret carries the session's proxy secret on every request
+	// the gateway sends to sessiond (proxy, RPC, status). sessiond started
+	// with PG_PROXY_SECRET answers 401 to requests without it, except
+	// GET /healthz, so one learner's container cannot drive another
+	// learner's sessiond (deployment.md §9.1).
+	HeaderProxySecret = "X-Playground-Proxy"
 )
 
 // HealthStatus is the body of GET /healthz on sessiond and the gateway.

@@ -58,7 +58,9 @@ steps:
         event: { command: ibuffer-do-delete }
         hint: "Mark first (* h marks all help buffers), then D (capital d)."
       - text: no *Help* buffer is left
-        elisp: '(not (seq-find (lambda (b) (eq (buffer-local-value (quote major-mode) b) (quote help-mode))) (buffer-list)))'
+        # Internal buffers (names starting with a space, such as C-h ?'s
+        # " *Metahelp*") are not listed by ibuffer, so they do not count.
+        elisp: '(not (seq-find (lambda (b) (and (eq (buffer-local-value (quote major-mode) b) (quote help-mode)) (not (string-prefix-p " " (buffer-name b))))) (buffer-list)))'
         hint: "* h marks the help buffers in one go. If some are not marked, m on their lines marks them, then D."
   - id: filter
     goal: Show only the Rust buffers

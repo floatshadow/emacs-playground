@@ -23,6 +23,7 @@ const (
 	OpStatus       RPCOp = "status"
 	OpDescribe     RPCOp = "describe"
 	OpDropStep     RPCOp = "drop-step"
+	OpOpen         RPCOp = "open"
 )
 
 // RPCResponse is the success body of every RPC: {"ok":true,"result":…}.
@@ -49,6 +50,19 @@ type KeysRequest struct {
 	Text string `json:"text,omitempty"`
 	// Frame selects the frame; default is the current mode.
 	Frame FrameKind `json:"frame,omitempty"`
+}
+
+// OpenRequest visits a workspace file in the learner's selected window
+// (the project file tree, frontend.md §9 and §10). Not in api.md §3.4: it
+// replaces the author-only eval the tree would otherwise need.
+type OpenRequest struct {
+	// Path is workspace-relative ("polyglot/docs/report.typ").
+	Path string `json:"path"`
+}
+
+// OpenResult names the buffer now shown.
+type OpenResult struct {
+	Buffer string `json:"buffer"`
 }
 
 // EvalRequest evaluates an Emacs Lisp form in the daemon (author mode,
@@ -260,4 +274,5 @@ var RPCSpecs = []RPCSpec{
 	{Op: OpStatus, Request: Empty{}, Result: StatusResult{}, Idempotent: true},
 	{Op: OpDescribe, Request: DescribeRequest{}, Result: DescribeResult{}, Idempotent: true},
 	{Op: OpDropStep, Request: DropStepRequest{}, Result: Empty{}, Idempotent: true, Internal: true},
+	{Op: OpOpen, Request: OpenRequest{}, Result: OpenResult{}, Idempotent: true},
 }

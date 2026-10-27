@@ -46,6 +46,19 @@ func (a *App) securityHeaders(h http.Header) {
 			scheme = "wss"
 		}
 		wsOrigins = " " + scheme + "://" + u.Host
+		// Local mode: the loopback names are interchangeable
+		// (httpx.SameOrigin), so allow WebSockets to each of them.
+		switch strings.ToLower(u.Hostname()) {
+		case "localhost", "127.0.0.1", "::1":
+			port := u.Port()
+			if port != "" {
+				port = ":" + port
+			}
+			wsOrigins = ""
+			for _, h := range []string{"localhost", "127.0.0.1"} {
+				wsOrigins += " " + scheme + "://" + h + port
+			}
+		}
 	}
 	h.Set("Content-Security-Policy", "default-src 'self'; "+
 		"script-src 'self' 'wasm-unsafe-eval'; "+

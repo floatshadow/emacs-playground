@@ -93,6 +93,9 @@ type Options struct {
 	DaemonPolicy     *Policy
 	RespawnDelay     time.Duration
 	GUIStartTimeout  time.Duration
+	// FrameWait bounds how long a restart waits for the new terminal
+	// frame before it reports daemon-restarted (default 10 s).
+	FrameWait time.Duration
 }
 
 // Supervisor keeps Emacs, tmux and the GUI display alive (backend.md §3.3,
@@ -125,6 +128,8 @@ type Supervisor struct {
 	termSeen      chan struct{}
 	guiSeen       chan struct{}
 
+	restarting bool // RestartEmacs is running (under mu)
+
 	restartMu sync.Mutex
 	modeMu    sync.Mutex
 	ctx       context.Context
@@ -148,6 +153,9 @@ func New(opt Options) *Supervisor {
 	}
 	if opt.SnapshotInterval <= 0 {
 		opt.SnapshotInterval = SnapshotInterval
+	}
+	if opt.FrameWait <= 0 {
+		opt.FrameWait = 10 * time.Second
 	}
 	if opt.RespawnDelay <= 0 {
 		opt.RespawnDelay = 100 * time.Millisecond
@@ -394,7 +402,14 @@ func (s *Supervisor) setFrame(kind protocol.FrameKind, open bool, reason string)
 	if !open && reason == "" && time.Since(s.lastCloseAt) < 3*time.Second {
 		reason = s.lastCloseCmd
 	}
+	// The GUI frame closing while the browser shows the terminal (a switch
+	// back to the terminal, or a late report of one) is not news for the
+	// learner: no frame-closed event, only the state change.
+	silent := kind == protocol.FrameGUI && !open && s.mode != protocol.FrameGUI
 	s.mu.Unlock()
+	if silent {
+		return
+	}
 	ev := &protocol.EmacsEvent{Event: protocol.EmacsFrameOpened, Frame: kind}
 	if !open {
 		ev.Event = protocol.EmacsFrameClosed
@@ -597,25 +612,79 @@ func (s *Supervisor) LastSnapshot() *protocol.WindowSpec {
 	return &spec
 }
 
+// FlushForm saves every modified file buffer before Emacs stops (a
+// restart, sessiond's shutdown), whether or not auto-save-visited-mode is
+// on: lessons about the modified flag turn it off, and stopping the daemon
+// would otherwise lose the learner's edits. Like base's
+// auto-save-visited-predicate it never saves over a file that changed on
+// disk (a lesson reset just restored it), skips remote and read-only
+// files, and a buffer that cannot be saved without a question is left
+// alone. The value is the number of buffers saved.
+const FlushForm = `(let ((n 0))
+  (dolist (b (buffer-list) n)
+    (with-current-buffer b
+      (when (and buffer-file-name (buffer-modified-p) (not buffer-read-only)
+                 (not (file-remote-p buffer-file-name))
+                 (verify-visited-file-modtime b))
+        (condition-case nil
+            (let ((save-silently t) (inhibit-message t))
+              (basic-save-buffer)
+              (setq n (1+ n)))
+          (error nil))))))`
+
+// FlushTimeout bounds FlushForm.
+const FlushTimeout = 3 * time.Second
+
+// Flush saves modified file buffers (FlushForm) when the agent is
+// connected and Emacs responsive.
+func (s *Supervisor) Flush(ctx context.Context) {
+	if s.opt.Agent == nil || !s.opt.Agent.Connected() || s.Unresponsive() {
+		return
+	}
+	var res protocol.AgentEvalResult
+	if err := s.opt.Agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: FlushForm}, FlushTimeout, &res); err != nil {
+		s.log.Info("saving buffers before Emacs stops", "err", err)
+		return
+	}
+	if n, ok := res.Value.(float64); ok && n > 0 {
+		s.log.Info("saved modified buffers before Emacs stops", "buffers", int(n))
+	}
+}
+
 // RestartEmacs restarts the daemon with buffer restore (rpc restart-emacs,
-// module changes): snapshot, stop, start, wait for hello, re-open the
-// snapshot, respawn the terminal frame, emit daemon-restarted.
+// module changes): snapshot, save modified buffers, stop, start, wait for
+// hello, re-open the snapshot, respawn the terminal frame, emit
+// daemon-restarted.
 func (s *Supervisor) RestartEmacs(ctx context.Context, reason string) error {
 	s.restartMu.Lock()
 	defer s.restartMu.Unlock()
 	if s.ctx == nil {
 		return errors.New("supervisor not started")
 	}
+	s.mu.Lock()
+	s.restarting = true
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.restarting = false
+		s.mu.Unlock()
+	}()
 	s.emit(&protocol.EmacsEvent{Event: protocol.EmacsRestarting, Reason: reason})
 	if _, err := s.Snapshot(ctx); err != nil {
 		s.log.Info("restart without a fresh snapshot", "err", err)
 	}
+	// The snapshot re-opens files from disk: unsaved edits would be lost.
+	s.Flush(ctx)
 	s.setIntentional(true)
 	before := s.opt.Agent.HelloCount()
 	s.daemon.Stop(RestartGrace)
 	s.mu.Lock()
 	s.failed = ""
 	s.crashed = false
+	// The old daemon's client frames are gone with it; the terminal frame
+	// counts as open again once the new daemon's client reports it
+	// (WaitTerminalFrame). No event: the browser shows "restarting".
+	s.frames.Terminal = false
 	s.mu.Unlock()
 	s.daemon.Start()
 	_, err := s.waitHello(before)
@@ -642,8 +711,58 @@ func (s *Supervisor) afterRestart(reason string) {
 		}
 	}
 	s.ensureTerminalFrame()
+	// Lesson setup after a restart needs the learner's frame: before it
+	// exists, layouts would go to the daemon's invisible initial frame.
+	if !s.waitTerminalFrame(ctx, s.opt.FrameWait) {
+		s.log.Warn("the terminal frame did not come back after the restart", "waited", s.opt.FrameWait)
+	}
 	s.emit(&protocol.EmacsEvent{Event: protocol.EmacsDaemonRestarted, Reason: reason})
 }
+
+// waitTerminalFrame waits until the terminal frame is open.
+func (s *Supervisor) waitTerminalFrame(ctx context.Context, timeout time.Duration) bool {
+	s.mu.Lock()
+	open := s.frames.Terminal
+	seen := s.termSeen
+	s.mu.Unlock()
+	if open {
+		return true
+	}
+	select {
+	case <-seen:
+		return true
+	case <-time.After(timeout):
+		return false
+	case <-ctx.Done():
+		return false
+	}
+}
+
+// WaitReady waits, up to timeout, until no restart is in progress and the
+// terminal frame is open, so a lesson's setup lands in the frame the
+// learner sees (scenario loader).
+func (s *Supervisor) WaitReady(ctx context.Context, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		s.mu.Lock()
+		ok := !s.restarting && s.ready && s.frames.Terminal
+		s.mu.Unlock()
+		if ok {
+			return true
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+}
+
+// deleteGUIFramesForm deletes every X frame of the daemon (the GUI frame).
+const deleteGUIFramesForm = `(progn (dolist (f (frame-list)) (when (eq (framep f) 'x) (delete-frame f t))) nil)`
 
 // SetMode switches the frame shown to the browser (rpc mode, architecture.md
 // §3.5).
@@ -698,6 +817,17 @@ func (s *Supervisor) SetMode(ctx context.Context, mode protocol.FrameKind) (prot
 	if mode == protocol.FrameTerminal {
 		if s.gui != nil {
 			s.gui.Stop(2 * time.Second)
+		}
+		// Delete the GUI frames inside Emacs before the display goes away:
+		// killing emacsclient deletes its frame only when the server's
+		// sentinel runs, and an X connection that drops first leaves
+		// "Connection lost to X server" in the terminal frame.
+		if s.opt.Agent != nil && s.opt.Agent.Connected() {
+			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+			if err := s.opt.Agent.Call(cctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: deleteGUIFramesForm}, 2*time.Second, nil); err != nil {
+				s.log.Warn("deleting the GUI frame before stopping the display", "err", err)
+			}
+			cancel()
 		}
 		if s.xvnc != nil {
 			s.xvnc.Stop(2 * time.Second)

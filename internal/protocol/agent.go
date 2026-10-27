@@ -187,6 +187,18 @@ type AgentSetupArgs struct {
 	// Workspace is the absolute workspace root (/work) so the agent can
 	// resolve relative paths.
 	Workspace string `json:"workspace"`
+	// Reset is true when the fixtures were extracted afresh (setup.reset or
+	// a reset request): the agent then clears the desk before opening, by
+	// killing the unmodified buffers a lesson's keys could trip over
+	// (other workspace files, Dired and buffer lists with stale marks,
+	// stray empty buffers made by C-x b with a new name). Modified buffers
+	// are kept. With Root, the agent also forgets the cursor positions
+	// save-place kept for files under it, so a replayed lesson opens its
+	// files at the top rather than where the last attempt left them.
+	Reset bool `json:"reset,omitempty"`
+	// Root is the workspace-relative directory the fixtures were extracted
+	// to (setup.root, e.g. "hello"); empty when the scenario has none.
+	Root string `json:"root,omitempty"`
 }
 
 // WindowSpec is the buffer and window spec saved with each checkpoint and

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -129,6 +130,12 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 			return agentError(cerr)
 		}
 		res = d
+	case protocol.OpOpen:
+		var req protocol.OpenRequest
+		if err := httpx.DecodeJSON(w, r, &req); err != nil {
+			return err
+		}
+		res, err = s.rpcOpen(ctx, req)
 	case protocol.OpDropStep:
 		var req protocol.DropStepRequest
 		if err := httpx.DecodeJSON(w, r, &req); err != nil {
@@ -219,6 +226,45 @@ func (s *Server) rpcEval(ctx context.Context, req protocol.EvalRequest) (any, er
 		out.Value = json.RawMessage("null")
 	}
 	return protocol.EvalResult{Value: out.Value}, nil
+}
+
+// rpcOpen visits a workspace file in the learner's window. The form is
+// built here from a path checked to stay inside the workspace, so it is
+// available without author mode (unlike eval).
+func (s *Server) rpcOpen(ctx context.Context, req protocol.OpenRequest) (any, error) {
+	rel := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(req.Path, "/")))
+	if req.Path == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || strings.ContainsRune(rel, 0) {
+		return nil, httpx.BadRequest("path must be a workspace-relative file")
+	}
+	root, err := os.OpenRoot(s.cfg.Workspace)
+	if err != nil {
+		return nil, httpx.Internal("workspace unavailable").Wrap(err)
+	}
+	defer root.Close()
+	st, err := root.Stat(rel)
+	if err != nil {
+		return nil, httpx.NotFound("no such file in the workspace: " + rel)
+	}
+	if st.IsDir() {
+		return nil, httpx.BadRequest("path is a directory")
+	}
+	abs := filepath.Join(s.cfg.Workspace, filepath.FromSlash(rel))
+	form := "(progn (find-file " + elispString(abs) + ") (buffer-name))"
+	var out struct {
+		Value json.RawMessage `json:"value"`
+	}
+	if err := s.agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: form}, agent.DefaultTimeout, &out); err != nil {
+		return nil, agentError(err)
+	}
+	var name string
+	_ = json.Unmarshal(out.Value, &name)
+	return protocol.OpenResult{Buffer: name}, nil
+}
+
+// elispString quotes s as an Emacs Lisp string literal.
+func elispString(s string) string {
+	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
+	return `"` + r.Replace(s) + `"`
 }
 
 func (s *Server) rpcRescue(ctx context.Context) (any, error) {

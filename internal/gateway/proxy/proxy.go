@@ -51,8 +51,8 @@ type Proxy struct {
 }
 
 type cached struct {
-	target string
-	rp     *httputil.ReverseProxy
+	target, secret string
+	rp             *httputil.ReverseProxy
 }
 
 // New returns the proxy.
@@ -174,10 +174,10 @@ func (p *Proxy) releaseWS(userID string) {
 
 // proxyFor returns the cached ReverseProxy for the session's endpoint.
 func (p *Proxy) proxyFor(sess *sessions.Session) *httputil.ReverseProxy {
-	target := sess.Endpoint.String()
+	target, secret := sess.Endpoint.String(), sess.ProxySecret
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if c := p.proxies[sess.ID]; c != nil && c.target == target {
+	if c := p.proxies[sess.ID]; c != nil && c.target == target && c.secret == secret {
 		return c.rp
 	}
 	endpoint := *sess.Endpoint
@@ -190,6 +190,10 @@ func (p *Proxy) proxyFor(sess *sessions.Session) *httputil.ReverseProxy {
 			h.Del("Cookie")
 			h.Del("Authorization")
 			h.Del(protocol.HeaderUser)
+			h.Del(protocol.HeaderProxySecret)
+			if secret != "" {
+				h.Set(protocol.HeaderProxySecret, secret)
+			}
 			if info, ok := pr.In.Context().Value(infoKey{}).(reqInfo); ok {
 				h.Set(protocol.HeaderUser, info.userID)
 			}
@@ -209,7 +213,7 @@ func (p *Proxy) proxyFor(sess *sessions.Session) *httputil.ReverseProxy {
 			httpx.WriteError(w, r, httpx.SessionUnavailable("the session did not answer").Wrap(err))
 		},
 	}
-	p.proxies[sess.ID] = &cached{target: target, rp: rp}
+	p.proxies[sess.ID] = &cached{target: target, secret: secret, rp: rp}
 	return rp
 }
 

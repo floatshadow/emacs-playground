@@ -46,6 +46,38 @@ var predicateOps = map[string]bool{
 	"exists": true, "contains": true, "regex": true,
 }
 
+// ExitSession is the virtual root "session" that exit-table rows (and only
+// they) may use (frontend.md §6, the header of curriculum/tables/exits.yaml).
+// These facts live in the event stream rather than in the agent's State, so
+// the browser adds them to the document before evaluating the rows:
+// "session.prefix", "session.emacs", "session.mode", "session.echo".
+// Step conditions are evaluated by sessiond and cannot use it.
+type ExitSession struct {
+	// Pending prefix from the input tap ("C-x", "C-x r"), null when none.
+	Prefix *string `json:"prefix"`
+	// Supervisor condition still current: "frame-closed", "suspended",
+	// "restarting", "unresponsive", or null.
+	Emacs *string `json:"emacs"`
+	// Frame the browser shows: "terminal" or "gui".
+	Mode FrameKind `json:"mode"`
+	// Latest echo text until the next key event, or null.
+	Echo *string `json:"echo"`
+}
+
+// ExitSessionRoot is the name of the virtual root ExitSession is stored under.
+const ExitSessionRoot = "session"
+
+// ExitDoc is StateDoc plus the virtual root "session" (ExitSession), the
+// document exit rows evaluate against.
+func ExitDoc(s *State, sess ExitSession) map[string]any {
+	doc := StateDoc(s)
+	b, _ := json.Marshal(sess)
+	var m map[string]any
+	_ = json.Unmarshal(b, &m)
+	doc[ExitSessionRoot] = m
+	return doc
+}
+
 // ValidatePredicate checks operator objects and regular expressions.
 func ValidatePredicate(p Predicate) error {
 	for path, want := range p {

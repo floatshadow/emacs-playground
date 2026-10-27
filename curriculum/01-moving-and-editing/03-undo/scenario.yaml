@@ -56,7 +56,10 @@ steps:
   - id: redo
     goal: Undo, then redo
     detail: "`C-g` deactivates the region. `C-/` undoes the last change (Tuesday goes away again); `C-M-_` (or `C-?` with a full keyboard) redoes it. Undo in Emacs is itself undoable, so nothing you typed is ever out of reach."
-    demo: "C-g ~300 C-/ ~600 C-M-_"
+    # The pause keeps the C-g clear of the refontification 0.5 s after the
+    # previous step's undo: a C-g read during redisplay is lost (emacs.md
+    # §10.4), and C-/ then only says "No further undo information for region".
+    demo: "~1000 C-g ~300 C-/ ~600 C-M-_"
     conditions:
       - text: undo-redo was used
         any:
@@ -67,7 +70,7 @@ steps:
         hint: "C-M-_ is Control Alt underscore (Esc then C-_ also works). C-? does the same where the terminal can send it."
       - text: Tuesday and Thursday are both there
         elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/journal.md") (save-excursion (goto-char (point-min)) (and (search-forward "Pressed it a lot" nil t) (search-forward "## Thursday" nil t))))'
-        hint: "If Tuesday is missing, redo once more with C-M-_."
+        hint: "If Tuesday is missing, press C-g so no region is highlighted (the bottom line said No further undo information for region if one was), then C-M-_ once more."
   - id: vundo
     goal: Look at the history as a tree
     detail: "`C-x u` opens vundo: every state of the buffer is a node; `b` and `f` walk back and forward, `RET` keeps the state you are on, `q` quits where you started."

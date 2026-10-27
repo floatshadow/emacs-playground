@@ -20,7 +20,7 @@ A half-typed key sequence waits too. Press `C-x` and stop: the echo area shows *
 
 ## An extra window
 
-Some commands show their result in a second window without moving your cursor there. :try[C-x C-b], the buffer list, is the classic: suddenly the screen is split. `C-x 1` keeps only the window you are in. Nothing is closed; the list is still a buffer, just not shown.
+Some commands show their result in a second window without moving your cursor there. :try[C-x C-b], the buffer list, is the classic: suddenly the screen is split. `C-x 1` keeps only the window you are in. Nothing is closed; the list is still a buffer, just not shown. Inside a list like this one, `q` closes it too. (Once Part 2 turns on the files module, `C-x C-b` opens ibuffer, which takes over the current window; `q` closes it the same way.)
 
 ## The wrong buffer
 

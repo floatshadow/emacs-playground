@@ -35,14 +35,24 @@ const whereMemo = memoLast(
     prefix: string | null,
     overlay: LiveContext['overlay'],
     busy: boolean,
-  ) => whereAmI(state, exits, { prefix, overlay, busy }),
+    mode: 'terminal' | 'gui',
+    echo: string | null,
+  ) => whereAmI(state, exits, { prefix, overlay, busy, mode, echo }),
 )
 
 export function selectWhereAmI(
-  s: Pick<SessionData, 'state' | 'tables' | 'prefix' | 'emacs'>,
+  s: Pick<SessionData, 'state' | 'tables' | 'prefix' | 'emacs' | 'mode' | 'echoLive'>,
 ): WhereAmIView | null {
   if (!s.state) return null
-  return whereMemo(s.state, s.tables.exits, s.prefix, s.emacs.overlay, s.emacs.busy)
+  return whereMemo(
+    s.state,
+    s.tables.exits,
+    s.prefix,
+    s.emacs.overlay,
+    s.emacs.busy,
+    s.mode,
+    s.echoLive,
+  )
 }
 
 /** Habit cards, pattern nudges and server nudges merged, minus dismissed ones. */

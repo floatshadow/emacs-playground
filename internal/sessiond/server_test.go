@@ -497,6 +497,15 @@ func TestServerFakeMode(t *testing.T) {
 	if ts.rpc("eval", protocol.EvalRequest{Form: "(+ 1 2)"}, nil) != 403 {
 		t.Fatal("eval outside author mode")
 	}
+	// open: workspace-relative files only, no author mode needed.
+	if ts.rpc("open", protocol.OpenRequest{Path: "hello/README.md"}, &protocol.OpenResult{}) != 200 {
+		t.Fatal("open a workspace file")
+	}
+	for path, want := range map[string]int{"../etc/passwd": 400, "": 400, "hello": 400, "hello/nope.txt": 404} {
+		if got := ts.rpc("open", protocol.OpenRequest{Path: path}, nil); got != want {
+			t.Fatalf("open %q: %d, want %d", path, got, want)
+		}
+	}
 	var dr protocol.DescribeResult
 	if ts.rpc("describe", protocol.DescribeRequest{Keys: "C-x C-f"}, &dr) != 200 {
 		t.Fatal("describe")
@@ -667,5 +676,68 @@ func TestSplitStepRef(t *testing.T) {
 	}
 	if _, _, ok := splitStepRef("refs/playground/manual/x"); ok {
 		t.Error("manual ref is not a step ref")
+	}
+}
+
+func TestElispString(t *testing.T) {
+	for in, want := range map[string]string{
+		"/work/a.md":     `"/work/a.md"`,
+		`/work/q"uote`:   `"/work/q\"uote"`,
+		`/work/back\sl`:  `"/work/back\\sl"`,
+		"/work/ünï cödé": `"/work/ünï cödé"`,
+	} {
+		if got := elispString(in); got != want {
+			t.Errorf("elispString(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
+func TestProxyAuth(t *testing.T) {
+	var seen []string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path+" "+r.Header.Get(protocol.HeaderProxySecret))
+		w.WriteHeader(200)
+	})
+	h := ProxyAuth("s3cret")(next)
+	for _, c := range []struct {
+		method, path, secret string
+		want                 int
+	}{
+		{"GET", "/healthz", "", 200},
+		{"HEAD", "/healthz", "", 200},
+		{"GET", "/status", "", 401},
+		{"GET", "/status", "wrong", 401},
+		{"GET", "/status", "s3cret", 200},
+		{"POST", "/rpc/keys", "", 401},
+		{"POST", "/rpc/drop-step", "s3cre", 401},
+		{"POST", "/rpc/keys", "s3cret", 200},
+		{"GET", "/pty", "", 401},
+		{"GET", "/preview/hello/README.md", "", 401},
+		{"POST", "/healthz", "", 401},
+	} {
+		req := httptest.NewRequest(c.method, c.path, nil)
+		if c.secret != "" {
+			req.Header.Set(protocol.HeaderProxySecret, c.secret)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != c.want {
+			t.Errorf("%s %s secret %q: %d, want %d", c.method, c.path, c.secret, rec.Code, c.want)
+		}
+		if c.want == 401 && !strings.Contains(rec.Body.String(), "unauthenticated") {
+			t.Errorf("%s %s: body %s", c.method, c.path, rec.Body)
+		}
+	}
+	// The secret is not passed on to the handlers.
+	for _, s := range seen {
+		if strings.HasSuffix(s, "s3cret") {
+			t.Errorf("handler saw the secret: %s", s)
+		}
+	}
+	// No secret configured: everything passes (local mode).
+	rec := httptest.NewRecorder()
+	ProxyAuth("")(next).ServeHTTP(rec, httptest.NewRequest("POST", "/rpc/keys", nil))
+	if rec.Code != 200 {
+		t.Fatalf("without a secret: %d", rec.Code)
 	}
 }

@@ -134,6 +134,13 @@
       create-lockfiles nil
       require-final-newline t)
 (auto-save-visited-mode 1)
+;; Never auto-save over a file that changed on disk since it was visited
+;; (a lesson reset, git, a formatter): `basic-save-buffer' would ask
+;; "changed since visited or saved.  Save anyway?" from a timer.
+;; Unmodified buffers follow the file (global-auto-revert-mode below); a
+;; modified one keeps its edits until you save or revert it yourself.
+(setq auto-save-visited-predicate
+      (lambda () (verify-visited-file-modtime (current-buffer))))
 
 (defun playground--quiet-auto-save (orig &optional arg pred)
   "Around advice for `save-some-buffers' (ORIG with ARG and PRED).

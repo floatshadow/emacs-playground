@@ -10,11 +10,14 @@ flowchart TB
     C[Caddy]
     G[gateway :8080]
   end
-  subgraph net_sessions [network: sessions, internal]
+  subgraph net_abc [network: pg-net-abc, internal]
     G2[gateway]
     S1[session-abc :7000]
-    S2[session-def :7000]
     R1[remote-box-abc :22]
+  end
+  subgraph net_def [network: pg-net-def, internal]
+    G4[gateway]
+    S2[session-def :7000]
     R2[remote-box-def :22]
   end
   subgraph net_docker [network: docker]
@@ -27,7 +30,7 @@ flowchart TB
   C --> G
 ```
 
-The gateway is the only component on more than one network. Session containers can reach the gateway (for fixtures and progress reporting) and their own remote box; they cannot reach each other or the Docker socket. In local mode there is one session container started by Compose and no proxy or Caddy.
+The gateway is the only component on more than one network. Every session has its own internal network (`pg-net-<id>`, deployment.md §7) that only the gateway, the session and its remote box join, so session containers can reach the gateway (for fixtures and progress reporting) and their own remote box; they cannot reach each other or the Docker socket. sessiond also answers only requests that carry its session's proxy secret, which the gateway adds (deployment.md §9.3), so a learner who reached another session's port would still be refused. In local mode there is one session container started by Compose on the shared `sessions` network, no proxy secret, and no socket proxy or Caddy.
 
 Inside a session container the process tree is:
 
@@ -101,7 +104,7 @@ The browser never evaluates conditions. It renders the latest `check` and select
 1. sessiond fetches the scenario JSON and the fixture tarball for the lesson from the gateway (`GET /internal/curriculum/...`, cached under `/work/.playground/cache`).
 2. If the scenario's `modules` differ from the current set, it writes `modules.el` and restarts the Emacs daemon with buffers restored (see §5.2).
 3. It extracts fixtures into `/work/<root>` without overwriting learner files unless `setup.reset: true`.
-4. It asks the agent to run `setup.open`, `setup.layout`, `setup.eval`.
+4. It asks the agent to run `setup.open`, `setup.layout`, `setup.eval`. After a reset extraction the agent first kills unmodified leftover buffers and forgets the cursor positions save-place kept for files under the root, so a replayed lesson starts at the top of its files.
 5. It records a checkpoint `refs/playground/<lesson>/<step>` and emits `step {status: loaded}`.
 
 ### 3.4 Rescue and reset

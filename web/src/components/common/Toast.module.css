@@ -1,6 +1,9 @@
+/* Under the top bar, over the screen pane's caption: at the bottom (the
+   demo's place) toasts covered the key ticker right when Rescue and Reset
+   add their entries to it. */
 .region {
   position: fixed;
-  bottom: 18px;
+  top: calc(var(--topbar-height) + 6px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 50;
@@ -41,7 +44,7 @@
 }
 @keyframes rise {
   from {
-    transform: translateY(6px);
+    transform: translateY(-6px);
     opacity: 0;
   }
 }

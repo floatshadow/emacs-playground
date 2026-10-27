@@ -521,6 +521,18 @@ export async function startFakeSession(opts: FakeOptions) {
         if (typeof b['text'] === 'string') feed(textToKeys(b['text'] as string))
         return {}
       }
+      case 'open': {
+        const path = String(b['path'] ?? '').replace(/^\/+/, '')
+        const buf = eng.visit(path)
+        if (!buf)
+          throw Object.assign(new Error('no such file in the workspace: ' + path), {
+            status: 404,
+            code: 'not_found',
+          })
+        eng.show(buf.name)
+        afterInput()
+        return { buffer: buf.name }
+      }
       case 'eval': {
         const form = String(b['form'] ?? '')
         const m = /\(find-file "((?:[^"\\]|\\.)*)"\)/.exec(form)

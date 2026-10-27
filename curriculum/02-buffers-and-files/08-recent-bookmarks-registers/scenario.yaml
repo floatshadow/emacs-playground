@@ -25,8 +25,8 @@ setup:
 steps:
   - id: recent
     goal: Reopen notes/todo.md from the recent files
-    detail: "`C-x C-r` lists files you opened recently, newest first, even after a restart. Type the start of the path, `/work/projects/n`, press `TAB` to complete it, then `RET`."
-    demo: 'C-x C-r ~600 "/work/projects/n" ~300 TAB ~400 RET'
+    detail: "`C-x C-r` lists files you opened recently, newest first, even after a restart. Type the start of the path, `/work/projects/notes/to`, press `TAB` to complete it, then `RET`."
+    demo: 'C-x C-r ~600 "/work/projects/notes/to" ~300 TAB ~400 RET'
     conditions:
       - text: C-x C-r was used
         any:
@@ -61,8 +61,8 @@ steps:
         hint: "The last jump goes to the README.md of polyglot."
   - id: list
     goal: Jump to main.rs from the bookmark list
-    detail: "`C-x r l` lists every bookmark. Move to the *main* line (`C-s main RET` gets there) and press `RET` to jump. `q` would leave the list instead."
-    demo: 'C-x r l ~800 C-s ~300 "main" RET ~300 RET'
+    detail: "`C-x r l` lists every bookmark, with its file. Move to the *main* line (`C-s main SPC RET` gets there: the space skips file names such as main.rs) and press `RET` to jump. `q` would leave the list instead."
+    demo: 'C-x r l ~800 C-s ~300 "main " RET ~300 RET'
     conditions:
       - text: the bookmark list was opened
         event: { command: bookmark-bmenu-list }

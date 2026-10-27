@@ -2,10 +2,13 @@ package sessions
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/zsy/emacs-playground/internal/docker"
@@ -21,7 +24,10 @@ type Limits struct {
 
 // Spec describes a session to create (backend.md §2.3).
 type Spec struct {
-	ID, UserID, Token  string
+	ID, UserID, Token string
+	// ProxySecret is required by sessiond on every request but /healthz
+	// (PG_PROXY_SECRET).
+	ProxySecret        string
 	Image, RemoteImage string
 	Limits             Limits
 	Network            string
@@ -64,6 +70,18 @@ type Backend interface {
 	List(ctx context.Context) ([]Handle, error)
 	// Endpoint is sessiond's base URL (http://pg-session-<id>:7000).
 	Endpoint(h Handle) *url.URL
+}
+
+// Networker is implemented by backends that give every session its own
+// network (DockerBackend with Isolate).
+type Networker interface {
+	// Attach joins the gateway to a running session's network again (a new
+	// gateway container after an upgrade; registry rebuild).
+	Attach(ctx context.Context, h Handle) error
+	// Prune removes the session networks of sessions for which keep
+	// (called after listing, so a session created meanwhile is kept)
+	// returns false.
+	Prune(ctx context.Context, keep func(id string) bool) error
 }
 
 // ---- static -----------------------------------------------------------------
@@ -134,6 +152,169 @@ type DockerBackend struct {
 	Port int
 	// EndpointFor overrides Endpoint (tests).
 	EndpointFor func(h Handle) *url.URL
+
+	// Isolate gives every session its own bridge network, NetworkName(id),
+	// instead of Spec.Network: the session container is its only member
+	// besides the gateway, which joins it under GatewayAlias, so sessions
+	// cannot reach each other (architecture.md §1, deployment.md §9.1).
+	Isolate bool
+	// Gateway is the gateway's own container (name, id or id prefix).
+	Gateway string
+	// GatewayAlias is the gateway's DNS name on session networks, default
+	// "gateway" (PG_GATEWAY_URL).
+	GatewayAlias string
+	// Internal makes session networks internal: no route out of the host
+	// (sessions.egress none and registries).
+	// TODO(gateway, deployment.md §9.2): with egress registries, connect the
+	// egress proxy to each session network as the remote box will be
+	// (TODO(gateway, deployment.md §6) in Create).
+	Internal bool
+	// SubnetPool is where session networks take their /28 subnets; the
+	// zero value lets the daemon choose from its default-address-pools.
+	SubnetPool netip.Prefix
+
+	netMu sync.Mutex
+}
+
+// NetworkName is a session's own network (DockerBackend.Isolate).
+func NetworkName(id string) string { return "pg-net-" + id }
+
+// SessionSubnetBits is the size of a session network: /28, 14 addresses
+// for the session, the gateway and later the remote box and egress proxy.
+const SessionSubnetBits = 28
+
+func (b *DockerBackend) gatewayAlias() string {
+	if b.GatewayAlias == "" {
+		return "gateway"
+	}
+	return b.GatewayAlias
+}
+
+// ensureNetwork creates the session's network (reusing one left behind)
+// and attaches the gateway to it.
+func (b *DockerBackend) ensureNetwork(ctx context.Context, id, userID string) (string, error) {
+	if b.Gateway == "" {
+		return "", errors.New("sessions: per-session networks need the gateway's container (sessions.gatewayContainer)")
+	}
+	name := NetworkName(id)
+	b.netMu.Lock()
+	defer b.netMu.Unlock()
+	taken := map[netip.Prefix]bool{}
+	for attempt := 0; ; attempt++ {
+		subnet, err := b.freeSubnet(ctx, taken)
+		if err != nil {
+			return "", err
+		}
+		_, err = b.Client.CreateNetwork(ctx, docker.NetworkSpec{
+			Name: name, Internal: b.Internal, Subnet: subnet,
+			Labels: map[string]string{
+				docker.LabelRole:    docker.RoleNetwork,
+				docker.LabelSession: id,
+				docker.LabelUser:    userID,
+				docker.LabelVersion: b.Version,
+			},
+		})
+		if err == nil || errors.Is(err, docker.ErrConflict) {
+			break
+		}
+		// Taken since the list (another daemon user): try the next one.
+		if errors.Is(err, docker.ErrSubnetTaken) && subnet.IsValid() && attempt < 16 {
+			taken[subnet] = true
+			continue
+		}
+		return "", err
+	}
+	if err := b.Client.ConnectNetwork(ctx, name, b.Gateway, []string{b.gatewayAlias()}); err != nil {
+		_ = b.Client.RemoveNetwork(context.WithoutCancel(ctx), name)
+		return "", fmt.Errorf("sessions: attaching the gateway (%s) to %s: %w", b.Gateway, name, err)
+	}
+	return name, nil
+}
+
+// freeSubnet returns the first /28 of SubnetPool that overlaps no existing
+// network and is not in taken; the zero prefix without a pool.
+func (b *DockerBackend) freeSubnet(ctx context.Context, taken map[netip.Prefix]bool) (netip.Prefix, error) {
+	pool := b.SubnetPool
+	if !pool.IsValid() {
+		return netip.Prefix{}, nil
+	}
+	if !pool.Addr().Is4() || pool.Bits() > SessionSubnetBits {
+		return netip.Prefix{}, fmt.Errorf("sessions: sessions.subnetPool %s is not an IPv4 range of /%d or larger", pool, SessionSubnetBits)
+	}
+	nets, err := b.Client.ListNetworks(ctx, nil)
+	if err != nil {
+		return netip.Prefix{}, err
+	}
+	var used []netip.Prefix
+	for _, n := range nets {
+		used = append(used, n.Subnets...)
+	}
+	pool = pool.Masked()
+	base := pool.Addr().As4()
+	start := binary.BigEndian.Uint32(base[:])
+	count := uint32(1) << (SessionSubnetBits - pool.Bits())
+	step := uint32(1) << (32 - SessionSubnetBits)
+next:
+	for i := uint32(0); i < count; i++ {
+		var a [4]byte
+		binary.BigEndian.PutUint32(a[:], start+i*step)
+		p := netip.PrefixFrom(netip.AddrFrom4(a), SessionSubnetBits)
+		if taken[p] {
+			continue
+		}
+		for _, u := range used {
+			if u.Overlaps(p) {
+				continue next
+			}
+		}
+		return p, nil
+	}
+	return netip.Prefix{}, fmt.Errorf("sessions: no free /%d left in sessions.subnetPool %s", SessionSubnetBits, b.SubnetPool)
+}
+
+// removeNetwork detaches the gateway and removes the session's network;
+// best effort (Prune retries leftovers).
+func (b *DockerBackend) removeNetwork(ctx context.Context, id string) error {
+	name := NetworkName(id)
+	if b.Gateway != "" {
+		if err := b.Client.DisconnectNetwork(ctx, name, b.Gateway); err != nil && !errors.Is(err, docker.ErrNotFound) {
+			return err
+		}
+	}
+	if err := b.Client.RemoveNetwork(ctx, name); err != nil && !errors.Is(err, docker.ErrNotFound) {
+		return err
+	}
+	return nil
+}
+
+// Attach implements Networker.
+func (b *DockerBackend) Attach(ctx context.Context, h Handle) error {
+	if !b.Isolate || b.Gateway == "" {
+		return nil
+	}
+	return b.Client.ConnectNetwork(ctx, NetworkName(h.ID), b.Gateway, []string{b.gatewayAlias()})
+}
+
+// Prune implements Networker: session networks (by label) of sessions keep
+// rejects are removed.
+func (b *DockerBackend) Prune(ctx context.Context, keep func(id string) bool) error {
+	b.netMu.Lock()
+	defer b.netMu.Unlock()
+	nets, err := b.Client.ListNetworks(ctx, map[string]string{docker.LabelRole: docker.RoleNetwork})
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, n := range nets {
+		id := n.Labels[docker.LabelSession]
+		if id == "" || n.Name != NetworkName(id) || keep(id) {
+			continue
+		}
+		if err := b.removeNetwork(ctx, id); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // Extra labels beyond deployment.md §2.
@@ -161,6 +342,9 @@ func (b *DockerBackend) Create(ctx context.Context, spec Spec) (Handle, error) {
 	}
 	env["PG_SESSION_ID"] = spec.ID
 	env["PG_SESSION_TOKEN"] = spec.Token
+	if spec.ProxySecret != "" {
+		env["PG_PROXY_SECRET"] = spec.ProxySecret
+	}
 	cs := docker.ContainerSpec{
 		Name:     ContainerName(spec.ID),
 		Hostname: ContainerName(spec.ID),
@@ -182,8 +366,18 @@ func (b *DockerBackend) Create(ctx context.Context, spec Spec) (Handle, error) {
 		PidsLimit: spec.Limits.Pids,
 	}
 	docker.Harden(&cs)
+	if b.Isolate {
+		net, err := b.ensureNetwork(ctx, spec.ID, spec.UserID)
+		if err != nil {
+			return h, err
+		}
+		cs.Network = net
+	}
 	id, err := b.Client.CreateContainer(ctx, cs)
 	if err != nil {
+		if b.Isolate {
+			_ = b.removeNetwork(context.WithoutCancel(ctx), spec.ID)
+		}
 		return h, err
 	}
 	h.ContainerID = id
@@ -209,6 +403,11 @@ func (b *DockerBackend) Remove(ctx context.Context, h Handle, keepVolume bool) e
 		if err := b.Client.RemoveContainer(ctx, h.ContainerID, true); err != nil && !errors.Is(err, docker.ErrNotFound) {
 			return err
 		}
+	}
+	if b.Isolate && h.ID != "" {
+		// Best effort: a network left behind is reused by the next Create
+		// and removed by Prune.
+		_ = b.removeNetwork(ctx, h.ID)
 	}
 	if !keepVolume && h.Volume != "" {
 		if err := b.Client.RemoveVolume(ctx, h.Volume); err != nil && !errors.Is(err, docker.ErrNotFound) {

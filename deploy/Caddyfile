@@ -1,4 +1,7 @@
 {$DOMAIN} {
 	encode zstd gzip
+	# sessiond → gateway calls use the sessions network only (api.md §2.6);
+	# the gateway also refuses /internal requests that carry forwarding headers.
+	respond /internal/* 404
 	reverse_proxy gateway:8080
 }

@@ -104,6 +104,30 @@ func TestOriginCheck(t *testing.T) {
 	}
 }
 
+func TestSameOriginLoopback(t *testing.T) {
+	cases := []struct {
+		public, origin string
+		want           bool
+	}{
+		{"http://localhost:8080", "http://localhost:8080", true},
+		{"http://localhost:8080", "http://127.0.0.1:8080", true},
+		{"http://127.0.0.1:8080", "http://localhost:8080", true},
+		{"http://localhost:8080", "http://[::1]:8080", true},
+		{"http://localhost:8080", "http://127.0.0.1:9090", false},
+		{"http://localhost:8080", "https://127.0.0.1:8080", false},
+		{"http://localhost", "http://127.0.0.1:80", true},
+		{"http://localhost:8080", "http://evil.example:8080", false},
+		{"https://emacs.example.edu", "https://127.0.0.1", false},
+	}
+	for _, c := range cases {
+		r := httptest.NewRequest("POST", "/api/v1/sessions", nil)
+		r.Header.Set("Origin", c.origin)
+		if got := SameOrigin(r, c.public); got != c.want {
+			t.Errorf("SameOrigin(public %s, origin %s) = %v, want %v", c.public, c.origin, got, c.want)
+		}
+	}
+}
+
 func TestMiddlewareAndWebSocket(t *testing.T) {
 	l := slog.New(slog.NewTextHandler(io.Discard, nil))
 	mux := http.NewServeMux()

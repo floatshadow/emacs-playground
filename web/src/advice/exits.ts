@@ -8,7 +8,7 @@
  * cannot know: a pending prefix (from the input tap) and supervisor events
  * (frame closed, Emacs suspended). They are listed first, as in the demo.
  */
-import type { ExitRow, State } from '../protocol.gen'
+import type { ExitRow, ExitSession, State } from '../protocol.gen'
 import { expandTemplate, matchPredicate, stateDoc } from './predicate'
 
 export interface ExitView {
@@ -31,9 +31,31 @@ export interface WhereAmIView {
   exits: ExitView[]
 }
 
+/**
+ * The virtual root "session" (protocol.ExitSession, frontend.md §6): facts
+ * from the event stream that the State object does not carry.
+ */
+export function exitSession(ctx: LiveContext): ExitSession {
+  let emacs: string | null = null
+  if (ctx.overlay === 'frame-closed' || ctx.overlay === 'suspended' || ctx.overlay === 'restarting')
+    emacs = ctx.overlay
+  else if (ctx.busy) emacs = 'unresponsive'
+  return {
+    prefix: ctx.prefix || null,
+    emacs,
+    mode: ctx.mode ?? 'terminal',
+    echo: ctx.echo ?? null,
+  }
+}
+
 /** Evaluates exit rows in order; rows with invalid predicates never match. */
-export function evaluateExits(state: State, rows: readonly ExitRow[]): ExitView[] {
+export function evaluateExits(
+  state: State,
+  rows: readonly ExitRow[],
+  session?: ExitSession,
+): ExitView[] {
   const doc = stateDoc(state)
+  doc['session'] = session ?? exitSession({ prefix: null, overlay: null })
   const out: ExitView[] = []
   for (const row of rows) {
     let ok = false
@@ -87,6 +109,22 @@ export interface LiveContext {
   /** Supervisor overlay, if any. */
   overlay: 'frame-closed' | 'suspended' | 'restarting' | 'stopping' | null
   busy?: boolean
+  /** Frame the browser shows. */
+  mode?: 'terminal' | 'gui'
+  /** Latest echo text until the next key event. */
+  echo?: string | null
+}
+
+/** session.* fields the exits table already covers (so live rows step aside). */
+function coveredSessionFields(rows: readonly ExitRow[]): Set<string> {
+  const out = new Set<string>()
+  for (const r of rows) {
+    for (const path of Object.keys(r.when ?? {})) {
+      const [root, field] = path.split('.')
+      if (root === 'session' && field) out.add(field)
+    }
+  }
+  return out
 }
 
 /** Live rows the State object cannot express (ported from the demo's whereAmI). */
@@ -137,7 +175,14 @@ export function whereAmI(
   rows: readonly ExitRow[],
   ctx: LiveContext = { prefix: null, overlay: null },
 ): WhereAmIView {
-  const exits = [...liveExits(ctx), ...evaluateExits(state, rows)]
+  // The table's session.* rows (curriculum/tables/exits.yaml) replace the
+  // built-in live rows for the same facts; the live rows remain a fallback
+  // for tables without them (for example the demo defaults).
+  const covered = coveredSessionFields(rows)
+  const live = liveExits(ctx).filter((e) =>
+    e.id === 'live:prefix' ? !covered.has('prefix') : !covered.has('emacs'),
+  )
+  const exits = [...live, ...evaluateExits(state, rows, exitSession(ctx))]
   const flags: string[] = []
   for (const e of exits) if (e.flag && !flags.includes(e.flag)) flags.push(e.flag)
   if (state.markActive && !flags.includes('region active')) flags.push('region active')

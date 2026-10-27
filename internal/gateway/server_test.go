@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -37,6 +38,17 @@ type sessiondFake struct {
 	mu   sync.Mutex
 	rpcs []string
 	srv  *httptest.Server
+	// secret, when set, is required in X-Playground-Proxy like sessiond
+	// with PG_PROXY_SECRET (all but /healthz).
+	secret string
+	// denied counts requests refused for a missing or wrong secret.
+	denied int
+}
+
+func (f *sessiondFake) requireSecret(s string) {
+	f.mu.Lock()
+	f.secret = s
+	f.mu.Unlock()
 }
 
 func newSessiondFake(t *testing.T) *sessiondFake {
@@ -76,7 +88,20 @@ func newSessiondFake(t *testing.T) *sessiondFake {
 		_ = httpx.WriteJSONText(r.Context(), c, map[string]any{"t": "hello", "protocol": 1}, time.Second)
 		_, _, _ = c.Read(r.Context())
 	})
-	f.srv = httptest.NewServer(mux)
+	f.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.mu.Lock()
+		secret := f.secret
+		bad := secret != "" && r.URL.Path != "/healthz" && r.Header.Get(protocol.HeaderProxySecret) != secret
+		if bad {
+			f.denied++
+		}
+		f.mu.Unlock()
+		if bad {
+			httpx.WriteError(w, r, httpx.Unauthenticated("no proxy secret"))
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
 	t.Cleanup(f.srv.Close)
 	return f
 }
@@ -160,6 +185,24 @@ func (c *client) json(method, path string, body, out any, want int, hdr ...strin
 		}
 	}
 	return resp.Header
+}
+
+func (c *client) cookies(base string) []string {
+	u, _ := url.Parse(base)
+	var out []string
+	for _, ck := range c.hc.Jar.Cookies(u) {
+		out = append(out, ck.Name+"="+ck.Value)
+	}
+	return []string{strings.Join(out, "; ")}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return bytes.TrimSpace(b)
 }
 
 func quietLog() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -302,6 +345,24 @@ func TestLocalModeEndToEnd(t *testing.T) {
 		}
 	}
 
+	// /internal stuck reports count against the same hourly limit as
+	// POST /api/v1/stuck (two used above); a changed note is no way round it.
+	limited := 0
+	for i := 0; i < 12 && limited == 0; i++ {
+		resp, _ := c.do("POST", "/internal/sessions/local/stuck", protocol.InternalStuckReport{LessonID: "00-orientation/01-first", StepID: "open", Note: fmt.Sprintf("note %d", i)}, "Authorization", "Bearer local")
+		if resp.StatusCode == http.StatusTooManyRequests {
+			limited = i + 1
+		} else if resp.StatusCode != 201 {
+			t.Fatalf("internal stuck %d: %d", i, resp.StatusCode)
+		}
+	}
+	if limited != 9 {
+		t.Fatalf("internal stuck reports limited after %d calls, want 9", limited)
+	}
+	c.json("POST", "/api/v1/stuck", protocol.StuckRequest{SessionID: "local", LessonID: "00-orientation/01-first", StepID: "open", Note: "again"}, nil, 429)
+	// Progress for a lesson the bundle does not have is refused.
+	c.json("POST", "/internal/sessions/local/progress", protocol.ProgressReport{LessonID: "99-made-up/01-x", StepID: "a", Status: protocol.ProgressDone}, nil, 400, "Authorization", "Bearer local")
+
 	// Proxy.
 	var st protocol.StatusResult
 	c.json("GET", "/s/local/status", nil, &st, 200)
@@ -440,8 +501,44 @@ func TestServerModeEndToEnd(t *testing.T) {
 	if live[0].Spec.Env["PG_GATEWAY_URL"] != "http://gateway:8080" {
 		t.Fatalf("gateway url %v", live[0].Spec.Env)
 	}
+	// sessiond only answers requests carrying its proxy secret, which the
+	// gateway derives per session and sends on the proxy, RPCs and status.
+	secret := live[0].Spec.Env["PG_PROXY_SECRET"]
+	if len(secret) != 64 || secret != sessions.ProxySecret(mustRead(t, filepath.Join(dataDir, ProxyKeyFile)), info.ID) {
+		t.Fatalf("proxy secret %q", secret)
+	}
+	sd.requireSecret(secret)
 	var st protocol.StatusResult
 	alice.json("GET", "/s/"+info.ID+"/status", nil, &st, 200)
+	alice.json("GET", "/s/"+info.ID+"/status", nil, &st, 200, protocol.HeaderProxySecret, "forged")
+	var gi protocol.SessionInfo
+	alice.json("GET", "/api/v1/sessions/"+info.ID, nil, &gi, 200)
+	if gi.Emacs == nil || gi.Emacs.Version != "31.1" {
+		t.Fatalf("session status through the secret %+v", gi)
+	}
+	alice.json("POST", "/api/v1/sessions/"+info.ID+"/restart-emacs", nil, nil, 200)
+	{
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ws, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(gw.URL, "http")+"/s/"+info.ID+"/events",
+			&websocket.DialOptions{HTTPHeader: http.Header{"Origin": {publicURL}, "Cookie": alice.cookies(gw.URL)}})
+		if err != nil {
+			t.Fatalf("events through the proxy: %v", err)
+		}
+		if _, msg, err := ws.Read(ctx); err != nil || !strings.Contains(string(msg), `"hello"`) {
+			t.Fatalf("events hello %s %v", msg, err)
+		}
+		ws.Close(websocket.StatusNormalClosure, "")
+		cancel()
+	}
+	if resp, err := http.Get(sd.srv.URL + "/status"); err != nil || resp.StatusCode != 401 {
+		t.Fatalf("direct request without the secret: %v %v", resp, err)
+	}
+	sd.mu.Lock()
+	denied := sd.denied
+	sd.mu.Unlock()
+	if denied != 1 {
+		t.Fatalf("sessiond refused %d gateway requests", denied-1)
+	}
 
 	bob := newClient(t, gw.URL)
 	bob.json("POST", "/api/v1/auth/invite", protocol.InviteLoginRequest{Code: "spring-cohort-7f3a9c"}, nil, 204)
@@ -475,6 +572,9 @@ func TestServerModeEndToEnd(t *testing.T) {
 	alice.json("POST", "/api/v1/sessions", nil, &info, 201)
 	if len(fake.Live()) != 1 {
 		t.Fatalf("recreated %+v", fake.Live())
+	}
+	if got := fake.Live()[0].Spec.Env["PG_PROXY_SECRET"]; got != secret {
+		t.Fatalf("re-created session has another proxy secret: %q", got)
 	}
 	alice.json("GET", "/internal/curriculum/scenarios/00-orientation/02-second", nil, nil, 401, "Authorization", auth)
 	if _, err := os.Stat(filepath.Join(dataDir, "playground.db")); err != nil {

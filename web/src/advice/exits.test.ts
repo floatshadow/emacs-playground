@@ -126,3 +126,54 @@ describe('exits table over real states (the demo whereAmI as data)', () => {
     expect(minorLighter('which-key-mode')).toBe('Which-key')
   })
 })
+
+describe('the virtual root session (protocol.ExitSession)', () => {
+  const rows = [
+    {
+      id: 'prefix-pending',
+      when: { 'session.prefix': { regex: '.' } },
+      why: '{session.prefix} is a prefix.',
+      how: 'C-g cancels it.',
+    },
+    {
+      id: 'frame-closed',
+      when: { 'session.emacs': 'frame-closed' },
+      why: 'The frame was closed.',
+      how: 'Wait a moment.',
+    },
+    {
+      id: 'describe-key',
+      when: { 'session.echo': { regex: '^Describe the following key' } },
+      why: 'C-h k is waiting for a key.',
+      how: 'Press the key.',
+    },
+  ]
+
+  it('evaluates session.* paths and templates', () => {
+    const w = whereAmI(calmState(), rows, {
+      prefix: 'C-x',
+      overlay: null,
+      echo: 'Describe the following key, mouse click, or menu item:',
+    })
+    expect(w.exits.map((e) => e.id)).toEqual(['prefix-pending', 'describe-key'])
+    expect(w.exits[0]?.why).toBe('C-x is a prefix.')
+  })
+
+  it('lets table rows replace the built-in live rows for the same facts', () => {
+    const w = whereAmI(calmState(), rows, { prefix: 'C-x', overlay: 'frame-closed' })
+    expect(w.exits.map((e) => e.id)).toEqual(['prefix-pending', 'frame-closed'])
+  })
+
+  it('keeps the live rows when the table has no session rows', () => {
+    const w = whereAmI(calmState(), [], { prefix: 'C-x', overlay: null })
+    expect(w.exits.map((e) => e.id)).toEqual(['live:prefix'])
+  })
+
+  it('reports unresponsive as session.emacs', () => {
+    const busyRows = [
+      { id: 'busy', when: { 'session.emacs': 'unresponsive' }, why: 'busy', how: 'wait' },
+    ]
+    const w = whereAmI(calmState(), busyRows, { prefix: null, overlay: null, busy: true })
+    expect(w.exits.map((e) => e.id)).toEqual(['busy'])
+  })
+})
