@@ -23,7 +23,8 @@ steps:
   - id: beside
     goal: Open Cargo.toml beside main.rs
     detail: "`C-x 4 f` is `C-x C-f` that opens the file in another window. With only one window, Emacs splits wherever there is room, so decide first: `C-x 3` makes a window on the right, then `C-x 4 f ../Cargo.toml RET` fills it."
-    demo: 'C-x 3 ~400 C-x 4 f ~500 "../Cargo.toml" RET'
+    # The absolute path works whatever buffer the demo starts from.
+    demo: 'C-x 3 ~400 C-x 4 f ~500 "/work/projects/hello/Cargo.toml" RET'
     conditions:
       - text: C-x 4 f was used
         event: { command: find-file-other-window }
@@ -52,7 +53,7 @@ steps:
     conditions:
       - text: C-x 4 4 was used
         event: { command: other-window-prefix }
-        hint: "Control x, 4, 4, then the command: C-x C-b."
+        hint: "C-x 4 4 only changes where the next command shows its buffer: the echo area says Display next command buffer in a new window, and waits. Press C-x C-b next, and the list opens in another window."
       - text: ibuffer was opened and closed again
         all:
           - event: { command: ibuffer }
