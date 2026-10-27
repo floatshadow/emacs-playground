@@ -16,7 +16,6 @@
 ;;; Code:
 
 (require 'ert)
-(require 'cl-lib)
 
 (defvar pg-modules-test-dir
   (file-name-directory (directory-file-name
@@ -24,7 +23,6 @@
   "The emacs.d directory under test.")
 
 (defvar modus-vivendi-tinted-palette-overrides)
-(defvar kkp--non-printable-keys-with-tilde-terminator)
 (declare-function modus-themes-get-color-value "modus-themes" (color &optional with-overrides theme))
 (declare-function playground--kkp-decode "base")
 (declare-function playground-fit-frame-to-display "base")
@@ -43,7 +41,7 @@
   (should-not playground-module-errors)
   (should (equal playground-modules-loaded '(base editing))))
 
-;;;; Terminal keys (B1)
+;;;; Terminal keys
 
 (defun pg-modules--decode (sequence)
   "The key the terminal frame reads for ESC [ SEQUENCE."
@@ -72,14 +70,14 @@
   (should (eq (key-binding [deletechar]) 'delete-forward-char))
   (should (eq (key-binding [C-delete]) 'kill-word)))
 
-;;;; M-x messages (B15)
+;;;; M-x messages
 
 (ert-deftest pg-modules/no-abbreviation-tips ()
   "M-x suggests key bindings but not abbreviations such as M-x em-ve."
   (should-not extended-command-suggest-shorter)
   (should suggest-key-bindings))
 
-;;;; Mode lines (B16, R8)
+;;;; Mode lines
 
 (defun pg-modules--luminance (hex)
   "WCAG relative luminance of the colour HEX (#rrggbb)."
@@ -130,7 +128,7 @@
   "Part 1's M-y is the yank-pop lesson 1.2 teaches; consult's comes in Part 4."
   (should (eq (key-binding (kbd "M-y")) 'yank-pop)))
 
-;;;; The GUI frame (B13)
+;;;; The GUI frame
 
 (ert-deftest pg-modules/gui-frame-follows-the-display ()
   "The GUI frame is fitted when it is made and when the display changes size."

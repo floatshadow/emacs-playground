@@ -46,17 +46,14 @@
 (declare-function flymake-diagnostic-backend "flymake" (diag))
 (declare-function flymake--lookup-type-property "flymake" (type prop &optional default))
 (declare-function tab-bar-tabs "tab-bar" (&optional frame))
-(declare-function tab-bar--current-tab "tab-bar" (&optional tab frame))
 (declare-function tab-bar-switch-to-tab "tab-bar" (name))
 (declare-function isearch-done "isearch" (&optional nopush edit))
 (declare-function isearch-message-prefix "isearch" (&optional ellipsis nonincremental))
-(declare-function server-running-p "server" (&optional name))
 (defvar isearch-string)
 (defvar isearch-nonincremental)
 (defvar isearch--current-buffer)
 (defvar window-state-normalize-buffer-name)
 (defvar flymake-mode)
-(defvar playground-modules)
 (defvar playground-modules-loaded)
 (defvar playground-module-errors)
 (defvar playground-config-dir)
@@ -284,9 +281,7 @@ sends the reply itself later.")
 (defun playground--usable-frame-p (frame)
   "Non-nil when FRAME is a live, real frame the learner can see.
 The daemon's initial frame is not one."
-  (and (frame-live-p frame)
-       (not (frame-parameter frame 'parent-frame))
-       (not (frame-parameter frame 'tooltip))
+  (and (playground--top-level-frame-p frame)
        (not (and (daemonp) (eq frame terminal-frame)))))
 
 (defun playground--learner-frame ()
@@ -331,6 +326,11 @@ there, the window that was selected when it was entered."
 (defun playground--absolute (path)
   "Absolute name of workspace-relative or absolute PATH."
   (expand-file-name path playground-agent-workspace))
+
+(defun playground--kill-quietly (buffer)
+  "Kill BUFFER without running `kill-buffer-query-functions'."
+  (let ((kill-buffer-query-functions nil))
+    (kill-buffer buffer)))
 
 ;;;; Transport
 
@@ -735,8 +735,7 @@ DIR non-nil when the children are stacked top to bottom."
           (line . ,(line-number-at-pos pt t))
           (col . ,(save-excursion (goto-char pt) (current-column)))
           (point . ,pt)
-          (markActive . ,(playground--bool (and mark-active (eq win (playground--user-window))
-                                                (region-active-p))))
+          (markActive . ,(playground--bool (region-active-p)))
           (windows . ,(playground--windows frame win))
           (layout . ,(playground--layout frame win))
           (frame . ,(playground--frame-kind frame))
@@ -803,8 +802,8 @@ latter to steer the next one (`kill-line' runs `kill-region', which
 sets it to `kill-region' so that kills append; `yank-pop' sets it to
 `yank'; `yank' with an empty kill ring leaves t; TAB in the minibuffer
 runs `minibuffer-complete', which sets it to `completion-at-point'),
-and the ticker then named a command the learner never ran.  M-x sets
-both to the command chosen by name."
+so it can name a command the learner never ran.  M-x sets both to the
+command chosen by name."
   real-this-command)
 
 (defun playground--pre-command ()
@@ -1173,6 +1172,15 @@ Returns the selected window."
           (select-window main))))
     (selected-window)))
 
+(defun playground--only-window ()
+  "Leave one ordinary window in the selected frame.
+That is the selected window, or a normal window when a side window is
+selected (`playground--leave-side-window')."
+  (let ((ignore-window-parameters t))
+    (playground--leave-side-window)
+    (delete-other-windows)
+    (playground--unside-sole-window)))
+
 (defun playground--unside-sole-window (&optional frame)
   "Make FRAME's only window an ordinary window again.
 A side window that became the only window (see
@@ -1481,9 +1489,8 @@ the absolute names of the spec's files, by its name."
 (defun playground--plain (x)
   "X with the text properties of its strings removed.
 A buffer name can carry properties: uniquify keeps the buffer itself
-in `uniquify-orig-buffer' on a name it gave back (main.rs after
-lesson 2.7 closed polyglot's main.rs), and a printed window state
-would then hold an unreadable #<buffer main.rs>."
+in `uniquify-orig-buffer' on a name it gave back, and a printed window
+state would then hold an unreadable #<buffer main.rs>."
   (cond ((stringp x) (substring-no-properties x))
         ((consp x) (cons (playground--plain (car x)) (playground--plain (cdr x))))
         ((vectorp x) (vconcat (mapcar #'playground--plain x)))
@@ -1491,9 +1498,9 @@ would then hold an unreadable #<buffer main.rs>."
 
 (defun playground--read-state (string)
   "Read STRING, a printed window state, and return it.
-States saved before `playground--plain' was applied may hold
-unreadable objects (#<buffer main.rs> in a name's text properties):
-those read as nil, and the strings lose their properties."
+A state printed without `playground--plain' may hold unreadable
+objects (#<buffer main.rs> in a name's text properties): those read
+as nil, and the strings lose their properties."
   (playground--plain
    (condition-case nil
        (car (read-from-string string))
@@ -1559,7 +1566,7 @@ or made."
                          (equal (car-safe (cdr-safe entry))
                                 (playground--readable
                                  (buffer-local-value 'help-xref-stack-item b))))
-              (let ((kill-buffer-query-functions nil)) (kill-buffer b))
+              (playground--kill-quietly b)
               (cl-incf n)))))
       (dolist (entry want)
         (let ((name (car-safe entry))
@@ -1644,8 +1651,7 @@ Returns the number killed."
                        (not (member (buffer-name b) shown)))
               (when-let* ((proc (get-buffer-process b)))
                 (set-process-query-on-exit-flag proc nil))
-              (let ((kill-buffer-query-functions nil))
-                (kill-buffer b))
+              (playground--kill-quietly b)
               (cl-incf n))))))
     n))
 
@@ -1703,9 +1709,7 @@ With CREATE, visit the file (or create the special buffer) when needed."
   (let ((node (car (read-from-string layout)))
         (ignore-window-parameters t))
     (playground--in-user-window
-      (playground--leave-side-window)
-      (delete-other-windows)
-      (playground--unside-sole-window)
+      (playground--only-window)
       (playground--build-layout node (selected-window))
       (balance-windows))))
 
@@ -1718,9 +1722,7 @@ absolute file names, help with states saved without them."
   (let ((ignore-window-parameters t)
         (state (playground--state-map-files (playground--read-state state) files)))
     (playground--in-user-window
-      (playground--leave-side-window)
-      (delete-other-windows)
-      (playground--unside-sole-window)
+      (playground--only-window)
       (window-state-put state (frame-root-window) 'safe))))
 
 (defun playground--select-leaf (name)
@@ -1890,8 +1892,7 @@ closes it.  Returns the number killed."
         (when (and file (buffer-live-p b) (not (buffer-modified-p b))
                    (string-prefix-p root (expand-file-name file))
                    (not (member (expand-file-name file) keep)))
-          (let ((kill-buffer-query-functions nil))
-            (kill-buffer b))
+          (playground--kill-quietly b)
           (cl-incf n))))
     n))
 
@@ -1923,8 +1924,7 @@ made again, the selected window last."
               (cl-incf reverted))))
          (t
           (with-current-buffer b (set-buffer-modified-p nil))
-          (let ((kill-buffer-query-functions nil))
-            (kill-buffer b))
+          (playground--kill-quietly b)
           (cl-incf killed)))))
     (let ((spec (alist-get 'spec args)))
       ;; A spec without files is not a snapshot (sessiond sends an empty
@@ -1933,10 +1933,11 @@ made again, the selected window last."
         (cl-incf killed (playground--kill-unlisted (playground--spec-files spec))))
       ;; Help buffers before the windows (ibuffer lists them), and tabs
       ;; before the windows, which go into the spec's tab.
-      (when spec (playground--sync-special-buffers (alist-get 'specialBuffers spec)))
-      (when spec (cl-incf killed (playground--kill-later-runs spec)))
-      (when spec (playground--sync-tabs spec))
-      (when spec (playground--op-open spec)))
+      (when spec
+        (playground--sync-special-buffers (alist-get 'specialBuffers spec))
+        (cl-incf killed (playground--kill-later-runs spec))
+        (playground--sync-tabs spec)
+        (playground--op-open spec)))
     `((reverted . ,reverted) (killed . ,killed))))
 
 (defun playground--sync-changed-buffers (root)
@@ -1955,8 +1956,7 @@ fixture.  Returns the number of buffers reverted or killed."
           (cond
            ((not (file-exists-p file))
             (with-current-buffer b (set-buffer-modified-p nil))
-            (let ((kill-buffer-query-functions nil))
-              (kill-buffer b))
+            (playground--kill-quietly b)
             (cl-incf n))
            ((not (verify-visited-file-modtime b))
             (with-current-buffer b
@@ -2016,8 +2016,7 @@ help and build output are kept.  Returns the number killed."
                  ((eq mode 'fundamental-mode)
                   (and (not (string-match-p "\\`[ *]" name))
                        (zerop (buffer-size b)))))
-            (let ((kill-buffer-query-functions nil))
-              (kill-buffer b))
+            (playground--kill-quietly b)
             (cl-incf n)))))
     n))
 
@@ -2133,9 +2132,7 @@ buffers and in the windows that show them, before the setup's eval
               (unless (derived-mode-p 'compilation-mode) (compilation-mode))))
           (playground--apply-layout layout))
          (first
-          (playground--leave-side-window)
-          (delete-other-windows)
-          (playground--unside-sole-window)
+          (playground--only-window)
           (switch-to-buffer first)))))
     ;; A layout saved as a window state (.eld) brings its own positions.
     (when (and reset (not (and layout (string-suffix-p ".eld" layout))))

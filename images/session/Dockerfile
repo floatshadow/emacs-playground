@@ -50,9 +50,9 @@
 # ~/.cache/emacs/eln-cache, or /work/.playground/eln-cache when ~/.cache
 # is mounted noexec (Docker's tmpfs default), or nowhere (early-init.el).
 #
-# Size and time (2026-10-26, 96-core builder): 3.35 GB unpacked, 855 MB
-# compressed; a cold build takes about 9 minutes (525 s), a config-only change
-# about 15 seconds.
+# Size and time on a 96-core builder: about 3.4 GB unpacked, 855 MB
+# compressed; a cold build takes about 9 minutes, a config-only change about
+# 15 seconds.
 
 ARG GO_VERSION=1.26.10
 ARG DEBIAN=trixie
@@ -121,9 +121,9 @@ RUN . /pins/emacs.env && cd /src/emacs-${EMACS_VERSION} \
  && make -j"$(nproc)" \
  && make install-strip \
  && /usr/local/bin/emacs --version | head -1 | grep -qx "GNU Emacs ${EMACS_VERSION}"
-# The AOT build from the release tarball leaves about 200 of Emacs's own
-# Lisp files without native code; compile them now so nothing is
-# compiled into ~/.cache at run time (see native-gaps.el).
+# The AOT build from the release tarball leaves some of Emacs's own Lisp
+# files without native code; compile them now so nothing is compiled
+# into ~/.cache at run time (see native-gaps.el).
 COPY images/session/native-gaps.el /src/native-gaps.el
 RUN /usr/local/bin/emacs --batch -l /src/native-gaps.el
 # Tree-sitter grammars at the revisions Emacs 31 itself pins

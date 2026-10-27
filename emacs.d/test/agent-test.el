@@ -873,7 +873,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
   snap)
 
 (ert-deftest pg-agent/reset-step-remakes-dired ()
-  "A window on a Dired listing comes back on that listing, up to date (X8)."
+  "A window on a Dired listing comes back on that listing, up to date."
   (pg-test-with-agent
     (let* ((brief (pg-test-file "inbox/brief.md" "# brief\n"))
            (notes (pg-test-file "inbox/notes.md" "# notes\n"))
@@ -987,8 +987,8 @@ Return the buffer once the run finished."
 
 (ert-deftest pg-agent/reset-step-drops-later-builds ()
   "Build output made since the checkpoint goes, unless its window is part of the step.
-Lesson 2.7: after Watch it and Do it yourself, the demonstration's
-*compilation* made \"the build finished\" hold before the learner built."
+Otherwise a demonstration's *compilation* would make \"the build
+finished\" hold before the learner builds anything (lesson 2.7)."
   (pg-test-with-agent
     (find-file-noselect (pg-test-file "a.txt" "a\n"))
     (let* ((early (pg-test--build "echo early" "*early*"))
@@ -1015,11 +1015,9 @@ Lesson 2.7: after Watch it and Do it yourself, the demonstration's
 
 (ert-deftest pg-agent/snapshot-with-propertized-buffer-names ()
   "A buffer name with text properties still gives a readable window state.
-Lesson 3.5 after 2.7: uniquify gave main.rs its name back with the
-buffer in a text property, the state printed #<buffer main.rs> among
-a window's previous buffers, did not read back, and reset-step fell
-back to the layout pattern: the help side window came back as an
-ordinary window, and C-x w s then showed a second one."
+uniquify can give a name back with the buffer in a text property; an
+unreadable state would make reset-step fall back to the layout pattern
+and lose the side window."
   (pg-test-with-agent
     (let* ((a (find-file-noselect (pg-test-file "a.txt" "a\n")))
            (b (find-file-noselect (pg-test-file "b.txt" "b\n")))
@@ -1039,7 +1037,7 @@ ordinary window, and C-x w s then showed a second one."
         (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap)))))
         (should (eq (window-parameter (get-buffer-window side) 'window-side) 'right)))
       (kill-buffer side)))
-  ;; A state saved before the fix reads with the buffer object as nil.
+  ;; A state printed with buffer objects reads them as nil.
   (should (equal (playground--read-state
                   "((buffer #(\"main.rs\" 0 1 (uniquify-orig-buffer #<buffer main.rs>)) (point . 1)) (prev-buffers (#(\"README.md<hello>\" 0 1 (x #<buffer README.md<hello>>)) 1 1)))")
                  '((buffer "main.rs" (point . 1)) (prev-buffers ("README.md<hello>" 1 1))))))
@@ -1256,7 +1254,7 @@ ordinary window, and C-x w s then showed a second one."
     (delete-other-windows)
     (find-file (pg-test-file "s.txt"))
     (pg-test--side-window "*pg-side-help*")
-    ;; What the old setup did: delete the other windows from the side window.
+    ;; Delete the other windows from the side window, ignoring its parameters.
     (let ((ignore-window-parameters t)) (delete-other-windows))
     (should (= (length (window-list nil 'nomini)) 1))
     (should (window-parameter (selected-window) 'window-side))

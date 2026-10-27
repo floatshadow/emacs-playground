@@ -22,10 +22,10 @@
 ;;;; Lesson 1.2  Kill, yank and the kill ring
 
 ;; M-y stays the built-in yank-pop, the command lesson 1.2 teaches (on
-;; its own it also lists the kill ring to pick from).  consult-yank-pop
-;; comes with the completion module (lesson 4.2): every package is
-;; installed in the image, so binding it here whenever consult exists
-;; gave Part 1 a different command than its lessons describe.
+;; its own it also lists the kill ring to pick from).  The completion
+;; module binds consult-yank-pop (lesson 4.2); every package is in the
+;; image, so binding it here whenever consult exists would give Part 1
+;; a different command than its lessons describe.
 
 ;;;; Lesson 1.3  Undo that never loses work
 

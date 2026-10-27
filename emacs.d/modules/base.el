@@ -133,8 +133,8 @@
 ;; M-x tells you the keys a command is bound to ("You can run the
 ;; command `save-buffer' with C-x C-s"), which teaches chords.  It does
 ;; not also suggest abbreviations ("... with M-x em-ve"): that message
-;; replaced the answer of M-x emacs-version two seconds after it
-;; appeared, and abbreviations are no help to someone learning names.
+;; would replace the command's own answer (M-x emacs-version) after two
+;; seconds, and abbreviations are no help to someone learning names.
 (setq extended-command-suggest-shorter nil)
 
 ;;;; Lesson 1.2  Kill, yank and the kill ring
@@ -270,14 +270,13 @@ stops the daemon itself."
   ;; Home, End and Delete.  tmux sends them to the pane the way its own
   ;; terminal type (tmux-256color) spells them: ESC [ 1 ~, ESC [ 4 ~ and
   ;; ESC [ 3 ~.  The decoders below take every ESC [ <digit> sequence,
-  ;; and kkp's table of ~ keys knows 7 and 8 for Home and End (rxvt) but
-  ;; not 1 and 4, so it fell back to the code point: End arrived as C-d
-  ;; (delete-char, which deleted text) and Home as C-a.  kkp also names
-  ;; Delete <delete>, which a terminal's `local-function-key-map' turns
-  ;; into DEL (delete-backward-char): Delete deleted backwards.  Here
-  ;; Home and End are <home> and <end>, and Delete is <deletechar>
-  ;; (delete-forward-char) as in a graphical frame; with a modifier it
-  ;; keeps its name, so C-<delete> stays kill-word.
+  ;; and kkp's table of ~ keys only knows 7 and 8 for Home and End
+  ;; (rxvt); without 1 and 4 it would decode End as C-d and Home as C-a.
+  ;; kkp names Delete <delete>, which a terminal's
+  ;; `local-function-key-map' turns into DEL (delete-backward-char).
+  ;; So Home and End are added as <home> and <end>, and Delete becomes
+  ;; <deletechar> (delete-forward-char) as in a graphical frame; with a
+  ;; modifier it keeps its name, so C-<delete> stays kill-word.
   (defvar kkp--non-printable-keys-with-tilde-terminator)
   (with-eval-after-load 'kkp
     (dolist (key '((1 . "<home>") (4 . "<end>")))

@@ -5,7 +5,7 @@
 ;;   emacs --batch -l native-gaps.el
 ;;
 ;; Emacs 31.1 built from the release tarball with
-;; --with-native-compilation=aot leaves about 80 of its own Lisp files
+;; --with-native-compilation=aot leaves about 200 of its own Lisp files
 ;; without native code (cl-seq, dabbrev, misearch, xt-mouse, ...).  At
 ;; run time Emacs then compiles them on first use into the writable eln
 ;; cache (~/.cache), which on a read-only root with a noexec tmpfs
