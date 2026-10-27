@@ -2,7 +2,8 @@
    caption) the screen above keeps its size, so the terminal never resizes
    because of it (B7). */
 .area {
-  height: 88px;
+  /* Room for the newest entry: large keycaps, the command and a two-line gloss. */
+  height: 98px;
   min-width: 0;
   overflow: hidden;
 }
@@ -16,8 +17,8 @@
 .tk {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 8px 10px;
+  gap: 4px;
+  padding: 7px 10px;
   border-radius: 6px;
   border: 1px solid transparent;
   min-width: 150px;

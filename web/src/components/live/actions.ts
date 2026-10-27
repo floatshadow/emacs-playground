@@ -66,6 +66,8 @@ export async function doResetStep(): Promise<void> {
 export async function doSkipStep(stepId: string, goal: string): Promise<void> {
   cancelDemo()
   useUiStore.getState().setSkipping({ stepId, goal })
+  // The keys Emacs plays are not the learner's: no habit cards for them.
+  useSessionStore.getState().setDemoPlaying(true)
   try {
     await rpc('skip', { stepId }, { silent: true })
     toast(i18n.t('stuck.skipped', { goal }))
@@ -75,6 +77,7 @@ export async function doSkipStep(stepId: string, goal: string): Promise<void> {
       'error',
     )
   } finally {
+    useSessionStore.getState().setDemoPlaying(false)
     useUiStore.getState().setSkipping(null)
     focusTerminal()
   }

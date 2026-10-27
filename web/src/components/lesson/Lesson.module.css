@@ -48,6 +48,9 @@
   background: var(--paper-3);
   padding: 1px 5px;
   border-radius: 3px;
+  /* Long paths (/work/projects/polyglot/src/main.rs) wrap instead of
+     widening the pane past its column at 1440 px and below. */
+  overflow-wrap: anywhere;
 }
 .prose pre {
   background: var(--screen);
@@ -309,6 +312,7 @@
   background: var(--paper-3);
   padding: 1px 4px;
   border-radius: 3px;
+  overflow-wrap: anywhere;
 }
 .conds {
   list-style: none;
@@ -320,6 +324,7 @@
   padding: 2px 0 2px 18px;
   position: relative;
   color: var(--ink-2);
+  overflow-wrap: anywhere;
 }
 .conds li::before {
   content: '';
