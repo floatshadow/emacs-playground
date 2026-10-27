@@ -91,6 +91,8 @@ type Tap struct {
 	// OnKey, when set, observes every decoded key (tests, debugging).
 	OnKey func(protocol.Key)
 	now   func() time.Time
+	// lastCommand is when the agent last reported a command (Reset).
+	lastCommand time.Time
 }
 
 // NewTap returns a tap that calls emit for prefix changes. emit must not
@@ -116,10 +118,38 @@ func (t *Tap) Keys(keys []protocol.Key) {
 	}
 }
 
-// Reset clears the pending prefix (called on agent key events).
+// late handles keys a stream reports only after MetaTimeout (a lone ESC,
+// an unterminated sequence) whose bytes arrived at arrived. tmux
+// (escape-time 0) hands such a byte to Emacs at once, so when the agent has
+// reported a command since the bytes arrived, Emacs has already used them
+// (ESC ESC ESC is keyboard-escape-quit) and reporting them now would show a
+// pending prefix after the command that consumed it (B4). Such keys are
+// dropped and the pending prefix is cleared; other keys go through Keys.
+func (t *Tap) late(keys []protocol.Key, arrived time.Time) {
+	if len(keys) == 0 {
+		return
+	}
+	t.mu.Lock()
+	if !t.lastCommand.IsZero() && arrived.Before(t.lastCommand) {
+		if t.OnKey != nil {
+			for _, k := range keys {
+				t.OnKey(k)
+			}
+		}
+		t.prefix.Reset()
+		t.mu.Unlock()
+		return
+	}
+	t.mu.Unlock()
+	t.Keys(keys)
+}
+
+// Reset clears the pending prefix (called on agent key events) and
+// remembers when, for late keys.
 func (t *Tap) Reset() {
 	t.mu.Lock()
 	t.prefix.Reset()
+	t.lastCommand = t.now()
 	t.mu.Unlock()
 }
 
@@ -153,7 +183,9 @@ func (s *TermStream) Input(p []byte) {
 		return
 	}
 	s.dec.Kitty = s.modes.Kitty()
-	keys := s.dec.Feed(p, s.tap.now())
+	now := s.tap.now()
+	stale, arrived := s.dec.TakeStale(now)
+	keys := s.dec.Feed(p, now)
 	if s.dec.Pending() {
 		if s.timer == nil {
 			s.timer = time.AfterFunc(MetaTimeout+5*time.Millisecond, s.flush)
@@ -162,6 +194,7 @@ func (s *TermStream) Input(p []byte) {
 		}
 	}
 	s.mu.Unlock()
+	s.tap.late(stale, arrived)
 	s.tap.Keys(keys)
 }
 
@@ -171,9 +204,10 @@ func (s *TermStream) flush() {
 		s.mu.Unlock()
 		return
 	}
+	arrived := s.dec.escAt
 	keys := s.dec.Flush(s.tap.now())
 	s.mu.Unlock()
-	s.tap.Keys(keys)
+	s.tap.late(keys, arrived)
 }
 
 // Output observes bytes the terminal sends to the browser.

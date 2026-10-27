@@ -58,6 +58,18 @@ func (d *TermDecoder) Feed(p []byte, now time.Time) []protocol.Key {
 	return out
 }
 
+// TakeStale reports, before new input is fed at now, a buffered lone ESC (or
+// unterminated sequence) that waited longer than MetaTimeout, together with
+// the time its bytes arrived; Feed would otherwise report it with the new
+// keys. It returns nil when nothing is stale.
+func (d *TermDecoder) TakeStale(now time.Time) ([]protocol.Key, time.Time) {
+	if len(d.buf) > 0 && d.buf[0] == 0x1b && now.Sub(d.escAt) > MetaTimeout && !d.paste {
+		at := d.escAt
+		return d.flushStale(), at
+	}
+	return nil, time.Time{}
+}
+
 // Flush reports a pending lone ESC (or the prefix of an unterminated
 // sequence) once MetaTimeout has passed since it arrived.
 func (d *TermDecoder) Flush(now time.Time) []protocol.Key {
