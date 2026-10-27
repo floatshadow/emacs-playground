@@ -4,15 +4,23 @@ Images, Compose files, the configuration file, networking, storage, operations a
 
 ## 1. Images
 
-| Image | Built from | Contents | Approximate size |
+| Image | Built by | Contents | Approximate size |
 |---|---|---|---|
-| `ghcr.io/ORG/emacs-playground/gateway` | `images/gateway/Dockerfile` | static Go binary with the embedded web bundle, curriculum bundle, fonts | 60 MB |
-| `ghcr.io/ORG/emacs-playground/session` | `images/session/Dockerfile` | Emacs 31.1, toolchains, config, sessiond | 5 to 7 GB |
-| `ghcr.io/ORG/emacs-playground/remote-box` | `images/remote-box/Dockerfile` | sshd, the same toolchains, no Emacs | 3 GB |
+| `ghcr.io/floatshadow/emacs-playground/gateway` | `.github/workflows/image-web.yml` from `images/gateway/Dockerfile` | static Go binary with the embedded web bundle, curriculum bundle, fonts; distroless | 60 MB |
+| `ghcr.io/floatshadow/emacs-playground/session` | `.github/workflows/image-emacs.yml` from `images/session/Dockerfile` | Emacs 31 built from source, toolchains, config, sessiond | about 3.5 GB |
+| `ghcr.io/floatshadow/emacs-playground/remote-box` | `.github/workflows/image-emacs.yml` from `images/remote-box/Dockerfile` | sshd, the same toolchains, no Emacs | about 2 GB |
 
-Tags: `vX.Y.Z` for releases, `main-<sha>` for CI builds, `latest` follows releases. The three images of a release share a tag; the gateway refuses a session image whose `org.opencontainers.image.version` label has a different major version.
+GitHub Actions builds every image; nobody needs to build locally to run or deploy. Three workflows:
 
-Build: `docker buildx bake` with a registry cache. The session image is layered so that Emacs, toolchains, Emacs packages and the config are separate layers. CI publishes an SBOM with each image.
+- `image-emacs.yml` builds the session and remote-box images on pushes to `main` that touch the Emacs side (`images/session`, `images/remote-box`, `emacs.d`, sessiond and shared Go packages) and on manual dispatch. The BuildKit cache is stored in the registry next to the image (`…/session:buildcache`), so a cold Emacs build (40 to 60 minutes on a standard runner) happens only when the Emacs stage changes; config-only changes rebuild in minutes. After pushing, the workflow pulls the image by digest and runs the agent's and the configuration's ERT suites.
+- `image-web.yml` builds the gateway image on pushes to `main` that touch the web app, the gateway, playctl, the curriculum or shared Go packages, and on pull requests (build and smoke test only, no push). The smoke test starts the image in local mode and checks `/healthz` and the curriculum index.
+- `release.yml` runs both on a `vX.Y.Z` tag.
+
+Tags: `main` and `latest` follow the main branch (until the first release; afterwards `latest` follows releases), `main-<sha>` pins a commit, `X.Y.Z` and `X.Y` are releases. All images of a release share a tag, and the gateway refuses a session image whose `org.opencontainers.image.version` label has a different major version. Each pushed image carries a provenance attestation and an SBOM.
+
+Pulling needs no login as long as the packages are public (repository Packages settings, "Change visibility"; a fork must do this once). Forks publish under their own owner automatically (`ghcr.io/<owner>/<repo>/…`); set `IMAGE_BASE` in `.env` to use them.
+
+`ci.yml` runs the Go and web test suites, lint, type checks, the protocol drift check and the curriculum validator on every push and pull request.
 
 ## 2. Compose files
 
@@ -194,7 +202,7 @@ docker compose up -d
 - Upgrades: `TAG=vX.Y.Z docker compose pull && docker compose up -d`. Running sessions keep their image until they stop; the gateway shows a "restart to update" chip.
 - Monitoring: `GET /healthz`, `/metrics` when enabled (sessions by state, creations, failures, event rates, proxy latency), structured logs on stdout. sessiond has `/healthz` and `/status` inside the network.
 - Backups: the gateway data volume nightly (SQLite, small). Workspace volumes are learner data; `playctl export-user <uid>` produces a tarball of a workspace and its progress.
-- Capacity: a 96-core, 440 GB host runs about 100 concurrent sessions at the defaults; `sessions.maxSessions` is the guard.
+- Capacity: budget about 1.5 GB of memory and a quarter of a CPU core per concurrent session at the defaults, more during builds; `sessions.maxSessions` is the guard.
 
 ## 6. Remote box
 

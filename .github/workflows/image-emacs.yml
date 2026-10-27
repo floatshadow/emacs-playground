@@ -1,0 +1,222 @@
+# Builds and publishes the Emacs development image (session) and the SSH
+# remote box, which shares the session's toolchain pins. Both are pushed to
+#   ghcr.io/<owner>/<repo>/session and ghcr.io/<owner>/<repo>/remote-box
+# on pushes to main (tags: main, main-<sha>, latest) and on release tags
+# through release.yml (tags: X.Y.Z, X.Y, latest). Pull requests only build.
+#
+# The session image compiles Emacs from source with native compilation; a
+# cold build takes 40 to 60 minutes on a standard runner, a cached one a few
+# minutes. The BuildKit cache lives in the registry next to the image
+# (…/session:buildcache), so every runner shares it.
+name: Emacs dev image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - images/session/**
+      - images/remote-box/**
+      - emacs.d/**
+      - cmd/sessiond/**
+      - internal/**
+      - go.mod
+      - go.sum
+      - .github/workflows/image-emacs.yml
+  pull_request:
+    paths:
+      - images/session/**
+      - images/remote-box/**
+      - emacs.d/**
+      - cmd/sessiond/**
+      - internal/**
+      - go.mod
+      - go.sum
+      - .github/workflows/image-emacs.yml
+  workflow_dispatch:
+    inputs:
+      push:
+        description: Push the images to GHCR
+        type: boolean
+        default: true
+      no_cache:
+        description: Ignore the build cache (full rebuild)
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      push:
+        type: boolean
+        default: true
+      no_cache:
+        type: boolean
+        default: false
+
+concurrency:
+  group: image-emacs-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_BASE: ghcr.io/${{ github.repository }}
+
+jobs:
+  session:
+    name: session image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Free disk space on the runner
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost /usr/local/.ghcup
+          sudo docker image prune -af >/dev/null 2>&1 || true
+          df -h /
+
+      - name: Decide whether to push
+        id: decide
+        run: |
+          push=false
+          case "${{ github.event_name }}" in
+            push) push=true ;;
+            workflow_dispatch|workflow_call) push='${{ inputs.push }}' ;;
+          esac
+          echo "push=$push" >> "$GITHUB_OUTPUT"
+
+      - name: Version from git
+        id: version
+        run: echo "version=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.decide.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_BASE }}/session
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=main-,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          labels: |
+            org.opencontainers.image.title=Emacs Playground session image
+            org.opencontainers.image.description=Emacs 31 with toolchains, the course configuration and sessiond
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/session/Dockerfile
+          platforms: linux/amd64
+          push: ${{ steps.decide.outputs.push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=registry,ref=${{ env.IMAGE_BASE }}/session:buildcache
+          cache-to: ${{ steps.decide.outputs.push == 'true' && format('type=registry,ref={0}/session:buildcache,mode=max', env.IMAGE_BASE) || '' }}
+          no-cache: ${{ inputs.no_cache == true }}
+          provenance: ${{ steps.decide.outputs.push == 'true' && 'mode=max' || 'false' }}
+          sbom: ${{ steps.decide.outputs.push == 'true' }}
+
+      - name: Test the pushed image (Emacs loads, ERT suites pass)
+        if: steps.decide.outputs.push == 'true'
+        run: |
+          ref='${{ env.IMAGE_BASE }}/session@${{ steps.build.outputs.digest }}'
+          docker pull "$ref"
+          docker run --rm --entrypoint sh "$ref" -c 'emacs --version | head -1'
+          docker run --rm --entrypoint sh "$ref" -c 'cd /opt/playground/emacs.d && emacs --batch -L lisp -l playground-agent -l test/agent-test.el -f ert-run-tests-batch-and-exit'
+          docker run --rm --entrypoint sh "$ref" -c 'cd /opt/playground/emacs.d && emacs --batch -l early-init.el -l test/config-test.el -f ert-run-tests-batch-and-exit'
+
+  remote-box:
+    name: remote-box image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Decide whether to push
+        id: decide
+        run: |
+          push=false
+          case "${{ github.event_name }}" in
+            push) push=true ;;
+            workflow_dispatch|workflow_call) push='${{ inputs.push }}' ;;
+          esac
+          echo "push=$push" >> "$GITHUB_OUTPUT"
+
+      - name: Version from git
+        id: version
+        run: echo "version=$(git describe --tags --always --dirty)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: steps.decide.outputs.push == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_BASE }}/remote-box
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix=main-,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+          labels: |
+            org.opencontainers.image.title=Emacs Playground remote box
+            org.opencontainers.image.description=SSH target with the session toolchains for the TRAMP lessons
+            org.opencontainers.image.licenses=GPL-3.0-or-later
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/remote-box/Dockerfile
+          platforms: linux/amd64
+          push: ${{ steps.decide.outputs.push == 'true' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=registry,ref=${{ env.IMAGE_BASE }}/remote-box:buildcache
+          cache-to: ${{ steps.decide.outputs.push == 'true' && format('type=registry,ref={0}/remote-box:buildcache,mode=max', env.IMAGE_BASE) || '' }}
+          no-cache: ${{ inputs.no_cache == true }}
+          provenance: ${{ steps.decide.outputs.push == 'true' && 'mode=max' || 'false' }}
+          sbom: ${{ steps.decide.outputs.push == 'true' }}
+
+      - name: Test the pushed image (sshd and toolchains present)
+        if: steps.decide.outputs.push == 'true'
+        run: |
+          ref='${{ env.IMAGE_BASE }}/remote-box@${{ steps.build.outputs.digest }}'
+          docker pull "$ref"
+          docker run --rm --entrypoint sh "$ref" -c 'test -x /usr/sbin/sshd && ls /opt/rust /opt/uv >/dev/null && echo ok'

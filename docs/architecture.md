@@ -218,4 +218,4 @@ loaded → checking → complete
 
 ## 8. Scaling
 
-One host per deployment in v1. A 96-core, 440 GB host runs about a hundred concurrent sessions at the default limits. Beyond that, the gateway's `Backend` interface (backend.md §2.3) admits a second implementation that schedules sessions across hosts or on Kubernetes; the session container contract does not change.
+One host per deployment in v1. Plan on roughly 1.5 GB of memory per concurrent session at the default limits, so a host with 160 GB runs about a hundred. Beyond that, the gateway's `Backend` interface (backend.md §2.3) admits a second implementation that schedules sessions across hosts or on Kubernetes; the session container contract does not change.
