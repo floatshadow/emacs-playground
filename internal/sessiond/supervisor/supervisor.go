@@ -761,8 +761,23 @@ func (s *Supervisor) WaitReady(ctx context.Context, timeout time.Duration) bool 
 	}
 }
 
-// deleteGUIFramesForm deletes every X frame of the daemon (the GUI frame).
-const deleteGUIFramesForm = `(progn (dolist (f (frame-list)) (when (eq (framep f) 'x) (delete-frame f t))) nil)`
+// leaveGUIForm deletes every X frame of the daemon (the GUI frame) and then
+// closes its X display connections, so stopping Xvnc afterwards does not
+// make Emacs report "Connection lost to X server" in the terminal frame
+// (B12): deleting the frames alone keeps the connection open. The session
+// image's Emacs is a Lucid build, where x-close-connection is safe. The
+// value is "closed" when no X display is left open, else a description of
+// what failed (the display is then left running).
+const leaveGUIForm = `(progn
+  (when (fboundp 'x-hide-tip) (ignore-errors (x-hide-tip)))
+  (dolist (f (frame-list)) (when (eq (framep f) 'x) (delete-frame f t)))
+  (if (not (fboundp 'x-display-list))
+      "closed"
+    (let ((failed nil))
+      (dolist (d (x-display-list))
+        (condition-case err (x-close-connection d)
+          (error (push (format "%s: %s" d (error-message-string err)) failed))))
+      (if failed (mapconcat #'identity failed "; ") "closed"))))`
 
 // SetMode switches the frame shown to the browser (rpc mode, architecture.md
 // §3.5).
@@ -818,18 +833,30 @@ func (s *Supervisor) SetMode(ctx context.Context, mode protocol.FrameKind) (prot
 		if s.gui != nil {
 			s.gui.Stop(2 * time.Second)
 		}
-		// Delete the GUI frames inside Emacs before the display goes away:
-		// killing emacsclient deletes its frame only when the server's
-		// sentinel runs, and an X connection that drops first leaves
-		// "Connection lost to X server" in the terminal frame.
+		// Delete the GUI frames inside Emacs and close its X connection
+		// before the display goes away: killing emacsclient deletes its
+		// frame only when the server's sentinel runs, and an X connection
+		// that drops under Emacs leaves "Connection lost to X server" in
+		// the terminal frame. When Emacs cannot let go of the display, Xvnc
+		// keeps running (it is reused by the next switch to GUI).
+		stopDisplay := true
 		if s.opt.Agent != nil && s.opt.Agent.Connected() {
 			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-			if err := s.opt.Agent.Call(cctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: deleteGUIFramesForm}, 2*time.Second, nil); err != nil {
-				s.log.Warn("deleting the GUI frame before stopping the display", "err", err)
+			var out struct {
+				Value any `json:"value"`
 			}
+			err := s.opt.Agent.Call(cctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: leaveGUIForm}, 2*time.Second, &out)
 			cancel()
+			switch {
+			case err != nil:
+				s.log.Warn("closing the GUI frame and display in Emacs; leaving the display running", "err", err)
+				stopDisplay = false
+			case out.Value != "closed" && out.Value != nil:
+				s.log.Warn("Emacs kept its X connection; leaving the display running", "result", out.Value)
+				stopDisplay = false
+			}
 		}
-		if s.xvnc != nil {
+		if s.xvnc != nil && stopDisplay {
 			s.xvnc.Stop(2 * time.Second)
 		}
 		s.setFrame(protocol.FrameGUI, false, "")

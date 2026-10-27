@@ -110,7 +110,7 @@ Font: the browser loads Iosevka Nerd Font so nerd-icons glyphs render; `TERM=tmu
 
 ## 6. GUI frame
 
-`Xvnc :1 -geometry 1600x900 -depth 24 -rfbport 5901 -localhost -SecurityTypes None -dpi 110`, no window manager; the Emacs frame is `fullboth`. Fonts through fontconfig: Iosevka Nerd Font 12 pt as default, Noto CJK as fallback. `pdf-tools` is built at image time (`pdf-tools-install` non-interactive) so `pdf-view-mode` opens PDFs instantly; `image-mode`, SVG, inline Org images and LaTeX previews work. `posframe`-based popups are allowed in GUI frames only; the config checks `(display-graphic-p)`.
+`Xvnc :1 -geometry 1600x900 -depth 24 -rfbport 5901 -localhost -SecurityTypes None -dpi 110 -AcceptSetDesktopSize=1`, no window manager; the geometry is the initial size, the browser pane's size follows through RandR, and the Emacs frame fills the display (sized by the agent, not by `fullscreen`, which needs a window manager). Fonts through fontconfig: Iosevka Nerd Font 12 pt as default, Noto CJK as fallback. `pdf-tools` is built at image time (`pdf-tools-install` non-interactive) so `pdf-view-mode` opens PDFs instantly; `image-mode`, SVG, inline Org images and LaTeX previews work. `posframe`-based popups are allowed in GUI frames only; the config checks `(display-graphic-p)`.
 
 The GUI frame is started on demand and torn down when the learner switches back; its only consumer is the noVNC pane through sessiond.
 

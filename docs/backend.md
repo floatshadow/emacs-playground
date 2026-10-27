@@ -197,8 +197,10 @@ A small process tree manager with per-child restart policies:
 | daemon | `emacs --fg-daemon=playground` | restart with backoff 1, 2, 4, 8 s, max 5 per 10 min; then `emacs` event `unresponsive` and give up until `/rpc/restart-emacs` |
 | tmux server | `tmux -L pg new-session -d -s emacs -x 120 -y 36` | restart immediately |
 | terminal frame | `tmux send-keys`-free: the session's initial command is `emacsclient -t -s playground`; tmux `remain-on-exit on` (respawn-pane needs the dead pane) and sessiond's session-level `pane-died` hook re-runs `tmux respawn-pane` | respawn within 500 ms; emit `emacs {event: frame-closed}` then `frame-opened` |
-| Xvnc | `Xvnc :1 -geometry 1600x900 -depth 24 -rfbport 5901 -localhost -SecurityTypes None` | restart if GUI mode is active |
-| GUI frame | `emacsclient -c -s playground --frame-parameters='((fullscreen . fullboth))'` with `DISPLAY=:1` | re-run while GUI mode is active |
+| Xvnc | `Xvnc :1 -geometry 1600x900 -depth 24 -rfbport 5901 -localhost -SecurityTypes None -AcceptSetDesktopSize=1`; the geometry is only the initial size: the browser asks for its pane's size (noVNC `resizeSession`) and Xvnc resizes through RandR | restart if GUI mode is active |
+| GUI frame | `emacsclient -c -s playground --frame-parameters='((width . W) (height . H))'` with `DISPLAY=:1` (no `fullscreen`: without a window manager it does nothing; the agent sizes GUI frames to their display, also after a RandR resize) | re-run while GUI mode is active |
+
+Leaving GUI mode deletes the X frames inside Emacs and closes its X display connection (`x-close-connection`, safe in the image's Lucid build) before Xvnc stops; if Emacs cannot let go of the display, Xvnc is left running (the next switch to GUI reuses it) rather than stopped under Emacs, which would print "Connection lost to X server" in the terminal frame.
 
 Health of the daemon is the agent heartbeat (`ping` every 2 s). Five missed heartbeats raise `emacs {event: unresponsive}`; Rescue then sends `C-g` through tmux and, if still unresponsive after 10 s, offers a daemon restart.
 

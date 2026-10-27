@@ -258,6 +258,10 @@ type harness struct {
 	stop  context.CancelFunc
 	calls []string
 	dir   string
+	// evalValue, when set, is the value of every eval (the agent's reply
+	// {"value": …}); evalForms records the forms.
+	evalValue any
+	evalForms []string
 }
 
 func newHarness(t *testing.T, mutate func(*Options)) *harness {
@@ -293,7 +297,16 @@ func newHarness(t *testing.T, mutate func(*Options)) *harness {
 		fake.Handle = func(op protocol.AgentOp, args json.RawMessage) (any, error) {
 			h.mu.Lock()
 			h.calls = append(h.calls, string(op))
+			value := h.evalValue
+			if op == protocol.AgentOpEval {
+				var a protocol.AgentEvalArgs
+				_ = json.Unmarshal(args, &a)
+				h.evalForms = append(h.evalForms, a.Form)
+			}
 			h.mu.Unlock()
+			if op == protocol.AgentOpEval && value != nil {
+				return map[string]any{"value": value}, nil
+			}
 			if op == protocol.AgentOpSnapshot {
 				return protocol.WindowSpec{Files: []protocol.FileSpec{{Path: "hello/src/main.rs", Point: 42, Visible: true}}}, nil
 			}
@@ -499,6 +512,12 @@ func TestSupervisorGUIMode(t *testing.T) {
 	if evalsAfter != evalsBefore+1 {
 		t.Fatalf("agent calls %v: want one eval deleting the GUI frame", h.calls)
 	}
+	h.mu.Lock()
+	form := h.evalForms[len(h.evalForms)-1]
+	h.mu.Unlock()
+	if !strings.Contains(form, "delete-frame") || !strings.Contains(form, "x-close-connection") {
+		t.Fatalf("the eval must delete the X frames and close the display: %s", form)
+	}
 	want := []string{"frame-opened:gui", "mode:gui", "mode:terminal"}
 	got := h.evs.emacs()
 	if strings.Join(got, ",") != strings.Join(want, ",") {
@@ -506,6 +525,41 @@ func TestSupervisorGUIMode(t *testing.T) {
 	}
 	if err := h.sup.SendKeys(ctx, protocol.FrameGUI, "C-g", ""); err == nil {
 		t.Fatal("gui keys while in terminal mode should fail")
+	}
+
+	// When Emacs cannot close its X connection, the display keeps running
+	// rather than dropping under Emacs (B12); the next switch reuses it.
+	h.mu.Lock()
+	h.evalValue = ":1: Display still has frames on it"
+	h.mu.Unlock()
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		h.sup.OnFrame(&protocol.AgentFrameMsg{Event: protocol.FrameOpened, Kind: protocol.FrameGUI})
+	}()
+	if _, err := h.sup.SetMode(ctx, protocol.FrameGUI); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.sup.SetMode(ctx, protocol.FrameTerminal); err != nil {
+		t.Fatal(err)
+	}
+	if !h.sup.xvnc.Running() || h.sup.gui.Running() || h.sup.Mode() != protocol.FrameTerminal {
+		t.Fatal("the display must keep running when Emacs keeps its X connection")
+	}
+	h.mu.Lock()
+	h.evalValue = "closed"
+	h.mu.Unlock()
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		h.sup.OnFrame(&protocol.AgentFrameMsg{Event: protocol.FrameOpened, Kind: protocol.FrameGUI})
+	}()
+	if _, err := h.sup.SetMode(ctx, protocol.FrameGUI); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.sup.SetMode(ctx, protocol.FrameTerminal); err != nil {
+		t.Fatal(err)
+	}
+	if h.sup.xvnc.Running() {
+		t.Fatal("the display stops once Emacs closed its connection")
 	}
 }
 

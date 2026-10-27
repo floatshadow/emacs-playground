@@ -84,16 +84,22 @@ func RealCommands(cfg *protocol.SessiondConfig) Commands {
 			return c
 		},
 		Xvnc: func() *exec.Cmd {
+			// The geometry is the initial size only: the browser asks for
+			// its pane's size (noVNC resizeSession, SetDesktopSize), which
+			// Xvnc accepts and applies through RandR (B13).
 			c := exec.Command(cfg.XvncBin, display,
 				"-geometry", fmt.Sprintf("%dx%d", w, h), "-depth", "24",
 				"-rfbport", fmt.Sprint(cfg.VNCPort), "-localhost", "-SecurityTypes", "None",
-				"-dpi", "110", "-AlwaysShared", "-desktop", "playground")
+				"-dpi", "110", "-AlwaysShared", "-AcceptSetDesktopSize=1", "-desktop", "playground")
 			c.Env = env
 			return c
 		},
 		GUIFrame: func() *exec.Cmd {
+			// No (fullscreen . fullboth): without a window manager it does
+			// nothing. The agent sizes GUI frames to their display, also
+			// when RandR changes it (emacs.md §10).
 			c := exec.Command(cfg.EmacsclientBin, "-c", "-s", cfg.EmacsServer,
-				"-F", fmt.Sprintf("((fullscreen . fullboth) (width . %d) (height . %d))", w/9, h/18))
+				"-F", fmt.Sprintf("((width . %d) (height . %d))", w/9, h/18))
 			c.Env = append(append([]string{}, env...), "DISPLAY="+display)
 			c.Dir = cfg.Workspace
 			return c
