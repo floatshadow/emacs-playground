@@ -271,6 +271,12 @@ export const UserLocal = "local" satisfies UserKind;
 export const UserInvite = "invite" satisfies UserKind;
 export const UserOIDC = "oidc" satisfies UserKind;
 
+/** WaitingKind names the loop of State.Waiting. */
+export type WaitingKind = "menu" | "avy" | "which-key";
+export const WaitingMenu = "menu" satisfies WaitingKind;
+export const WaitingAvy = "avy" satisfies WaitingKind;
+export const WaitingWhichKey = "which-key" satisfies WaitingKind;
+
 /** CheatRow is [keys, description]; YAML `- [M-., go to definition]`. */
 export type CheatRow = [keys: string, description: string];
 
@@ -1470,7 +1476,11 @@ export interface RestoreRequest {
   ref?: string;
 }
 
-/** RestoreResult reports how many files were restored or removed. */
+/**
+ * RestoreResult reports how many files the restore changed: restored or
+ * removed on disk, or with unsaved changes in their buffer that the
+ * restore discarded (each file once).
+ */
 export interface RestoreResult {
   restoredFiles: number;
 }
@@ -1772,6 +1782,12 @@ export interface State {
   readOnlyReason: string | null;
   /** DiagAtPoint is the Flymake diagnostic at point, or null. */
   diagAtPoint: Diagnostic | null;
+  /**
+   * Waiting names a loop that reads keys of its own (a menu-bar menu,
+   * avy, which-key's pages), or null. Such a loop is neither a prompt nor
+   * a recursive edit, and every key goes to it.
+   */
+  waiting: Waiting | null;
 }
 
 /** StatusResult is the result of rpc status and the body of GET /status. */
@@ -1955,6 +1971,19 @@ export interface User {
   id: string;
   displayName: string;
   kind: UserKind;
+}
+
+/** Waiting describes a loop that reads keys of its own. */
+export interface Waiting {
+  /** Kind is the loop. */
+  kind: WaitingKind;
+  /** What says what is waiting, for people ("a menu"). */
+  what: string;
+  /**
+   * Leave is the keys that leave it ("C-g"; "a" for which-key, where
+   * C-g only goes back to the prefix). Rescue sends them.
+   */
+  leave: string;
 }
 
 /** Window is one live window of the selected frame. */

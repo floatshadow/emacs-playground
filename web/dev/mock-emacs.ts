@@ -1650,6 +1650,7 @@ export class MockEmacs {
       diagAtPoint: d
         ? { severity: 'error', message: d.msg, line: d.line + 1, col: d.col, source: 'rustc' }
         : null,
+      waiting: null,
     }
   }
 

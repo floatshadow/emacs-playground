@@ -41,6 +41,7 @@ export function apiState(over: Partial<State> = {}): State {
     prefixArg: null,
     readOnlyReason: null,
     diagAtPoint: { severity: 'error', message: 'mismatched types', line: 9, col: 20 },
+    waiting: null,
     ...over,
   }
 }
@@ -54,6 +55,7 @@ export function calmState(over: Partial<State> = {}): State {
     ],
     layout: 3,
     diagAtPoint: null,
+    waiting: null,
     ...over,
   })
 }

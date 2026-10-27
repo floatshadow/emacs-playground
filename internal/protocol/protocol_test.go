@@ -76,7 +76,7 @@ const stateJSON = `{
   "frame": "terminal", "frames": 1, "tabs": {"count": 1, "current": "main"},
   "minibuffer": null,
   "isearch": false, "recursive": 0, "macro": false, "prefixArg": null,
-  "readOnlyReason": null, "diagAtPoint": null
+  "readOnlyReason": null, "diagAtPoint": null, "waiting": null
 }`
 
 func TestStateDecode(t *testing.T) {

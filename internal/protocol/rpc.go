@@ -163,7 +163,9 @@ type RestoreRequest struct {
 	Ref   string `json:"ref,omitempty"`
 }
 
-// RestoreResult reports how many files were restored or removed.
+// RestoreResult reports how many files the restore changed: restored or
+// removed on disk, or with unsaved changes in their buffer that the
+// restore discarded (each file once).
 type RestoreResult struct {
 	RestoredFiles int `json:"restoredFiles"`
 }

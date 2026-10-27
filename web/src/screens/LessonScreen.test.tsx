@@ -156,6 +156,7 @@ const state = (over: Record<string, unknown> = {}): Event => ({
   prefixArg: null,
   readOnlyReason: null,
   diagAtPoint: null,
+  waiting: null,
   ...over,
 })
 

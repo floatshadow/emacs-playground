@@ -91,10 +91,38 @@ type State struct {
 	ReadOnlyReason *string `json:"readOnlyReason"`
 	// DiagAtPoint is the Flymake diagnostic at point, or null.
 	DiagAtPoint *Diagnostic `json:"diagAtPoint"`
+	// Waiting names a loop that reads keys of its own (a menu-bar menu,
+	// avy, which-key's pages), or null. Such a loop is neither a prompt nor
+	// a recursive edit, and every key goes to it.
+	Waiting *Waiting `json:"waiting"`
 }
 
 // Type implements Event.
 func (*State) Type() EventType { return EventState }
+
+// WaitingKind names the loop of State.Waiting.
+type WaitingKind string
+
+// Waiting loops (playground-agent-waiting-loops).
+const (
+	// WaitingMenu is a menu-bar menu in a terminal frame (F10, a click).
+	WaitingMenu WaitingKind = "menu"
+	// WaitingAvy is avy reading the characters or letters of its target.
+	WaitingAvy WaitingKind = "avy"
+	// WaitingWhichKey is which-key paging through a pending prefix's keys.
+	WaitingWhichKey WaitingKind = "which-key"
+)
+
+// Waiting describes a loop that reads keys of its own.
+type Waiting struct {
+	// Kind is the loop.
+	Kind WaitingKind `json:"kind"`
+	// What says what is waiting, for people ("a menu").
+	What string `json:"what"`
+	// Leave is the keys that leave it ("C-g"; "a" for which-key, where
+	// C-g only goes back to the prefix). Rescue sends them.
+	Leave string `json:"leave"`
+}
 
 // Window is one live window of the selected frame.
 type Window struct {
