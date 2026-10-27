@@ -217,7 +217,7 @@ Only a completion outside a demonstration counts as `done` (api.md §3.4).
 
 | Path | Target | Notes |
 |---|---|---|
-| key press to screen update, terminal frame | < 30 ms local, < 80 ms server on the same continent | xterm.js WebGL, tmux `escape-time 0` |
+| key press to screen update, terminal frame | < 30 ms local, < 80 ms server on the same continent | xterm.js WebGL, tmux `escape-time 10` |
 | key press to ticker prefix | < 20 ms | input tap, no Emacs involvement |
 | command to ticker entry | < 100 ms | agent post-command-hook, JSON, WebSocket |
 | last event to `check` | about 50 ms, < 300 ms with Elisp or shell checks | debounce 40 ms trailing, 120 ms max; Elisp checks batched |

@@ -197,7 +197,7 @@ Keep Emacs, tmux and Xvnc alive; expose the PTY, events, VNC and RPC endpoints; 
 3. Start the HTTP server on `PG_LISTEN`. `/healthz` answers 503 "Emacs is starting" until step 4 completes, so the gateway and Compose can poll from the first second.
 4. Start the Emacs daemon and wait for the agent's `hello` (60 s, then restart once and report).
 5. Start the tmux server and the terminal frame.
-6. Resume the step saved in `/work/.playground/state.json`, if any (no fixtures, setup or checkpoint).
+6. Resume the step saved in `/work/.playground/state.json`, if any: no fixtures and no checkpoint, but the fresh Emacs gets the lesson back before the step is active. The last snapshot (`snapshot.json`) is re-opened with the agent's `open` when it shows a file under the lesson root, else the lesson's setup runs without `reset`. Until the resume ends, periodic and shutdown snapshots do not overwrite `snapshot.json` (`Supervisor.HoldSnapshots`), so a *scratch* snapshot of the fresh Emacs never replaces the learner's.
 
 ### 3.3 Supervisor
 
@@ -234,9 +234,9 @@ Decodes what the learner types into Emacs key names, independently of Emacs, to 
 - Terminal decoder: legacy encoding (`0x01..0x1a` → `C-a..C-z`, `0x1b` followed by a byte within 50 ms → `M-<key>`, `0x7f` `DEL`, `0x0d` `RET`, `0x09` `TAB`), CSI and SS3 sequences, xterm `modifyOtherKeys`, and `CSI code ; modifiers u`. Bracketed paste, mouse reports and terminal replies are skipped. The browser's terminal sends CSI u itself for chords the legacy encoding cannot carry (frontend.md §5), and tmux passes them on.
 - Mode tracker: watches terminal output for the kitty keyboard protocol being pushed, set or popped and for `modifyOtherKeys`, so the decoder knows how ESC is encoded.
 - RFB decoder: KeyEvent messages (type 4) and QEMU extended key events on `/vnc`; X keysyms mapped through a generated table, modifier state tracked from the modifier keysyms.
-- Prefix tracker: the static prefix list `C-x`, `C-c`, `C-h`, `M-g`, `M-s`, `M-o`, `C-x 4`, `C-x 5`, `C-x t`, `C-x r`, `C-x n`, `C-x p`, `C-x 8`, `ESC`. It emits `prefix` while the sequence so far is a prefix and clears it on the next agent `key` or on C-g.
+- Prefix tracker: the static prefix list `C-x`, `C-c`, `C-h`, `M-g`, `M-s`, `C-x 4`, `C-x 5`, `C-x t`, `C-x r`, `C-x n`, `C-x p`, `C-x 8`, `C-x w`, `C-x x`, `C-x v`, `C-x a`, `C-x C-k`, `C-x RET`, `M-s h`, `ESC` (`inputtap.DefaultPrefixes`; M-o is ace-window, not a prefix). It emits `prefix` while the sequence so far is a prefix, and `prefix` with `keys: ""` as soon as a key ends a pending prefix (C-g, or a key that completes a command or leaves the list): the agent's `key` event can come much later (`C-h k` reads its own key first). `C-h` after a pending prefix keeps it pending for one more key: which-key's paging dispatcher reads that key (`n`, `p`, `d` keep the prefix, `u` drops its last key, `a` ends it) and reads the prefix again; without which-key, `describe-prefix-bindings` runs and its `key` event resets the tracker.
 
-Late keys: a lone `ESC` is reported only when the 50 ms meta timeout ends (by a timer, or when the next input arrives), while tmux (`escape-time 0`) hands the byte to Emacs at once. The tap remembers when the agent last reported a command; a key reported late whose bytes arrived before that moment was already used by Emacs (the third `ESC` of `ESC ESC ESC`), so it is dropped and the pending prefix cleared. Otherwise a silently pending `ESC` would turn the learner's next `C-x` into `C-M-x` in the tracker.
+Late keys: a lone `ESC` is reported only when the 50 ms meta timeout ends (by a timer, or when the next input arrives), while tmux hands the byte to Emacs after its `escape-time` of 10 ms (`supervisor.EscapeTime`). The tap remembers when the agent last reported a command; a key reported late whose bytes arrived before that moment was already used by Emacs (the third `ESC` of `ESC ESC ESC`), so it is dropped and the pending prefix cleared. Otherwise a silently pending `ESC` would turn the learner's next `C-x` into `C-M-x` in the tracker.
 
 ### 3.7 Event bus
 
@@ -270,7 +270,7 @@ Resuming a lesson (`scenario` without `stepId`) starts at the first step neither
 
 ### 3.9 Checkpoints
 
-The workspace is a git repository. Checkpoints never touch the learner's index or branch:
+The workspace is a git repository. Checkpoints and restores never touch the learner's index or branch; both use a temporary index:
 
 ```
 export GIT_INDEX_FILE=/work/.playground/index.tmp
@@ -291,7 +291,7 @@ Next to each ref, `/work/.playground/checkpoints/<ref>.json` (`checkpoint.Meta`)
 | `globals` | printed values of `sessiond.GlobalVars` (≤ 256 KiB): kill ring, minibuffer, file, buffer, search and replace histories, the keyboard macro and its counters | "Watch it" followed by "Do it yourself" must not leave the demo's kills, commands or macro counts behind. Add a variable here when a lesson depends on another piece of session state |
 | `emptyDirs` | the workspace's empty directories (at most 1000) | git holds no empty directories |
 
-Restore: `git restore --source=<ref> --worktree --staged -- .`, `git clean -fd` keeping build output and `.playground`, recreate the empty directories, keep `emacs.d/modules.el` as it is (modules only grow, emacs.md §4, and the running Emacs has the current set loaded), then the agent's `reset-step` with the spec, then the unsaved text (`replace-buffer-contents`) and undo histories with undo recording off, then the session variables. The learner's staging area is reset to the checkpoint; Magit lessons take their own checkpoints after staging. Once started, a restore runs to the end without the request's cancellation: a page navigating away during "Go to this step" must not leave the step half restored.
+Restore: `git restore --source=<ref> --worktree --staged -- .`, `git clean -fd` keeping build output and `.playground`, recreate the empty directories, keep `emacs.d/modules.el` as it is (modules only grow, emacs.md §4, and the running Emacs has the current set loaded), then the agent's `reset-step` with the spec, then the unsaved text (`replace-buffer-contents`) and undo histories with undo recording off, then the session variables. The restore commands run with `GIT_INDEX_FILE=/work/.playground/index.tmp`, which then holds the checkpoint, so `git clean` removes exactly the files the checkpoint does not have. The learner's index keeps whatever the learner staged, and course files stay untracked (no `A` in `git status`, no `Git@` in the mode line); `Manager.Init` resets an index older workspaces had filled once (marker `.playground/learner-index-reset`). `restoredFiles` counts the files restored or removed on disk and those whose unsaved changes the restore discarded. TODO(sessiond, backend.md §3.9): Magit lessons that rely on staged changes need the restore to put the staging area back too. Once started, a restore runs to the end without the request's cancellation: a page navigating away during "Go to this step" must not leave the step half restored.
 
 Git commands run detached from the request, bounded by `checkpoint.GitTimeout` (2 min), and the manager serialises them. A git lock file older than `checkpoint.StaleLockAge` (10 s) that blocks a command belongs to a git process that died; it is removed and the command runs once more.
 

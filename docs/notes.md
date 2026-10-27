@@ -18,7 +18,9 @@ Developer workflow, longer commands, the toolchain, the slice-1 scope and the kn
 | sessiond environment, supervisor, input tap, step engine, checkpoints, scenario loader ("Go to this step", `setup.reset`) | backend.md §3 |
 | playctl commands (`curriculum play` flags and output) | backend.md §4, CURRICULUM.md B.5 |
 | Session image, tmux, terminal keys, GUI frame, saving, module unlocking | emacs.md §1 to §7 |
-| Agent hooks, the learner's frame, `snapshot`, `open`, `reset-step`, `setup`, side windows, C-g during redisplay | emacs.md §10 |
+| Agent hooks, the learner's frame (the GUI frame while one exists), windows following the learner between the terminal and GUI frames, waiting loops (`waiting`) and Rescue, echo deduplication, `snapshot`, `open`, `reset-step`, `setup`, side windows, C-g during redisplay | emacs.md §10 |
+| Demo idle end and abandoned demos, the cold-start resume, checkpoint restores on a temporary index, the prefix list | api.md §4.1, backend.md §3.2, §3.6, §3.9 |
+| Go to this step (veil, quiet keys), finished and displaced lessons, offered locales, the top bar at narrow widths | frontend.md §7, §11, §12 |
 | Extended keys in the browser, demo player input, nudge suppression, progress resets from another tab | frontend.md §2, §5, §6 |
 | Authoring rules (modules only grow, demos from the checkpoint, builds, `C-g` after an edit) | CURRICULUM.md B.3 |
 | Every dependency, its pin and why | third-party.md |
@@ -104,6 +106,10 @@ What the first slice builds; everything else is a `TODO` with its doc section (r
 - curriculum: Parts 0 to 3 complete (lesson.md, scenario.yaml with self-solving demos, fixtures), the five tables, and `curriculum/index.yaml` listing all 15 parts (later parts `planned`).
 
 ## 6. Known limitations
+
+- Checkpoint restores leave the learner's git index alone, so a future Magit lesson that relies on staged changes needs its restore to put the staging area back (`TODO(sessiond, backend.md §3.9)`).
+- zh-CN UI strings cover about a fifth of `en.json`, so the locale is not offered; several advice strings (ticker labels, pattern nudges, habit titles) are still English literals in `web/src/advice`.
+- Plain Ctrl+/ reaches Emacs as `C-_` (tmux encodes it as that byte), so the ticker shows `C-_` for it.
 
 - `reset-step` does not switch off buffer-local minor modes a demonstration turned on; lessons that toggle a mode accept either direction or reset it in their setup.
 - "Go to this step" on lesson 3.5's `try` and `hide` starts without the learner's `*Help*` display rule (a checkpoint does not record `display-buffer-alist`), so the learner evaluates `popups.el` again, as the step's hint says. Watch it on 3.5 `rule` leaves the demonstration's rule active.

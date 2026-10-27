@@ -18,7 +18,7 @@ The contracts between the browser, the gateway, sessiond and the Emacs agent. Th
 | Method and path | Body | Response |
 |---|---|---|
 | `GET /auth/config` | | unauthenticated: `{mode, authMode, oidcStartUrl?}`, what the login screen offers |
-| `POST /auth/invite` | `{code}` | `204`, sets the cookie; `403 forbidden` for an unknown, expired or used-up code; `429` per IP and per code. An already signed-in browser keeps its user and uses up nothing |
+| `POST /auth/invite` | `{code}` | `204`, sets the cookie; `403 forbidden` for an unknown, expired or used-up code; `429` per IP and per code; `409 conflict` when auth mode is not `invite` (`none` or `oidc`). An already signed-in browser keeps its user and uses up nothing |
 | `GET /auth/oidc/start`, `GET /auth/oidc/callback` | | `501 not_implemented` in slice 1 (`404` when auth mode is not `oidc`) |
 | `POST /auth/logout` | | `204`, clears the cookie |
 | `GET /me` | | `{user:{id, displayName, kind}, mode, authMode, features:{gui, remoteBox, stuckReports, authorMode}, version}`; `401` when not signed in |
@@ -169,7 +169,7 @@ The step engine (backend.md §3.8) moves the active step through these `step` st
 | `skipped` | `skip` finished | progress `skipped`; the next step's `loaded` follows, or `lessonComplete` on the last step |
 | `dropped` | `drop-step` forgot the active step | no step is active until the next `scenario` |
 
-The demo latch is set by `demo start` and cleared by `restore {}`, a `scenario` load of the step and `drop-step`; only a completion without the latch counts as `done`. Stuck rules are not evaluated while a demo plays (between `demo start` and `demo end`). Keys sent with `keys` (inline "try it", playctl) are learner input.
+The demo latch is set by `demo start` and cleared by `restore {}`, a `scenario` load of the step and `drop-step`; only a completion without the latch counts as `done`. Stuck rules are not evaluated while a demo plays (between `demo start` and `demo end`); a demo also ends without `demo end` when no `keys` arrived for 10 s (`steps.DemoIdle`) or the terminal connection of the page closes, and if it had not completed the step its latch is dropped, so the learner's own completion counts as `done`. Keys sent with `keys` (inline "try it", playctl) are learner input.
 
 ## 5. State object
 
@@ -190,7 +190,7 @@ Emitted by the agent and forwarded unchanged apart from `seq` and `ts`. The brow
   "frame": "terminal", "frames": 1, "tabs": {"count": 1, "current": "main"},
   "minibuffer": null,
   "isearch": false, "recursive": 0, "macro": false, "prefixArg": null,
-  "readOnlyReason": null, "diagAtPoint": null
+  "readOnlyReason": null, "diagAtPoint": null, "waiting": null
 }
 ```
 
@@ -200,6 +200,7 @@ Emitted by the agent and forwarded unchanged apart from `seq` and `ts`. The brow
 - `layout` is a window id for a single window, or `["vsplit"|"hsplit", child, …]`. `vsplit` stacks children top to bottom (C-x 2, Emacs's vertical combination), `hsplit` places them side by side (C-x 3). Layout conditions match it with `protocol.MatchLayout`.
 - `minibuffer`, when open: `{"depth":1,"prompt":"Find file: ","contents":"~/hello/src/","kind":"prompt"}`; isearch is reported with `kind: "isearch"`.
 - `frames` is `(length (frame-list))`, including the daemon's invisible frame.
+- `waiting`, while a loop that reads keys of its own runs (a menu-bar menu in the terminal, avy reading its target, which-key paging through a prefix's keys): `{"kind":"menu"|"avy"|"which-key","what":"a menu","leave":"C-g"}`, else null. `leave` is the keys that end it (`a` for which-key, where C-g only returns to the prefix); Rescue sends them first.
 
 ## 6. Scenario object
 
