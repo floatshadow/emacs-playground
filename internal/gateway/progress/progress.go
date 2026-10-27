@@ -50,9 +50,10 @@ func (s *Service) Apply(ctx context.Context, userID string, rep protocol.Progres
 		return httpx.BadRequest("lessonId and stepId must be shorter than 200 bytes")
 	}
 	switch rep.Status {
-	case protocol.ProgressInProgress, protocol.ProgressDone, protocol.ProgressNotStarted:
+	case protocol.ProgressInProgress, protocol.ProgressDone, protocol.ProgressNotStarted,
+		protocol.ProgressDemonstrated, protocol.ProgressSkipped:
 	default:
-		return httpx.BadRequest("status must be in-progress, done or not-started")
+		return httpx.BadRequest("status must be in-progress, demonstrated, skipped, done or not-started")
 	}
 	if s.Steps != nil {
 		steps, ok := s.Steps.StepIDs(rep.LessonID)
@@ -79,7 +80,9 @@ func (s *Service) Apply(ctx context.Context, userID string, rep protocol.Progres
 			rec = r
 		}
 	}
-	if rec.Status != protocol.ProgressDone {
+	// A step's status only rises (not-started < in-progress < demonstrated
+	// < skipped < done); only a reset clears it (api.md §2.4).
+	if protocol.ProgressRank(rep.Status) > protocol.ProgressRank(rec.Status) {
 		rec.Status = rep.Status
 		if rep.Status == protocol.ProgressDone {
 			rec.CompletedAt = rep.At
@@ -111,7 +114,7 @@ func (s *Service) Get(ctx context.Context, userID string) (protocol.Progress, er
 			lp = protocol.LessonProgress{Status: protocol.ProgressNotStarted, Steps: map[string]protocol.StepProgress{}}
 		}
 		lp.Steps[r.StepID] = protocol.StepProgress{Status: r.Status, HintsUsed: r.HintsUsed, Resets: r.Resets, CompletedAt: r.CompletedAt}
-		if r.Status != protocol.ProgressNotStarted {
+		if protocol.ProgressRank(r.Status) > 0 {
 			lp.Status = protocol.ProgressInProgress
 		}
 		out.Lessons[r.LessonID] = lp
@@ -120,37 +123,57 @@ func (s *Service) Get(ctx context.Context, userID string) (protocol.Progress, er
 		}
 	}
 	for id, lp := range out.Lessons {
-		if s.Steps == nil {
-			continue
+		var steps []string
+		known := false
+		if s.Steps != nil {
+			steps, known = s.Steps.StepIDs(id)
 		}
-		steps, ok := s.Steps.StepIDs(id)
-		if !ok || len(steps) == 0 {
-			continue
+		if !known {
+			// Not in the bundle: count what was recorded.
+			for st := range lp.Steps {
+				steps = append(steps, st)
+			}
+		} else {
+			lp.Counts.Total = len(steps)
 		}
-		done := true
 		for _, st := range steps {
-			if lp.Steps[st].Status != protocol.ProgressDone {
-				done = false
-				break
+			switch lp.Steps[st].Status {
+			case protocol.ProgressDone:
+				lp.Counts.Done++
+			case protocol.ProgressSkipped:
+				lp.Counts.Skipped++
+			case protocol.ProgressDemonstrated:
+				lp.Counts.Demonstrated++
 			}
 		}
-		if done {
+		// A lesson is done only when every step of the bundle's scenario
+		// is done (skipped and demonstrated steps are not).
+		if known && len(steps) > 0 && lp.Counts.Done == len(steps) {
 			lp.Status = protocol.ProgressDone
-			out.Lessons[id] = lp
 		}
+		out.Lessons[id] = lp
 	}
 	return out, nil
 }
 
-// Reset clears a lesson's progress for userID.
+// Reset clears a lesson's progress for userID; an empty lessonID clears
+// every lesson of the user ("Start over").
 func (s *Service) Reset(ctx context.Context, userID, lessonID string) error {
+	details := "lesson=" + lessonID
 	if lessonID == "" {
-		return httpx.BadRequest("lessonId is required")
+		if err := s.Store.Progress().DeleteAll(ctx, userID); err != nil {
+			return err
+		}
+		details = "lesson=*"
+	} else {
+		if len(lessonID) > maxIDLen {
+			return httpx.BadRequest("lessonId must be shorter than 200 bytes")
+		}
+		if err := s.Store.Progress().DeleteLesson(ctx, userID, lessonID); err != nil {
+			return err
+		}
 	}
-	if err := s.Store.Progress().DeleteLesson(ctx, userID, lessonID); err != nil {
-		return err
-	}
-	_ = s.Store.Audit(ctx, store.AuditEvent{At: s.now().UnixMilli(), UserID: userID, Action: "progress.reset", Details: "lesson=" + lessonID})
+	_ = s.Store.Audit(ctx, store.AuditEvent{At: s.now().UnixMilli(), UserID: userID, Action: "progress.reset", Details: details})
 	return nil
 }
 

@@ -382,6 +382,11 @@ func (r sqlProgress) DeleteLesson(ctx context.Context, userID, lessonID string) 
 	return err
 }
 
+func (r sqlProgress) DeleteAll(ctx context.Context, userID string) error {
+	_, err := r.db.ExecContext(ctx, `DELETE FROM progress WHERE user_id = ?`, userID)
+	return err
+}
+
 type sqlStuck struct{ db *sql.DB }
 
 func (r sqlStuck) Add(ctx context.Context, rep *StuckReport) (int64, error) {

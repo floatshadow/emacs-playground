@@ -129,6 +129,8 @@ type ProgressRepo interface {
 	Put(ctx context.Context, r StepRecord) error
 	// DeleteLesson removes a user's records for one lesson.
 	DeleteLesson(ctx context.Context, userID, lessonID string) error
+	// DeleteAll removes every record of a user ("Start over").
+	DeleteAll(ctx context.Context, userID string) error
 }
 
 // StuckRepo stores stuck reports.

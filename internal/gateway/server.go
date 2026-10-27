@@ -559,6 +559,8 @@ func (a *App) resetProgress(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
+	// {lessonId} clears one lesson; no body, {} or an empty lessonId clears
+	// every lesson ("Start over", api.md §2.4).
 	var req protocol.ProgressResetRequest
 	if err := httpx.DecodeJSON(w, r, &req); err != nil {
 		return err
@@ -566,7 +568,8 @@ func (a *App) resetProgress(w http.ResponseWriter, r *http.Request) error {
 	if err := a.Progress.Reset(r.Context(), u.ID, req.LessonID); err != nil {
 		return err
 	}
-	// Tell the user's running session to forget the step (best effort).
+	// Tell the user's running session to forget the step and its saved
+	// progress: drop-step {lessonId}, or {} for everything (best effort).
 	if sess, err := a.Sessions.ForUser(r.Context(), u.ID); err == nil && sess.Usable() {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()

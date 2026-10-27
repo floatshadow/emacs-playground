@@ -333,6 +333,13 @@ func (r jsonProgress) DeleteLesson(_ context.Context, userID, lessonID string) e
 	return r.s.save()
 }
 
+func (r jsonProgress) DeleteAll(_ context.Context, userID string) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	delete(r.s.d.Progress, userID)
+	return r.s.save()
+}
+
 type jsonStuck struct{ s *jsonStore }
 
 func (r jsonStuck) Add(_ context.Context, rep *StuckReport) (int64, error) {

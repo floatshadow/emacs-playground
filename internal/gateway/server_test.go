@@ -324,6 +324,19 @@ func TestLocalModeEndToEnd(t *testing.T) {
 	if len(prog.Lessons) != 0 {
 		t.Fatalf("after reset %+v", prog)
 	}
+	// Start over: a reset with no body clears every lesson and tells
+	// sessiond drop-step {}.
+	c.json("POST", "/internal/sessions/local/progress", protocol.ProgressReport{LessonID: "00-orientation/01-first", StepID: "open", Status: protocol.ProgressSkipped}, nil, 204, "Authorization", "Bearer local")
+	c.json("GET", "/api/v1/progress", nil, &prog, 200)
+	if lp := prog.Lessons["00-orientation/01-first"]; lp.Steps["open"].Status != protocol.ProgressSkipped || lp.Counts.Skipped != 1 || lp.Counts.Total != 3 {
+		t.Fatalf("skipped %+v", lp)
+	}
+	c.json("POST", "/api/v1/progress/reset", nil, nil, 204)
+	prog = protocol.Progress{}
+	c.json("GET", "/api/v1/progress", nil, &prog, 200)
+	if len(prog.Lessons) != 0 {
+		t.Fatalf("after start over %+v", prog)
+	}
 
 	// Stuck: the gateway asks sessiond for events; sessiond's own filing
 	// of the same report merges.
@@ -339,7 +352,7 @@ func TestLocalModeEndToEnd(t *testing.T) {
 		t.Fatalf("stuck reports %+v", reps)
 	}
 	calls := strings.Join(sd.calls(), "\n")
-	for _, want := range []string{"restart-emacs {} user=local", `drop-step {"lessonId":"00-orientation/01-first"} user=local`, `stuck {"note":"lost"} user=local`} {
+	for _, want := range []string{"restart-emacs {} user=local", `drop-step {"lessonId":"00-orientation/01-first"} user=local`, `drop-step {} user=local`, `stuck {"note":"lost"} user=local`} {
 		if !strings.Contains(calls, want) {
 			t.Errorf("sessiond did not get %q; got:\n%s", want, calls)
 		}
