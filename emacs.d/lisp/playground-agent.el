@@ -54,6 +54,7 @@
 (defvar isearch-string)
 (defvar isearch-nonincremental)
 (defvar isearch--current-buffer)
+(defvar window-state-normalize-buffer-name)
 (defvar flymake-mode)
 (defvar playground-modules)
 (defvar playground-modules-loaded)
@@ -122,7 +123,7 @@ on the next pong, or the connection is dropped after
   '(eglot--managed-mode flymake-mode overwrite-mode read-only-mode view-mode
     auto-revert-mode visual-line-mode auto-fill-mode follow-mode olivetti-mode
     iedit-mode multiple-cursors-mode rectangle-mark-mode corfu-mode
-    diff-hl-mode apheleia-mode ws-butler-mode subword-mode superword-mode
+    diff-hl-mode apheleia-mode subword-mode superword-mode
     outline-minor-mode hs-minor-mode display-line-numbers-mode hl-line-mode
     whitespace-mode text-scale-mode buffer-face-mode tab-line-mode
     smerge-mode git-timemachine-mode magit-blame-mode wdired-mode
@@ -130,7 +131,9 @@ on the next pong, or the connection is dropped after
     compilation-minor-mode electric-pair-mode abbrev-mode
     eldoc-box-hover-mode eldoc-box-hover-at-point-mode
     breadcrumb-local-mode pulsar-mode)
-  "Minor modes reported in the state's `minors' list when enabled."
+  "Minor modes reported in the state's `minors' list when enabled.
+Housekeeping modes that never ask anything of the learner, such as
+ws-butler (which trims the spaces you added), are left out."
   :type '(repeat symbol))
 
 (defcustom playground-agent-echo-noise
@@ -249,14 +252,47 @@ sends the reply itself later.")
   "\"gui\" or \"terminal\" for FRAME."
   (if (display-graphic-p frame) "gui" "terminal"))
 
+(defvar playground--learner-frame nil
+  "The frame the learner's last command ran in (or the newest client frame).")
+
+(defun playground--usable-frame-p (frame)
+  "Non-nil when FRAME is a live, real frame the learner can see.
+The daemon's initial frame is not one."
+  (and (frame-live-p frame)
+       (not (frame-parameter frame 'parent-frame))
+       (not (frame-parameter frame 'tooltip))
+       (not (and (daemonp) (eq frame terminal-frame)))))
+
+(defun playground--learner-frame ()
+  "The frame the learner works in.
+That is the frame of the last command when it still exists.  Calls
+from sessiond run from timers, between commands, with whatever frame
+Emacs last selected (the GUI frame just made, the daemon's own frame
+after a client frame closed), which is not always the one the
+learner is looking at."
+  (cond ((playground--usable-frame-p playground--learner-frame) playground--learner-frame)
+        ((playground--usable-frame-p (selected-frame)) (selected-frame))
+        ((seq-find #'playground--usable-frame-p (frame-list)))
+        (t (selected-frame))))
+
+(defun playground--note-learner-frame (&optional frame)
+  "Remember FRAME (default: the selected one) as the learner's frame."
+  (let ((frame (or frame (selected-frame))))
+    (when (playground--usable-frame-p frame)
+      (setq playground--learner-frame frame))))
+
 (defun playground--user-window ()
   "The window the learner is working in.
-That is the selected window, or the window that was selected when
-the minibuffer was entered."
-  (let ((w (selected-window)))
+That is the selected window of the learner's frame
+\(`playground--learner-frame'), or, while a minibuffer is open
+there, the window that was selected when it was entered."
+  (let* ((frame (playground--learner-frame))
+         (w (frame-selected-window frame)))
     (if (window-minibuffer-p w)
         (let ((m (minibuffer-selected-window)))
-          (if (and m (window-live-p m)) m (frame-first-window)))
+          (if (and m (window-live-p m) (eq (window-frame m) frame))
+              m
+            (frame-first-window frame)))
       w)))
 
 (defun playground--relative (file)
@@ -731,12 +767,24 @@ C-x C-c deletes its frame before `post-command-hook' runs.")
     digit-argument negative-argument)
   "Commands that build a prefix argument.
 They call `prefix-command-preserve-state', which sets `this-command'
-back to the previous command, so they are recognised before they run.")
+and `real-this-command' back to the previous command, so they are
+recognised before they run.")
+
+(defun playground--command ()
+  "The command the learner's keys ran, as reported in key events.
+That is `real-this-command', not `this-command': commands rewrite the
+latter to steer the next one (`kill-line' runs `kill-region', which
+sets it to `kill-region' so that kills append; `yank-pop' sets it to
+`yank'; `yank' with an empty kill ring leaves t; TAB in the minibuffer
+runs `minibuffer-complete', which sets it to `completion-at-point'),
+and the ticker then named a command the learner never ran.  M-x sets
+both to the command chosen by name."
+  real-this-command)
 
 (defun playground--pre-command ()
   "Remember the keys of the command about to run, and the command."
   (setq playground--pre-keys (this-command-keys-vector)
-        playground--pre-command this-command
+        playground--pre-command (playground--command)
         playground--pre-frame (playground--frame-kind)))
 
 (defun playground--this-keys ()
@@ -770,10 +818,11 @@ kind of frame it was typed in, by default the selected window's."
   (unless playground--in-hook
     (let ((playground--in-hook t))
       (playground--safely "post-command"
+        (playground--note-learner-frame)
         (let* ((depth (minibuffer-depth))
                (cmd (if (memq playground--pre-command playground--prefix-arg-commands)
                         playground--pre-command
-                      this-command))
+                      (playground--command)))
                ;; Already reported when its prompt opened.  This also
                ;; covers the extra run of this hook that starts the
                ;; minibuffer's own command loop (depth one deeper, the
@@ -829,7 +878,7 @@ kind of frame it was typed in, by default the selected window's."
       (playground--safely "minibuffer-setup"
         (let* ((depth (minibuffer-depth))
                (outer (1- depth))
-               (cmd this-command))
+               (cmd (playground--command)))
           (cond
            ((memq cmd '(execute-extended-command execute-extended-command-for-buffer))
             ;; The M-x prompt itself: remember its keys, report the
@@ -858,11 +907,11 @@ kind of frame it was typed in, by default the selected window's."
         ;; C-g minibuffer-keyboard-quit) exits by a throw, so its own
         ;; `post-command-hook' run never happens; report it here, where
         ;; its keys are still known.
-        (when this-command
+        (when-let* ((cmd (playground--command)))
           (let ((keys (playground--this-keys)))
             (unless (string-empty-p keys)
-              (playground--emit (playground--key-event this-command keys nil (current-buffer)))
-              (setq playground--exit-reported this-command))))
+              (playground--emit (playground--key-event cmd keys nil (current-buffer)))
+              (setq playground--exit-reported cmd))))
         (playground--minibuffer-event nil (substring-no-properties (or (minibuffer-prompt) ""))
                                       (minibuffer-depth) "prompt")
         (playground--schedule-state)))))
@@ -895,6 +944,9 @@ kind of frame it was typed in, by default the selected window's."
 (defun playground--on-make-frame ()
   "An emacsclient frame opened (it is selected)."
   (playground--safely "make-frame"
+    ;; The browser shows the frame just made: the terminal frame after
+    ;; a restart, the GUI frame when the learner switches to it.
+    (playground--note-learner-frame)
     (playground--frame-event "opened" (selected-frame))
     (playground--emit-state t)
     ;; After the server has finished setting the frame up (its initial
@@ -1015,7 +1067,10 @@ vectors arrays, and anything else its printed representation."
      (t (format "%S" value)))))
 
 (defmacro playground--in-user-window (&rest body)
-  "Run BODY with the learner's window selected (not the minibuffer)."
+  "Run BODY with the learner's window selected (not the minibuffer).
+The window is in the learner's frame (`playground--learner-frame'),
+so `selected-window', `frame-first-window' and the like mean what the
+learner sees, whichever frame Emacs happens to have selected."
   (declare (indent 0) (debug t))
   `(let ((w (playground--user-window)))
      (if (eq w (selected-window))
@@ -1036,7 +1091,9 @@ vectors arrays, and anything else its printed representation."
     (error "unknown")))
 
 (defun playground--op-check (args &rest _)
-  "Evaluate every form of ARGS: {results:[true|false|\"unknown\"]}."
+  "Evaluate every form of ARGS: {results:[true|false|\"unknown\"]}.
+Each form runs with the learner's window selected in the learner's
+frame (`playground--in-user-window')."
   `((results . ,(vconcat (mapcar #'playground--check-form (alist-get 'forms args))))))
 
 ;;;;; Rescue (emacs.md 10.3)
@@ -1185,8 +1242,84 @@ non-nil when there was something to repair."
     (format "(%s %s)" (if (car node) "vsplit" "hsplit")
             (mapconcat #'playground--layout-string (cdr node) " "))))
 
+(defun playground--state-add-files (state)
+  "Writable window STATE (from `window-state-get') with file names added.
+Each window's buffer entry, (buffer NAME . PROPS), gets (file . FILE)
+when its buffer visits a file, and each prev-buffers entry, (NAME
+START POINT), the file name as a fourth element.  Buffer names change
+after the snapshot (uniquify renames README.md to README.md<hello>
+when a second README.md opens); the file names let
+`playground--state-map-files' find the same buffers again.
+`window-state-put' ignores the additions."
+  (let ((file-of (lambda (name)
+                   (when-let* (((stringp name))
+                               (b (get-buffer name)))
+                     (buffer-file-name b)))))
+    (cond
+     ((not (proper-list-p state)) state)
+     ((and (eq (car state) 'buffer) (stringp (cadr state)))
+      (let ((file (funcall file-of (cadr state))))
+        (if (and file (not (assq 'file (cddr state))))
+            (append state (list (cons 'file file)))
+          state)))
+     ((eq (car state) 'prev-buffers)
+      (cons 'prev-buffers
+            (mapcar (lambda (entry)
+                      (let ((file (and (proper-list-p entry) (= (length entry) 3)
+                                       (funcall file-of (car entry)))))
+                        (if file (append entry (list file)) entry)))
+                    (cdr state))))
+     (t (mapcar #'playground--state-add-files state)))))
+
+(defun playground--buffer-for-file (file &optional visit)
+  "The live buffer visiting FILE; with VISIT, visit FILE when it exists."
+  (or (find-buffer-visiting file)
+      (and visit (file-exists-p file) (find-file-noselect file))))
+
+(defun playground--file-by-buffer-name (name files)
+  "The one file among FILES (absolute names) a buffer called NAME visited.
+For window states saved without file names: NAME is matched by its
+base name, and a uniquify suffix such as <hello> or <hello/src> must
+name directories of the file.  Nil unless exactly one file fits."
+  (when (string-match "\\`\\(.*?\\)\\(?:<\\([^>]*\\)>\\)?\\'" name)
+    (let* ((base (match-string 1 name))
+           (dirs (match-string 2 name))
+           (fits (seq-filter
+                  (lambda (f)
+                    (and (equal (file-name-nondirectory f) base)
+                         (or (null dirs)
+                             (string-search (concat "/" dirs "/") f))))
+                  files)))
+      (and fits (null (cdr fits)) (car fits)))))
+
+(defun playground--state-map-files (state &optional files)
+  "Window STATE with buffer names replaced by today's names of their files.
+The inverse of `playground--state-add-files': a buffer entry with a
+file names the buffer visiting that file now (visiting it again if
+needed), whatever it was called when the state was saved.  An entry
+without a file whose buffer no longer exists is matched against FILES,
+the absolute names of the spec's files, by its name."
+  (cond
+   ((not (proper-list-p state)) state)
+   ((and (eq (car state) 'buffer) (stringp (cadr state)))
+    (let* ((name (cadr state))
+           (file (or (alist-get 'file (cddr state))
+                     (and files (not (get-buffer name))
+                          (playground--file-by-buffer-name name files))))
+           (b (and (stringp file) (playground--buffer-for-file file t))))
+      (if b (cons 'buffer (cons (buffer-name b) (cddr state))) state)))
+   ((eq (car state) 'prev-buffers)
+    (cons 'prev-buffers
+          (mapcar (lambda (entry)
+                    (let* ((file (and (proper-list-p entry) (stringp (nth 3 entry))
+                                      (nth 3 entry)))
+                           (b (and file (playground--buffer-for-file file))))
+                      (if b (cons (buffer-name b) (cdr entry)) entry)))
+                  (cdr state))))
+   (t (mapcar (lambda (s) (playground--state-map-files s files)) state))))
+
 (defun playground--op-snapshot (&rest _)
-  "Buffer and window spec of the selected frame (protocol.WindowSpec)."
+  "Buffer and window spec of the learner's frame (protocol.WindowSpec)."
   (let* ((frame (window-frame (playground--user-window)))
          (wins (window-list frame 'nomini (frame-first-window frame)))
          (files '()))
@@ -1200,7 +1333,12 @@ non-nil when there was something to repair."
     `((files . ,(vconcat (nreverse files)))
       (layout . ,(playground--layout-string (playground--tree frame)))
       (windowState . ,(with-selected-frame frame
-                        (prin1-to-string (window-state-get (frame-root-window frame) t))))
+                        ;; Real buffer names, which the file names are
+                        ;; looked up by.
+                        (let ((window-state-normalize-buffer-name nil))
+                          (prin1-to-string
+                           (playground--state-add-files
+                            (window-state-get (frame-root-window frame) t))))))
       (selected . ,(playground--leaf-name (window-buffer (playground--user-window))))
       (tab . ,(alist-get 'current (playground--tabs frame)))
       (takenAt . ,(playground--now-ms)))))
@@ -1251,14 +1389,19 @@ With CREATE, visit the file (or create the special buffer) when needed."
       (playground--build-layout node (selected-window))
       (balance-windows))))
 
-(defun playground--apply-window-state (state)
-  "Apply STATE, a printed `window-state-get' value."
-  (let ((ignore-window-parameters t))
+(defun playground--apply-window-state (state &optional files)
+  "Apply STATE, a printed `window-state-get' value.
+Buffers recorded with their file (`playground--state-add-files') are
+found by that file, so a window shows the file it showed when the
+state was saved even if its buffer has been renamed since.  FILES,
+absolute file names, help with states saved without them."
+  (let ((ignore-window-parameters t)
+        (state (playground--state-map-files (car (read-from-string state)) files)))
     (playground--in-user-window
       (playground--leave-side-window)
       (delete-other-windows)
       (playground--unside-sole-window)
-      (window-state-put (car (read-from-string state)) (frame-root-window) 'safe))))
+      (window-state-put state (frame-root-window) 'safe))))
 
 (defun playground--select-leaf (name)
   "Select the window showing NAME, if any."
@@ -1276,21 +1419,29 @@ only frame there is."
   (not (and (daemonp) (frame-live-p terminal-frame)
             (eq (selected-frame) terminal-frame))))
 
+(defun playground--spec-files (spec)
+  "Absolute names of the files listed in SPEC (a WindowSpec alist)."
+  (mapcar (lambda (f) (playground--absolute (alist-get 'path f)))
+          (append (alist-get 'files spec) nil)))
+
 (defun playground--open-layout (spec)
-  "Apply the window part of SPEC (a WindowSpec alist) to the selected frame."
+  "Apply the window part of SPEC (a WindowSpec alist) to the learner's frame.
+The tab comes first: switching tabs afterwards would replace the
+windows just put back with the ones that tab remembers."
+  (when-let* ((tab (alist-get 'tab spec)))
+    (when (and (featurep 'tab-bar) (bound-and-true-p tab-bar-mode))
+      (ignore-errors (playground--in-user-window (tab-bar-switch-to-tab tab)))))
   (let ((state (alist-get 'windowState spec))
         (layout (alist-get 'layout spec)))
     (cond
      ((and state (not (string-empty-p state))
-           (condition-case err (progn (playground--apply-window-state state) t)
+           (condition-case err
+               (progn (playground--apply-window-state state (playground--spec-files spec)) t)
              (error (playground--log "window-state-put failed: %S" err) nil))))
      ((and layout (not (string-empty-p layout)))
       (playground--apply-layout layout))))
   (when-let* ((sel (alist-get 'selected spec)))
-    (playground--select-leaf sel))
-  (when-let* ((tab (alist-get 'tab spec)))
-    (when (and (featurep 'tab-bar) (bound-and-true-p tab-bar-mode))
-      (ignore-errors (tab-bar-switch-to-tab tab)))))
+    (playground--select-leaf sel)))
 
 (defun playground--apply-pending-layout (frame)
   "Give FRAME the layout `open' kept for the first client frame, if any."
@@ -1324,8 +1475,33 @@ and applied to the next client frame."
       (setq playground--pending-layout (cons (float-time) args))
       `((opened . ,opened) (layoutDeferred . t)))))
 
+(defun playground--kill-unlisted (files)
+  "Kill unmodified workspace file buffers whose file is not among FILES.
+FILES are the absolute names of the buffers a step started with.  A
+buffer opened during the step keeps a step condition true (\"hello's
+main.rs is open\") and renames the step's own buffers (README.md
+becomes README.md<hello> next to README.md<polyglot>), so a reset
+closes it.  Returns the number killed."
+  (let ((root (file-name-as-directory (expand-file-name playground-agent-workspace)))
+        (keep (mapcar #'expand-file-name files))
+        (n 0))
+    (dolist (b (buffer-list))
+      (let ((file (buffer-file-name b)))
+        (when (and file (buffer-live-p b) (not (buffer-modified-p b))
+                   (string-prefix-p root (expand-file-name file))
+                   (not (member (expand-file-name file) keep)))
+          (let ((kill-buffer-query-functions nil))
+            (kill-buffer b))
+          (cl-incf n))))
+    n))
+
 (defun playground--op-reset-step (args &rest _)
-  "Revert or kill file buffers, then open the spec in ARGS."
+  "Put the files and windows back to the spec in ARGS (the step's start).
+Edited buffers are reverted to the restored files, buffers of files
+that are gone are killed, unmodified file buffers the step did not
+start with are closed, then the spec is opened: its files, points
+and windows, each window on the file it showed (whatever the buffer
+is called now), the selected window last."
   (let ((reverted 0) (killed 0))
     (dolist (b (buffer-list))
       (let ((file (buffer-file-name b)))
@@ -1347,6 +1523,10 @@ and applied to the next client frame."
             (kill-buffer b))
           (cl-incf killed)))))
     (let ((spec (alist-get 'spec args)))
+      ;; A spec without files is not a snapshot (sessiond sends an empty
+      ;; one when the checkpoint has none): close nothing then.
+      (when (> (length (alist-get 'files spec)) 0)
+        (cl-incf killed (playground--kill-unlisted (playground--spec-files spec))))
       (when spec (playground--op-open spec)))
     `((reverted . ,reverted) (killed . ,killed))))
 
@@ -1474,17 +1654,43 @@ turned the mode on."
     (auto-save-visited-mode 1)
     t))
 
+(defun playground--start-at-top (buffers &optional windows-too)
+  "Put point at the start of each of BUFFERS.
+With WINDOWS-TOO, also every window of the learner's frame that shows
+one of them (window start included), and forget the positions those
+windows remember for them, which `switch-to-buffer' would bring back.
+A buffer kept from an earlier visit otherwise opens where that visit
+left it, and a lesson's \"the cursor is on line 5\" can already be
+true when it starts."
+  (dolist (b buffers)
+    (when (buffer-live-p b)
+      (with-current-buffer b (goto-char (point-min)))))
+  (when windows-too
+    (dolist (w (window-list (playground--learner-frame) 'nomini))
+      (when (memq (window-buffer w) buffers)
+        (with-current-buffer (window-buffer w)
+          (set-window-start w (point-min))
+          (set-window-point w (point-min))))
+      (set-window-prev-buffers
+       w (seq-remove (lambda (entry) (memq (car-safe entry) buffers))
+                     (window-prev-buffers w))))))
+
 (defun playground--setup-now (args)
-  "The work of `playground--op-setup' (ARGS), at top level."
+  "The work of `playground--op-setup' (ARGS), at top level.
+With reset, the files of `open' start at their first line, in their
+buffers and in the windows that show them, before the setup's eval
+\(which may move them on purpose)."
   (let* ((playground-agent-workspace
           (file-name-as-directory (or (alist-get 'workspace args) playground-agent-workspace)))
          (open (append (alist-get 'open args) nil))
          (layout (alist-get 'layout args))
          (form (alist-get 'eval args))
          (compile-cmd (alist-get 'compile args))
+         (reset (eq (alist-get 'reset args) t))
+         (opened nil)
          (first nil))
     (playground--sync-changed-buffers playground-agent-workspace)
-    (when (eq (alist-get 'reset args) t)
+    (when reset
       (playground--restore-auto-save)
       (playground--in-user-window
         ;; Tabs from an earlier lesson (3.7, project tabs) are not part of
@@ -1499,7 +1705,10 @@ turned the mode on."
           (playground--forget-places (playground--absolute root)))))
     (dolist (path open)
       (let ((b (find-file-noselect (playground--absolute path))))
+        (push b opened)
         (unless first (setq first b))))
+    (when reset
+      (playground--start-at-top opened))
     (playground--in-user-window
       (let ((ignore-window-parameters t))
         (cond
@@ -1519,6 +1728,9 @@ turned the mode on."
           (delete-other-windows)
           (playground--unside-sole-window)
           (switch-to-buffer first)))))
+    ;; A layout saved as a window state (.eld) brings its own positions.
+    (when (and reset (not (and layout (string-suffix-p ".eld" layout))))
+      (playground--start-at-top opened t))
     (when (and form (not (string-empty-p form)))
       (playground--in-user-window (eval (car (read-from-string form)) t)))
     (when (and compile-cmd (not (string-empty-p compile-cmd)))

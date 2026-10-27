@@ -102,6 +102,10 @@ The learner never interacts with tmux. It exists for reconnection and for bring-
 
 Keys: xterm.js runs with the kitty keyboard protocol extension on; tmux passes CSI u through with `extended-keys always`; `kkp.el` in `base.el` enables the protocol in Emacs (`kkp-enable-in-terminal`). This is what makes `C-;`, `C-RET`, `C-S-s` and `C-M-%` distinguishable. Milestone 1 verifies the full path and falls back to legacy encoding (with those bindings avoided in lessons) if any link fails.
 
+kkp's decoders are installed for every `ESC [ <digit>` and `ESC [ <letter>` sequence of a tmux frame (`playground--kkp-tmux`), so they also see the keys tmux spells its own way: Home `ESC [ 1 ~`, End `ESC [ 4 ~`, Delete `ESC [ 3 ~` (tmux-256color). `base.el` adds 1 and 4 to kkp's table of `~` keys (`<home>`, `<end>`; kkp knew only rxvt's 7 and 8 and fell back to the code point, so End arrived as `C-d` and deleted a character) and reads unmodified Delete as `<deletechar>` (`delete-forward-char`) instead of `<delete>`, which a terminal's `local-function-key-map` turns into DEL (`delete-backward-char`). Modified keys keep kkp's names: `C-<delete>` is `kill-word`, `C-<end>` is `end-of-buffer`.
+
+Mode lines: the selected window's mode line is the playground's violet (`#7a58c4`, white text) and the others are dimmed (`#232639`, grey text), a background contrast of 2.8; lessons point at "the bright mode line" to show which window is selected. These are `modus-vivendi-tinted-palette-overrides`, set before the theme loads, so another Modus theme keeps its own colours. Housekeeping minor modes stay out of the mode line: ws-butler's " wb" is hidden (`editing.el`), and the agent leaves it out of the state's `minors`.
+
 Clipboard: Emacs 31 sets the terminal selection through OSC 52 when `xterm-extra-capabilities` includes `setSelection`; tmux forwards it with `set-clipboard on`; xterm.js's clipboard addon writes it to the browser clipboard. Paste from the browser goes through bracketed paste.
 
 Mouse: Emacs 31 enables `xterm-mouse-mode` by default; clicks, drags on window dividers and scrolling work in the terminal frame.
@@ -110,9 +114,11 @@ Font: the browser loads Iosevka Nerd Font so nerd-icons glyphs render; `TERM=tmu
 
 ## 6. GUI frame
 
-`Xvnc :1 -geometry 1600x900 -depth 24 -rfbport 5901 -localhost -SecurityTypes None -dpi 110 -AcceptSetDesktopSize=1`, no window manager; the geometry is the initial size, the browser pane's size follows through RandR, and the Emacs frame fills the display (sized by the agent, not by `fullscreen`, which needs a window manager). Fonts through fontconfig: Iosevka Nerd Font 12 pt as default, Noto CJK as fallback. `pdf-tools` is built at image time (`pdf-tools-install` non-interactive) so `pdf-view-mode` opens PDFs instantly; `image-mode`, SVG, inline Org images and LaTeX previews work. `posframe`-based popups are allowed in GUI frames only; the config checks `(display-graphic-p)`.
+`Xvnc :1 -geometry 1600x900 -depth 24 -rfbport 5901 -localhost -SecurityTypes None -dpi 110 -AcceptSetDesktopSize=1`, no window manager; the geometry is the initial size, the browser pane's size follows through RandR, and the Emacs frame covers the whole screen (below; sized by the config, not by `fullscreen`, which needs a window manager). Fonts through fontconfig: Iosevka Nerd Font 12 pt as default, Noto CJK as fallback. `pdf-tools` is built at image time (`pdf-tools-install` non-interactive) so `pdf-view-mode` opens PDFs instantly; `image-mode`, SVG, inline Org images and LaTeX previews work. `posframe`-based popups are allowed in GUI frames only; the config checks `(display-graphic-p)`.
 
 The GUI frame is started on demand and torn down when the learner switches back; its only consumer is the noVNC pane through sessiond.
+
+The frame covers the X screen exactly and follows it when the screen changes size: the browser asks Xvnc for a screen as large as its pane (noVNC `resizeSession`, RandR in X), so the frame is drawn at the size it is shown instead of being scaled. Without a window manager `fullscreen` only takes effect when a frame is made, so `base.el` fits every GUI frame of the playground daemon itself (`playground-fit-frame-to-display`): from `after-make-frame-functions` and from `display-monitors-changed-functions`, it moves the frame to the monitor's origin and gives its text area the monitor's size minus what the menu bar, internal border and fringes take (`frame-resize-pixelwise`), and clears `fullscreen`, which would fight an explicit size. Nothing happens when a window manager runs (`_NET_SUPPORTING_WM_CHECK` on the root window) or outside the playground daemon.
 
 ## 7. Daemon and frames
 
@@ -138,7 +144,7 @@ A global minor mode, about 400 lines, no dependencies beyond built-ins. It repor
 
 | Hook | Emits | Notes |
 |---|---|---|
-| `post-command-hook` | `key` then `state` | `keys` from `(key-description (this-command-keys-vector))`, `cmd` from `this-command` (symbol name; lambdas reported as `<lambda>`); `state` coalesced to one per command |
+| `post-command-hook` | `key` then `state` | `keys` from `(key-description (this-command-keys-vector))`, `cmd` from `real-this-command` (symbol name; lambdas reported as `<lambda>`): `this-command` is what commands rewrite to steer the next one (`kill-line` leaves `kill-region`, `yank-pop` leaves `yank`, `yank` on an empty kill ring leaves `t`, minibuffer TAB leaves `completion-at-point`), so the ticker would name a command the learner never ran. M-x sets both to the command run by name; prefix-argument commands are recognised in `pre-command-hook`. `state` coalesced to one per command |
 | `window-configuration-change-hook`, `window-selection-change-functions`, `window-buffer-change-functions` | `state` | layout and window list |
 | `minibuffer-setup-hook`, `minibuffer-exit-hook` | `minibuffer`, `state` | prompt from `(minibuffer-prompt)`, contents from `(minibuffer-contents-no-properties)` |
 | `isearch-mode-hook`, `isearch-mode-end-hook` | `minibuffer {kind: isearch}` | isearch does not use the minibuffer; reported as a prompt-like state |
@@ -175,10 +181,11 @@ A global minor mode, about 400 lines, no dependencies beyond built-ins. It repor
 ### 10.3 Commands
 
 - `playground-rescue`: in order: `(while (> (minibuffer-depth) 0) (abort-recursive-edit))`; `(isearch-exit)` if searching; `(kmacro-end-macro)` if defining; `(overwrite-mode -1)`; `(widen)`; `(exit-recursive-edit)` loop; delete other windows keeping a window that visits a file if any; bury buffers whose mode derives from `special-mode` except `*scratch*`; `(deactivate-mark)`; `(keyboard-quit)` equivalents via `(discard-input)`. Returns the list of actions taken as strings. Never saves, kills file buffers, or reverts.
-- `playground-check FORMS`: evaluates each form with `condition-case`, returns `t`, `nil`, or `"unknown"` on error, with a 1 s `with-timeout` per form.
-- `playground-reset-step SPEC`: for each file-visiting buffer: revert if the file exists, kill otherwise (`kill-buffer` without prompts for unmodified; modified buffers are reverted since the checkpoint is authoritative); then `playground-open` with the spec's files and layout.
-- `playground-open {files, layout}`: `find-file-noselect` each file, apply the layout with `window-state-put` from a serialised state when present, else a simple split description.
-- `playground-snapshot`: the inverse of `playground-open`, used for checkpoints and restart restore.
+- `playground-check FORMS`: evaluates each form with `condition-case`, returns `t`, `nil`, or `"unknown"` on error, with a 1 s `with-timeout` per form. Forms run with the learner's window selected in the learner's frame: the frame of the last command (or the client frame made last), not whatever frame Emacs has selected when the timer runs, which after a client frame closes can be the daemon's own frame (then `(selected-window)` was its `*scratch*` window and lesson 3.1's "the lower window is selected" read false). States, snapshots, setups and the other ops use the same window.
+- `playground-reset-step SPEC`: for each file-visiting buffer: revert if the file exists, kill otherwise (`kill-buffer` without prompts for unmodified; modified buffers are reverted since the checkpoint is authoritative); unmodified file buffers in the workspace that the spec does not list (opened during the step) are killed, so the step's conditions are false again and uniquify gives the step's own buffers back their names; then `playground-open` with the spec's files and layout. Each window comes back on the file it showed, the selected window last.
+- `playground-open {files, layout}`: `find-file-noselect` each file, apply the layout with `window-state-put` from a serialised state when present, else a simple split description. The state's buffer entries carry their files (below) and are renamed to whatever buffer visits that file now; an entry without a file whose buffer is gone is matched to the one spec file with the same base name (and directories named by a uniquify suffix). The tab is switched before the windows are put back.
+- `playground-snapshot`: the inverse of `playground-open`, used for checkpoints and restart restore. Its `windowState` is `(window-state-get nil t)` with `(file . NAME)` added to each window's buffer entry and the file name as a fourth element of each `prev-buffers` entry; `window-state-put` ignores both. Buffer names do not identify buffers across a step: when a second `README.md` opens, uniquify renames the first `README.md<hello>`.
+- `setup` with `reset`: the files of `open` start at their first line, in their buffers and in the windows showing them (window start too, and the windows' remembered positions for them are dropped), before the setup's `eval`; a `.eld` layout keeps the positions it stores.
 - `playground-set-modules LIST`: writes `modules.el`; the restart is sessiond's job.
 - `playground-describe KEYS`: `(key-binding (kbd KEYS))` and the first docstring line, used by the ticker for commands it does not have a gloss for.
 - `playground-gui-frame`: `(make-frame-on-display ":1" …)` as an alternative to `emacsclient -c`.
@@ -193,7 +200,7 @@ A global minor mode, about 400 lines, no dependencies beyond built-ins. It repor
 
 ### 10.6 Testing
 
-ERT tests run with `emacs --batch -l lisp/playground-agent.el -l test/agent-test.el` against a fake socket server written in Elisp (`make-network-process :server t`), covering: event shapes, rescue from each trap state, reset with a spec, check timeouts, reconnection. The Go agent integration test (backend.md §6) runs the same scripted scenarios through sessiond.
+ERT tests run with `emacs --batch -l lisp/playground-agent.el -l test/agent-test.el` against a fake socket server written in Elisp (`make-network-process :server t`), covering: event shapes, rescue from each trap state, reset with a spec, check timeouts, reconnection. `test/config-test.el` covers early-init.el and, in the session image, loads `test/modules-test.el`, which loads init.el with the base and editing modules and checks what lessons rely on: Home, End and Delete as tmux sends them, the M-x messages, the mode-line colours (WCAG contrast computed from the Modus palette), hidden lighters, Part 1's M-y, and the GUI frame fit. The Go agent integration test (backend.md §6) runs the same scripted scenarios through sessiond.
 
 ## 11. Standalone use
 

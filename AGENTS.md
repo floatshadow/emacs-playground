@@ -261,6 +261,14 @@ Backend decisions from the fixes (backend.md §3.6, §3.8, §3.12):
 - Leaving GUI mode closes Emacs's X connections (`x-close-connection`) after deleting the X frames; if that fails, Xvnc keeps running rather than dropping under Emacs. Xvnc runs with `-AcceptSetDesktopSize=1`; the GUI frame command has no `fullscreen` parameter.
 - `playctl curriculum play` resets each played lesson's progress afterwards when `-session` is a gateway session path; `-watch` replays as demonstrations; `-repeat N`; `make curriculum-play` replays every lesson twice, `make curriculum-watch` Part 0 as demonstrations.
 
+Emacs side (emacs.md §5, §6, §10):
+
+- Key events name `real-this-command`: C-k is `kill-line` (not `kill-region`), M-y `yank-pop`, C-y on an empty kill ring `yank`, TAB in a prompt `minibuffer-complete`. Conditions may keep the old names as alternatives. M-y is the built-in `yank-pop` until the completion module (lesson 4.2) binds `consult-yank-pop`; `editing.el` no longer binds it whenever consult is installed.
+- The agent's checks, states, snapshots and setups use the learner's frame: the frame of the last command (or the client frame made last), not whatever frame Emacs has selected when a call runs from a timer.
+- `WindowSpec.windowState` is `window-state-get` with each window's file added to its buffer entry (`(file . NAME)`); `open` and `reset-step` put windows back by file, and `reset-step` closes the unmodified workspace file buffers the spec does not list.
+- In tmux frames Home, End and Delete are `<home>`, `<end>` and `<deletechar>`. The selected mode line is violet (`#7a58c4`), inactive ones `#232639`. ws-butler's lighter is hidden and it is not in the state's `minors`. A reset setup starts its `open` files on line 1. The GUI frame fits itself to the X screen whenever RandR changes it.
+- `test/config-test.el` loads `test/modules-test.el` (init.el with base and editing) in the session image, so `make emacs-test` covers the modules too.
+
 ## 6. Slice 1 scope
 
 What this round builds (everything else stays a TODO with its doc section):

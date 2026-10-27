@@ -165,7 +165,7 @@ Pings are left out unless TYPE is \"ping\"."
 (defmacro pg-test-command (cmd keys &rest body)
   "Simulate running command CMD typed as KEYS: BODY, then the hook."
   (declare (indent 2) (debug t))
-  `(let ((this-command ,cmd))
+  `(let* ((this-command ,cmd) (real-this-command this-command))
      (cl-letf (((symbol-function 'playground--this-keys) (lambda () ,keys)))
        ,@body
        (playground--post-command))))
@@ -367,7 +367,7 @@ Pings are left out unless TYPE is \"ping\"."
   (pg-test-with-agent
     (pg-test-clear)
     ;; The M-x prompt opens: remembered, not reported.
-    (let ((this-command 'execute-extended-command))
+    (let ((this-command 'execute-extended-command) (real-this-command 'execute-extended-command))
       (cl-letf (((symbol-function 'playground--this-keys) (lambda () "M-x"))
                 ((symbol-function 'minibuffer-depth) (lambda () 1))
                 ((symbol-function 'minibuffer-prompt) (lambda () "M-x ")))
@@ -388,7 +388,7 @@ Pings are left out unless TYPE is \"ping\"."
     (pg-test-clear)
     (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1))
               ((symbol-function 'minibuffer-prompt) (lambda () "Find file: ")))
-      (let ((this-command 'find-file))
+      (let ((this-command 'find-file) (real-this-command 'find-file))
         (cl-letf (((symbol-function 'playground--this-keys) (lambda () "C-x C-f")))
           (playground--on-minibuffer-setup)
           ;; The minibuffer's own command loop starts with one more run
@@ -396,7 +396,7 @@ Pings are left out unless TYPE is \"ping\"."
           (playground--post-command)))
       ;; RET accepts: exit-minibuffer leaves by a throw, so the exit
       ;; hook reports it.
-      (let ((this-command 'exit-minibuffer))
+      (let ((this-command 'exit-minibuffer) (real-this-command 'exit-minibuffer))
         (cl-letf (((symbol-function 'playground--this-keys) (lambda () "RET")))
           (playground--on-minibuffer-exit))))
     (pg-test-command 'find-file "C-x C-f" nil)
@@ -474,10 +474,10 @@ Pings are left out unless TYPE is \"ping\"."
     (pg-test-clear)
     (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1))
               ((symbol-function 'minibuffer-prompt) (lambda () "Find file: ")))
-      (let ((this-command 'find-file))
+      (let ((this-command 'find-file) (real-this-command 'find-file))
         (cl-letf (((symbol-function 'playground--this-keys) (lambda () "C-x C-f")))
           (playground--on-minibuffer-setup)))
-      (let ((this-command 'minibuffer-keyboard-quit))
+      (let ((this-command 'minibuffer-keyboard-quit) (real-this-command 'minibuffer-keyboard-quit))
         (cl-letf (((symbol-function 'playground--this-keys) (lambda () "C-g")))
           (playground--on-minibuffer-exit))))
     ;; After the quit unwinds, the command loop runs the hook again for
@@ -520,7 +520,7 @@ Pings are left out unless TYPE is \"ping\"."
   (pg-test-with-agent
     (pg-test-clear)
     (dolist (case '((universal-argument "C-u") (digit-argument "C-M-5")))
-      (let ((this-command (car case)))
+      (let* ((this-command (car case)) (real-this-command this-command))
         (cl-letf (((symbol-function 'this-command-keys-vector)
                    (lambda () (key-parse (cadr case)))))
           (playground--pre-command)))
@@ -534,6 +534,89 @@ Pings are left out unless TYPE is \"ping\"."
                            (pg-test-messages "key"))
                    '(("C-u" "universal-argument") ("C-M-5" "digit-argument")
                      ("C-f" "forward-char"))))))
+
+(defmacro pg-test-run (cmd keys)
+  "Run command CMD as the command loop does, typed as KEYS, then the hook.
+Errors (an empty kill ring) are ignored, as the command loop shows them."
+  `(let* ((this-command ,cmd) (real-this-command this-command))
+     (cl-letf (((symbol-function 'playground--this-keys) (lambda () ,keys)))
+       (ignore-errors (call-interactively this-command))
+       (playground--post-command))))
+
+(ert-deftest pg-agent/reports-the-command-run ()
+  "Commands that rewrite `this-command' are reported by the command the keys ran."
+  (pg-test-with-agent
+    (switch-to-buffer (get-buffer-create "pg-kills"))
+    (erase-buffer)
+    (insert "first line\nsecond line\n")
+    (goto-char (point-min))
+    (let ((kill-ring nil) (kill-ring-yank-pointer nil)
+          (interprogram-paste-function nil) (interprogram-cut-function nil)
+          (last-command nil))
+      ;; yank with nothing to yank leaves this-command at t.
+      (pg-test-run 'yank "C-y")
+      ;; kill-line goes through kill-region, which renames this-command.
+      (pg-test-run 'kill-line "C-k")
+      (should (equal (car kill-ring) "first line"))
+      (setq last-command 'forward-line)
+      (forward-line 1)
+      (pg-test-run 'kill-line "C-k")
+      (setq last-command 'end-of-buffer)
+      (goto-char (point-max))
+      (pg-test-run 'yank "C-y")
+      (should (string-suffix-p "second line" (buffer-string)))
+      ;; yank-pop sets this-command to yank so that M-y can follow.
+      (setq last-command 'yank)
+      (pg-test-run 'yank-pop "M-y")
+      (should (string-suffix-p "first line" (buffer-string))))
+    (pg-test-settle)
+    (should (equal (mapcar (lambda (k) (list (alist-get 'keys k) (alist-get 'cmd k)))
+                           (pg-test-messages "key"))
+                   '(("C-y" "yank") ("C-k" "kill-line") ("C-k" "kill-line")
+                     ("C-y" "yank") ("M-y" "yank-pop"))))
+    (kill-buffer "pg-kills")))
+
+(ert-deftest pg-agent/minibuffer-complete-is-itself ()
+  "TAB in a prompt is minibuffer-complete, though it sets this-command otherwise."
+  (pg-test-with-agent
+    (pg-test-clear)
+    (let ((real-this-command 'minibuffer-complete)
+          (this-command 'completion-at-point))
+      (cl-letf (((symbol-function 'playground--this-keys) (lambda () "TAB")))
+        (playground--post-command)))
+    (let ((k (pg-test-wait (lambda () (car (pg-test-messages "key"))))))
+      (should (equal (alist-get 'cmd k) "minibuffer-complete")))))
+
+(ert-deftest pg-agent/learner-frame ()
+  "The learner's frame is the frame of the last command, while it exists."
+  (pg-test-with-agent
+    (let ((playground--learner-frame nil))
+      (pg-test-command 'forward-char "C-f" nil)
+      (should (eq playground--learner-frame (selected-frame)))
+      (should (eq (playground--learner-frame) (selected-frame)))
+      ;; A frame that is gone (a closed client frame) is not used.
+      (setq playground--learner-frame 'not-a-live-frame)
+      (should (eq (playground--learner-frame) (selected-frame)))
+      (should (eq (playground--user-window) (selected-window))))))
+
+(ert-deftest pg-agent/check-runs-in-the-learners-window ()
+  "check evaluates its forms in the learner's window, not in whatever is selected."
+  (pg-test-with-agent
+    (delete-other-windows)
+    (switch-to-buffer (get-buffer-create "pg-upper"))
+    (let ((lower (split-window-below)))
+      (set-window-buffer lower (get-buffer-create "pg-lower"))
+      ;; The learner works in the lower window; a timer runs with the
+      ;; upper one selected.
+      (cl-letf (((symbol-function 'playground--user-window) (lambda () lower)))
+        (let ((r (pg-test-value
+                  (pg-test-call "check"
+                                `((forms . ,(vector "(not (eq (selected-window) (frame-first-window)))"
+                                                    "(equal (buffer-name) \"pg-lower\")")))))))
+          (should (equal (alist-get 'results r) '(t t))))))
+    (delete-other-windows)
+    (kill-buffer "pg-upper")
+    (kill-buffer "pg-lower")))
 
 (ert-deftest pg-agent/key-frame-is-where-typed ()
   "C-x C-c in the GUI frame is reported as typed there, though the frame is gone."
@@ -715,6 +798,105 @@ Pings are left out unless TYPE is \"ping\"."
       (should-not (get-file-buffer c))
       (should (= (length (window-list)) 2))
       (should (equal (playground--layout-string (playground--tree (selected-frame))) "(hsplit a.txt b.txt)")))))
+
+(defun pg-test--shown-files ()
+  "Files of the selected frame's windows, top to bottom, left to right."
+  (mapcar (lambda (w) (buffer-file-name (window-buffer w)))
+          (window-list nil 'nomini (frame-first-window))))
+
+(ert-deftest pg-agent/reset-step-by-file ()
+  "Reset this step puts each window back on its file and closes files opened since."
+  (pg-test-with-agent
+    (let ((hello (pg-test-file "projects/hello/README.md" "# hello\n"))
+          (hello-main (pg-test-file "projects/hello/src/main.rs" "fn main() {}\n"))
+          (poly (pg-test-file "projects/polyglot/README.md" "# polyglot\n"))
+          (poly-main (pg-test-file "projects/polyglot/src/main.rs" "fn main() {}\n"))
+          (uniquify-buffer-name-style 'post-forward-angle-brackets))
+      ;; The step starts on hello's README.md, the only README.md open.
+      (delete-other-windows)
+      (find-file hello)
+      (should (equal (buffer-name) "README.md"))
+      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+        (should (string-match-p "(file \\. " (alist-get 'windowState snap)))
+        ;; During the step: hello's main.rs, polyglot's main.rs and
+        ;; README.md; the window ends on polyglot's README.md, and the
+        ;; first README.md is now README.md<hello>.
+        (find-file hello-main)
+        (find-file poly-main)
+        (find-file poly)
+        (should (equal (buffer-name (get-file-buffer hello)) "README.md<hello>"))
+        (setf (alist-get 'files snap) (vconcat (alist-get 'files snap)))
+        (pg-test-value (pg-test-call "reset-step" `((spec . ,snap)))))
+      (should (equal (pg-test--shown-files) (list hello)))
+      (should (equal (buffer-name (window-buffer (selected-window))) "README.md"))
+      (should (equal (buffer-local-value 'default-directory (window-buffer (selected-window)))
+                     (file-name-directory hello)))
+      (dolist (f (list hello-main poly poly-main))
+        (should-not (get-file-buffer f))))))
+
+(ert-deftest pg-agent/open-finds-renamed-buffers ()
+  "open shows the file a window showed, whatever its buffer is called now."
+  (pg-test-with-agent
+    (let ((hello (pg-test-file "projects/hello/README.md" "# hello\n"))
+          (poly (pg-test-file "projects/polyglot/README.md" "# polyglot\n"))
+          (main (pg-test-file "projects/hello/src/main.rs" "fn main() {}\n"))
+          (uniquify-buffer-name-style 'post-forward-angle-brackets))
+      (delete-other-windows)
+      (find-file main)
+      (split-window-below)
+      (other-window 1)
+      (find-file hello)
+      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+        ;; Another README.md opens and takes the lower window.
+        (find-file poly)
+        (other-window 1)
+        (setf (alist-get 'files snap) (vconcat (alist-get 'files snap)))
+        (pg-test-value (pg-test-call "open" snap))
+        (should (equal (pg-test--shown-files) (list main hello)))
+        (should (equal (buffer-file-name (window-buffer (selected-window))) hello))
+        ;; A state saved by an older agent, without file names, is
+        ;; matched through the spec's files by the buffer's base name.
+        (switch-to-buffer (get-file-buffer poly))
+        (let ((old (replace-regexp-in-string " (file \\. \"[^\"]*\")" ""
+                                             (alist-get 'windowState snap))))
+          (should-not (string-match-p "(file \\. " old))
+          (setf (alist-get 'windowState snap) old)
+          (pg-test-value (pg-test-call "open" snap)))
+        (should (equal (pg-test--shown-files) (list main hello)))))))
+
+(ert-deftest pg-agent/op-setup-reset-starts-at-the-top ()
+  "With reset, the files of a setup start on their first line, in their windows too."
+  (pg-test-with-agent
+    (let ((readme (pg-test-file "hello/README.md" "one\ntwo\nthree\nfour\nfive\nsix\n"))
+          (main (pg-test-file "hello/src/main.rs" "fn main() {}\n")))
+      (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/src/main.rs" "hello/README.md"))
+                                             (layout . "(vsplit hello/src/main.rs hello/README.md)")
+                                             (reset . t)
+                                             (workspace . ,pg-test--dir))))
+      ;; The learner moved to line 5 of README.md in the lower window.
+      (let ((w (get-buffer-window (get-file-buffer readme))))
+        (with-selected-window w (goto-char (point-min)) (forward-line 4))
+        (should (= (with-current-buffer (get-file-buffer readme)
+                     (line-number-at-pos (window-point w)))
+                   5)))
+      (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/src/main.rs" "hello/README.md"))
+                                             (layout . "(vsplit hello/src/main.rs hello/README.md)")
+                                             (reset . t)
+                                             (workspace . ,pg-test--dir))))
+      (let ((w (get-buffer-window (get-file-buffer readme))))
+        (should (= (window-point w) 1))
+        (should (= (window-start w) 1))
+        (should (= (with-current-buffer (get-file-buffer readme) (point)) 1)))
+      (should (get-file-buffer main))
+      ;; Without reset (a step's own setup) the position stays.
+      (let ((w (get-buffer-window (get-file-buffer readme))))
+        (with-selected-window w (goto-char (point-min)) (forward-line 2))
+        (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/src/main.rs" "hello/README.md"))
+                                               (layout . "(vsplit hello/src/main.rs hello/README.md)")
+                                               (workspace . ,pg-test--dir))))
+        (should (= (with-current-buffer (get-file-buffer readme)
+                     (line-number-at-pos (window-point (get-buffer-window (get-file-buffer readme)))))
+                   3))))))
 
 (ert-deftest pg-agent/op-setup ()
   "setup opens files, applies a layout pattern and evaluates a form."

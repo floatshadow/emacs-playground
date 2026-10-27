@@ -46,6 +46,22 @@
 ;; terminal.  Modus themes are designed for legibility (WCAG AAA).
 (line-number-mode 1)
 (column-number-mode 1)
+
+;; The selected window's mode line must stand out: lessons say "the
+;; bright mode line marks the selected window".  The theme's own two
+;; mode lines (#484d67 and #292d48) are hard to tell apart in a browser
+;; terminal, so the active one takes the playground's violet and the
+;; inactive ones are dimmed (a background contrast of about 2.8 between
+;; them; both keep their text above 4.5:1).  Theme-specific overrides,
+;; so another Modus theme chosen later keeps its own colours.
+(defvar modus-vivendi-tinted-palette-overrides)
+(setq modus-vivendi-tinted-palette-overrides
+      '((bg-mode-line-active "#7a58c4")
+        (fg-mode-line-active "#ffffff")
+        (border-mode-line-active "#a990e6")
+        (bg-mode-line-inactive "#232639")
+        (fg-mode-line-inactive "#969696")
+        (border-mode-line-inactive "#3c3f55")))
 (load-theme 'modus-vivendi-tinted t)
 
 ;; The mode line reads the way the course describes it:
@@ -113,6 +129,13 @@
 
 ;; Repeat a command's last key: C-x o o o, C-x { { {.
 (repeat-mode 1)
+
+;; M-x tells you the keys a command is bound to ("You can run the
+;; command `save-buffer' with C-x C-s"), which teaches chords.  It does
+;; not also suggest abbreviations ("... with M-x em-ve"): that message
+;; replaced the answer of M-x emacs-version two seconds after it
+;; appeared, and abbreviations are no help to someone learning names.
+(setq extended-command-suggest-shorter nil)
 
 ;;;; Lesson 1.2  Kill, yank and the kill ring
 
@@ -244,6 +267,28 @@ stops the daemon itself."
 (playground-with-package kkp
   (global-kkp-mode 1)
 
+  ;; Home, End and Delete.  tmux sends them to the pane the way its own
+  ;; terminal type (tmux-256color) spells them: ESC [ 1 ~, ESC [ 4 ~ and
+  ;; ESC [ 3 ~.  The decoders below take every ESC [ <digit> sequence,
+  ;; and kkp's table of ~ keys knows 7 and 8 for Home and End (rxvt) but
+  ;; not 1 and 4, so it fell back to the code point: End arrived as C-d
+  ;; (delete-char, which deleted text) and Home as C-a.  kkp also names
+  ;; Delete <delete>, which a terminal's `local-function-key-map' turns
+  ;; into DEL (delete-backward-char): Delete deleted backwards.  Here
+  ;; Home and End are <home> and <end>, and Delete is <deletechar>
+  ;; (delete-forward-char) as in a graphical frame; with a modifier it
+  ;; keeps its name, so C-<delete> stays kill-word.
+  (defvar kkp--non-printable-keys-with-tilde-terminator)
+  (with-eval-after-load 'kkp
+    (dolist (key '((1 . "<home>") (4 . "<end>")))
+      (unless (assq (car key) kkp--non-printable-keys-with-tilde-terminator)
+        (push key kkp--non-printable-keys-with-tilde-terminator))))
+
+  (defun playground--kkp-decode (prefix)
+    "Read the rest of a CSI sequence that began with PREFIX; return its key."
+    (let ((keys (kkp--process-keys prefix)))
+      (if (equal keys [delete]) [deletechar] keys)))
+
   ;; kkp switches itself on only after the terminal answers the kitty
   ;; protocol query.  tmux 3.5 forwards the keys but never answers, so
   ;; in tmux frames the decoders are installed directly.
@@ -255,7 +300,7 @@ stops the daemon itself."
                (boundp 'kkp--key-prefixes))
       (dolist (prefix kkp--key-prefixes)
         (define-key input-decode-map (kkp--csi-escape (string prefix))
-                    (lambda (_prompt) (kkp--process-keys prefix))))))
+                    (lambda (_prompt) (playground--kkp-decode prefix))))))
   (add-hook 'tty-setup-hook #'playground--kkp-tmux 90))
 
 ;; Truecolor is announced with COLORTERM=truecolor (set in the image).
@@ -279,5 +324,80 @@ stops the daemon itself."
 
 ;; No window manager runs under Xvnc: never try to raise or move frames.
 (setq pop-up-frames nil)
+
+;; The GUI frame covers the whole X screen, and follows it when the
+;; screen changes size: the browser asks Xvnc for a screen as large as
+;; its pane (noVNC's resize, RandR on the X side), so the frame is drawn
+;; at the size it is shown instead of being scaled down.  Without a
+;; window manager nothing else would move or resize the frame, and
+;; `fullscreen' only takes effect when the frame is made.
+(defun playground--no-window-manager-p (frame)
+  "Non-nil when no window manager runs on FRAME's X display."
+  (not (ignore-errors
+         (x-window-property "_NET_SUPPORTING_WM_CHECK" frame "AnyPropertyType" 0 nil t))))
+
+(defun playground--display-area (frame)
+  "(X Y WIDTH HEIGHT) in pixels of the monitor FRAME is on."
+  (or (ignore-errors
+        (let ((g (frame-monitor-geometry frame)))
+          (and (consp g) (> (nth 2 g) 0) (> (nth 3 g) 0) g)))
+      (list 0 0 (display-pixel-width frame) (display-pixel-height frame))))
+
+(defun playground--frame-fit (area outer-size text-size)
+  "Position and text size that make a frame's outer edges cover AREA.
+AREA is the monitor's (X Y WIDTH HEIGHT); OUTER-SIZE and TEXT-SIZE are
+the frame's (WIDTH HEIGHT) now, in pixels, whose difference is what
+the menu bar, internal borders and fringes take.  Returns (X Y
+TEXT-WIDTH TEXT-HEIGHT)."
+  (pcase-let ((`(,x ,y ,w ,h) area)
+              (`(,ow ,oh) outer-size)
+              (`(,tw ,th) text-size))
+    (list x y (max 1 (- w (- ow tw))) (max 1 (- h (- oh th))))))
+
+(defun playground--outer-size (frame)
+  "FRAME's outer (WIDTH HEIGHT) in pixels, menu bar included."
+  (pcase-let ((`(,left ,top ,right ,bottom) (frame-edges frame 'outer-edges)))
+    (list (- right left) (- bottom top))))
+
+(defun playground-fit-frame-to-display (&optional frame)
+  "Make the graphical FRAME cover its display exactly.
+Its outer edges (menu bar included) go to the monitor's edges; the
+text area gets what remains, to the pixel.  Does nothing for terminal
+frames, child frames, or when a window manager is in charge.  Returns
+the outer size reached as (WIDTH HEIGHT), or nil."
+  (interactive)
+  (let ((frame (or frame (selected-frame))))
+    (when (and (frame-live-p frame)
+               (eq (framep frame) 'x)
+               (not (frame-parameter frame 'parent-frame))
+               (playground--no-window-manager-p frame))
+      (pcase-let ((`(,x ,y ,tw ,th)
+                   (playground--frame-fit (playground--display-area frame)
+                                          (playground--outer-size frame)
+                                          (list (frame-text-width frame)
+                                                (frame-text-height frame))))
+                  (frame-resize-pixelwise t))
+        ;; An explicit size and `fullscreen' would fight.
+        (when (frame-parameter frame 'fullscreen)
+          (set-frame-parameter frame 'fullscreen nil))
+        (set-frame-position frame x y)
+        (set-frame-size frame tw th t)
+        (playground--outer-size frame)))))
+
+(defun playground--fit-new-frame (frame)
+  "Fit FRAME to its display when it is the playground's GUI frame."
+  (when (and (playground-p) (daemonp) (eq (framep frame) 'x))
+    (ignore-errors (playground-fit-frame-to-display frame))))
+
+(defun playground--fit-frames-on (terminal)
+  "Fit the GUI frames of TERMINAL to its display (monitors changed)."
+  (when (and (playground-p) (daemonp))
+    (dolist (frame (frame-list))
+      (when (and (eq (framep frame) 'x)
+                 (or (null terminal) (eq (frame-terminal frame) terminal)))
+        (ignore-errors (playground-fit-frame-to-display frame))))))
+
+(add-hook 'after-make-frame-functions #'playground--fit-new-frame)
+(add-hook 'display-monitors-changed-functions #'playground--fit-frames-on)
 
 ;;; base.el ends here
