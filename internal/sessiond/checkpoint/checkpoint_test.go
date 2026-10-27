@@ -194,12 +194,16 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 	write(t, ws, ".playground/cache/x", "cache")
 
 	m.Now = func() time.Time { return time.UnixMilli(1761472060000) }
-	manual, err := m.Take(ctx, ManualRef("Before refactor!"), "Before refactor!", nil, nil)
+	bufs := map[string]BufferState{"hello/src/main.rs": {Modified: true, HasText: true, Text: "fn main() {}\n", Undo: `(nil ("x" . 1))`}}
+	manual, err := m.TakeWith(ctx, Meta{Ref: ManualRef("Before refactor!"), Label: "Before refactor!", Buffers: bufs})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manual.Ref != "refs/playground/manual/before-refactor" {
-		t.Fatalf("manual ref %s", manual.Ref)
+	if manual.Ref != "refs/playground/manual/before-refactor" || manual.CreatedAt != 1761472060000 {
+		t.Fatalf("manual %+v", manual)
+	}
+	if got, err := m.ReadMeta(manual.Ref); err != nil || got.Buffers["hello/src/main.rs"] != bufs["hello/src/main.rs"] {
+		t.Fatalf("buffer state not kept with the checkpoint: %+v %v", got.Buffers, err)
 	}
 
 	items, err := m.List(ctx)

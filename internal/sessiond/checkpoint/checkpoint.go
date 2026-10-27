@@ -126,6 +126,24 @@ type Meta struct {
 	CreatedAt int64                `json:"createdAt"`
 	Step      *protocol.StepRef    `json:"step,omitempty"`
 	Spec      *protocol.WindowSpec `json:"spec,omitempty"`
+	// Buffers is the state of the file buffers the commit (files as on
+	// disk) does not have, by workspace-relative path; a restore puts it
+	// back after the agent's reset-step.
+	Buffers map[string]BufferState `json:"buffers,omitempty"`
+}
+
+// BufferState is what a checkpoint keeps of one file buffer besides the
+// file: a step can start with the previous step's unsaved edit and rely on
+// its undo history (lesson 1.3 undoes a deletion within a region).
+type BufferState struct {
+	// Modified is true when the buffer had unsaved changes.
+	Modified bool `json:"modified,omitempty"`
+	// Text is the unsaved text (HasText), absent for unmodified or large
+	// buffers.
+	Text    string `json:"text,omitempty"`
+	HasText bool   `json:"hasText,omitempty"`
+	// Undo is the printed buffer-undo-list, reduced to readable entries.
+	Undo string `json:"undo,omitempty"`
 }
 
 // Manager takes, lists and restores checkpoints of one workspace. Operations
@@ -316,6 +334,13 @@ func (m *Manager) writeExclude() error {
 
 // Take records a checkpoint at ref with label and saves the metadata.
 func (m *Manager) Take(ctx context.Context, ref, label string, step *protocol.StepRef, spec *protocol.WindowSpec) (Meta, error) {
+	return m.TakeWith(ctx, Meta{Ref: ref, Label: label, Step: step, Spec: spec})
+}
+
+// TakeWith is Take with the metadata given whole (Ref, Label, Step, Spec,
+// Unsaved); CreatedAt is set here.
+func (m *Manager) TakeWith(ctx context.Context, meta Meta) (Meta, error) {
+	ref, label := meta.Ref, meta.Label
 	if !ValidRef(ref) {
 		return Meta{}, fmt.Errorf("checkpoint: invalid ref %q", ref)
 	}
@@ -341,7 +366,7 @@ func (m *Manager) Take(ctx context.Context, ref, label string, step *protocol.St
 	if _, err := m.git(ctx, nil, "update-ref", ref, commit); err != nil {
 		return Meta{}, err
 	}
-	meta := Meta{Label: label, Ref: ref, CreatedAt: m.Now().UnixMilli(), Step: step, Spec: spec}
+	meta.CreatedAt = m.Now().UnixMilli()
 	if err := m.writeMeta(meta); err != nil {
 		return meta, err
 	}

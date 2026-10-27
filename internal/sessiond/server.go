@@ -495,8 +495,10 @@ func (s *Server) stepCheckpoint(ctx context.Context, lessonID, stepID string, fo
 	}
 	sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	spec, _ := s.sup.Snapshot(sctx)
+	bufs := s.bufferStates(sctx)
 	cancel()
-	meta, err := s.ckpt.Take(ctx, ref, lessonID+"/"+stepID, &protocol.StepRef{LessonID: lessonID, StepID: stepID}, spec)
+	meta, err := s.ckpt.TakeWith(ctx, checkpoint.Meta{Ref: ref, Label: lessonID + "/" + stepID,
+		Step: &protocol.StepRef{LessonID: lessonID, StepID: stepID}, Spec: spec, Buffers: bufs})
 	if err != nil {
 		return err
 	}

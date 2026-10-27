@@ -1,0 +1,45 @@
+package sessiond
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
+)
+
+func TestBufferStateForms(t *testing.T) {
+	capture := buffersForm("/work")
+	for _, want := range []string{`(ws "/work/")`, "buffer-modified-p", "buffer-undo-list", "262144", "131072", "524288"} {
+		if !strings.Contains(capture, want) {
+			t.Fatalf("capture form lacks %q:\n%s", want, capture)
+		}
+	}
+	bufs := map[string]checkpoint.BufferState{
+		"editing/notes/journal.md": {Modified: true, HasText: true, Text: "# Journal\n\n## Wednesday \"quoted\" \\ back\n", Undo: `(nil ("x" . 3))`},
+		"a.txt":                    {Undo: `(nil (1 . 2))`},
+		"big.txt":                  {Modified: true},
+	}
+	restore := restoreBuffersForm("/work/", bufs, map[string]int{"editing/notes/journal.md": 12})
+	for _, want := range []string{
+		`(ws "/work/")`,
+		`("a.txt" nil "(nil (1 . 2))" 0)`,
+		`("big.txt" nil nil 0)`,
+		`("editing/notes/journal.md" "# Journal` + "\n\n" + `## Wednesday \"quoted\" \\ back` + "\n" + `" "(nil (\"x\" . 3))" 12)`,
+		"replace-buffer-contents", "(buffer-undo-list t)", "condition-case",
+	} {
+		if !strings.Contains(restore, want) {
+			t.Fatalf("restore form lacks %q:\n%s", want, restore)
+		}
+	}
+	// Sorted, so the form is stable.
+	if strings.Index(restore, `"a.txt"`) > strings.Index(restore, `"editing/`) {
+		t.Fatal("entries are not sorted")
+	}
+	// PG_TEST_FORMS_DIR=dir writes the capture form for a check in real
+	// Emacs (the session image).
+	if dir := os.Getenv("PG_TEST_FORMS_DIR"); dir != "" {
+		_ = os.WriteFile(filepath.Join(dir, "capture.el"), []byte(buffersForm("/tmp/ws")), 0o644)
+	}
+}

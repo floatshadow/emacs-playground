@@ -317,8 +317,9 @@ func (s *Server) rpcCheckpoint(ctx context.Context, req protocol.CheckpointReque
 	}
 	sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	spec, _ := s.sup.Snapshot(sctx)
+	bufs := s.bufferStates(sctx)
 	cancel()
-	meta, err := s.ckpt.Take(ctx, checkpoint.ManualRef(label), label, nil, spec)
+	meta, err := s.ckpt.TakeWith(ctx, checkpoint.Meta{Ref: checkpoint.ManualRef(label), Label: label, Spec: spec, Buffers: bufs})
 	if err != nil {
 		return nil, httpx.Internal("could not take the checkpoint").Wrap(err)
 	}
@@ -405,6 +406,10 @@ func (s *Server) restoreCheckpoint(ctx context.Context, ref string) (int, checkp
 		if err := s.agent.Call(ctx, protocol.AgentOpResetStep, protocol.AgentResetStepArgs{Spec: *spec}, 10*time.Second, nil); err != nil {
 			s.log.Warn("reset-step after restore", "err", err)
 		}
+		// reset-step put the buffers on the restored files; the edits
+		// that were unsaved when the checkpoint was taken and the undo
+		// histories go back.
+		s.restoreBuffers(ctx, meta.Buffers, spec)
 	}
 	return n, meta, nil
 }
