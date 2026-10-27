@@ -8,7 +8,8 @@
 ;; ws-butler (trim trailing spaces you added, nothing else).
 ;;
 ;; Keys added here, by lesson:
-;;   1.2  M-y          browse the kill ring (consult-yank-pop when available)
+;;   1.2  M-y          built in: right after C-y, an older kill (yank-pop);
+;;                     the completion module makes it consult-yank-pop (4.2)
 ;;   1.3  C-x u        vundo, the undo tree;  C-? / C-M-_  redo
 ;;   1.5  M-%          replace with a preview, then y n ! ^ . per match
 ;;   1.6  C-x C-k ...  keyboard macros (built in; nothing to configure)
@@ -20,8 +21,11 @@
 
 ;;;; Lesson 1.2  Kill, yank and the kill ring
 
-(when (fboundp 'consult-yank-pop)
-  (keymap-global-set "M-y" #'consult-yank-pop))
+;; M-y stays the built-in yank-pop, the command lesson 1.2 teaches (on
+;; its own it also lists the kill ring to pick from).  consult-yank-pop
+;; comes with the completion module (lesson 4.2): every package is
+;; installed in the image, so binding it here whenever consult exists
+;; gave Part 1 a different command than its lessons describe.
 
 ;;;; Lesson 1.3  Undo that never loses work
 

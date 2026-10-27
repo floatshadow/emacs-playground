@@ -733,12 +733,24 @@ C-x C-c deletes its frame before `post-command-hook' runs.")
     digit-argument negative-argument)
   "Commands that build a prefix argument.
 They call `prefix-command-preserve-state', which sets `this-command'
-back to the previous command, so they are recognised before they run.")
+and `real-this-command' back to the previous command, so they are
+recognised before they run.")
+
+(defun playground--command ()
+  "The command the learner's keys ran, as reported in key events.
+That is `real-this-command', not `this-command': commands rewrite the
+latter to steer the next one (`kill-line' runs `kill-region', which
+sets it to `kill-region' so that kills append; `yank-pop' sets it to
+`yank'; `yank' with an empty kill ring leaves t; TAB in the minibuffer
+runs `minibuffer-complete', which sets it to `completion-at-point'),
+and the ticker then named a command the learner never ran.  M-x sets
+both to the command chosen by name."
+  real-this-command)
 
 (defun playground--pre-command ()
   "Remember the keys of the command about to run, and the command."
   (setq playground--pre-keys (this-command-keys-vector)
-        playground--pre-command this-command
+        playground--pre-command (playground--command)
         playground--pre-frame (playground--frame-kind)))
 
 (defun playground--this-keys ()
@@ -775,7 +787,7 @@ kind of frame it was typed in, by default the selected window's."
         (let* ((depth (minibuffer-depth))
                (cmd (if (memq playground--pre-command playground--prefix-arg-commands)
                         playground--pre-command
-                      this-command))
+                      (playground--command)))
                ;; Already reported when its prompt opened.  This also
                ;; covers the extra run of this hook that starts the
                ;; minibuffer's own command loop (depth one deeper, the
@@ -831,7 +843,7 @@ kind of frame it was typed in, by default the selected window's."
       (playground--safely "minibuffer-setup"
         (let* ((depth (minibuffer-depth))
                (outer (1- depth))
-               (cmd this-command))
+               (cmd (playground--command)))
           (cond
            ((memq cmd '(execute-extended-command execute-extended-command-for-buffer))
             ;; The M-x prompt itself: remember its keys, report the
@@ -860,11 +872,11 @@ kind of frame it was typed in, by default the selected window's."
         ;; C-g minibuffer-keyboard-quit) exits by a throw, so its own
         ;; `post-command-hook' run never happens; report it here, where
         ;; its keys are still known.
-        (when this-command
+        (when-let* ((cmd (playground--command)))
           (let ((keys (playground--this-keys)))
             (unless (string-empty-p keys)
-              (playground--emit (playground--key-event this-command keys nil (current-buffer)))
-              (setq playground--exit-reported this-command))))
+              (playground--emit (playground--key-event cmd keys nil (current-buffer)))
+              (setq playground--exit-reported cmd))))
         (playground--minibuffer-event nil (substring-no-properties (or (minibuffer-prompt) ""))
                                       (minibuffer-depth) "prompt")
         (playground--schedule-state)))))

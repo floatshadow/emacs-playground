@@ -124,6 +124,12 @@
     ;; Other lighters are untouched.
     (should (equal (cdr (assq 'abbrev-mode minor-mode-alist)) '(" Abbrev")))))
 
+;;;; Keys of the editing module
+
+(ert-deftest pg-modules/m-y-is-yank-pop ()
+  "Part 1's M-y is the yank-pop lesson 1.2 teaches; consult's comes in Part 4."
+  (should (eq (key-binding (kbd "M-y")) 'yank-pop)))
+
 ;;;; The GUI frame (B13)
 
 (ert-deftest pg-modules/gui-frame-follows-the-display ()
