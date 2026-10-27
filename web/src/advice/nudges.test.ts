@@ -3,7 +3,9 @@ import { record, type Recorder } from '../test/recorder'
 import { selectNudges } from '../store/selectors'
 import { initialSessionData, reduce, type SessionData } from '../store/session'
 import type { Event } from '../protocol.gen'
+import { proseKeys } from './mentions'
 import { patternNudges } from './patterns'
+import type { TickerEntry } from './ticker'
 import { calmState } from './fixtures'
 
 let rec: Recorder | null = null
@@ -143,6 +145,27 @@ describe('habit cards (layer 2)', () => {
     expect(s.cards.map((c) => c.id)).toEqual(['habit:C-b'])
   })
 
+  it('each command of a mentioned span counts: C-a and C-k in 3.5 build (B8, R5)', () => {
+    const key = (keys: string, cmd: string): Event => ({
+      t: 'key',
+      keys,
+      cmd,
+      buf: ' *Minibuf-1*',
+      mode: 'minibuffer-mode',
+      frame: 'terminal',
+    })
+    const detail = '`C-x p c`, clear the offered command (`C-a C-k`), type `sh build.sh`, `RET`.'
+    let s: SessionData = {
+      ...initialSessionData(),
+      activeStep: { lessonId: 'L', stepId: 'build' },
+      mentions: { lessonId: 'L', lesson: [], steps: { build: proseKeys(detail) } },
+    }
+    s = reduce(s, key('C-a', 'move-beginning-of-line'), 1000)
+    s = reduce(s, key('C-k', 'kill-line'), 1200)
+    expect(s.cards).toEqual([])
+    expect(s.habitsSeen.size).toBe(0)
+  })
+
   it('only single-key commands match; M-x invocations and sequences do not', () => {
     rec = record()
     rec.keys('C-x C-f C-g')
@@ -219,6 +242,56 @@ describe('stuck patterns', () => {
       mentions: { lessonId: 'L', lesson: ['C-x 2', 'C-x o'], steps: {} },
     }
     expect(ids(s, rec.now())).not.toContain('many-windows')
+  })
+
+  it('windows that popped up are no accident: no split, no card (2.7 build output)', () => {
+    const three = calmState({
+      windows: [
+        {
+          id: 3,
+          buf: 'README.md',
+          mode: 'markdown-mode',
+          selected: true,
+          dedicated: false,
+          side: null,
+        },
+        {
+          id: 5,
+          buf: '*xref*',
+          mode: 'xref--xref-buffer-mode',
+          selected: false,
+          dedicated: false,
+          side: null,
+        },
+        {
+          id: 7,
+          buf: '*compilation*',
+          mode: 'compilation-mode',
+          selected: false,
+          dedicated: false,
+          side: null,
+        },
+      ],
+    })
+    const at = 1000
+    let id = 0
+    const entry = (keys: string[], cmd: string): TickerEntry => ({
+      id: ++id,
+      keys,
+      cmd,
+      kind: 'ok',
+      at,
+    })
+    const ticker = [entry(['C-x', 'p', 'c'], 'project-compile'), entry(['RET'], 'exit-minibuffer')]
+    expect(
+      patternNudges({ ticker, state: three, minibufferSince: null, now: at }).map((n) => n.id),
+    ).not.toContain('many-windows')
+    const split = [entry(['C-x', '2'], 'split-window-below'), ...ticker]
+    expect(
+      patternNudges({ ticker: split, state: three, minibufferSince: null, now: at }).map(
+        (n) => n.id,
+      ),
+    ).toContain('many-windows')
   })
 
   it('a calm state yields nothing', () => {

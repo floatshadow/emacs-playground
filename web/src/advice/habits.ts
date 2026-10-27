@@ -38,7 +38,7 @@ export function habitTitle(key: string, vscode: string): string {
  * The card for a ticker entry, or null when the entry is not a single-key
  * command, matches no habit, the habit was already shown this session, or
  * the lesson mentions the key (mentioned: normalised sequences; a card for
- * K is suppressed when one of them starts with K).
+ * K is suppressed when K starts a command of one of them, isMentioned).
  */
 export function habitCardFor(
   entry: TickerEntry,
