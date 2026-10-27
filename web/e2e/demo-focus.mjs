@@ -1,7 +1,8 @@
 // Regression check for the demo player (review fix, 2026-10-27): "Watch it"
 // keeps playing when the terminal loses focus. tmux's focus-events make
 // xterm.js send a focus-out report (ESC [ O) on blur; that is not learner
-// input. A real keypress still stops the demo.
+// input. A real keypress still stops the demo. Watch it is a demonstration
+// (fix plan contract b): the step ends up watched, not done.
 //
 //   cd web && node e2e/demo-focus.mjs      (stack on :8080, Chrome on CDP :9222)
 import { chromium } from 'playwright-core'
@@ -46,8 +47,9 @@ try {
 
   // 1. Watch it, then click the lesson text: the terminal blurs.
   const t0 = Date.now()
+  const caption = page.locator('[aria-label="Demo caption"]')
   await active().getByRole('button', { name: 'Watch it' }).click()
-  await page.getByText(/^Playing the demo for/).waitFor({ timeout: 5000 })
+  await caption.waitFor({ timeout: 5000 })
   await page.waitForTimeout(400)
   await page.getByRole('heading', { level: 1 }).first().click()
   await page.waitForTimeout(300)
@@ -58,27 +60,25 @@ try {
     .isVisible()
     .catch(() => false)
   if (stopped) fail('the demo stopped when the terminal lost focus')
-  const completed = await page
-    .locator('ol li', { hasText: 'Open src/main.rs' })
-    .first()
-    .getByText('Done:')
-    .waitFor({ state: 'attached', timeout: 20000 })
+  const completed = await active()
+    .filter({ hasText: 'Open src/main.rs' })
+    .getByText('You watched this step')
+    .waitFor({ state: 'attached', timeout: 30000 })
     .then(() => true)
     .catch(() => false)
-  if (!completed) fail('the first step did not complete after the blur')
+  if (!completed) fail('the first step was not demonstrated after the blur')
   console.log(
-    `blur during the demo: focus-out report sent=${focusOut}, demo stopped=${stopped}, step completed=${completed}`,
+    `blur during the demo: focus-out report sent=${focusOut}, demo stopped=${stopped}, step demonstrated=${completed}`,
   )
   if (stopped || !completed) throw new Error('stopping after the blur check')
 
   // 2. A real key during a demo still stops it.
-  await active().filter({ hasText: 'Change the greeting' }).waitFor({ timeout: 10000 })
-  await page.getByText(/^Playing the demo for/).waitFor({ state: 'detached', timeout: 15000 })
+  await caption.waitFor({ state: 'detached', timeout: 15000 })
   await active().getByRole('button', { name: 'Watch it' }).click()
-  await page.getByText(/^Playing the demo for/).waitFor({ timeout: 5000 })
+  await caption.waitFor({ timeout: 5000 })
   await page.keyboard.press('Shift') // a lone modifier is not input
   await page.waitForTimeout(300)
-  const afterShift = await page.getByText(/^Playing the demo for/).isVisible()
+  const afterShift = await caption.isVisible()
   if (!afterShift) fail('a lone Shift stopped the demo')
   await page.keyboard.press('ArrowRight')
   await page
@@ -91,7 +91,7 @@ try {
   fail(String(e).split('\n')[0])
 } finally {
   await api('/s/local/rpc/rescue', {})
-  await api('/api/v1/progress/reset', { lessonId: LESSON })
+  await api('/api/v1/progress/reset', {})
   await page.close()
   await browser.close().catch(() => undefined)
 }

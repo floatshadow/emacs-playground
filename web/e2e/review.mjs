@@ -536,7 +536,13 @@ await check('B5', 'Start over and honest step ticks', async (h, note) => {
   note(`after the course map's Start over: lessons with progress ${left}`)
   assert(left === 0, 'Start over on the course map left progress')
   await h.page.goto(url + '/session', { waitUntil: 'load' })
-  const onSession = await h.page.getByRole('button', { name: 'Start over' }).count()
+  // The Session page is a lazy chunk: wait for it before counting.
+  const onSession = await h.page
+    .getByRole('button', { name: 'Start over' })
+    .first()
+    .waitFor({ timeout: 10000 })
+    .then(() => h.page.getByRole('button', { name: 'Start over' }).count())
+    .catch(() => 0)
   note(`Session page Start over buttons: ${onSession}`)
   assert(onSession > 0, 'the Session page has no Start over')
   await resetAll()

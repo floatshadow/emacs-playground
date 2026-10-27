@@ -13,8 +13,8 @@
 //      setup opens (lib.rs) and that buffer in Where am I
 //   4  the focusing click adds no ticker entry; C-x shows a pending prefix,
 //      C-f find-file and the prompt, C-g clears it
-//   5  Watch it completes the first step (the check event and the step list),
-//      also when the terminal loses focus during the demo
+//   5  Watch it demonstrates the first step (step demonstrated, the caption),
+//      also when the terminal loses focus; Do it yourself, then the keys complete it
 //   6  lesson 0.2 with Part 0's modules: C-x C-b alone opens the buffer list in
 //      a second window and Where am I names it; Rescue leaves one window with
 //      main.rs and the toast names what it did. (From Part 2 on the files
@@ -36,7 +36,7 @@
 // workspace bind mount, <repo>/workspace).
 //
 // The script resets the progress of lessons 0.2, 2.3 and 3.8 first, so it
-// can be re-run against the same session.
+// can be re-run against the same session, and all progress when it ends.
 import { chromium } from 'playwright-core'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -155,6 +155,23 @@ async function api(path, init = {}) {
     body = text
   }
   return { status: res.status, body, type: res.headers.get('content-type') ?? '' }
+}
+
+/** Sends a demo string through rpc keys as learner input, at playctl pacing (170/70 ms). */
+async function playKeys(demo) {
+  const re = /"((?:[^"\\]|\\.)*)"|~(\d+)|(\S+)/g
+  for (const m of demo.matchAll(re)) {
+    if (m[1] !== undefined) {
+      for (const ch of JSON.parse(`"${m[1]}"`)) {
+        await api('/s/local/rpc/keys', { method: 'POST', body: JSON.stringify({ text: ch }) })
+        await page.waitForTimeout(70)
+      }
+    } else if (m[2] !== undefined) await page.waitForTimeout(Number(m[2]))
+    else {
+      await api('/s/local/rpc/keys', { method: 'POST', body: JSON.stringify({ keys: m[3] }) })
+      await page.waitForTimeout(170)
+    }
+  }
 }
 
 const ticker = () => page.locator('[aria-label^="Key ticker"]')
@@ -351,7 +368,7 @@ try {
     return `prefix shown after ${prefixMs} ms`
   })
 
-  await scenario(5, 'Watch it completes the first step', async () => {
+  await scenario(5, 'Watch it demonstrates the first step; the learner does it', async () => {
     const first = page.locator('ol li', { hasText: 'Open src/main.rs' }).first()
     await activeStep().filter({ hasText: 'Open src/main.rs' }).waitFor({ timeout: 5000 })
     const t0 = Date.now()
@@ -359,28 +376,44 @@ try {
     // Clicking the lesson text blurs the terminal: xterm.js sends a focus-out
     // report (tmux focus-events), which is not a keypress and must not stop
     // the demo (e2e/demo-focus.mjs checks this in more detail).
-    await page.getByText(/^Playing the demo for/).waitFor({ timeout: 5000 })
+    const caption = page.locator('[aria-label="Demo caption"]')
+    await caption.waitFor({ timeout: 5000 })
     await page.waitForTimeout(300)
     await page.getByRole('heading', { level: 1 }).first().click()
-    // sessiond's step engine says so, not only the page.
+    // A demonstration, not a completion (fix plan contract b): sessiond
+    // records it "demonstrated" and the step stays active.
     const ev = await waitEvent(
       t0,
-      (e) =>
-        (e.t === 'check' && e.stepId === 'open' && e.complete === true) ||
-        (e.t === 'step' && e.stepId === 'open' && e.status === 'complete'),
-      15000,
-      'check or step complete for step open',
+      (e) => e.t === 'step' && e.stepId === 'open' && /demonstrated|complete/.test(e.status),
+      30000,
+      'step demonstrated for step open',
     )
-    await first.getByText('Done:').waitFor({ state: 'attached', timeout: 15000 })
-    await activeStep().filter({ hasText: 'Change the greeting' }).waitFor({ timeout: 5000 })
-    await page.getByText(/^Playing the demo for/).waitFor({ state: 'detached', timeout: 15000 })
+    if (ev.status !== 'demonstrated') throw new Error('Watch it completed the step')
+    await caption.waitFor({ state: 'detached', timeout: 30000 })
     if (
       await toastText(/Demo stopped/)
         .isVisible()
         .catch(() => false)
     )
       throw new Error('the demo stopped when the terminal lost focus')
-    return `${ev.t} event after ${ev._at - t0} ms (terminal blurred during the demo)`
+    await activeStep().filter({ hasText: 'Open src/main.rs' }).waitFor({ timeout: 5000 })
+    // Do it yourself: the step goes back to its checkpoint; the learner's
+    // keys (here the demo's, sent as input) complete it for real.
+    const t1 = Date.now()
+    await activeStep().getByRole('button', { name: 'Do it yourself' }).click()
+    await waitEvent(t1, (e) => e.t === 'step' && e.status === 'reset', 15000, 'step reset')
+    await page.waitForTimeout(600)
+    const lesson = await api('/api/v1/curriculum/lessons/' + LESSON_23)
+    await playKeys(lesson.body.scenario.steps[0].demo)
+    const done = await waitEvent(
+      t1,
+      (e) => e.t === 'step' && e.stepId === 'open' && e.status === 'complete',
+      15000,
+      'step complete for step open',
+    )
+    await first.getByText('Done:').waitFor({ state: 'attached', timeout: 15000 })
+    await activeStep().filter({ hasText: 'Change the greeting' }).waitFor({ timeout: 5000 })
+    return `demonstrated after ${ev._at - t0} ms (terminal blurred), done by the learner after ${done._at - t1} ms`
   })
 
   await scenario(7, 'Reset this step restores files and the step', async () => {
@@ -415,6 +448,8 @@ try {
     if (!onDisk().includes('XYZ')) throw new Error('the edit never reached main.rs on disk')
     const t0 = Date.now()
     await page.getByRole('button', { name: 'Reset this step' }).click()
+    // It asks first (R10).
+    await page.getByRole('dialog').getByRole('button', { name: 'Reset', exact: true }).click()
     const toast = toastText(/^Restored /)
     await toast.waitFor({ timeout: 8000 })
     const said = await toast.innerText()
@@ -612,6 +647,9 @@ try {
     return summary
   })
 } finally {
+  // Start over: the scenarios and the replay recorded progress for the
+  // single local learner (fix plan contract a).
+  await api('/api/v1/progress/reset', { method: 'POST' }).catch(() => undefined)
   results.sort((a, b) => a.n - b.n)
   const table = results.map(
     (r) => `${r.ok ? 'PASS' : 'FAIL'}  ${r.n}  ${r.name}  ${r.ok ? r.detail : r.error}`,

@@ -80,15 +80,36 @@ try {
     await shot('e2e-3-hint')
   })
 
-  await step('watch it completes step 2', async () => {
+  await step('watch it demonstrates step 2, with a caption', async () => {
     await page.getByRole('button', { name: 'Watch it' }).click()
-    await activeStep().filter({ hasText: 'Save it' }).waitFor({ timeout: 15000 })
-    // The step completes before the demo string ends; let it finish typing.
-    await page.getByText(/^Playing the demo for/).waitFor({ state: 'detached', timeout: 15000 })
+    await page.locator('[aria-label="Demo caption"]').getByText('M-<').waitFor({ timeout: 5000 })
+    await shot('e2e-3b-caption')
+    // A demonstration, not a completion: the step stays, watched.
+    await activeStep()
+      .filter({ hasText: 'Change the greeting' })
+      .getByText('You watched this step')
+      .waitFor({ timeout: 20000 })
+    await page.locator('[aria-label="Demo caption"]').waitFor({ state: 'detached', timeout: 20000 })
   })
 
-  await step('reset this step', async () => {
+  await step('do it yourself, then the keys complete step 2', async () => {
+    await activeStep().getByRole('button', { name: 'Do it yourself' }).click()
+    await activeStep()
+      .getByText('You watched this step')
+      .waitFor({ state: 'detached', timeout: 5000 })
+    await focusTerminal()
+    await page.keyboard.press('Alt+Shift+Comma')
+    await page.keyboard.press('Control+s')
+    await page.keyboard.type('Hello', { delay: 30 })
+    await page.keyboard.press('Enter')
+    for (let i = 0; i < 5; i++) await page.keyboard.press('Backspace')
+    await page.keyboard.type('Hi', { delay: 30 })
+    await activeStep().filter({ hasText: 'Save it' }).waitFor({ timeout: 15000 })
+  })
+
+  await step('reset this step asks first', async () => {
     await page.getByRole('button', { name: 'Reset this step' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Reset', exact: true }).click()
     await page
       .getByText(/^Restored .*(checkpoint|no files had changed)/)
       .first()
