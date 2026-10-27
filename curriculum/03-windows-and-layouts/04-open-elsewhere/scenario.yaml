@@ -40,7 +40,7 @@ steps:
       - text: C-x 4 d was used
         event: { command: dired-other-window }
         hint: "Control x, 4, then d. RET accepts the directory it offers."
-      - text: main.rs left; Cargo.toml above a listing on the right
+      - text: main.rs left; on the right, Cargo.toml split above a second window
         layout: "(hsplit main.rs (vsplit Cargo.toml *))"
         hint: "Split the Cargo.toml window with C-x 2 first. If the listing replaced main.rs, C-c <left> undoes it."
       - text: the listing is of /work/projects/hello/

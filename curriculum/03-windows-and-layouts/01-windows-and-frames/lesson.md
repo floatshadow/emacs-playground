@@ -22,10 +22,10 @@ Split Editor is `C-x 2` (one above the other) or `C-x 3` (side by side). Editor 
 
 ## Frames
 
-:try[C-x 5 2] makes a new frame. In a terminal only one frame is visible at a time, so the new one takes over the screen, with a single window; `C-x 5 0` deletes it and the frame you came from reappears exactly as you left it. In the graphical frame, new frames are real desktop windows. Most people use one frame and many windows.
+:try[C-x 5 2] makes a new frame. In a terminal only one frame is visible at a time, so the new one takes over the screen, with a single window; `C-x 5 0` deletes it and the frame you came from reappears exactly as you left it. `C-x 5 o` switches between frames without closing any. On your own desktop, a new graphical frame is a separate desktop window. Most people use one frame and many windows.
 
 :::gui-only
-In the graphical frame, `C-x 5 2` opens a second desktop window on the same Emacs: drag it to another monitor, and both show the same buffers.
+On a desktop, `C-x 5 2` in a graphical Emacs opens a second desktop window on the same Emacs, which you can drag to another monitor; both show the same buffers. The playground's graphical screen has no window manager to place it, so the new frame lies exactly over the first and nothing seems to change. `C-x 5 0` closes it, and `C-x 5 o` moves between the two.
 :::
 
 ::steps

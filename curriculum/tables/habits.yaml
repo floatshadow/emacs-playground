@@ -1,6 +1,7 @@
 # Layer 2 of the advice engine (frontend.md §6): VS Code muscle memory. One
-# card per key per session when a single-key command event matches; cards
-# expire after 12 commands.
+# card per key per session (kept across reloads) when a single-key command
+# event matches and the lesson does not mention the key; a card stays until
+# it is dismissed or another lesson loads.
 #
 # Row fields (protocol.HabitRow):
 #   key     the single key VS Code users press by habit, Emacs notation (C-z)
@@ -8,7 +9,8 @@
 #   say     the card body; key names render as keycaps
 #
 # Ported from HABITS in design/demo/mock-emacs.js. Prefix keys (C-x, C-c,
-# C-u) are not listed: they never arrive as a single-key command event.
+# C-h, C-u) are not listed: they never arrive as a single-key command event.
+# C-h (VS Code: replace) is explained by the help-prefix row of exits.yaml.
 
 - key: C-z
   vscode: undo
@@ -69,10 +71,6 @@
 - key: C-l
   vscode: select line
   say: "C-l re-centres the screen on your line; nothing was selected. Press it again for top, then bottom."
-
-- key: C-h
-  vscode: replace
-  say: "C-h opens the help system. C-h k explains any key. Replace is M-%."
 
 - key: C-y
   vscode: redo

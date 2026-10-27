@@ -31,7 +31,9 @@ steps:
   - id: move
     goal: Move describe below perimeter
     detail: "The cursor is on the empty line above `describe`. Set the mark with `C-SPC`, go down four lines with `C-n`, and kill the region with `C-w`. Then `M->` and `C-y` put it back at the end."
-    demo: "C-SPC ~300 C-n ~200 C-n ~200 C-n ~200 C-n ~400 C-w ~400 M-> ~400 C-y"
+    # From line 3 whatever the previous step left: the region is the empty
+    # line and describe below it.
+    demo: "M-< ~200 C-n ~200 C-n ~300 C-SPC ~300 C-n ~200 C-n ~200 C-n ~200 C-n ~400 C-w ~400 M-> ~400 C-y"
     conditions:
       - text: a region was killed
         event: { command: kill-region }

@@ -39,7 +39,9 @@ steps:
   - id: line
     goal: "Question 3: where is the cursor? Go to line 5 of README.md."
     detail: "The mode line shows the position as `L1`. Move down with `C-n` (or the arrow key) until it says `L5`."
-    demo: "C-n ~200 C-n ~200 C-n ~200 C-n"
+    # From the top of the buffer: the previous step leaves the cursor on
+    # whichever line the learner typed on.
+    demo: "M-< ~200 C-n ~200 C-n ~200 C-n ~200 C-n"
     conditions:
       - text: the cursor is in README.md
         state: { file: /work/hello/README.md }

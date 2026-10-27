@@ -224,7 +224,7 @@ isearch-forward-symbol-at-point: Search for the symbol under the cursor
 isearch-repeat-forward: Jump to the next match
 isearch-repeat-backward: Jump to the previous match
 isearch-exit: Stop searching and stay here
-isearch-abort: Cancel the search (back to the start)
+isearch-abort: Drop what did not match, or cancel the search
 isearch-cancel: Cancel the search (back to the start)
 isearch-printing-char: Add a character to the search
 isearch-delete-char: Remove the last searched character

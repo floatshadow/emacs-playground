@@ -19,17 +19,20 @@ steps:
       - text: a prompt was opened
         event: { command: find-file }
         hint: "C-x C-f opens a prompt at the bottom of the screen."
+      # Only the commands C-g runs inside a prompt: keyboard-quit is C-g
+      # anywhere else, before the prompt or after it was accepted.
       - text: C-g cancelled it
         any:
           - event: { command: abort-minibuffers }
           - event: { command: minibuffer-keyboard-quit }
           - event: { command: abort-recursive-edit }
-          - event: { command: keyboard-quit }
-          - event: { command: keyboard-escape-quit }
         hint: "Press C-g (Control and g) while the prompt is open. The echo area says Quit."
       - text: no prompt is open now
         state: { minibuffer: null }
         hint: "A prompt is still open at the bottom. C-g closes it."
+      - text: main.rs is still the current buffer
+        state: { file: /work/hello/src/main.rs }
+        hint: "RET in the prompt opened what it offered. q closes a folder listing, or C-x b main.rs RET brings main.rs back; then C-x C-f again and C-g."
   - id: search
     goal: Start a search, then cancel it
     detail: "`C-s` starts searching as you type. Type `zzz`, which is not in the file: the prompt says *Failing I-search*. `C-g` removes what did not match; a second `C-g` ends the search and puts the cursor back."

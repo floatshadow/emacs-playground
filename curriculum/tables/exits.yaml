@@ -55,8 +55,32 @@
 
 # --- Waiting for you ----------------------------------------------------
 
+# A loop that reads keys of its own (state `waiting`): every key goes to it,
+# and nothing else in the state shows it.
+- id: menu-open
+  when: { "waiting.kind": menu }
+  why: "A menu is open: every key goes to it until it closes."
+  how: "C-g (or ESC ESC ESC) closes it. Arrow keys and RET pick an item. Rescue me closes it too."
+
+- id: avy-waiting
+  when: { "waiting.kind": avy }
+  why: "avy is waiting for the characters of the place to jump to; the letters on the screen mark the candidates."
+  how: "Type the letters shown at your target, or C-g to stay where you are."
+
+- id: which-key-pages
+  when: { "waiting.kind": which-key }
+  why: "which-key is showing pages of the keys that can follow the prefix."
+  how: "n and p turn the pages, a aborts (C-g only goes back to the prefix)."
+
+# C-h has a row of its own (VS Code users press it for replace); the
+# generic row's regex is every pending prefix but exactly C-h.
+- id: help-prefix
+  when: { "session.prefix": C-h }
+  why: "C-h is the help prefix (not replace, as in VS Code): Emacs is waiting for the next key."
+  how: "k explains a key, f a function, m the current modes; the popup lists the rest. C-g cancels. Replace is M-%."
+
 - id: prefix-pending
-  when: { "session.prefix": { regex: "." } }
+  when: { "session.prefix": { regex: "^([^C]|C[^-]|C-[^h]|C-h.)" } }
   why: "{session.prefix} is a prefix: Emacs is waiting for the next key."
   how: "Press the next key of the command, or C-g to cancel. The popup lists what can follow."
 
@@ -64,6 +88,13 @@
   when: { "session.echo": { regex: "^Describe the following key" } }
   why: "C-h k is waiting for a key to explain."
   how: "Press the key you are curious about; it is explained, not run. C-g cancels."
+
+# query-replace asks at each match through the echo area, not the
+# minibuffer, so only the echo shows this phase.
+- id: query-replace-match
+  when: { "session.echo": { regex: "^(Query replacing|Replacing)" } }
+  why: "A replace stopped at the highlighted match and waits for one key."
+  how: "y replaces this match, n skips it, ! replaces all the rest, q or RET stops. C-g stops too; afterwards C-/ undoes the replacements made."
 
 - id: prefix-argument
   when: { prefixArg: { not: null } }
@@ -308,6 +339,20 @@
 
 # --- Windows, tabs and frames ---------------------------------------
 
+# frames counts the daemon's own invisible frame: the terminal frame alone
+# is 2, and GUI mode adds its graphical frame. Either screen shows one frame
+# at a time (the graphical one has no window manager), so a frame made with
+# C-x 5 2 hides the one underneath.
+- id: extra-frame
+  when: { frames: { gte: 3 }, "session.mode": terminal }
+  why: "Another frame now covers this one (C-x 5 2). The windows you had are in the frame underneath."
+  how: "C-x 5 0 closes this frame and brings the other back. C-x 5 o switches between them."
+
+- id: extra-frame-gui
+  when: { frames: { gte: 4 }, "session.mode": gui }
+  why: "Another graphical frame now lies over this one (C-x 5 2). The windows you had are in the frame underneath."
+  how: "C-x 5 0 closes this frame and brings the other back. C-x 5 o switches between them."
+
 - id: other-window-special
   when: { "otherWindows.mode": { in: [help-mode, helpful-mode, apropos-mode, Info-mode, Buffer-menu-mode, ibuffer-mode, compilation-mode, grep-mode, occur-mode, xref--xref-buffer-mode, dired-mode, bookmark-bmenu-mode, vundo-mode, magit-status-mode, magit-diff-mode, magit-log-mode, eshell-mode, eat-mode, messages-buffer-mode, completion-list-mode] }, "windows.side": { not: { in: [left, right, top, bottom] } } }
   why: "Another window shows {otherWindows.buf}."
@@ -336,7 +381,7 @@
 - id: gui-frame
   when: { frame: gui }
   why: "You are in the graphical frame: the same Emacs and the same buffers, drawn with images and mouse menus."
-  how: "Switch back with the Terminal tab above the screen. Everything you did here is there too."
+  how: "Switch back with the Terminal tab above the screen. Your buffers and windows come along; tabs made here do not."
 
 # --- Information ------------------------------------------------------
 

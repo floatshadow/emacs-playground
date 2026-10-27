@@ -4,6 +4,8 @@
 A stand-in for, and later a cross-check of, `playctl curriculum validate`.
 It checks, without Emacs:
 
+  YAML         no comment follows a plain scalar on its line (scenarios
+               and tables): " #" would cut the text short
   index.yaml   15 parts in order; lesson ids are "<part dir>/<lesson dir>";
                every ready lesson has lesson.md and scenario.yaml; no
                lesson directory is missing from the index
@@ -81,6 +83,32 @@ class Report:
 def load_yaml(p: Path):
     with open(p, encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+
+def plain_scalar_comments(src: str) -> list[tuple[int, str]]:
+    """(line, value) of each plain scalar that a comment follows on its line.
+
+    A space and # end a plain scalar and start a comment, so
+    `text: there is a ## heading` reads as "there is a". The curriculum puts
+    comments on lines of their own, so a comment after a plain scalar is
+    text the author meant to keep: quote the value."""
+    lines = src.splitlines()
+    out = []
+    try:
+        for tok in yaml.scan(src, Loader=yaml.SafeLoader):
+            if isinstance(tok, yaml.ScalarToken) and tok.plain:
+                end = tok.end_mark
+                rest = lines[end.line][end.column:] if end.line < len(lines) else ""
+                if re.match(r"[ \t]+#", rest):
+                    out.append((end.line + 1, tok.value))
+    except yaml.YAMLError:
+        pass  # reported by the loader
+    return out
+
+
+def check_yaml_source(where: str, p: Path, rep: Report) -> None:
+    for line, value in plain_scalar_comments(p.read_text(encoding="utf-8")):
+        rep.err(where, f"line {line}: a comment cuts the plain scalar {value!r}; quote the value")
 
 
 def is_localtext(v) -> bool:
@@ -390,6 +418,7 @@ def check_scenario(lesson_id: str, ldir: Path, rep: Report, commands: set) -> di
     except yaml.YAMLError as e:
         rep.err(where, f"YAML: {e}")
         return None
+    check_yaml_source(where, ldir / "scenario.yaml", rep)
     if not isinstance(sc, dict):
         rep.err(where, "not a mapping")
         return None
@@ -739,6 +768,8 @@ def check_tables(tdir: Path, rep: Report) -> dict:
         except yaml.YAMLError as e:
             rep.err(f"tables/{name}.yaml", f"YAML: {e}")
             out[name] = None
+            continue
+        check_yaml_source(f"tables/{name}.yaml", p, rep)
     exits = out.get("exits")
     if not isinstance(exits, list) or not exits:
         rep.err("tables/exits.yaml", "must be a non-empty list")

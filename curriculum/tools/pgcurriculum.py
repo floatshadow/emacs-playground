@@ -486,7 +486,7 @@ STATE_FIELDS = {
     "buf", "file", "mode", "modeName", "minors", "modified", "readonly", "narrowed",
     "overwrite", "line", "col", "point", "markActive", "windows", "layout", "frame",
     "frames", "tabs", "minibuffer", "isearch", "recursive", "macro", "prefixArg",
-    "readOnlyReason", "diagAtPoint",
+    "readOnlyReason", "diagAtPoint", "waiting",
     # virtual roots
     "otherWindows", "selectedWindow", "session",
 }
@@ -495,6 +495,7 @@ SUBFIELDS = {
     "minibuffer": {"depth", "prompt", "contents", "kind"},
     "tabs": {"count", "current"},
     "diagAtPoint": {"severity", "message", "source", "line", "col"},
+    "waiting": {"kind", "what", "leave"},
     "windows": WINDOW_FIELDS,
     "otherWindows": WINDOW_FIELDS,
     "selectedWindow": WINDOW_FIELDS - {"length"},

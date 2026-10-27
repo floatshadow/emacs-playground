@@ -64,8 +64,10 @@ steps:
     goal: Run the macro on the other four lines
     detail: "`F4` runs the last macro once; `C-u 4 F4` runs it four times. The counter carries on from 2, where the recording left it; `C-x C-k C-c 2 RET` sets it there again if you have run the macro before (or watched the demo). (`C-x C-k r` runs it once on every line of a region.)"
     # Outside a recording, C-x C-k C-c sets the value the next run starts
-    # from, so the demo numbers the rows 2 to 5 however often it ran.
-    demo: 'C-x C-k C-c ~300 "2" RET ~300 C-u 4 <f4>'
+    # from, so the demo numbers the rows 2 to 5 however often it ran; M-<
+    # C-n puts the cursor at the start of line 2 wherever the recording
+    # ended.
+    demo: 'C-x C-k C-c ~300 "2" RET ~300 M-< ~200 C-n ~300 C-u 4 <f4>'
     conditions:
       - text: all five lines are table rows
         elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/languages.md") (save-excursion (goto-char (point-min)) (re-search-forward "^| 1 | Rust |\n| 2 | OCaml |\n| 3 | Python |\n| 4 | Typst |\n| 5 | LaTeX |$" nil t)))'

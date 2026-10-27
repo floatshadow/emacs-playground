@@ -28,7 +28,7 @@ steps:
     detail: "`M->` goes to the end. Add a heading `## Thursday`, an empty line and one sentence ending in a full stop. Every word you type is more history on top of the deletion."
     demo: 'M-> ~300 "\n## Thursday\n\nUndo saved me twice today."'
     conditions:
-      - text: there is a ## Thursday heading
+      - text: "there is a ## Thursday heading"
         elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/journal.md") (save-excursion (goto-char (point-min)) (re-search-forward "^## Thursday$" nil t)))'
         hint: "M-> goes to the end of the file. Type ## Thursday on a line of its own."
       - text: there is a Thursday entry with a sentence
@@ -40,7 +40,8 @@ steps:
   - id: undo-region
     goal: Get Tuesday back without losing Thursday
     detail: "Plain undo would remove Thursday first. Instead, select the place where Tuesday used to be (from the start of `## Wednesday` up two lines) and press `C-/`: with an active region, undo only undoes changes inside it."
-    demo: 'C-r ~300 "## Wednesday" RET ~300 C-SPC ~300 C-p ~200 C-p ~400 C-/'
+    # C-r searches back from the end, wherever the cursor was left.
+    demo: 'M-> ~300 C-r ~300 "## Wednesday" RET ~300 C-SPC ~300 C-p ~200 C-p ~400 C-/'
     conditions:
       - text: undo was used
         any:
