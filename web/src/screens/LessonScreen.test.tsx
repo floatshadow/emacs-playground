@@ -266,6 +266,10 @@ describe('LessonScreen against a fake events stream', () => {
       .filter((li) => li.parentElement === steps)
     expect(items[0]).toHaveTextContent(/^Done:/)
     expect(items[1]).toHaveAttribute('aria-current', 'step')
+    // L1: the finished step is highlighted for a moment and announced.
+    expect(items[0]).toHaveClass('justDone')
+    expect(screen.getByText('Step done: Open src/main.rs')).toBeInTheDocument()
+    await waitFor(() => expect(items[0]).not.toHaveClass('justDone'), { timeout: 2000 })
   })
 
   it('shows the ticker, Where am I and the cheat sheet from events', async () => {
