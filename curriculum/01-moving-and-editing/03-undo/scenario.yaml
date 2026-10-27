@@ -78,7 +78,7 @@ steps:
     conditions:
       - text: vundo was opened
         event: { command: vundo }
-        hint: "C-x, then u."
+        hint: "Control x, then u without Control. A small window opens below the text with the undo history drawn as a tree of dots."
       - text: vundo is closed
         state: { "windows.mode": { not: vundo-mode } }
         hint: "q closes the vundo window."

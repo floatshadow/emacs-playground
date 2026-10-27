@@ -32,7 +32,7 @@ steps:
     conditions:
       - text: C-x C-k C-c was used
         event: { command: kmacro-set-counter }
-        hint: "C-x C-k C-c: Control x, Control k, Control c."
+        hint: "Keep Control held for all three keys, C-x C-k C-c, until the bottom line asks for the macro counter value."
       - text: the counter starts at 1
         # Outside a macro, kmacro-set-counter sets the value the next
         # recording starts from (kmacro-initial-counter-value).
@@ -40,8 +40,11 @@ steps:
         hint: "Type 1 at the prompt and RET."
   - id: record
     goal: Record one line of the table
-    detail: "At the start of line 1: `F3` starts recording. Type `| `, press `F3` again (while recording it inserts the counter), type ` | `, `C-e`, type ` |`, then `C-n C-a` to get ready for the next line, and `F4` to stop."
-    demo: 'M-< ~300 <f3> ~400 "| " <f3> ~300 " | " C-e ~200 " |" C-n ~200 C-a ~400 <f4>'
+    detail: "A recording uses the counter up, so every attempt starts with `C-x C-k C-c 1 RET`, as in the previous step. Then, at the start of line 1: `F3` starts recording. Type `| `, press `F3` again (while recording it inserts the counter), type ` | `, `C-e`, type ` |`, then `C-n C-a` to get ready for the next line, and `F4` to stop."
+    # Setting the counter first makes the demo repeatable: Watch it, then
+    # Do it yourself, records twice, and a step restore does not give the
+    # counter back.
+    demo: 'C-x C-k C-c ~300 "1" RET ~300 M-< ~300 <f3> ~400 "| " <f3> ~300 " | " C-e ~200 " |" C-n ~200 C-a ~400 <f4>'
     conditions:
       - text: a macro was recorded
         any:
@@ -50,7 +53,7 @@ steps:
         hint: "F3 starts, F4 ends. Def in the mode line means recording."
       - text: line 1 reads "| 1 | Rust |"
         elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/languages.md") (save-excursion (goto-char (point-min)) (looking-at "| 1 | Rust |$")))'
-        hint: "Inside the recording, F3 inserts the counter. If line 1 is wrong, C-/ until it is back, then record again."
+        hint: "Inside the recording, F3 inserts the counter. If line 1 is wrong, C-/ until it is back, then record again. If it says | 0 |, the counter was used up: C-x C-k C-c 1 RET before F3."
       - text: recording has stopped
         state: { macro: false }
         hint: "F4 stops recording. If Def is still in the mode line, press F4."
@@ -59,12 +62,14 @@ steps:
         say: "If Def is still in the mode line, Emacs is still recording: F4 stops. If the line went wrong, C-g throws the recording away; undo and start again with F3."
   - id: replay
     goal: Run the macro on the other four lines
-    detail: "`F4` runs the last macro once; `C-u 4 F4` runs it four times. (`C-x C-k r` runs it once on every line of a region.)"
-    demo: "C-u 4 <f4>"
+    detail: "`F4` runs the last macro once; `C-u 4 F4` runs it four times. The counter carries on from 2, where the recording left it; `C-x C-k C-c 2 RET` sets it there again if you have run the macro before (or watched the demo). (`C-x C-k r` runs it once on every line of a region.)"
+    # Outside a recording, C-x C-k C-c sets the value the next run starts
+    # from, so the demo numbers the rows 2 to 5 however often it ran.
+    demo: 'C-x C-k C-c ~300 "2" RET ~300 C-u 4 <f4>'
     conditions:
       - text: all five lines are table rows
         elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/notes/languages.md") (save-excursion (goto-char (point-min)) (re-search-forward "^| 1 | Rust |\n| 2 | OCaml |\n| 3 | Python |\n| 4 | Typst |\n| 5 | LaTeX |$" nil t)))'
-        hint: "The cursor must be at the start of line 2 when you replay. C-u 4 F4 runs the macro four times."
+        hint: "The cursor must be at the start of line 2 when you replay. If the numbers do not run from 2 to 5, C-/ the rows away, C-x C-k C-c 2 RET, then C-u 4 F4."
       - text: the macro has finished running
         elisp: "(not executing-kbd-macro)"
         hint: "Wait for the macro to finish."

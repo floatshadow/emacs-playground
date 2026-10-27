@@ -6,6 +6,8 @@ minutes: 12
 
 With several files open, the everyday moves are switching to the one you want, saving, and getting rid of what you no longer need. Each has a key, and a few details, such as two files with the same name, look odd until you know what Emacs is doing.
 
+This lesson works with two small projects in `/work/projects`: *hello* in `/work/projects/hello/` and *polyglot* in `/work/projects/polyglot/`. (`/work/hello` is the older copy of hello from lesson 2.3; nothing here uses it.)
+
 :::vscode
 Ctrl+Tab is `C-x b RET`, which flips to the previous buffer, or `C-x <left>` and `C-x <right>`, which walk this window's history. Ctrl+S is `C-x C-s`, Save All is `C-x s`, Save As is `C-x C-w` and Ctrl+W is `C-x k`. Where VS Code shows *main.rs hello/src* in a tab, Emacs names the buffer `main.rs<hello>`.
 :::

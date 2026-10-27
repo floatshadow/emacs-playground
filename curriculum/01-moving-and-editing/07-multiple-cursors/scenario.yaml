@@ -45,7 +45,7 @@ steps:
         hint: "Every cursor types the same thing. If a line got pub twice, C-/ and try again."
       - text: back to one cursor
         elisp: '(with-current-buffer (find-buffer-visiting "/work/editing/src/report.rs") (not (bound-and-true-p multiple-cursors-mode)))'
-        hint: "C-g leaves multiple-cursors mode."
+        hint: "C-g removes the extra cursors, and the mc: count in the mode line goes away. If a region is highlighted, the first C-g only clears it: press it again."
   - id: expand
     goal: Grow a selection from a word to the whole string
     detail: "Put the cursor inside the word *report* in `\"report\"`. Each `C-=` grows the selection to the next larger piece of syntax: the word, then the string with its quotes, then the argument list, then the whole call. Copy the string with its quotes using `M-w`. `C--` shrinks the selection again."

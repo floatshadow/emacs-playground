@@ -10,22 +10,23 @@ setup:
   reset: true
   open: [hello/src/main.rs]
   layout: single
-  eval: "(progn (goto-char (point-min)) (forward-line 2))"
+  # Line numbers start off, so the last step's toggle shows them.
+  eval: "(progn (goto-char (point-min)) (forward-line 2) (display-line-numbers-mode -1))"
 steps:
   - id: popup
     goal: Find the bookmark command under C-x r
-    detail: "Press `C-x r` and wait a second. The which-key popup lists every key that can follow, with the command it runs. Find the one that sets a bookmark (it is `m`), press it, and accept the default name with `RET`."
+    detail: "Press `C-x r` and wait a second. The which-key popup lists every key that can follow, with the command it runs. When its bottom line counts pages, such as *(1 of 2)*, `C-h` then `n` shows the next page (`C-h` then `p` goes back). Find the key that sets a bookmark (it is `m`), press it, and accept the default name with `RET`."
     demo: "C-x r ~1500 m ~600 RET"
     conditions:
       - text: bookmark-set ran
         event: { command: bookmark-set }
-        hint: "C-x r, wait for the popup, look for bookmark-set. It is m."
+        hint: "C-x r, wait for the popup, look for bookmark-set. If it is not on the first page, C-h then n turns the page. It is m."
       - text: the name was accepted
         state: { minibuffer: null }
         hint: "The prompt offers main.rs as the name; RET accepts it."
     stuck:
       - when: { idle_seconds: 40 }
-        say: "Press C-x, then r, then wait. If nothing pops up, C-x r C-h lists the same keys in a help buffer."
+        say: "Press C-x, then r, then wait. If nothing pops up, C-x r C-h lists the same keys in a help buffer; q closes it."
   - id: list
     goal: Find the command that lists bookmarks
     detail: "Back to `C-x r`. One of the keys lists bookmarks (`l`). Open the list, see your bookmark, then leave with `q`."
@@ -50,18 +51,21 @@ steps:
         hint: "C-x r SPC, then a letter to name the register: a."
       - text: you jumped back to it
         event: { command: jump-to-register }
-        hint: "C-x r j, then the same letter a."
+        hint: "Jump with C-x r j and the letter you stored with, a. Another letter is another, empty register: the echo area complains and the cursor stays put."
       - text: the cursor is where you stored it
         elisp: '(let ((m (get-register ?a))) (and (markerp m) (eq (marker-buffer m) (window-buffer (selected-window))) (= (marker-position m) (window-point (selected-window)))))'
         hint: "Store first with C-x r SPC a, move away, then C-x r j a."
   - id: by-name
     goal: Run a command by name and watch the ticker
-    detail: "Every key runs a named command, and `M-x` runs any command by name. Turn on line numbers with `M-x display-line-numbers-mode RET`. The ticker under the screen shows *M-x display-line-numbers-mode*."
+    detail: "Every key runs a named command, and `M-x` runs any command by name. Toggle line numbers with `M-x display-line-numbers-mode RET`: they appear, and the same command again hides them. The ticker under the screen shows *M-x display-line-numbers-mode*."
     demo: 'M-x ~500 "display-line-numbers-mode" ~300 RET'
+    # The command toggles, and neither a step restore (Do it yourself after
+    # Watch it) nor a reset reload switches a buffer's minor modes back off,
+    # so the step accepts either direction: running it is the point.
     conditions:
       - text: display-line-numbers-mode ran
         event: { command: display-line-numbers-mode }
         hint: "M-x, then type display-line-numbers-mode (TAB completes), then RET."
-      - text: line numbers are on in main.rs
-        elisp: "(buffer-local-value 'display-line-numbers-mode (window-buffer (selected-window)))"
-        hint: "Running the command again turns line numbers off; run it once more."
+      - text: the M-x prompt is closed again
+        state: { minibuffer: null }
+        hint: "RET runs the command and closes the prompt. If the prompt stays open, the name is incomplete or misspelt: TAB completes it, C-g starts over."

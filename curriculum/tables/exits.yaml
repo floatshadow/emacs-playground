@@ -80,35 +80,70 @@
   why: "Prompts are open inside prompts, {minibuffer.depth} deep."
   how: "C-g closes the innermost one. ESC ESC ESC closes them all."
 
+# Prompt rows: one per kind of question, so that a prompt matches exactly
+# one of them; tools/validate.py checks this against the real Emacs 31
+# prompts in its EXIT_PROMPT_SAMPLES. The browser evaluates these regular
+# expressions with JavaScript and sessiond with Go (RE2): write them so
+# both read them alike, without inline flags such as (?i) (spell case out
+# with classes, [Ff]ile) and without lookaround. Questions, whose prompts
+# end with a ? and the answers, stay out of the name rows through anchors
+# or a trailing [^?]*$. minibuffer-prompt is the rest: its regex is the
+# union of all the others.
+
 - id: minibuffer-mx
   when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "M-x" } }
   why: "M-x is waiting for a command name."
   how: "Type part of the name, TAB completes, RET runs it. C-g cancels."
 
+- id: minibuffer-yes-no
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "\\((y or n|yes or no)\\)" } }
+  why: "Emacs asks a question: {minibuffer.prompt}"
+  how: "Answer y or n. C-g cancels the whole command."
+
+- id: minibuffer-choice
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "\\((y, n|yes, no)," } }
+  why: "Emacs asks a question with several answers: {minibuffer.prompt}"
+  how: "Press one key: y for yes, n for no, or another answer from the list (! means yes to all the rest, q stops). ? or C-h explains each answer. C-g cancels."
+
 - id: minibuffer-file
-  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "(?i)(find|open|write|visit|dired).*(file|directory)|file.*:" } }
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "^(Find|Write|Insert|Visit|Open)\\b.*\\b(file|directory)\\b|^Dired|^Create directory|^(Copy|Rename|Move|Symlink) .+ to: $" } }
   why: "Emacs is asking for a file or folder: {minibuffer.prompt}{minibuffer.contents}"
   how: "Type a name, TAB completes, RET accepts. A / after the path starts over from the root, ~/ from home. C-g cancels."
 
 - id: minibuffer-buffer
-  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "(?i)buffer" } }
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "^[A-Z][a-z]+( to| in| from)? buffer\\b" } }
   why: "Emacs is asking for a buffer name: {minibuffer.prompt}"
   how: "RET alone takes the default shown in the prompt. TAB lists the buffers. C-g cancels."
 
-- id: minibuffer-yes-no
-  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "\\((y or n|yes or no)" } }
-  why: "Emacs asks a question: {minibuffer.prompt}"
-  how: "Answer y or n. C-g cancels the whole command."
+- id: minibuffer-number
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "^(Goto|Go to) (line|char)|([Ll]ine number|[Cc]olumn|[Cc]ounter|[Nn]umber)[^?]*$" } }
+  why: "Emacs is asking for a number: {minibuffer.prompt}"
+  how: "Type a number, RET. C-g cancels."
+
+- id: minibuffer-help
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "^(Describe|Where is|Search for a command|Apropos)" } }
+  why: "Help is asking what to explain: {minibuffer.prompt}"
+  how: "Type the name, TAB completes it, RET shows the help. C-g cancels."
+
+- id: minibuffer-bookmark
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "[Bb]ookmark[^?]*$" } }
+  why: "Emacs is asking for a bookmark name: {minibuffer.prompt}"
+  how: "Type a name, TAB completes the existing ones, RET accepts. RET alone takes the default shown. C-g cancels."
+
+- id: minibuffer-search
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "^(List lines|Flush lines|Keep lines|How many|Highlight)\\b[^?]*regexp" } }
+  why: "Emacs is asking what to look for: {minibuffer.prompt}"
+  how: "Type the text, RET. It is a regular expression, so . and * and [ have special meanings. RET alone takes the default shown. C-g cancels."
 
 - id: minibuffer-replace
-  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "(?i)replac" } }
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "[Rr]eplac[^?]*$" } }
   why: "A replace command is asking what to replace, and with what."
   how: "Type the text, RET, the replacement, RET. Then y replaces, n skips, ! replaces all, q stops."
 
 - id: minibuffer-prompt
-  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { not: { regex: "(?i)M-x|file|directory|buffer|replac|\\((y or n|yes or no)" } } }
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { not: { regex: "M-x|\\((y or n|yes or no)\\)|\\((y, n|yes, no),|^(Find|Write|Insert|Visit|Open)\\b.*\\b(file|directory)\\b|^Dired|^Create directory|^(Copy|Rename|Move|Symlink) .+ to: $|^[A-Z][a-z]+( to| in| from)? buffer\\b|^(Goto|Go to) (line|char)|([Ll]ine number|[Cc]olumn|[Cc]ounter|[Nn]umber)[^?]*$|^(Describe|Where is|Search for a command|Apropos)|[Bb]ookmark[^?]*$|^(List lines|Flush lines|Keep lines|How many|Highlight)\\b[^?]*regexp|[Rr]eplac[^?]*$" } } }
   why: "A prompt is open at the bottom: {minibuffer.prompt}"
-  how: "RET accepts, C-g cancels. TAB completes names. M-p brings back what you typed before."
+  how: "RET accepts, C-g cancels. M-p brings back what you typed before."
 
 - id: recursive-edit
   when: { recursive: { gt: 0 }, minibuffer: null }

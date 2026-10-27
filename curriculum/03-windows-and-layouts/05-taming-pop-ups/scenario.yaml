@@ -56,14 +56,14 @@ steps:
         hint: "q in the help window closes it."
   - id: rule
     goal: Send *Help* to the right with a rule of your own
-    detail: "Open `/work/projects/notes/popups.el`. It adds a rule for *Help* with two wrong values: change `bottom` to `right` and `0.25` to `0.4`. Save, then `M-x eval-buffer RET` runs the file, which adds the rule."
+    detail: "Open `/work/projects/notes/popups.el`. The rule for *Help* at the end of the file has two wrong values, numbered 1 and 2 in the comments beside them: change `(side . bottom)` to `(side . right)` and `0.25` to `0.4`. Save, then `M-x eval-buffer RET` runs the file, which adds the rule."
     demo: 'C-x C-f ~400 "/work/projects/notes/popups.el" RET ~500 M-< ~300 C-s ~300 "(side . bottom" RET ~300 M-DEL ~300 "right" ~300 C-s ~300 "0.25" RET ~300 DEL DEL DEL DEL ~300 "0.4" ~300 C-x C-s ~400 M-x ~400 "eval-buffer" RET'
     conditions:
       - text: popups.el says right and 0.4
         all:
           - file: { path: projects/notes/popups.el, contains: "(side . right)" }
           - file: { path: projects/notes/popups.el, contains: "(window-width . 0.4)" }
-        hint: "Edit the two values in the rule and save with C-x C-s."
+        hint: "The values to change are in the rule near the end of the file, on the line (side . bottom) under the *Help* pattern: bottom becomes right, and 0.25 on the next line becomes 0.4. The first bottom in the file is in a comment at the top; changing it does nothing. Then save with C-x C-s."
       - text: the file was evaluated
         any:
           - event: { command: eval-buffer }
@@ -76,7 +76,7 @@ steps:
         hint: "Evaluate the file after saving the fix. Evaluating the old version adds the old rule; just fix it and evaluate again."
     stuck:
       - when: { step_seconds: 240 }
-        say: "Change bottom to right and 0.25 to 0.4, save with C-x C-s, then M-x eval-buffer RET while popups.el is the current buffer."
+        say: "In the rule at the end of popups.el, change (side . bottom) to (side . right) and 0.25 to 0.4; the bottom in the comment at the top does not count. Save with C-x C-s, then M-x eval-buffer RET while popups.el is the current buffer."
   - id: try
     goal: Ask for help again and watch it open on the right
     detail: "`C-h f find-file RET`. This time *Help* appears in a side window along the right edge, two fifths wide, and the build output stays where it was."
@@ -86,7 +86,7 @@ steps:
         any:
           - event: { command: describe-function }
           - event: { command: helpful-callable }
-        hint: "C-h f, find-file, RET."
+        hint: "C-h f asks for a function name; type find-file and RET. Your rule decides where *Help* goes, so watch the right edge of the frame."
       - text: "*Help* is in a side window on the right"
         state: { "windows.side": right, "windows.buf": "*Help*" }
         hint: "If help opened elsewhere, the rule is not active yet: evaluate popups.el again (M-x eval-buffer in it)."

@@ -7,7 +7,7 @@ exist, and stay useful as a cross-check afterwards.
 
 | Tool | What it does |
 |---|---|
-| `validate.py` | Schema and content checks of Part B.2 to B.4: index, every scenario (all `protocol.Scenario` fields and nothing else), lesson.md directives and front matter, the five tables, fixture drift. Exit status 1 on errors. |
+| `validate.py` | Schema and content checks of Part B.2 to B.4: index, every scenario (all `protocol.Scenario` fields and nothing else), lesson.md directives and front matter, the five tables, fixture drift. Content rules from the newcomer review: no level-one hint that only repeats the step's keys; exit-row regexes that JavaScript reads like RE2 (compiled with node's `RegExp` when node is installed); every prompt in `EXIT_PROMPT_SAMPLES` matches exactly its own exit row. Exit status 1 on errors. `test_validate.py` tests these rules. |
 | `pgcurriculum.py` | Python ports of `internal/protocol` (keys, demo strings, layout patterns, predicates, state paths), shared by the other tools. The Go code is the reference. |
 | `sync_fixtures.py` | Copies the shared fixture trees in `fixture-src/` into each lesson that uses them (`--check` reports drift). |
 | `play/play.py` | Replays every step's demo in a real Emacs 31.1 and checks the step's conditions after every command. |
@@ -15,6 +15,7 @@ exist, and stay useful as a cross-check afterwards.
 
 ```sh
 python3 curriculum/tools/validate.py                 # all lessons and tables
+python3 -m unittest discover -s curriculum/tools -p 'test_*.py'   # the validator's own tests
 python3 curriculum/tools/sync_fixtures.py            # after editing fixture-src/
 docker build -t pg-curriculum-play curriculum/tools/play
 python3 curriculum/tools/play/play.py --all          # or one or more lesson ids; -v, --keep
@@ -112,6 +113,18 @@ Agent and step engine:
   quits (`quits_in_window`) should count it too.
 - `playground-rescue` is interactive: 3.6's demo runs it with `M-x` where
   the learner presses the Rescue button.
+- A demo may run twice from the same checkpoint: Watch it restores the
+  step first when the learner has run commands, Do it yourself restores
+  it again, and `playctl curriculum play -watch` does both. A restore puts
+  back files (files created since the checkpoint are removed) and windows,
+  but not a buffer's minor modes. 0.4's last step accepts either toggle
+  direction of `display-line-numbers-mode`; 3.8's follow and writing steps
+  rely on their setup turning follow-mode and olivetti-mode off, so a
+  second pass after a restore toggles them off again.
+- Demos that open files by path type the absolute path after the offered
+  directory (2.4, 3.4), so they work from any buffer; 2.3, 2.6 and 2.7
+  keep relative names because the step teaches them from its starting
+  buffer.
 - `setup.layout` patterns may nest (3.2 builds a 2×2 grid); names with a
   `/` are workspace-relative files. Demos that depend on which window is
   selected after setup select it in `setup.eval` (3.2, 3.3).

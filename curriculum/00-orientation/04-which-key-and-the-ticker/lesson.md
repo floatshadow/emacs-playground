@@ -12,7 +12,9 @@ The keyboard shortcut reference card is built in and context sensitive. Press an
 
 ## Explore a prefix
 
-Press :try[C-x r] and wait. The popup lists the commands under it: rectangles, :jargon[registers] and :jargon[bookmarks] live here, each one key away. Press a key to run that command, or `C-g` to put the popup away. `C-h` after any prefix gives the same list as a help buffer you can search.
+Press :try[C-x r] and wait. The popup lists the commands under it: rectangles, :jargon[registers] and :jargon[bookmarks] live here, each one key away. Press a key to run that command, or `C-g` to put the popup away.
+
+When a prefix has more keys than fit, the popup's bottom line counts its pages, for example *(1 of 2) [C-h paging/help]*. `C-h` then `n` turns to the next page, and `C-h` then `p` turns back; the prefix stays pending, so you can still press a key from any page. `C-h` then `h` shows the same list as a help buffer you can search, and so does a `C-h` pressed before the popup appears.
 
 A bookmark is a named place in a file that survives restarts; a register is a one-letter slot for a position, kept for this session. Both get their own lesson in Part 2; here they are just things to find in a popup.
 

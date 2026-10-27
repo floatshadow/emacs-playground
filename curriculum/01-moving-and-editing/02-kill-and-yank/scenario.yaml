@@ -61,7 +61,7 @@ steps:
     conditions:
       - text: C-x h selected everything
         event: { command: mark-whole-buffer }
-        hint: "C-x, then h."
+        hint: "Control x, then h without Control: the whole buffer turns highlighted. If a list of C-x keys appeared instead, Control was still held on the h; C-g and try again."
       - text: M-w copied it
         all:
           - event: { command: kill-ring-save }

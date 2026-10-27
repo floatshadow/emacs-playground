@@ -36,7 +36,7 @@ steps:
     conditions:
       - text: follow-mode is on in reading.md
         elisp: '(let ((b (find-buffer-visiting "/work/projects/notes/reading.md"))) (and b (buffer-local-value (quote follow-mode) b)))'
-        hint: "M-x follow-mode RET, in the reading.md window."
+        hint: "Follow mode is switched on per buffer: run M-x follow-mode RET with the cursor in one of the reading.md windows. Running it again switches it off."
       - text: reading.md in two columns
         layout: "(hsplit reading.md reading.md)"
         hint: "C-x 3 first, so there are two windows on the same buffer."
@@ -50,7 +50,7 @@ steps:
           - event: { command: project-compile }
           - event: { command: compile }
           - event: { command: recompile }
-        hint: "C-x p c, then sh build.sh as the command."
+        hint: "C-x p c offers make -k as the command. Clear it first (C-a C-k), then type sh build.sh, or the build runs make instead."
       - text: main.rs above *compilation*
         layout: "(vsplit main.rs *compilation*)"
         hint: "Start from one window on main.rs (C-x 1), then build."
@@ -61,7 +61,7 @@ steps:
     conditions:
       - text: two windows side by side
         layout: "(hsplit * *)"
-        hint: "C-x 1, then C-x 3."
+        hint: "Side by side, not one above the other: C-x 3 splits left and right, C-x 2 top and bottom. Start from a single window with C-x 1."
       - text: lib.rs beside shout.rs
         layout: "(hsplit lib.rs shout.rs)"
         hint: "lib.rs on the left, tests/shout.rs on the right."
@@ -75,7 +75,7 @@ steps:
         hint: "M-x olivetti-mode RET in reading.md. Run it again to turn it off."
       - text: one window on reading.md
         layout: "reading.md"
-        hint: "C-x 1 keeps only the selected window."
+        hint: "Select the reading.md window before C-x 1: it keeps the window the cursor is in and closes the others."
   - id: wide
     goal: "Recipe 4, wide code and narrow notes: main.rs wider on the left"
     detail: "`C-x 3`, then `C-x b main.rs RET` on the left. `C-x }` widens the selected window by a column, and a plain `}` repeats it: press it until main.rs is clearly wider (five or six times). `C-x {` narrows."

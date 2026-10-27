@@ -52,17 +52,17 @@ steps:
         say: "Pressing C-g many times is fine: it is always safe. Look at the bottom line; when it no longer says I-search, the search is over."
   - id: buffer-list
     goal: Open the buffer list, then close it
-    detail: "`C-x C-b` lists every buffer in a second window, without moving your cursor. `C-x 1` keeps only the window you are in; or `C-x o` moves into the list and `q` closes it. (From Part 2 on, `C-x C-b` opens ibuffer in the current window instead, and `q` closes it.)"
+    detail: "`C-x C-b` shows the buffer list in one of two ways, depending on the modules that are on. The plain list opens in a second window and your cursor stays here: `C-x 1` keeps only the window you are in, or `C-x o` moves into the list and `q` closes it. Ibuffer (from Part 2's files module on) takes over this window with the cursor in it: `q` closes it and main.rs comes back."
     demo: "C-x C-b ~1500 C-x o ~300 q"
     conditions:
       - text: the buffer list was opened
         any:
           - event: { command: list-buffers }
           - event: { command: ibuffer }
-        hint: "Press C-x, then C-b."
+        hint: "Hold Control for both keys: C-x, then C-b. C-x b with a plain b asks for a buffer name instead; C-g cancels it."
       - text: back to one window showing main.rs
         layout: "main.rs"
-        hint: "C-x 1 keeps only the selected window. If the cursor is in the list, q closes it instead."
+        hint: "Look at where the cursor is. In main.rs with the list below: C-x 1 keeps only this window. In the list (a second window, or the list filling this one): q closes it."
   - id: help
     goal: Open help for a key, then leave the help window
     detail: "`C-h k` then `C-f` explains what `C-f` does, in a *Help* window. The cursor moves into it, so `q` closes it straight away."
@@ -86,7 +86,7 @@ steps:
     conditions:
       - text: the tutorial was opened
         event: { command: help-with-tutorial }
-        hint: "C-h t opens the Emacs tutorial."
+        hint: "C-h, then a plain t (no Control on the t). The tutorial replaces main.rs in this window."
       - text: the tutorial buffer is gone
         elisp: '(not (get-buffer "TUTORIAL"))'
         hint: "C-x k asks which buffer to kill, offering the current one. RET accepts it. Then answer the y-or-n question with n."
@@ -94,8 +94,8 @@ steps:
         state: { file: /work/hello/src/main.rs }
         hint: "After killing a buffer, Emacs shows the previous one. C-x b main.rs RET also brings it back."
   - id: escape
-    goal: Make a big mess, then escape with ESC ESC ESC
-    detail: "Press `C-x 2`, `C-x 3` and `M-x`: three windows and an open prompt. `ESC ESC ESC` (Esc three times) gets out of one thing at a time: first the prompt, then the extra windows."
+    goal: Make a big mess, then escape with ESC ESC ESC (twice)
+    detail: "Press `C-x 2`, `C-x 3` and `M-x`: three windows and an open prompt. `ESC ESC ESC` (Esc three times in a row) gets out of one layer each time you use it: the first `ESC ESC ESC` closes the prompt, a second `ESC ESC ESC` closes the extra windows."
     demo: "C-x 2 ~300 C-x 3 ~300 M-x ~800 ESC ESC ESC ~600 ESC ESC ESC"
     conditions:
       - text: the window was split
@@ -105,9 +105,9 @@ steps:
         hint: "C-x 2 splits the window; C-x 3 splits it again, side by side."
       - text: ESC ESC ESC was used
         event: { command: keyboard-escape-quit }
-        hint: "Press Esc three times quickly."
+        hint: "Three presses of Esc in a row, without other keys between them. One or two Esc presses only start a key sequence (the echo area shows ESC-)."
       - text: one window and no prompt
         all:
           - layout: single
           - state: { minibuffer: null }
-        hint: "ESC ESC ESC first closes the prompt. Press it again to close the extra windows."
+        hint: "One ESC ESC ESC closes one layer. If the prompt is gone but the windows are still split, press ESC ESC ESC a second time."
