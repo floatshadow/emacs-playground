@@ -48,7 +48,7 @@ steps:
         hint: "Control x, then Control b."
       - text: ibuffer is in the selected window
         state: { mode: ibuffer-mode }
-        hint: "If you left the list, C-x C-b opens it again."
+        hint: "ibuffer must be in the selected window when the step checks. If you pressed q or moved to another window, C-x C-b brings it back."
   - id: help
     goal: Kill every *Help* buffer in one operation
     detail: "Commands that act on many buffers work on the marked ones. `* h` marks every help buffer at once; `D` kills the marked buffers."

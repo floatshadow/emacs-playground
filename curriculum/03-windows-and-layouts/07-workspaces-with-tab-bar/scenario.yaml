@@ -32,10 +32,10 @@ steps:
     conditions:
       - text: the tab is called hello
         state: { "tabs.current": hello }
-        hint: "C-x t r, type hello, RET."
+        hint: "C-x t r asks for the tab's new name at the bottom; type hello and RET. With one tab the tab bar stays hidden, so the name shows only once there are two."
       - text: main.rs above lib.rs
         layout: "(vsplit main.rs lib.rs)"
-        hint: "C-x 2 splits; C-x o moves down; C-x b lib.rs RET."
+        hint: "main.rs goes in the top window, lib.rs in the bottom one. If they are the other way round, C-x o to the top window and C-x b main.rs RET there."
   - id: polyglot
     goal: "Open polyglot in a tab of its own, side by side: main.rs and README.md"
     detail: "`C-x p p` switches project in a new tab named after it (the windows module sets this up). Pick `/work/projects/polyglot/`, press `f`, open `src/main.rs`. Then `C-x 3`, `C-x o`, `C-x C-f ../README.md RET`. The tab bar appears at the top now that there are two tabs."
@@ -46,7 +46,7 @@ steps:
         hint: "C-x p p opens the project in a new tab called polyglot. (C-x t 2 makes an empty tab; C-x t r names it.)"
       - text: main.rs beside README.md
         layout: "(hsplit main.rs README.md)"
-        hint: "C-x 3, C-x o, then open ../README.md from src/."
+        hint: "main.rs on the left, README.md on the right. After C-x 3 the cursor stays on the left: C-x o first, then open README.md, one folder above src/."
       - text: they are polyglot's files
         elisp: '(and (seq-find (lambda (w) (equal (buffer-file-name (window-buffer w)) "/work/projects/polyglot/src/main.rs")) (window-list)) (seq-find (lambda (w) (equal (buffer-file-name (window-buffer w)) "/work/projects/polyglot/README.md")) (window-list)))'
         hint: "Open the files under /work/projects/polyglot/, not hello's."

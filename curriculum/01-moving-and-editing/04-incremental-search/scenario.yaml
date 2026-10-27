@@ -36,13 +36,13 @@ steps:
     conditions:
       - text: C-r was used
         event: { command: isearch-backward }
-        hint: "C-r, then type fn greet( with the parenthesis."
+        hint: "C-r searches upwards from the cursor, and the bottom line says I-search backward. Then type fn greet( with the parenthesis, so greet_all does not match first."
       - text: the cursor is on the fn greet line
         elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (string-match-p "^fn greet(" (thing-at-point (quote line) t))))'
         hint: "A backward search leaves the cursor at the start of the match."
       - text: the search is finished
         state: { isearch: false }
-        hint: "RET ends the search."
+        hint: "RET leaves the cursor at the match and the I-search line at the bottom goes away. C-g would put the cursor back where the search started."
   - id: symbol
     goal: Search for the symbol at point
     detail: "Put the cursor on `greet` (`M-f M-f M-b` from the start of the line) and press `M-s .`. It searches for the whole symbol: `greet` matches, `greet_all` does not. `C-s` for the next one, `RET` to stop."
@@ -53,7 +53,7 @@ steps:
         hint: "M-s, then a full stop, with the cursor on the word greet."
       - text: the search is finished
         state: { isearch: false }
-        hint: "RET ends the search."
+        hint: "RET stops at the current match and the prompt at the bottom disappears. C-g would take you back to where you pressed M-s . instead."
   - id: regexp
     goal: Search with a regular expression
     detail: "`C-M-s` searches for a regexp. From the top (`M-<`), find the first `let` with no type annotation: `let [a-z]+ =`."

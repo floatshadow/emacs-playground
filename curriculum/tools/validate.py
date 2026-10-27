@@ -356,6 +356,30 @@ def check_condition(where: str, c, rep: Report, top: bool, ids: set, commands: s
         check_condition(f"{where}.not", v, rep, False, ids, commands)
 
 
+# --- Hints ----------------------------------------------------------------
+
+# Key-like tokens, as web/e2e/review.mjs (S4) finds them in step texts.
+HINT_KEY = re.compile(r"(?:[CMSs]-)+[^\s,.;:()\"'`]+|\b(?:RET|TAB|SPC|ESC|DEL)\b")
+
+
+def restating_hint(step: dict, cond: dict) -> str | None:
+    """The condition's hint when it adds nothing to the step's text.
+
+    A level-one hint fails when every key it names is already in the
+    step's goal or detail and it has at most eight other words ("C-x, then
+    h."): the learner asking for a hint has read those keys already.
+    """
+    hint = text_en(cond.get("hint"))
+    keys = HINT_KEY.findall(hint)
+    if not keys:
+        return None
+    said = set(HINT_KEY.findall(f"{text_en(step.get('goal'))} {text_en(step.get('detail'))}"))
+    words = [w for w in re.split(r"\s+", HINT_KEY.sub(" ", hint)) if w]
+    if all(k in said for k in keys) and len(words) <= 8:
+        return hint
+    return None
+
+
 # --- Scenario -------------------------------------------------------------
 
 
@@ -502,6 +526,12 @@ def check_scenario(lesson_id: str, ldir: Path, rep: Report, commands: set) -> di
         ids: set = set()
         for ci, c in enumerate(conds):
             check_condition(f"{sw} condition {ci + 1}", c, rep, True, ids, commands)
+            if isinstance(c, dict):
+                bare = restating_hint(st, c)
+                if bare:
+                    rep.err(f"{sw} condition {ci + 1}",
+                            f"the hint {bare!r} only repeats keys the step already gives; say what to "
+                            "look for or the usual mistake (CURRICULUM.md B.3)")
         for ri, r in enumerate(st.get("stuck") or []):
             rw = f"{sw} stuck {ri + 1}"
             if not isinstance(r, dict) or set(r) - STUCK_KEYS:

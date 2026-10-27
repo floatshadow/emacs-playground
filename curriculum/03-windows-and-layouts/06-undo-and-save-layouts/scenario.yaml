@@ -40,7 +40,7 @@ steps:
     conditions:
       - text: C-x 1 was used
         event: { command: delete-other-windows }
-        hint: "Destroy it on purpose first: C-x 1."
+        hint: "This step undoes a real change, so make one first: C-x 1 leaves a single window. Then C-c <left> has something to bring back."
       - text: C-c <left> was used
         event: { command: winner-undo }
         hint: "Control c, then the left arrow key."
@@ -54,7 +54,7 @@ steps:
     conditions:
       - text: burly-bookmark-windows ran
         event: { command: burly-bookmark-windows }
-        hint: "M-x burly-bookmark-windows RET, then a name."
+        hint: "The command name has two hyphens, burly-bookmark-windows. TAB after burly-b completes up to burly-bookmark-, then w and TAB finish it. The name prompt starts with Burly: already; type review after it."
       - text: a bookmark called review exists
         elisp: '(progn (require (quote bookmark)) (seq-find (lambda (b) (string-match-p "review" (car b))) bookmark-alist))'
         hint: "Name it review. The Burly: in front is part of the name and marks it as a layout."

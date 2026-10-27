@@ -34,7 +34,7 @@ steps:
         any:
           - event: { command: imenu }
           - event: { command: consult-imenu }
-        hint: "M-g, then i."
+        hint: "Alt and g, then a plain i: the bottom line asks for a definition of this file by name. M-g g is its neighbour that asks for a line number."
       - text: the cursor is on fn greet_all
         elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/src/main.rs") (string-match-p "fn greet_all" (thing-at-point (quote line) t))))'
         hint: "In the prompt, type Fn greet_a and press TAB: it completes to Fn greet_all. Then RET."
@@ -45,7 +45,7 @@ steps:
     conditions:
       - text: a bookmark was set
         event: { command: bookmark-set }
-        hint: "C-x r m, then a name."
+        hint: "C-x r m asks for the bookmark's name at the bottom and offers one. Type greet-all instead, then RET, so that C-x r b finds it by that name."
       - text: you jumped to it
         event: { command: bookmark-jump }
         hint: "C-x r b, then the bookmark's name. TAB completes."

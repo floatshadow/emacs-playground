@@ -80,7 +80,7 @@ steps:
     conditions:
       - text: C-x C-f was used
         event: { command: find-file }
-        hint: "C-x C-f, and this time press RET straight away."
+        hint: "Leave the prompt as Emacs offers it, ending in src/, and press RET: asking for a directory opens Dired. Delete anything you typed after the last / first."
       - text: q closed Dired
         any:
           - event: { command: dirvish-quit }

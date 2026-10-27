@@ -43,7 +43,7 @@ steps:
     conditions:
       - text: what-line ran
         event: { command: what-line }
-        hint: "M-x, type what-line, RET."
+        hint: "M-x, then what-line with its hyphen, then RET. The echo area answers with Line and a number for a few seconds."
       - text: whitespace-mode ran
         event: { command: whitespace-mode }
         hint: "M-x, type whitespace-mode (TAB helps), RET."

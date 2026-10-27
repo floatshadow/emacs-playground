@@ -32,7 +32,7 @@ steps:
     conditions:
       - text: C-x C-k C-c was used
         event: { command: kmacro-set-counter }
-        hint: "C-x C-k C-c: Control x, Control k, Control c."
+        hint: "Keep Control held for all three keys, C-x C-k C-c, until the bottom line asks for the macro counter value."
       - text: the counter starts at 1
         # Outside a macro, kmacro-set-counter sets the value the next
         # recording starts from (kmacro-initial-counter-value).

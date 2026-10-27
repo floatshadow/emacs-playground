@@ -37,7 +37,7 @@ steps:
         hint: "Control x, then Control b. Not C-x b, which switches buffers."
       - text: the list is on screen
         state: { "windows.mode": { in: [ibuffer-mode, Buffer-menu-mode] } }
-        hint: "If the list disappeared, press C-x C-b again."
+        hint: "The list must still be in the selected window when the step checks. If you pressed q or switched away, C-x C-b brings it back."
   - id: mark
     goal: Mark exactly the buffers that visit files
     detail: "Six buffers, grouped by project. Move with `n` and `p`. Press `m` on each buffer that shows a file in the *Filename* column; `u` unmarks a line. Leave `notes`, *scratch* and *Messages* unmarked: they are buffers without files."
@@ -64,7 +64,7 @@ steps:
         hint: "Control x, then a plain b. Type notes, then RET."
       - text: notes is shown, and it visits no file
         state: { buf: notes, file: null }
-        hint: "Type the name exactly: notes. RET switches to it."
+        hint: "The buffer must be called exactly notes, in lower case and without an extension. A name nothing has yet makes a new, empty buffer with no file behind it."
   - id: kill
     goal: Kill the lib.rs buffer; the file stays on disk
     detail: "`C-x k` kills a buffer, which is closer to closing a tab than deleting a file. It offers the current buffer; type `lib.rs` instead and `RET`."
