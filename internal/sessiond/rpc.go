@@ -315,11 +315,11 @@ func (s *Server) rpcCheckpoint(ctx context.Context, req protocol.CheckpointReque
 	if len(label) > 200 {
 		return nil, httpx.BadRequest("label is limited to 200 characters")
 	}
-	sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	spec, _ := s.sup.Snapshot(sctx)
-	bufs := s.bufferStates(sctx)
+	bufs, globals := s.bufferStates(sctx), s.globals(sctx)
 	cancel()
-	meta, err := s.ckpt.TakeWith(ctx, checkpoint.Meta{Ref: checkpoint.ManualRef(label), Label: label, Spec: spec, Buffers: bufs})
+	meta, err := s.ckpt.TakeWith(ctx, checkpoint.Meta{Ref: checkpoint.ManualRef(label), Label: label, Spec: spec, Buffers: bufs, Globals: globals})
 	if err != nil {
 		return nil, httpx.Internal("could not take the checkpoint").Wrap(err)
 	}
@@ -407,9 +407,10 @@ func (s *Server) restoreCheckpoint(ctx context.Context, ref string) (int, checkp
 			s.log.Warn("reset-step after restore", "err", err)
 		}
 		// reset-step put the buffers on the restored files; the edits
-		// that were unsaved when the checkpoint was taken and the undo
-		// histories go back.
+		// that were unsaved when the checkpoint was taken, the undo
+		// histories and the session variables go back.
 		s.restoreBuffers(ctx, meta.Buffers, spec)
+		s.restoreGlobals(ctx, meta.Globals)
 	}
 	return n, meta, nil
 }

@@ -130,6 +130,9 @@ type Meta struct {
 	// disk) does not have, by workspace-relative path; a restore puts it
 	// back after the agent's reset-step.
 	Buffers map[string]BufferState `json:"buffers,omitempty"`
+	// Globals is the printed alist of Emacs session variables (kill ring,
+	// histories, keyboard macro) when the checkpoint was taken.
+	Globals string `json:"globals,omitempty"`
 }
 
 // BufferState is what a checkpoint keeps of one file buffer besides the

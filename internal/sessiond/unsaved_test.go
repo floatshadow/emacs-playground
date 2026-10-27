@@ -37,9 +37,25 @@ func TestBufferStateForms(t *testing.T) {
 	if strings.Index(restore, `"a.txt"`) > strings.Index(restore, `"editing/`) {
 		t.Fatal("entries are not sorted")
 	}
-	// PG_TEST_FORMS_DIR=dir writes the capture form for a check in real
+	// PG_TEST_FORMS_DIR=dir writes the capture forms for a check in real
 	// Emacs (the session image).
 	if dir := os.Getenv("PG_TEST_FORMS_DIR"); dir != "" {
 		_ = os.WriteFile(filepath.Join(dir, "capture.el"), []byte(buffersForm("/tmp/ws")), 0o644)
+		_ = os.WriteFile(filepath.Join(dir, "globals.el"), []byte(globalsForm()), 0o644)
+		_ = os.WriteFile(filepath.Join(dir, "restore-globals.el"), []byte(restoreGlobalsForm("GLOBALS")), 0o644)
+	}
+}
+
+func TestGlobalsForms(t *testing.T) {
+	capture := globalsForm()
+	for _, v := range GlobalVars {
+		if !strings.Contains(capture, v) {
+			t.Fatalf("capture form lacks %s", v)
+		}
+	}
+	restore := restoreGlobalsForm(`((kill-ring "a \"b\"") (kmacro-counter . 3))`)
+	if !strings.Contains(restore, `(read-from-string "((kill-ring \"a \\\"b\\\"\") (kmacro-counter . 3))")`) ||
+		!strings.Contains(restore, "kill-ring-yank-pointer") {
+		t.Fatalf("restore form:\n%s", restore)
 	}
 }

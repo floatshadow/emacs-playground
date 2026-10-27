@@ -493,12 +493,12 @@ func (s *Server) stepCheckpoint(ctx context.Context, lessonID, stepID string, fo
 	if !force && s.ckpt.Exists(ctx, ref) {
 		return nil
 	}
-	sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	spec, _ := s.sup.Snapshot(sctx)
-	bufs := s.bufferStates(sctx)
+	bufs, globals := s.bufferStates(sctx), s.globals(sctx)
 	cancel()
 	meta, err := s.ckpt.TakeWith(ctx, checkpoint.Meta{Ref: ref, Label: lessonID + "/" + stepID,
-		Step: &protocol.StepRef{LessonID: lessonID, StepID: stepID}, Spec: spec, Buffers: bufs})
+		Step: &protocol.StepRef{LessonID: lessonID, StepID: stepID}, Spec: spec, Buffers: bufs, Globals: globals})
 	if err != nil {
 		return err
 	}

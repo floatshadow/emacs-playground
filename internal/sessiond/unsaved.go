@@ -160,6 +160,95 @@ func restoreBuffersForm(workspace string, bufs map[string]checkpoint.BufferState
   n)`, elispString(ws), entries.String())
 }
 
+// GlobalVars are the Emacs session variables a checkpoint keeps: steps
+// rely on the kill ring (M-y after C-y), the minibuffer and search
+// histories (M-p in M-x, C-s C-s), and the keyboard macro and its counter.
+// A demonstration followed by "Do it yourself" would otherwise leave the
+// demo's kills, commands and macro counts in them.
+var GlobalVars = []string{
+	"kill-ring", "extended-command-history", "minibuffer-history", "file-name-history",
+	"buffer-name-history", "search-ring", "regexp-search-ring", "query-replace-history",
+	"query-replace-defaults", "read-expression-history", "shell-command-history",
+	"kmacro-counter", "kmacro-initial-counter-value", "kmacro-default-counter-format", "last-kbd-macro",
+}
+
+// maxGlobals bounds the printed globals; larger state is not recorded.
+const maxGlobals = 256 << 10
+
+// globalsForm prints GlobalVars readably: strings without text properties
+// (entries over 32 KiB dropped), lists cut to 100 entries, the macro
+// counters as integers or nil (F3 starts from kmacro-initial-counter-value,
+// which C-x C-k C-c sets and recording consumes), a macro only when it is
+// keys (integers and symbols). The value is the printed alist, or nil when
+// it would exceed maxGlobals.
+func globalsForm() string {
+	return fmt.Sprintf(`(let* ((print-length nil) (print-level nil)
+       (str (lambda (x) (and (stringp x) (<= (length x) 32768) (substring-no-properties x))))
+       (item (lambda (x)
+               (cond ((stringp x) (funcall str x))
+                     ((and (consp x) (stringp (car x)) (stringp (cdr x)))
+                      (and (funcall str (car x)) (funcall str (cdr x))
+                           (cons (funcall str (car x)) (funcall str (cdr x)))))
+                     (t nil))))
+       (out (delq nil
+                  (mapcar (lambda (v)
+                            (when (boundp v)
+                              (let ((val (symbol-value v)))
+                                (cond
+                                 ((memq v '(kmacro-counter kmacro-initial-counter-value))
+                                  (cons v (and (integerp val) val)))
+                                 ((stringp val) (and (funcall str val) (cons v (funcall str val))))
+                                 ((eq v 'last-kbd-macro)
+                                  (and (or (stringp val)
+                                           (and (vectorp val) (seq-every-p (lambda (e) (or (integerp e) (symbolp e))) val)))
+                                       (cons v (if (stringp val) (substring-no-properties val) val))))
+                                 ((listp val)
+                                  (cons v (delq nil (mapcar item (seq-take val 100)))))))))
+                          '(%s))))
+       (printed (prin1-to-string out)))
+  (and (<= (length printed) %d) printed))`, strings.Join(GlobalVars, " "), maxGlobals)
+}
+
+// restoreGlobalsForm sets the recorded variables back.
+func restoreGlobalsForm(printed string) string {
+	return fmt.Sprintf(`(condition-case nil
+    (let ((g (car (read-from-string %s))))
+      (dolist (e g) (when (boundp (car e)) (set (car e) (cdr e))))
+      (when (assq 'kill-ring g) (setq kill-ring-yank-pointer kill-ring))
+      (length g))
+  (error nil))`, elispString(printed))
+}
+
+// globals asks the agent for the session variables to record with a
+// checkpoint ("" when unavailable).
+func (s *Server) globals(ctx context.Context) string {
+	if s.agent == nil || !s.agent.Connected() {
+		return ""
+	}
+	var out struct {
+		Value json.RawMessage `json:"value"`
+	}
+	if err := s.agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: globalsForm()}, 2*time.Second, &out); err != nil {
+		s.log.Debug("session variables for the checkpoint", "err", err)
+		return ""
+	}
+	var printed string
+	if err := json.Unmarshal(out.Value, &printed); err != nil {
+		return ""
+	}
+	return printed
+}
+
+// restoreGlobals sets a checkpoint's session variables back.
+func (s *Server) restoreGlobals(ctx context.Context, printed string) {
+	if printed == "" || s.agent == nil || !s.agent.Connected() {
+		return
+	}
+	if err := s.agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: restoreGlobalsForm(printed)}, 3*time.Second, nil); err != nil {
+		s.log.Warn("restoring the session variables of the checkpoint", "err", err)
+	}
+}
+
 // restoreBuffers puts a checkpoint's buffer state back.
 func (s *Server) restoreBuffers(ctx context.Context, bufs map[string]checkpoint.BufferState, spec *protocol.WindowSpec) {
 	if len(bufs) == 0 || s.agent == nil || !s.agent.Connected() {
