@@ -193,7 +193,6 @@
     "watch": "Watch it",
     "watchTitle": "Watch Emacs do this step slowly, every key named below the screen. Watching does not count as done: you do it yourself afterwards. Press any key to stop.",
     "stop": "Stop",
-    "playing": "Playing the demo for “{{goal}}”…",
     "watching": "Watching: {{goal}}",
     "fromStart": "Starting from the beginning of this step.",
     "captionLabel": "Demo caption",
@@ -221,11 +220,7 @@
     "lockOn": "The keyboard is locked: Ctrl+W, Ctrl+T and Ctrl+N reach Emacs too.",
     "lockOff": "This browser keeps Ctrl+W, Ctrl+T and Ctrl+N; Chrome and Edge lock them in fullscreen.",
     "leave": "Leave focus mode",
-    "leaveHint": "or Shift+Esc",
-    "locked": "Focus mode: fullscreen with the keyboard locked. Hold Esc to leave.",
-    "noLock": "Fullscreen is on, but this browser keeps some keys (Ctrl+W, Ctrl+T, Ctrl+N). Chrome and Edge can lock them; Firefox cannot.",
-    "refused": "The browser refused fullscreen: {{error}}",
-    "unsupported": "Fullscreen is not available in this browser."
+    "leaveHint": "or Shift+Esc"
   },
   "startOver": {
     "button": "Start over",
