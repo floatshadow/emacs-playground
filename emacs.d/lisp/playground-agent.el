@@ -54,6 +54,7 @@
 (defvar isearch-string)
 (defvar isearch-nonincremental)
 (defvar isearch--current-buffer)
+(defvar window-state-normalize-buffer-name)
 (defvar flymake-mode)
 (defvar playground-modules)
 (defvar playground-modules-loaded)
@@ -1241,8 +1242,84 @@ non-nil when there was something to repair."
     (format "(%s %s)" (if (car node) "vsplit" "hsplit")
             (mapconcat #'playground--layout-string (cdr node) " "))))
 
+(defun playground--state-add-files (state)
+  "Writable window STATE (from `window-state-get') with file names added.
+Each window's buffer entry, (buffer NAME . PROPS), gets (file . FILE)
+when its buffer visits a file, and each prev-buffers entry, (NAME
+START POINT), the file name as a fourth element.  Buffer names change
+after the snapshot (uniquify renames README.md to README.md<hello>
+when a second README.md opens); the file names let
+`playground--state-map-files' find the same buffers again.
+`window-state-put' ignores the additions."
+  (let ((file-of (lambda (name)
+                   (when-let* (((stringp name))
+                               (b (get-buffer name)))
+                     (buffer-file-name b)))))
+    (cond
+     ((not (proper-list-p state)) state)
+     ((and (eq (car state) 'buffer) (stringp (cadr state)))
+      (let ((file (funcall file-of (cadr state))))
+        (if (and file (not (assq 'file (cddr state))))
+            (append state (list (cons 'file file)))
+          state)))
+     ((eq (car state) 'prev-buffers)
+      (cons 'prev-buffers
+            (mapcar (lambda (entry)
+                      (let ((file (and (proper-list-p entry) (= (length entry) 3)
+                                       (funcall file-of (car entry)))))
+                        (if file (append entry (list file)) entry)))
+                    (cdr state))))
+     (t (mapcar #'playground--state-add-files state)))))
+
+(defun playground--buffer-for-file (file &optional visit)
+  "The live buffer visiting FILE; with VISIT, visit FILE when it exists."
+  (or (find-buffer-visiting file)
+      (and visit (file-exists-p file) (find-file-noselect file))))
+
+(defun playground--file-by-buffer-name (name files)
+  "The one file among FILES (absolute names) a buffer called NAME visited.
+For window states saved without file names: NAME is matched by its
+base name, and a uniquify suffix such as <hello> or <hello/src> must
+name directories of the file.  Nil unless exactly one file fits."
+  (when (string-match "\\`\\(.*?\\)\\(?:<\\([^>]*\\)>\\)?\\'" name)
+    (let* ((base (match-string 1 name))
+           (dirs (match-string 2 name))
+           (fits (seq-filter
+                  (lambda (f)
+                    (and (equal (file-name-nondirectory f) base)
+                         (or (null dirs)
+                             (string-search (concat "/" dirs "/") f))))
+                  files)))
+      (and fits (null (cdr fits)) (car fits)))))
+
+(defun playground--state-map-files (state &optional files)
+  "Window STATE with buffer names replaced by today's names of their files.
+The inverse of `playground--state-add-files': a buffer entry with a
+file names the buffer visiting that file now (visiting it again if
+needed), whatever it was called when the state was saved.  An entry
+without a file whose buffer no longer exists is matched against FILES,
+the absolute names of the spec's files, by its name."
+  (cond
+   ((not (proper-list-p state)) state)
+   ((and (eq (car state) 'buffer) (stringp (cadr state)))
+    (let* ((name (cadr state))
+           (file (or (alist-get 'file (cddr state))
+                     (and files (not (get-buffer name))
+                          (playground--file-by-buffer-name name files))))
+           (b (and (stringp file) (playground--buffer-for-file file t))))
+      (if b (cons 'buffer (cons (buffer-name b) (cddr state))) state)))
+   ((eq (car state) 'prev-buffers)
+    (cons 'prev-buffers
+          (mapcar (lambda (entry)
+                    (let* ((file (and (proper-list-p entry) (stringp (nth 3 entry))
+                                      (nth 3 entry)))
+                           (b (and file (playground--buffer-for-file file))))
+                      (if b (cons (buffer-name b) (cdr entry)) entry)))
+                  (cdr state))))
+   (t (mapcar (lambda (s) (playground--state-map-files s files)) state))))
+
 (defun playground--op-snapshot (&rest _)
-  "Buffer and window spec of the selected frame (protocol.WindowSpec)."
+  "Buffer and window spec of the learner's frame (protocol.WindowSpec)."
   (let* ((frame (window-frame (playground--user-window)))
          (wins (window-list frame 'nomini (frame-first-window frame)))
          (files '()))
@@ -1256,7 +1333,12 @@ non-nil when there was something to repair."
     `((files . ,(vconcat (nreverse files)))
       (layout . ,(playground--layout-string (playground--tree frame)))
       (windowState . ,(with-selected-frame frame
-                        (prin1-to-string (window-state-get (frame-root-window frame) t))))
+                        ;; Real buffer names, which the file names are
+                        ;; looked up by.
+                        (let ((window-state-normalize-buffer-name nil))
+                          (prin1-to-string
+                           (playground--state-add-files
+                            (window-state-get (frame-root-window frame) t))))))
       (selected . ,(playground--leaf-name (window-buffer (playground--user-window))))
       (tab . ,(alist-get 'current (playground--tabs frame)))
       (takenAt . ,(playground--now-ms)))))
@@ -1307,14 +1389,19 @@ With CREATE, visit the file (or create the special buffer) when needed."
       (playground--build-layout node (selected-window))
       (balance-windows))))
 
-(defun playground--apply-window-state (state)
-  "Apply STATE, a printed `window-state-get' value."
-  (let ((ignore-window-parameters t))
+(defun playground--apply-window-state (state &optional files)
+  "Apply STATE, a printed `window-state-get' value.
+Buffers recorded with their file (`playground--state-add-files') are
+found by that file, so a window shows the file it showed when the
+state was saved even if its buffer has been renamed since.  FILES,
+absolute file names, help with states saved without them."
+  (let ((ignore-window-parameters t)
+        (state (playground--state-map-files (car (read-from-string state)) files)))
     (playground--in-user-window
       (playground--leave-side-window)
       (delete-other-windows)
       (playground--unside-sole-window)
-      (window-state-put (car (read-from-string state)) (frame-root-window) 'safe))))
+      (window-state-put state (frame-root-window) 'safe))))
 
 (defun playground--select-leaf (name)
   "Select the window showing NAME, if any."
@@ -1332,21 +1419,29 @@ only frame there is."
   (not (and (daemonp) (frame-live-p terminal-frame)
             (eq (selected-frame) terminal-frame))))
 
+(defun playground--spec-files (spec)
+  "Absolute names of the files listed in SPEC (a WindowSpec alist)."
+  (mapcar (lambda (f) (playground--absolute (alist-get 'path f)))
+          (append (alist-get 'files spec) nil)))
+
 (defun playground--open-layout (spec)
-  "Apply the window part of SPEC (a WindowSpec alist) to the selected frame."
+  "Apply the window part of SPEC (a WindowSpec alist) to the learner's frame.
+The tab comes first: switching tabs afterwards would replace the
+windows just put back with the ones that tab remembers."
+  (when-let* ((tab (alist-get 'tab spec)))
+    (when (and (featurep 'tab-bar) (bound-and-true-p tab-bar-mode))
+      (ignore-errors (playground--in-user-window (tab-bar-switch-to-tab tab)))))
   (let ((state (alist-get 'windowState spec))
         (layout (alist-get 'layout spec)))
     (cond
      ((and state (not (string-empty-p state))
-           (condition-case err (progn (playground--apply-window-state state) t)
+           (condition-case err
+               (progn (playground--apply-window-state state (playground--spec-files spec)) t)
              (error (playground--log "window-state-put failed: %S" err) nil))))
      ((and layout (not (string-empty-p layout)))
       (playground--apply-layout layout))))
   (when-let* ((sel (alist-get 'selected spec)))
-    (playground--select-leaf sel))
-  (when-let* ((tab (alist-get 'tab spec)))
-    (when (and (featurep 'tab-bar) (bound-and-true-p tab-bar-mode))
-      (ignore-errors (tab-bar-switch-to-tab tab)))))
+    (playground--select-leaf sel)))
 
 (defun playground--apply-pending-layout (frame)
   "Give FRAME the layout `open' kept for the first client frame, if any."
@@ -1380,8 +1475,33 @@ and applied to the next client frame."
       (setq playground--pending-layout (cons (float-time) args))
       `((opened . ,opened) (layoutDeferred . t)))))
 
+(defun playground--kill-unlisted (files)
+  "Kill unmodified workspace file buffers whose file is not among FILES.
+FILES are the absolute names of the buffers a step started with.  A
+buffer opened during the step keeps a step condition true (\"hello's
+main.rs is open\") and renames the step's own buffers (README.md
+becomes README.md<hello> next to README.md<polyglot>), so a reset
+closes it.  Returns the number killed."
+  (let ((root (file-name-as-directory (expand-file-name playground-agent-workspace)))
+        (keep (mapcar #'expand-file-name files))
+        (n 0))
+    (dolist (b (buffer-list))
+      (let ((file (buffer-file-name b)))
+        (when (and file (buffer-live-p b) (not (buffer-modified-p b))
+                   (string-prefix-p root (expand-file-name file))
+                   (not (member (expand-file-name file) keep)))
+          (let ((kill-buffer-query-functions nil))
+            (kill-buffer b))
+          (cl-incf n))))
+    n))
+
 (defun playground--op-reset-step (args &rest _)
-  "Revert or kill file buffers, then open the spec in ARGS."
+  "Put the files and windows back to the spec in ARGS (the step's start).
+Edited buffers are reverted to the restored files, buffers of files
+that are gone are killed, unmodified file buffers the step did not
+start with are closed, then the spec is opened: its files, points
+and windows, each window on the file it showed (whatever the buffer
+is called now), the selected window last."
   (let ((reverted 0) (killed 0))
     (dolist (b (buffer-list))
       (let ((file (buffer-file-name b)))
@@ -1403,6 +1523,10 @@ and applied to the next client frame."
             (kill-buffer b))
           (cl-incf killed)))))
     (let ((spec (alist-get 'spec args)))
+      ;; A spec without files is not a snapshot (sessiond sends an empty
+      ;; one when the checkpoint has none): close nothing then.
+      (when (> (length (alist-get 'files spec)) 0)
+        (cl-incf killed (playground--kill-unlisted (playground--spec-files spec))))
       (when spec (playground--op-open spec)))
     `((reverted . ,reverted) (killed . ,killed))))
 

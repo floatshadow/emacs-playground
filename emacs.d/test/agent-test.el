@@ -799,6 +799,71 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (should (= (length (window-list)) 2))
       (should (equal (playground--layout-string (playground--tree (selected-frame))) "(hsplit a.txt b.txt)")))))
 
+(defun pg-test--shown-files ()
+  "Files of the selected frame's windows, top to bottom, left to right."
+  (mapcar (lambda (w) (buffer-file-name (window-buffer w)))
+          (window-list nil 'nomini (frame-first-window))))
+
+(ert-deftest pg-agent/reset-step-by-file ()
+  "Reset this step puts each window back on its file and closes files opened since."
+  (pg-test-with-agent
+    (let ((hello (pg-test-file "projects/hello/README.md" "# hello\n"))
+          (hello-main (pg-test-file "projects/hello/src/main.rs" "fn main() {}\n"))
+          (poly (pg-test-file "projects/polyglot/README.md" "# polyglot\n"))
+          (poly-main (pg-test-file "projects/polyglot/src/main.rs" "fn main() {}\n"))
+          (uniquify-buffer-name-style 'post-forward-angle-brackets))
+      ;; The step starts on hello's README.md, the only README.md open.
+      (delete-other-windows)
+      (find-file hello)
+      (should (equal (buffer-name) "README.md"))
+      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+        (should (string-match-p "(file \\. " (alist-get 'windowState snap)))
+        ;; During the step: hello's main.rs, polyglot's main.rs and
+        ;; README.md; the window ends on polyglot's README.md, and the
+        ;; first README.md is now README.md<hello>.
+        (find-file hello-main)
+        (find-file poly-main)
+        (find-file poly)
+        (should (equal (buffer-name (get-file-buffer hello)) "README.md<hello>"))
+        (setf (alist-get 'files snap) (vconcat (alist-get 'files snap)))
+        (pg-test-value (pg-test-call "reset-step" `((spec . ,snap)))))
+      (should (equal (pg-test--shown-files) (list hello)))
+      (should (equal (buffer-name (window-buffer (selected-window))) "README.md"))
+      (should (equal (buffer-local-value 'default-directory (window-buffer (selected-window)))
+                     (file-name-directory hello)))
+      (dolist (f (list hello-main poly poly-main))
+        (should-not (get-file-buffer f))))))
+
+(ert-deftest pg-agent/open-finds-renamed-buffers ()
+  "open shows the file a window showed, whatever its buffer is called now."
+  (pg-test-with-agent
+    (let ((hello (pg-test-file "projects/hello/README.md" "# hello\n"))
+          (poly (pg-test-file "projects/polyglot/README.md" "# polyglot\n"))
+          (main (pg-test-file "projects/hello/src/main.rs" "fn main() {}\n"))
+          (uniquify-buffer-name-style 'post-forward-angle-brackets))
+      (delete-other-windows)
+      (find-file main)
+      (split-window-below)
+      (other-window 1)
+      (find-file hello)
+      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+        ;; Another README.md opens and takes the lower window.
+        (find-file poly)
+        (other-window 1)
+        (setf (alist-get 'files snap) (vconcat (alist-get 'files snap)))
+        (pg-test-value (pg-test-call "open" snap))
+        (should (equal (pg-test--shown-files) (list main hello)))
+        (should (equal (buffer-file-name (window-buffer (selected-window))) hello))
+        ;; A state saved by an older agent, without file names, is
+        ;; matched through the spec's files by the buffer's base name.
+        (switch-to-buffer (get-file-buffer poly))
+        (let ((old (replace-regexp-in-string " (file \\. \"[^\"]*\")" ""
+                                             (alist-get 'windowState snap))))
+          (should-not (string-match-p "(file \\. " old))
+          (setf (alist-get 'windowState snap) old)
+          (pg-test-value (pg-test-call "open" snap)))
+        (should (equal (pg-test--shown-files) (list main hello)))))))
+
 (ert-deftest pg-agent/op-setup ()
   "setup opens files, applies a layout pattern and evaluates a form."
   (pg-test-with-agent
