@@ -168,6 +168,95 @@ def check_regex(where: str, rx: str, rep: Report) -> None:
         rep.err(where, f"regex {rx!r}: {e}")
 
 
+JS_LEADING_FLAGS = re.compile(r"^\(\?([ims]+)\)")
+
+
+def js_regex_problem(rx: str) -> str | None:
+    """Why the browser cannot read RX as RE2 does, or None.
+
+    The browser (web/src/advice/predicate.ts) compiles exit-table regexes
+    with JavaScript's RegExp after turning a leading (?i), (?m) or (?s)
+    into RegExp flags. Everything else that RE2 accepts but JavaScript
+    rejects or reads differently is refused here: inline flags anywhere
+    else (including (?i:...) groups, which older browsers lack), named
+    groups, \\A \\z \\Q \\E \\C, \\p classes and \\x{...} (JavaScript needs
+    the u flag), and POSIX classes such as [[:alpha:]].
+    """
+    m = JS_LEADING_FLAGS.match(rx)
+    if m:
+        rx = rx[m.end():]
+    i, n = 0, len(rx)
+    in_class = False
+    while i < n:
+        c = rx[i]
+        if c == "\\":
+            nxt = rx[i + 1:i + 2]
+            if nxt and nxt in "AzQEC":
+                return f"\\{nxt} is not JavaScript"
+            if nxt in ("p", "P"):
+                return "\\p classes need RegExp's u flag in JavaScript"
+            if rx[i + 1:i + 3] == "x{":
+                return "\\x{...} needs RegExp's u flag in JavaScript"
+            i += 2
+            continue
+        if in_class:
+            if rx.startswith("[:", i):
+                return "POSIX classes ([[:alpha:]]) are not JavaScript"
+            if c == "]":
+                in_class = False
+            i += 1
+            continue
+        if c == "[":
+            in_class = True
+            i += 1
+            if rx[i:i + 1] == "^":
+                i += 1
+            if rx[i:i + 1] == "]":
+                i += 1
+            continue
+        if c == "(" and rx[i + 1:i + 2] == "?" and rx[i + 2:i + 3] != ":":
+            return "inline flags and special groups are not portable ((?i) is accepted only at the very start)"
+        i += 1
+    return None
+
+
+def js_compile_all(patterns: list[str]) -> dict[str, str]:
+    """Compile PATTERNS with node's RegExp when node is installed; errors by pattern."""
+    import json
+    import shutil
+    import subprocess
+
+    node = shutil.which("node")
+    if not node or not patterns:
+        return {}
+    prog = (
+        "const ps = JSON.parse(require('fs').readFileSync(0, 'utf8')); const out = {};"
+        "for (const p of ps) { const m = /^\\(\\?([ims]+)\\)/.exec(p);"
+        " try { new RegExp(m ? p.slice(m[0].length) : p, m ? m[1] : ''); }"
+        " catch (e) { out[p] = String(e.message); } }"
+        "process.stdout.write(JSON.stringify(out));"
+    )
+    try:
+        r = subprocess.run([node, "-e", prog], input=json.dumps(patterns), capture_output=True,
+                           text=True, timeout=30)
+        return json.loads(r.stdout or "{}")
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return {}
+
+
+def predicate_regexes(pred) -> list[str]:
+    out = []
+    if not isinstance(pred, dict):
+        return out
+    for want in pred.values():
+        w = want
+        while isinstance(w, dict) and len(w) == 1 and "not" in w:
+            w = w["not"]
+        if isinstance(w, dict) and isinstance(w.get("regex"), str):
+            out.append(w["regex"])
+    return out
+
+
 def check_predicate(where: str, pred, rep: Report, allow_session: bool = False) -> None:
     if not isinstance(pred, dict) or not pred:
         rep.err(where, "predicate must be a non-empty mapping")
@@ -176,17 +265,14 @@ def check_predicate(where: str, pred, rep: Report, allow_session: bool = False) 
         pc.validate_predicate(pred)
     except pc.PredicateError as e:
         rep.err(where, str(e))
-    for path, want in pred.items():
+    for path in pred:
         msg = pc.check_state_path(path)
         if msg:
             rep.err(where, msg)
         elif path.split(".")[0] == "session" and not allow_session:
             rep.err(where, f"{path!r}: the session root exists only in the browser (exits table)")
-        w = want
-        while isinstance(w, dict) and len(w) == 1 and "not" in w:
-            w = w["not"]
-        if isinstance(w, dict) and "regex" in w and isinstance(w["regex"], str):
-            check_regex(where, w["regex"], rep)
+    for rx in predicate_regexes(pred):
+        check_regex(where, rx, rep)
 
 
 def check_condition(where: str, c, rep: Report, top: bool, ids: set, commands: set) -> None:
@@ -551,6 +637,65 @@ def check_cheat_keys(where: str, keys: str, rep: Report) -> None:
             i += 1
 
 
+# Prompts Emacs 31 shows in the session image with the modules of Parts 0
+# to 3 (measured with (minibuffer-prompt) after the keys), and the one
+# exit row each must match among the rows that read minibuffer.prompt.
+EXIT_PROMPT_SAMPLES = {
+    "M-x ": "minibuffer-mx",
+    "C-u M-x ": "minibuffer-mx",
+    "Find file: ": "minibuffer-file",
+    "Find file in /work/projects/hello/: ": "minibuffer-file",
+    "Write file: ": "minibuffer-file",
+    "Dired (directory): ": "minibuffer-file",
+    "Open recent file: ": "minibuffer-file",
+    "Rename build.sh to: ": "minibuffer-file",
+    "Copy build.sh to: ": "minibuffer-file",
+    "Create directory: ": "minibuffer-file",
+    "Switch to buffer (default *compilation*): ": "minibuffer-buffer",
+    "Switch to buffer in other window (default *compilation*): ": "minibuffer-buffer",
+    "Kill buffer (default README.md): ": "minibuffer-buffer",
+    "Rename buffer (to new name): ": "minibuffer-buffer",
+    "Goto line: ": "minibuffer-number",
+    "Go to char: ": "minibuffer-number",
+    "Macro counter value: ": "minibuffer-number",
+    "Describe function: ": "minibuffer-help",
+    "Describe variable: ": "minibuffer-help",
+    "Where is command: ": "minibuffer-help",
+    "Set bookmark named (default README.md): ": "minibuffer-bookmark",
+    "Jump to bookmark: ": "minibuffer-bookmark",
+    "Save Burly bookmark: ": "minibuffer-bookmark",
+    "List lines matching regexp (default .): ": "minibuffer-search",
+    "Query replace regexp: ": "minibuffer-replace",
+    "Query replace (default colour → color): ": "minibuffer-replace",
+    "Replace in region (0L)from pointin buffer: ": "minibuffer-replace",
+    "Delete build.sh (y or n) ": "minibuffer-yes-no",
+    "File CHANGES.md exists; overwrite? (y or n) ": "minibuffer-yes-no",
+    "Save your position in the tutorial? (y or n) ": "minibuffer-yes-no",
+    "Buffer README.md modified; kill anyway? (yes, no, save and then kill, ?): ": "minibuffer-choice",
+    "Save file /work/projects/hello/README.md? (y, n, !, ., q, M-~, C-r, C-f, d or C-h) ": "minibuffer-choice",
+    "Compile command: ": "minibuffer-prompt",
+    "Select project (default current project): ": "minibuffer-prompt",
+    "New name for tab (leave blank for automatic naming): ": "minibuffer-prompt",
+}
+
+
+def check_exit_prompts(rows: list, rep: Report) -> None:
+    """Every sample prompt matches exactly its own minibuffer row (B11)."""
+    prompt_rows = [r for r in rows if isinstance(r.get("when"), dict) and "minibuffer.prompt" in r["when"]]
+    for prompt, want in EXIT_PROMPT_SAMPLES.items():
+        doc = pc.state_doc({"minibuffer": {"kind": "prompt", "prompt": prompt, "contents": "", "depth": 1},
+                            "windows": [{"id": 1, "buf": "main.rs", "mode": "rust-ts-mode", "selected": True}]})
+        got = []
+        for r in prompt_rows:
+            try:
+                if pc.predicate_match(r["when"], doc):
+                    got.append(r.get("id"))
+            except re.error:
+                pass
+        if got != [want]:
+            rep.err("tables/exits.yaml", f"the prompt {prompt!r} matches {got or 'no row'}, want only {want}")
+
+
 def check_tables(tdir: Path, rep: Report) -> dict:
     out = {}
     for name in ("exits", "habits", "gloss", "cheats", "glossary"):
@@ -580,6 +725,10 @@ def check_tables(tdir: Path, rep: Report) -> dict:
                 rep.err(w, "id missing or duplicate")
             ids.add(rid)
             check_predicate(w, row.get("when"), rep, allow_session=True)
+            for rx in predicate_regexes(row.get("when")):
+                prob = js_regex_problem(rx)
+                if prob:
+                    rep.err(w, f"regex {rx!r}: {prob}; the browser evaluates this row")
             for k in ("why", "how"):
                 v = row.get(k)
                 if not isinstance(v, str) or not v.strip():
@@ -589,6 +738,11 @@ def check_tables(tdir: Path, rep: Report) -> dict:
                     msg = pc.check_state_path(path)
                     if msg:
                         rep.err(w, f"{k} template: {msg}")
+        rows = [r for r in exits if isinstance(r, dict)]
+        all_rx = sorted({rx for r in rows for rx in predicate_regexes(r.get("when"))})
+        for rx, msg in js_compile_all(all_rx).items():
+            rep.err("tables/exits.yaml", f"regex {rx!r} does not compile in JavaScript: {msg}")
+        check_exit_prompts(rows, rep)
     habits = out.get("habits")
     if not isinstance(habits, list) or not habits:
         rep.err("tables/habits.yaml", "must be a non-empty list")
