@@ -17,7 +17,9 @@ export PATH := $(HOME)/.local/go/bin:$(HOME)/go/bin:$(HOME)/.local/bin:$(PATH)
 export COREPACK_ENABLE_DOWNLOAD_PROMPT := 0
 
 TAG ?= latest
-IMAGE_BASE ?= ghcr.io/floatshadow/emacs-playground   # forks: ghcr.io/<owner>/<repo>
+# Forks: IMAGE_BASE=ghcr.io/<owner>/<repo>. (A comment after the value would
+# become part of it: make keeps the spaces before the #.)
+IMAGE_BASE ?= ghcr.io/floatshadow/emacs-playground
 DOMAIN ?=
 GO ?= go
 PNPM ?= pnpm
