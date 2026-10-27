@@ -70,6 +70,19 @@ func (ls *LessonState) finished(stepID string) bool {
 	return ls != nil && (ls.Done[stepID] != 0 || ls.Skipped[stepID] != 0)
 }
 
+// progress is a report of stepID with status, carrying the step's hint and
+// reset totals when there are any.
+func (ls *LessonState) progress(lessonID, stepID string, status protocol.ProgressStatus, at time.Time) protocol.ProgressReport {
+	rep := protocol.ProgressReport{LessonID: lessonID, StepID: stepID, Status: status, At: at.UnixMilli()}
+	if h := ls.Hints[stepID]; h > 0 {
+		rep.HintsUsed = &h
+	}
+	if r := ls.Resets[stepID]; r > 0 {
+		rep.Resets = &r
+	}
+	return rep
+}
+
 // hold says what the engine does when the active step's conditions hold.
 type hold int
 
@@ -460,14 +473,7 @@ func (e *Engine) restart(lessonID, stepID string, count bool) bool {
 	delete(ls.Skipped, stepID)
 	delete(ls.Demonstrated, stepID)
 	evs := e.startStepLocked(idx, protocol.StepReset)
-	resets, hints := ls.Resets[stepID], ls.Hints[stepID]
-	rep := protocol.ProgressReport{LessonID: lessonID, StepID: stepID, Status: protocol.ProgressInProgress, At: e.opt.Now().UnixMilli()}
-	if resets > 0 {
-		rep.Resets = &resets
-	}
-	if hints > 0 {
-		rep.HintsUsed = &hints
-	}
+	rep := ls.progress(lessonID, stepID, protocol.ProgressInProgress, e.opt.Now())
 	saved := e.savedLocked()
 	e.mu.Unlock()
 	e.emit(evs...)
@@ -569,13 +575,7 @@ func (e *Engine) FinishSkip(ctx context.Context, stepID string) (*string, bool) 
 	now := e.opt.Now()
 	ls := e.lesson(sc.ID)
 	ls.Skipped[stepID] = now.UnixMilli()
-	rep := protocol.ProgressReport{LessonID: sc.ID, StepID: stepID, Status: protocol.ProgressSkipped, At: now.UnixMilli()}
-	if h := ls.Hints[stepID]; h > 0 {
-		rep.HintsUsed = &h
-	}
-	if r := ls.Resets[stepID]; r > 0 {
-		rep.Resets = &r
-	}
+	rep := ls.progress(sc.ID, stepID, protocol.ProgressSkipped, now)
 	last := idx+1 >= len(sc.Steps)
 	ev := &protocol.StepEvent{LessonID: sc.ID, StepID: stepID, Status: protocol.StepSkipped, Index: idx, Count: len(sc.Steps), LessonComplete: last}
 	next := e.advanceLocked(ctx, sc, idx, []protocol.Event{ev}, rep)
@@ -601,11 +601,7 @@ func (e *Engine) Hint(stepID string, level int) bool {
 		return true
 	}
 	ls.Hints[stepID] = level
-	hints := level
-	rep := protocol.ProgressReport{LessonID: lessonID, StepID: stepID, Status: statusOf(ls, stepID), HintsUsed: &hints, At: e.opt.Now().UnixMilli()}
-	if r := ls.Resets[stepID]; r > 0 {
-		rep.Resets = &r
-	}
+	rep := ls.progress(lessonID, stepID, statusOf(ls, stepID), e.opt.Now())
 	saved := e.savedLocked()
 	e.mu.Unlock()
 	e.report(rep)
@@ -750,8 +746,8 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 	step := &sc.Steps[idx]
 	ec := &evalContext{
 		ctx:          ctx,
-		counts:       copyCounts(e.counts),
-		lessonCounts: copyCounts(e.lessonCounts),
+		counts:       maps.Clone(e.counts),
+		lessonCounts: maps.Clone(e.lessonCounts),
 		state:        e.state,
 		stateDoc:     e.stateDoc,
 		root:         e.opt.Root,
@@ -799,13 +795,11 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 			id = protocol.ConditionID(step.ID, i)
 		}
 		cr := protocol.CondResult{ID: id, OK: r.t == protocol.True, Unknown: r.t == protocol.Unknown}
-		if r.t != protocol.True {
+		if !cr.OK {
 			cr.Detail = truncate(r.detail, MaxShellOutput)
-		}
-		results[i] = cr
-		if r.t != protocol.True {
 			complete = false
 		}
+		results[i] = cr
 	}
 	out := protocol.CheckResult{LessonID: sc.ID, StepID: step.ID, Conditions: results, Complete: complete}
 
@@ -851,13 +845,7 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 		ls := e.lesson(sc.ID)
 		ls.Demonstrated[step.ID] = now.UnixMilli()
 		evs = append(evs, &protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepDemonstrated, Index: idx, Count: len(sc.Steps)})
-		rep := protocol.ProgressReport{LessonID: sc.ID, StepID: step.ID, Status: protocol.ProgressDemonstrated, At: now.UnixMilli()}
-		if h := ls.Hints[step.ID]; h > 0 {
-			rep.HintsUsed = &h
-		}
-		if r := ls.Resets[step.ID]; r > 0 {
-			rep.Resets = &r
-		}
+		rep := ls.progress(sc.ID, step.ID, protocol.ProgressDemonstrated, now)
 		saved := e.savedLocked()
 		e.mu.Unlock()
 		e.emit(evs...)
@@ -871,13 +859,7 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 	ls.Done[step.ID] = now.UnixMilli()
 	last := idx+1 >= len(sc.Steps)
 	evs = append(evs, &protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepComplete, Index: idx, Count: len(sc.Steps), LessonComplete: last})
-	rep := protocol.ProgressReport{LessonID: sc.ID, StepID: step.ID, Status: protocol.ProgressDone, At: now.UnixMilli()}
-	if h := ls.Hints[step.ID]; h > 0 {
-		rep.HintsUsed = &h
-	}
-	if r := ls.Resets[step.ID]; r > 0 {
-		rep.Resets = &r
-	}
+	rep := ls.progress(sc.ID, step.ID, protocol.ProgressDone, now)
 	e.advanceLocked(ctx, sc, idx, evs, rep)
 	return out, true
 }
@@ -1019,14 +1001,6 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
-}
-
-func copyCounts(m map[string]int) map[string]int {
-	out := make(map[string]int, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
 }
 
 func (e *Engine) emit(evs ...protocol.Event) {

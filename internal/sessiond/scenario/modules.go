@@ -37,11 +37,7 @@ func ParseModulesEl(src string) ([]string, bool) {
 	if m == nil {
 		return nil, false
 	}
-	out := []string{}
-	for _, f := range strings.Fields(m[1]) {
-		out = append(out, f)
-	}
-	return out, true
+	return append([]string{}, strings.Fields(m[1])...), true
 }
 
 // RenderModulesEl renders modules.el for mods.

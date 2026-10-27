@@ -91,49 +91,41 @@ func run(args, environ []string, stdout, stderr io.Writer) int {
 	case "version":
 		fmt.Fprintln(stdout, buildinfo.Version)
 		return 0
+	case "", "config", "healthcheck":
+	default:
+		fs.Usage()
+		return 2
+	}
+	cfg, err := config.LoadSessiond(env)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	switch cmd {
 	case "config":
-		cfg, err := config.LoadSessiond(env)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(config.RedactedSessiond(cfg))
 		return 0
 	case "healthcheck":
-		cfg, err := config.LoadSessiond(env)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
 		if err := healthcheck(cfg.Listen, 2*time.Second); err != nil {
 			fmt.Fprintln(stderr, "sessiond healthcheck:", err)
 			return 1
 		}
 		return 0
-	case "":
-		cfg, err := config.LoadSessiond(env)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		log := newLogger(cfg, stdout)
-		slog.SetDefault(log)
-		log.Info("sessiond starting", "version", buildinfo.Version, "session", cfg.SessionID, "listen", cfg.Listen, "workspace", cfg.Workspace)
-		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
-		defer stop()
-		srv := sessiond.New(cfg, sessiond.Options{Fake: *fake, Log: log})
-		if err := srv.Run(ctx); err != nil {
-			log.Error("sessiond failed", "err", err)
-			return 1
-		}
-		log.Info("sessiond stopped")
-		return 0
-	default:
-		fs.Usage()
-		return 2
 	}
+	log := newLogger(cfg, stdout)
+	slog.SetDefault(log)
+	log.Info("sessiond starting", "version", buildinfo.Version, "session", cfg.SessionID, "listen", cfg.Listen, "workspace", cfg.Workspace)
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
+	defer stop()
+	srv := sessiond.New(cfg, sessiond.Options{Fake: *fake, Log: log})
+	if err := srv.Run(ctx); err != nil {
+		log.Error("sessiond failed", "err", err)
+		return 1
+	}
+	log.Info("sessiond stopped")
+	return 0
 }
 
 // defaultAgentSocket puts the agent socket inside PG_RUN_DIR when only the

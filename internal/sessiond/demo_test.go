@@ -144,7 +144,7 @@ func waitProgress(t *testing.T, gw *fakeGateway, want ...string) {
 // TestRestoreOutlivesTheRequest: a restore that has started finishes when
 // the request goes away (a page navigating away during "Go to this step"):
 // git does not die holding the index lock, and the agent still gets
-// reset-step (X9).
+// reset-step.
 func TestRestoreOutlivesTheRequest(t *testing.T) {
 	if _, err := exec.LookPath("bash"); err != nil {
 		t.Skip("bash not installed")

@@ -108,16 +108,6 @@ func (b *Bus) Seq() int64 {
 	return b.seq
 }
 
-// LastState returns the most recent state frame, if any.
-func (b *Bus) LastState() (Frame, bool) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.lastState == nil {
-		return Frame{}, false
-	}
-	return *b.lastState, true
-}
-
 // Recent returns up to n of the most recent sequenced frames, oldest first,
 // as raw JSON (the stuck report window).
 func (b *Bus) Recent(n int) []json.RawMessage {
@@ -205,13 +195,6 @@ func (s *Subscription) Close() {
 	s.bus.mu.Lock()
 	delete(s.bus.subs, s)
 	s.bus.mu.Unlock()
-}
-
-// Subscribers returns the number of live subscriptions.
-func (b *Bus) Subscribers() int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return len(b.subs)
 }
 
 // deliver is called with the bus lock held.

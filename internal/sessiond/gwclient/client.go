@@ -139,17 +139,22 @@ func (c *Client) do(ctx context.Context, method, path string, body any, hdr http
 	return nil, lastErr
 }
 
+// ifNoneMatch returns the conditional-request header for a cached etag.
+func ifNoneMatch(etag string) http.Header {
+	hdr := http.Header{}
+	if etag != "" {
+		hdr.Set("If-None-Match", etag)
+	}
+	return hdr
+}
+
 // Scenario fetches GET /internal/curriculum/scenarios/{lessonId}. etag is
 // sent as If-None-Match; notModified is true on 304 (raw is then nil).
 func (c *Client) Scenario(ctx context.Context, lessonID, etag string) (raw []byte, newETag string, notModified bool, err error) {
 	if !ValidLessonID(lessonID) {
 		return nil, "", false, fmt.Errorf("invalid lesson id %q", lessonID)
 	}
-	hdr := http.Header{}
-	if etag != "" {
-		hdr.Set("If-None-Match", etag)
-	}
-	resp, err := c.do(ctx, http.MethodGet, protocol.InternalScenarioPath+lessonID, nil, hdr)
+	resp, err := c.do(ctx, http.MethodGet, protocol.InternalScenarioPath+lessonID, nil, ifNoneMatch(etag))
 	if err != nil {
 		return nil, "", false, err
 	}
@@ -180,11 +185,7 @@ func (c *Client) Fixtures(ctx context.Context, lessonID, etag string) (FixtureRe
 	if !ValidLessonID(lessonID) {
 		return FixtureResult{}, fmt.Errorf("invalid lesson id %q", lessonID)
 	}
-	hdr := http.Header{}
-	if etag != "" {
-		hdr.Set("If-None-Match", etag)
-	}
-	resp, err := c.do(ctx, http.MethodGet, protocol.InternalFixturesPath+lessonID, nil, hdr)
+	resp, err := c.do(ctx, http.MethodGet, protocol.InternalFixturesPath+lessonID, nil, ifNoneMatch(etag))
 	if err != nil {
 		return FixtureResult{}, err
 	}
@@ -233,7 +234,7 @@ type Reporter struct {
 	once  sync.Once
 }
 
-// NewReporter starts a reporter; Close drains it (bounded by ctx).
+// NewReporter starts a reporter; Close drains it.
 func NewReporter(c *Client) *Reporter {
 	r := &Reporter{c: c, queue: make(chan protocol.ProgressReport, 256), done: make(chan struct{})}
 	go r.run()

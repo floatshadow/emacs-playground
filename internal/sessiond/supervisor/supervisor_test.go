@@ -528,7 +528,7 @@ func TestSupervisorGUIMode(t *testing.T) {
 	}
 
 	// When Emacs cannot close its X connection, the display keeps running
-	// rather than dropping under Emacs (B12); the next switch reuses it.
+	// rather than dropping under Emacs; the next switch reuses it.
 	h.mu.Lock()
 	h.evalValue = ":1: Display still has frames on it"
 	h.mu.Unlock()

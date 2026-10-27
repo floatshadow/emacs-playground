@@ -31,25 +31,13 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 	)
 	switch op {
 	case protocol.OpKeys:
-		var req protocol.KeysRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		res, err = s.rpcKeys(ctx, req)
+		res, err = withBody(w, r, s.rpcKeys)
 	case protocol.OpEval:
-		var req protocol.EvalRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		res, err = s.rpcEval(ctx, req)
+		res, err = withBody(w, r, s.rpcEval)
 	case protocol.OpRescue:
 		res, err = s.rpcRescue(ctx)
 	case protocol.OpScenario:
-		var req protocol.ScenarioRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		res, err = s.loader.Load(ctx, req)
+		res, err = withBody(w, r, s.loader.Load)
 	case protocol.OpCheck:
 		cr, ok := s.engine.Check(ctx)
 		if !ok {
@@ -57,23 +45,9 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 		}
 		res = cr
 	case protocol.OpHint:
-		var req protocol.HintRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		if req.StepID == "" || req.Level < 1 {
-			return httpx.BadRequest("stepId and a level of at least 1 are required")
-		}
-		if !s.engine.Hint(req.StepID, req.Level) {
-			return httpx.Conflict("that step is not part of the active lesson")
-		}
-		res = protocol.Empty{}
+		res, err = withBody(w, r, s.rpcHint)
 	case protocol.OpCheckpoint:
-		var req protocol.CheckpointRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		res, err = s.rpcCheckpoint(ctx, req)
+		res, err = withBody(w, r, s.rpcCheckpoint)
 	case protocol.OpCheckpoints:
 		items, lerr := s.ckpt.List(ctx)
 		if lerr != nil {
@@ -81,35 +55,13 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 		}
 		res = protocol.CheckpointsResult{Items: items}
 	case protocol.OpRestore:
-		var req protocol.RestoreRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		res, err = s.rpcRestore(ctx, req)
+		res, err = withBody(w, r, s.rpcRestore)
 	case protocol.OpMode:
-		var req protocol.ModeRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		res, err = s.rpcMode(ctx, req)
+		res, err = withBody(w, r, s.rpcMode)
 	case protocol.OpModules:
-		var req protocol.ModulesRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		restarting, merr := s.loader.SetModules(req.Enabled)
-		res, err = protocol.ModulesResult{Restarting: restarting}, merr
+		res, err = withBody(w, r, s.rpcModules)
 	case protocol.OpRestartEmacs:
-		// The restart takes seconds; progress arrives as emacs events.
-		s.bg.Add(1)
-		go func() {
-			defer s.bg.Done()
-			rctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-			defer cancel()
-			if err := s.sup.RestartEmacs(rctx, "requested"); err != nil {
-				s.log.Error("restart-emacs", "err", err)
-			}
-		}()
+		s.rpcRestartEmacs()
 		res = protocol.Empty{}
 	case protocol.OpStuck:
 		var req protocol.StuckRPCRequest
@@ -120,47 +72,15 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 	case protocol.OpStatus:
 		res = s.status()
 	case protocol.OpDescribe:
-		var req protocol.DescribeRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		if _, perr := protocol.ParseKeys(req.Keys); perr != nil {
-			return httpx.BadRequest(perr.Error())
-		}
-		var d protocol.DescribeResult
-		if cerr := s.agent.Call(ctx, protocol.AgentOpDescribe, protocol.AgentDescribeArgs{Keys: req.Keys}, 2*time.Second, &d); cerr != nil {
-			return agentError(cerr)
-		}
-		res = d
+		res, err = withBody(w, r, s.rpcDescribe)
 	case protocol.OpOpen:
-		var req protocol.OpenRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		res, err = s.rpcOpen(ctx, req)
+		res, err = withBody(w, r, s.rpcOpen)
 	case protocol.OpDropStep:
-		var req protocol.DropStepRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		if req.LessonID != "" && !gwclient.ValidLessonID(req.LessonID) {
-			return httpx.BadRequest("lessonId is not a valid lesson id")
-		}
-		// An empty lessonId forgets every lesson ("Start over").
-		s.engine.Drop(req.LessonID)
-		res = protocol.Empty{}
+		res, err = withBody(w, r, s.rpcDropStep)
 	case protocol.OpDemo:
-		var req protocol.DemoRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		res, err = s.rpcDemo(ctx, req)
+		res, err = withBody(w, r, s.rpcDemo)
 	case protocol.OpSkip:
-		var req protocol.SkipRequest
-		if err := httpx.DecodeJSON(w, r, &req); err != nil {
-			return err
-		}
-		res, err = s.rpcSkip(ctx, req)
+		res, err = withBody(w, r, s.rpcSkip)
 	default:
 		return httpx.NotFound(fmt.Sprintf("unknown operation %q", op))
 	}
@@ -169,6 +89,68 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 	}
 	httpx.WriteOK(w, res)
 	return nil
+}
+
+// withBody decodes the request body into a Req and calls f with it.
+func withBody[Req, Res any](w http.ResponseWriter, r *http.Request, f func(context.Context, Req) (Res, error)) (any, error) {
+	var req Req
+	if err := httpx.DecodeJSON(w, r, &req); err != nil {
+		return nil, err
+	}
+	return f(r.Context(), req)
+}
+
+// errNotActiveStep answers ops naming a step that is not the active one.
+func errNotActiveStep() error { return httpx.Conflict("that step is not the active step") }
+
+func (s *Server) rpcHint(_ context.Context, req protocol.HintRequest) (any, error) {
+	if req.StepID == "" || req.Level < 1 {
+		return nil, httpx.BadRequest("stepId and a level of at least 1 are required")
+	}
+	if !s.engine.Hint(req.StepID, req.Level) {
+		return nil, httpx.Conflict("that step is not part of the active lesson")
+	}
+	return protocol.Empty{}, nil
+}
+
+func (s *Server) rpcModules(_ context.Context, req protocol.ModulesRequest) (any, error) {
+	restarting, err := s.loader.SetModules(req.Enabled)
+	return protocol.ModulesResult{Restarting: restarting}, err
+}
+
+// rpcRestartEmacs restarts Emacs in the background: the restart takes
+// seconds, and its progress arrives as emacs events.
+func (s *Server) rpcRestartEmacs() {
+	s.bg.Add(1)
+	go func() {
+		defer s.bg.Done()
+		rctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+		defer cancel()
+		if err := s.sup.RestartEmacs(rctx, "requested"); err != nil {
+			s.log.Error("restart-emacs", "err", err)
+		}
+	}()
+}
+
+func (s *Server) rpcDescribe(ctx context.Context, req protocol.DescribeRequest) (any, error) {
+	if _, err := protocol.ParseKeys(req.Keys); err != nil {
+		return nil, httpx.BadRequest(err.Error())
+	}
+	var d protocol.DescribeResult
+	if err := s.agent.Call(ctx, protocol.AgentOpDescribe, protocol.AgentDescribeArgs{Keys: req.Keys}, 2*time.Second, &d); err != nil {
+		return nil, agentError(err)
+	}
+	return d, nil
+}
+
+// rpcDropStep forgets a lesson's active step; an empty lessonId forgets
+// every lesson ("Start over").
+func (s *Server) rpcDropStep(_ context.Context, req protocol.DropStepRequest) (any, error) {
+	if req.LessonID != "" && !gwclient.ValidLessonID(req.LessonID) {
+		return nil, httpx.BadRequest("lessonId is not a valid lesson id")
+	}
+	s.engine.Drop(req.LessonID)
+	return protocol.Empty{}, nil
 }
 
 // agentError maps agent call failures to API errors.
@@ -231,16 +213,24 @@ func (s *Server) rpcEval(ctx context.Context, req protocol.EvalRequest) (any, er
 	if timeout > agent.MaxEvalTimeout {
 		timeout = agent.MaxEvalTimeout
 	}
+	v, err := s.evalRaw(ctx, req.Form, timeout)
+	if err != nil {
+		return nil, agentError(err)
+	}
+	if len(v) == 0 {
+		v = json.RawMessage("null")
+	}
+	return protocol.EvalResult{Value: v}, nil
+}
+
+// evalRaw runs form through the agent's eval op and returns its value as
+// the agent printed it.
+func (s *Server) evalRaw(ctx context.Context, form string, timeout time.Duration) (json.RawMessage, error) {
 	var out struct {
 		Value json.RawMessage `json:"value"`
 	}
-	if err := s.agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: req.Form}, timeout, &out); err != nil {
-		return nil, agentError(err)
-	}
-	if len(out.Value) == 0 {
-		out.Value = json.RawMessage("null")
-	}
-	return protocol.EvalResult{Value: out.Value}, nil
+	err := s.agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: form}, timeout, &out)
+	return out.Value, err
 }
 
 // rpcOpen visits a workspace file in the learner's window. The form is
@@ -265,14 +255,12 @@ func (s *Server) rpcOpen(ctx context.Context, req protocol.OpenRequest) (any, er
 	}
 	abs := filepath.Join(s.cfg.Workspace, filepath.FromSlash(rel))
 	form := "(progn (find-file " + elispString(abs) + ") (buffer-name))"
-	var out struct {
-		Value json.RawMessage `json:"value"`
-	}
-	if err := s.agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: form}, agent.DefaultTimeout, &out); err != nil {
+	v, err := s.evalRaw(ctx, form, agent.DefaultTimeout)
+	if err != nil {
 		return nil, agentError(err)
 	}
 	var name string
-	_ = json.Unmarshal(out.Value, &name)
+	_ = json.Unmarshal(v, &name)
 	return protocol.OpenResult{Buffer: name}, nil
 }
 
@@ -315,15 +303,10 @@ func (s *Server) rpcCheckpoint(ctx context.Context, req protocol.CheckpointReque
 	if len(label) > 200 {
 		return nil, httpx.BadRequest("label is limited to 200 characters")
 	}
-	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	spec, _ := s.sup.Snapshot(sctx)
-	bufs, globals := s.bufferStates(sctx), s.globals(sctx)
-	cancel()
-	meta, err := s.ckpt.TakeWith(ctx, checkpoint.Meta{Ref: checkpoint.ManualRef(label), Label: label, Spec: spec, Buffers: bufs, Globals: globals})
+	meta, err := s.takeCheckpoint(ctx, checkpoint.Meta{Ref: checkpoint.ManualRef(label), Label: label})
 	if err != nil {
 		return nil, httpx.Internal("could not take the checkpoint").Wrap(err)
 	}
-	s.bus.Publish(&protocol.CheckpointEvent{Label: meta.Label, Ref: meta.Ref, CreatedAt: meta.CreatedAt})
 	return protocol.CheckpointResult{Ref: meta.Ref, CreatedAt: meta.CreatedAt}, nil
 }
 
@@ -461,17 +444,17 @@ func (s *Server) rpcDemo(ctx context.Context, req protocol.DemoRequest) (any, er
 	}
 	act := s.engine.Active()
 	if act == nil || req.StepID == "" || act.StepID != req.StepID {
-		return nil, httpx.Conflict("that step is not the active step")
+		return nil, errNotActiveStep()
 	}
 	if req.Phase == protocol.DemoEnd {
 		if !s.engine.EndDemo(req.StepID) {
-			return nil, httpx.Conflict("that step is not the active step")
+			return nil, errNotActiveStep()
 		}
 		return protocol.DemoResult{}, nil
 	}
 	restored := s.restartIfDirty(ctx, *act)
 	if !s.engine.StartDemo(req.StepID) {
-		return nil, httpx.Conflict("that step is not the active step")
+		return nil, errNotActiveStep()
 	}
 	return protocol.DemoResult{Restored: restored}, nil
 }
@@ -491,7 +474,7 @@ const skipSettle = 8 * time.Second
 func (s *Server) rpcSkip(ctx context.Context, req protocol.SkipRequest) (any, error) {
 	act := s.engine.Active()
 	if act == nil || req.StepID == "" || act.StepID != req.StepID {
-		return nil, httpx.Conflict("that step is not the active step")
+		return nil, errNotActiveStep()
 	}
 	if !s.skipMu.TryLock() {
 		return nil, httpx.Conflict("a skip is already running")
@@ -508,7 +491,7 @@ func (s *Server) rpcSkip(ctx context.Context, req protocol.SkipRequest) (any, er
 	}
 	s.restartIfDirty(ctx, *act)
 	if !s.engine.BeginSkip(act.StepID) {
-		return nil, httpx.Conflict("that step is not the active step")
+		return nil, errNotActiveStep()
 	}
 	completed := false
 	if demo != "" {

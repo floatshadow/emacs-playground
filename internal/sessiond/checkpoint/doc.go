@@ -10,13 +10,16 @@
 //	commit=$(git commit-tree "$tree" -m "checkpoint <lesson>/<step>" ${parent:+-p $parent})
 //	git update-ref refs/playground/<lesson>/<step> "$commit"
 //
-// Restoring runs
+// Restoring loads the ref's tree into the index first (git read-tree,
+// update-index --refresh) so only differing files are rewritten, then runs
 //
 //	git restore --source=<ref> --worktree --staged -- .
 //	git clean -fd -e target -e _build -e .venv -e node_modules -e .playground
 //
-// and leaves the agent's reset-step to the caller. Metadata (label, step,
-// creation time, window spec) is stored in
+// recreates the recorded empty directories, and leaves the agent's
+// reset-step (and the buffer and session-variable restore) to the caller.
+// Metadata (label, step, creation time, window spec, unsaved buffer state,
+// session variables, empty directories) is stored in
 // /work/.playground/checkpoints/<ref without refs/playground/>.json.
 //
 // Build output, the playground directory and the Emacs package and cache

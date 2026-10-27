@@ -111,17 +111,6 @@ func (c *Child) StartedAt() time.Time {
 	return c.started
 }
 
-// Signal sends sig to the child's process group.
-func (c *Child) Signal(sig syscall.Signal) error {
-	c.mu.Lock()
-	pid := c.pid
-	c.mu.Unlock()
-	if pid == 0 {
-		return os.ErrProcessDone
-	}
-	return syscall.Kill(-pid, sig)
-}
-
 // SignalProcess sends sig to the child process only, not its group (whose
 // other members are Emacs subprocesses such as language servers and
 // shells, for which SIGUSR2 would be fatal).

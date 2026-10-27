@@ -86,7 +86,7 @@ func RealCommands(cfg *protocol.SessiondConfig) Commands {
 		Xvnc: func() *exec.Cmd {
 			// The geometry is the initial size only: the browser asks for
 			// its pane's size (noVNC resizeSession, SetDesktopSize), which
-			// Xvnc accepts and applies through RandR (B13).
+			// Xvnc accepts and applies through RandR.
 			c := exec.Command(cfg.XvncBin, display,
 				"-geometry", fmt.Sprintf("%dx%d", w, h), "-depth", "24",
 				"-rfbport", fmt.Sprint(cfg.VNCPort), "-localhost", "-SecurityTypes", "None",

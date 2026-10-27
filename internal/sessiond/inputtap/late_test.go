@@ -26,10 +26,10 @@ func (l *prefixLog) String() string {
 	return strings.Join(l.got, ",")
 }
 
-// TestLateEscAfterCommand is B4: ESC ESC ESC 150 ms apart. tmux hands each
-// ESC to Emacs at once; the tap reports a lone ESC only when its timer
-// fires, so the third one used to arrive after the agent's
-// keyboard-escape-quit and left "ESC is a prefix" pending for good.
+// TestLateEscAfterCommand: ESC ESC ESC 150 ms apart. tmux hands each ESC to
+// Emacs at once while the tap reports a lone ESC only when its timer fires,
+// so the third one arrives after the agent's keyboard-escape-quit; it must
+// not leave "ESC is a prefix" pending.
 func TestLateEscAfterCommand(t *testing.T) {
 	log := &prefixLog{}
 	tap := NewTap(log.emit)

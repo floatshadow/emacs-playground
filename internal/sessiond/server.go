@@ -329,12 +329,14 @@ func (c checker) Check(ctx context.Context, forms []string, timeout time.Duratio
 // noGateway is the fetcher when PG_GATEWAY_URL is empty.
 type noGateway struct{}
 
+var errNoGateway = errors.New("no gateway configured (PG_GATEWAY_URL)")
+
 func (noGateway) Scenario(context.Context, string, string) ([]byte, string, bool, error) {
-	return nil, "", false, errors.New("no gateway configured (PG_GATEWAY_URL)")
+	return nil, "", false, errNoGateway
 }
 
 func (noGateway) Fixtures(context.Context, string, string) (gwclient.FixtureResult, error) {
-	return gwclient.FixtureResult{}, errors.New("no gateway configured (PG_GATEWAY_URL)")
+	return gwclient.FixtureResult{}, errNoGateway
 }
 
 // Handler returns the HTTP mux (backend.md §3, api.md §3).
@@ -494,17 +496,25 @@ func (s *Server) stepCheckpoint(ctx context.Context, lessonID, stepID string, fo
 	if !force && s.ckpt.Exists(ctx, ref) {
 		return nil
 	}
+	_, err := s.takeCheckpoint(ctx, checkpoint.Meta{Ref: ref, Label: lessonID + "/" + stepID,
+		Step: &protocol.StepRef{LessonID: lessonID, StepID: stepID}})
+	return err
+}
+
+// takeCheckpoint records the workspace files under meta.Ref together with
+// the windows, the file buffers' unsaved state and the session variables
+// (each captured within 5 s, best effort), and announces the checkpoint.
+func (s *Server) takeCheckpoint(ctx context.Context, meta checkpoint.Meta) (checkpoint.Meta, error) {
 	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	spec, _ := s.sup.Snapshot(sctx)
-	bufs, globals := s.bufferStates(sctx), s.globals(sctx)
+	meta.Spec, _ = s.sup.Snapshot(sctx)
+	meta.Buffers, meta.Globals = s.bufferStates(sctx), s.globals(sctx)
 	cancel()
-	meta, err := s.ckpt.TakeWith(ctx, checkpoint.Meta{Ref: ref, Label: lessonID + "/" + stepID,
-		Step: &protocol.StepRef{LessonID: lessonID, StepID: stepID}, Spec: spec, Buffers: bufs, Globals: globals})
+	meta, err := s.ckpt.TakeWith(ctx, meta)
 	if err != nil {
-		return err
+		return meta, err
 	}
 	s.bus.Publish(&protocol.CheckpointEvent{Label: meta.Label, Ref: meta.Ref, CreatedAt: meta.CreatedAt})
-	return nil
+	return meta, nil
 }
 
 // stateFile is /work/.playground/state.json.
@@ -523,15 +533,15 @@ func (s *Server) persist(saved steps.Saved) {
 		return
 	}
 	p := s.statePath()
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		s.log.Warn("state.json", "err", err)
-		return
+	err = os.MkdirAll(filepath.Dir(p), 0o755)
+	if err == nil {
+		err = os.WriteFile(p+".tmp", b, 0o644)
 	}
-	if err := os.WriteFile(p+".tmp", b, 0o644); err == nil {
+	if err == nil {
 		err = os.Rename(p+".tmp", p)
-		if err != nil {
-			s.log.Warn("state.json", "err", err)
-		}
+	}
+	if err != nil {
+		s.log.Warn("state.json", "err", err)
 	}
 }
 
@@ -658,15 +668,13 @@ func (s *Server) heartbeatLoop(ctx context.Context) {
 
 func (s *Server) startFakeAgent(pid int) {
 	ctx, cancel := context.WithCancel(context.Background())
+	fake := &agent.Fake{Path: s.cfg.AgentSocket, Hello: protocol.AgentHelloMsg{Emacs: "fake", PID: pid, Modules: s.modules.Current()},
+		Initial: []any{protocol.AgentFrameMsg{T: protocol.AgentFrame, Event: protocol.FrameOpened, Kind: protocol.FrameTerminal}}}
 	s.fakeMu.Lock()
 	if s.fakeCancel != nil {
 		s.fakeCancel()
 	}
 	s.fakeCancel = cancel
-	s.fakeMu.Unlock()
-	fake := &agent.Fake{Path: s.cfg.AgentSocket, Hello: protocol.AgentHelloMsg{Emacs: "fake", PID: pid, Modules: s.modules.Current()},
-		Initial: []any{protocol.AgentFrameMsg{T: protocol.AgentFrame, Event: protocol.FrameOpened, Kind: protocol.FrameTerminal}}}
-	s.fakeMu.Lock()
 	s.fake = fake
 	s.fakeMu.Unlock()
 	go func() {

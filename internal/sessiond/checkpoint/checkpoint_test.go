@@ -324,10 +324,6 @@ func TestTakeUsesPlan(t *testing.T) {
 	if _, err := m.Take(context.Background(), "refs/playground/l/s", "l/s", nil, nil); err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	for _, c := range r.calls {
-		got = append(got, c[len(c)-1])
-	}
 	last := r.calls[len(r.calls)-1]
 	if !reflect.DeepEqual(last, []string{"update-ref", "refs/playground/l/s", "commit1"}) {
 		t.Fatalf("update-ref call %v (all %v)", last, r.calls)

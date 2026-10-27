@@ -120,7 +120,6 @@ type Supervisor struct {
 	crashReason   string
 	daemonStarts  int
 	version       string
-	agentPID      int
 	lastRespawn   time.Time
 	respawnStreak int
 	lastCloseCmd  string
@@ -332,7 +331,6 @@ func (s *Supervisor) OnHello(h *protocol.AgentHelloMsg) {
 	s.ready = true
 	s.everReady = true
 	s.version = h.Emacs
-	s.agentPID = h.PID
 	wasUnresponsive := s.unresponsive
 	s.unresponsive = false
 	crashed := s.crashed
@@ -763,8 +761,8 @@ func (s *Supervisor) WaitReady(ctx context.Context, timeout time.Duration) bool 
 
 // leaveGUIForm deletes every X frame of the daemon (the GUI frame) and then
 // closes its X display connections, so stopping Xvnc afterwards does not
-// make Emacs report "Connection lost to X server" in the terminal frame
-// (B12): deleting the frames alone keeps the connection open. The session
+// make Emacs report "Connection lost to X server" in the terminal frame:
+// deleting the frames alone keeps the connection open. The session
 // image's Emacs is a Lucid build, where x-close-connection is safe. The
 // value is "closed" when no X display is left open, else a description of
 // what failed (the display is then left running).
@@ -830,39 +828,42 @@ func (s *Supervisor) SetMode(ctx context.Context, mode protocol.FrameKind) (prot
 		s.opt.OnModeChange(mode)
 	}
 	if mode == protocol.FrameTerminal {
-		if s.gui != nil {
-			s.gui.Stop(2 * time.Second)
-		}
-		// Delete the GUI frames inside Emacs and close its X connection
-		// before the display goes away: killing emacsclient deletes its
-		// frame only when the server's sentinel runs, and an X connection
-		// that drops under Emacs leaves "Connection lost to X server" in
-		// the terminal frame. When Emacs cannot let go of the display, Xvnc
-		// keeps running (it is reused by the next switch to GUI).
-		stopDisplay := true
-		if s.opt.Agent != nil && s.opt.Agent.Connected() {
-			cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-			var out struct {
-				Value any `json:"value"`
-			}
-			err := s.opt.Agent.Call(cctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: leaveGUIForm}, 2*time.Second, &out)
-			cancel()
-			switch {
-			case err != nil:
-				s.log.Warn("closing the GUI frame and display in Emacs; leaving the display running", "err", err)
-				stopDisplay = false
-			case out.Value != "closed" && out.Value != nil:
-				s.log.Warn("Emacs kept its X connection; leaving the display running", "result", out.Value)
-				stopDisplay = false
-			}
-		}
-		if s.xvnc != nil && stopDisplay {
-			s.xvnc.Stop(2 * time.Second)
-		}
-		s.setFrame(protocol.FrameGUI, false, "")
+		s.leaveGUI(ctx)
 	}
 	s.emit(&protocol.ModeEvent{Mode: mode})
 	return mode, nil
+}
+
+// leaveGUI stops the GUI frame and, once Emacs has let go of it, the
+// display. The GUI frames are deleted inside Emacs and its X connection
+// closed before the display goes away: killing emacsclient deletes its
+// frame only when the server's sentinel runs, and an X connection that
+// drops under Emacs leaves "Connection lost to X server" in the terminal
+// frame. When Emacs cannot let go of the display, Xvnc keeps running (it
+// is reused by the next switch to GUI).
+func (s *Supervisor) leaveGUI(ctx context.Context) {
+	if s.gui != nil {
+		s.gui.Stop(2 * time.Second)
+	}
+	stopDisplay := true
+	if s.opt.Agent != nil && s.opt.Agent.Connected() {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		var out protocol.AgentEvalResult
+		err := s.opt.Agent.Call(cctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: leaveGUIForm}, 2*time.Second, &out)
+		cancel()
+		switch {
+		case err != nil:
+			s.log.Warn("closing the GUI frame and display in Emacs; leaving the display running", "err", err)
+			stopDisplay = false
+		case out.Value != "closed" && out.Value != nil:
+			s.log.Warn("Emacs kept its X connection; leaving the display running", "result", out.Value)
+			stopDisplay = false
+		}
+	}
+	if s.xvnc != nil && stopDisplay {
+		s.xvnc.Stop(2 * time.Second)
+	}
+	s.setFrame(protocol.FrameGUI, false, "")
 }
 
 func waitTCP(ctx context.Context, addr string, timeout time.Duration) error {
@@ -921,17 +922,17 @@ func (s *Supervisor) SendKeys(ctx context.Context, frame protocol.FrameKind, key
 	return s.opt.Tmux.SendKeys(ctx, false, ks...)
 }
 
+// runCtx runs cmd and returns its combined output, killing it when ctx
+// ends first.
 func runCtx(ctx context.Context, cmd *exec.Cmd) (string, error) {
-	out := make(chan struct {
+	type result struct {
 		b   []byte
 		err error
-	}, 1)
+	}
+	out := make(chan result, 1)
 	go func() {
 		b, err := cmd.CombinedOutput()
-		out <- struct {
-			b   []byte
-			err error
-		}{b, err}
+		out <- result{b, err}
 	}()
 	select {
 	case r := <-out:
@@ -973,9 +974,6 @@ func (s *Supervisor) Interrupt(ctx context.Context) error {
 	}()
 	return nil
 }
-
-// SignalDaemon sends sig to the daemon's process group.
-func (s *Supervisor) SignalDaemon(sig syscall.Signal) error { return s.daemon.Signal(sig) }
 
 // Stop shuts everything down (backend.md §5): the caller has already emitted
 // emacs stopping and taken a snapshot.

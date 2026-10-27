@@ -123,7 +123,7 @@ func (t *Tap) Keys(keys []protocol.Key) {
 // (escape-time 0) hands such a byte to Emacs at once, so when the agent has
 // reported a command since the bytes arrived, Emacs has already used them
 // (ESC ESC ESC is keyboard-escape-quit) and reporting them now would show a
-// pending prefix after the command that consumed it (B4). Such keys are
+// pending prefix after the command that consumed it. Such keys are
 // dropped and the pending prefix is cleared; other keys go through Keys.
 func (t *Tap) late(keys []protocol.Key, arrived time.Time) {
 	if len(keys) == 0 {

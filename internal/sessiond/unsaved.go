@@ -71,15 +71,13 @@ func (s *Server) bufferStates(ctx context.Context) map[string]checkpoint.BufferS
 	if s.agent == nil || !s.agent.Connected() {
 		return nil
 	}
-	var out struct {
-		Value json.RawMessage `json:"value"`
-	}
-	if err := s.agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: buffersForm(s.cfg.Workspace)}, 2*time.Second, &out); err != nil {
+	v, err := s.evalRaw(ctx, buffersForm(s.cfg.Workspace), 2*time.Second)
+	if err != nil {
 		s.log.Debug("buffer state for the checkpoint", "err", err)
 		return nil
 	}
 	var raw map[string][3]json.RawMessage
-	if err := json.Unmarshal(out.Value, &raw); err != nil || len(raw) == 0 {
+	if err := json.Unmarshal(v, &raw); err != nil || len(raw) == 0 {
 		return nil
 	}
 	m := make(map[string]checkpoint.BufferState, len(raw))
@@ -225,15 +223,13 @@ func (s *Server) globals(ctx context.Context) string {
 	if s.agent == nil || !s.agent.Connected() {
 		return ""
 	}
-	var out struct {
-		Value json.RawMessage `json:"value"`
-	}
-	if err := s.agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: globalsForm()}, 2*time.Second, &out); err != nil {
+	v, err := s.evalRaw(ctx, globalsForm(), 2*time.Second)
+	if err != nil {
 		s.log.Debug("session variables for the checkpoint", "err", err)
 		return ""
 	}
 	var printed string
-	if err := json.Unmarshal(out.Value, &printed); err != nil {
+	if err := json.Unmarshal(v, &printed); err != nil {
 		return ""
 	}
 	return printed

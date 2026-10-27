@@ -413,7 +413,7 @@ func (m *Manager) Take(ctx context.Context, ref, label string, step *protocol.St
 }
 
 // TakeWith is Take with the metadata given whole (Ref, Label, Step, Spec,
-// Unsaved); CreatedAt is set here.
+// Buffers, Globals); CreatedAt and EmptyDirs are set here.
 func (m *Manager) TakeWith(ctx context.Context, meta Meta) (Meta, error) {
 	ref, label := meta.Ref, meta.Label
 	if !ValidRef(ref) {
@@ -424,7 +424,7 @@ func (m *Manager) TakeWith(ctx context.Context, meta Meta) (Meta, error) {
 	if err := m.ensurePlaygroundDir(); err != nil {
 		return Meta{}, err
 	}
-	parent, _ := m.git(ctx, nil, "rev-parse", "-q", "--verify", ref+"^{commit}")
+	parent, _ := m.commitOf(ctx, ref)
 	cmds := TakeCommands(m.IndexFile(), ref, "checkpoint "+label, "$tree", parent)
 	if _, err := m.git(ctx, cmds[0].Env, cmds[0].Args...); err != nil {
 		return Meta{}, err
@@ -443,10 +443,12 @@ func (m *Manager) TakeWith(ctx context.Context, meta Meta) (Meta, error) {
 	}
 	meta.CreatedAt = m.Now().UnixMilli()
 	meta.EmptyDirs = m.emptyDirs()
-	if err := m.writeMeta(meta); err != nil {
-		return meta, err
-	}
-	return meta, nil
+	return meta, m.writeMeta(meta)
+}
+
+// commitOf returns the commit ref points to; an error when there is none.
+func (m *Manager) commitOf(ctx context.Context, ref string) (string, error) {
+	return m.git(ctx, nil, "rev-parse", "-q", "--verify", ref+"^{commit}")
 }
 
 func (m *Manager) metaPath(ref string) string {
@@ -488,7 +490,7 @@ func (m *Manager) Exists(ctx context.Context, ref string) bool {
 	if !ValidRef(ref) {
 		return false
 	}
-	_, err := m.git(ctx, nil, "rev-parse", "-q", "--verify", ref+"^{commit}")
+	_, err := m.commitOf(ctx, ref)
 	return err == nil
 }
 
@@ -501,13 +503,13 @@ func (m *Manager) List(ctx context.Context) ([]protocol.CheckpointInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	var items []protocol.CheckpointInfo
 	if out == "" {
 		return []protocol.CheckpointInfo{}, nil
 	}
 	if err := m.stageWorktree(ctx); err != nil {
 		return nil, err
 	}
+	var items []protocol.CheckpointInfo
 	for _, line := range strings.Split(out, "\n") {
 		f := strings.SplitN(line, "\t", 3)
 		if len(f) < 3 {
@@ -567,7 +569,7 @@ func (m *Manager) Restore(ctx context.Context, ref string) (int, Meta, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, err := m.git(ctx, nil, "rev-parse", "-q", "--verify", ref+"^{commit}"); err != nil {
+	if _, err := m.commitOf(ctx, ref); err != nil {
 		return 0, Meta{}, fmt.Errorf("checkpoint %s: %w", ref, os.ErrNotExist)
 	}
 	if err := m.stageWorktree(ctx); err != nil {

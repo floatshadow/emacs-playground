@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -193,13 +194,6 @@ func (s *Server) Connected() bool {
 	return s.cur != nil
 }
 
-// Hello returns the last hello, or nil.
-func (s *Server) Hello() *protocol.AgentHelloMsg {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.hello
-}
-
 // HelloCount returns how many hellos have been received.
 func (s *Server) HelloCount() uint64 {
 	s.mu.Lock()
@@ -242,15 +236,14 @@ func (s *Server) readLoop(nc *conn) {
 	defer close(nc.done)
 	sc := bufio.NewScanner(nc.c)
 	sc.Buffer(make([]byte, 0, 64<<10), protocol.MaxAgentLine+1)
-	var err error
 	for sc.Scan() {
 		line := sc.Bytes()
-		if len(strings.TrimSpace(string(line))) == 0 {
+		if len(bytes.TrimSpace(line)) == 0 {
 			continue
 		}
 		s.dispatch(nc, line)
 	}
-	err = sc.Err()
+	err := sc.Err()
 	if errors.Is(err, bufio.ErrTooLong) {
 		s.log.Warn("agent line longer than 1 MB; dropping the connection")
 	}
@@ -346,7 +339,7 @@ func (s *Server) write(nc *conn, v any) error {
 // is non-nil). timeout 0 means DefaultTimeout; it is capped at
 // MaxEvalTimeout.
 func (s *Server) Call(ctx context.Context, op protocol.AgentOp, args any, timeout time.Duration, out any) error {
-	raw, err := s.CallRaw(ctx, op, args, timeout)
+	raw, err := s.callRaw(ctx, op, args, timeout)
 	if err != nil {
 		return err
 	}
@@ -358,8 +351,8 @@ func (s *Server) Call(ctx context.Context, op protocol.AgentOp, args any, timeou
 	return nil
 }
 
-// CallRaw is Call returning the undecoded value.
-func (s *Server) CallRaw(ctx context.Context, op protocol.AgentOp, args any, timeout time.Duration) (json.RawMessage, error) {
+// callRaw is Call returning the undecoded value.
+func (s *Server) callRaw(ctx context.Context, op protocol.AgentOp, args any, timeout time.Duration) (json.RawMessage, error) {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}

@@ -136,23 +136,14 @@ func (l *Loader) Load(ctx context.Context, req protocol.ScenarioRequest) (protoc
 		if err := l.Modules.Write(want); err != nil {
 			return protocol.ScenarioResult{}, httpx.Internal("could not write modules.el").Wrap(err)
 		}
-		l.emit(&protocol.ModulesEvent{Enabled: want, Restarting: true})
 		res.Restarting = true
 		l.pending = sc.ID
-		l.bg.Add(1)
-		go func() {
-			defer l.bg.Done()
-			bctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-			defer cancel()
-			if err := l.Restart.RestartEmacs(bctx, "module set changed"); err != nil {
-				l.log().Error("restart for modules failed", "err", err)
-			}
-			l.emit(&protocol.ModulesEvent{Enabled: want, Restarting: false})
+		l.restartForModules(want, func(bctx context.Context) {
 			l.mu.Lock()
 			defer l.mu.Unlock()
 			l.pending = ""
 			l.finish(bctx, sc, idx, reset, forceCheckpoint)
-		}()
+		})
 		return res, nil
 	}
 	l.finish(ctx, sc, idx, reset, forceCheckpoint)
@@ -339,6 +330,14 @@ func (l *Loader) SetModules(mods []string) (bool, error) {
 	if err := l.Modules.Write(mods); err != nil {
 		return false, httpx.Internal("could not write modules.el").Wrap(err)
 	}
+	l.restartForModules(mods, nil)
+	return true, nil
+}
+
+// restartForModules announces and runs, in the background, the daemon
+// restart that loads a changed module set, then calls after (when set)
+// with the restart's context.
+func (l *Loader) restartForModules(mods []string, after func(context.Context)) {
 	l.emit(&protocol.ModulesEvent{Enabled: mods, Restarting: true})
 	l.bg.Add(1)
 	go func() {
@@ -349,15 +348,21 @@ func (l *Loader) SetModules(mods []string) (bool, error) {
 			l.log().Error("restart for modules failed", "err", err)
 		}
 		l.emit(&protocol.ModulesEvent{Enabled: mods, Restarting: false})
+		if after != nil {
+			after(ctx)
+		}
 	}()
-	return true, nil
 }
 
 func (l *Loader) cachePath(kind, lessonID, ext string) string {
 	return filepath.Join(l.CacheDir, kind, filepath.FromSlash(lessonID)+ext)
 }
 
-func readETag(p string) string {
+// cachedETag returns the ETag of the cached file p, "" when p is not cached.
+func cachedETag(p string) string {
+	if _, err := os.Stat(p); err != nil {
+		return ""
+	}
 	b, err := os.ReadFile(p + ".etag")
 	if err != nil {
 		return ""
@@ -381,11 +386,7 @@ func writeCached(p string, data []byte, etag string) error {
 // scenario fetches the scenario, using and refreshing the cache.
 func (l *Loader) scenario(ctx context.Context, lessonID string) (*protocol.Scenario, error) {
 	p := l.cachePath("scenarios", lessonID, ".json")
-	etag := ""
-	if _, err := os.Stat(p); err == nil {
-		etag = readETag(p)
-	}
-	raw, newETag, notModified, err := l.Fetch.Scenario(ctx, lessonID, etag)
+	raw, newETag, notModified, err := l.Fetch.Scenario(ctx, lessonID, cachedETag(p))
 	switch {
 	case err != nil && gwclient.NotFound(err):
 		return nil, httpx.NotFound("no such lesson: " + lessonID)
@@ -425,11 +426,7 @@ func (l *Loader) scenario(ctx context.Context, lessonID string) (*protocol.Scena
 // fixtures; it returns the number of files written.
 func (l *Loader) fixtures(ctx context.Context, sc *protocol.Scenario, reset bool) (int, error) {
 	p := l.cachePath("fixtures", sc.ID, protocol.FixtureExt)
-	etag := ""
-	if _, err := os.Stat(p); err == nil {
-		etag = readETag(p)
-	}
-	fr, err := l.Fetch.Fixtures(ctx, sc.ID, etag)
+	fr, err := l.Fetch.Fixtures(ctx, sc.ID, cachedETag(p))
 	switch {
 	case err != nil && gwclient.NotFound(err):
 		return 0, nil
