@@ -12,13 +12,17 @@ setup:
   layout: single
   # Both crates are known projects from the start, so C-x p p offers
   # them by name. (A directory with Cargo.toml is a project root: the
-  # files module adds it to project-vc-extra-root-markers.)
+  # files module adds it to project-vc-extra-root-markers.) A build
+  # output from an earlier visit or lesson 3.5 goes: the compile step
+  # reads *compilation* for "Finished dev profile".
   eval: >-
     (progn
       (dolist (b (buffer-list))
         (let ((f (buffer-file-name b)))
           (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/projects/" f)))
             (kill-buffer b))))
+      (when (get-buffer "*compilation*")
+        (let ((kill-buffer-query-functions nil)) (kill-buffer "*compilation*")))
       (require 'project)
       (dolist (d '("/work/projects/hello/" "/work/projects/polyglot/"))
         (let ((p (project-current nil d)))

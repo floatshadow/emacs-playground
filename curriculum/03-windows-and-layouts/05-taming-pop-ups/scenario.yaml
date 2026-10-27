@@ -20,7 +20,8 @@ setup:
       (setq display-buffer-alist
             (seq-remove (lambda (r) (equal (car-safe r) "\\*Help\\*")) display-buffer-alist))
       (dolist (n '("*Help*" "*compilation*"))
-        (when (get-buffer n) (kill-buffer n))))
+        (when (get-buffer n)
+          (let ((kill-buffer-query-functions nil)) (kill-buffer n)))))
 steps:
   - id: build
     goal: Run the build and see where its output lands
