@@ -25,20 +25,40 @@ setup:
         ;; contain it, so remove it or C-x C-w would ask to overwrite.
         (when (file-exists-p f) (delete-file f))))
 steps:
+  # Demos type absolute paths right after the directory the prompt offers:
+  # the second / starts a fresh path, so they work from whatever buffer the
+  # learner is in (Watch it, Skip, Go to this step).
   - id: open
-    goal: Open four files, two of them called main.rs
-    detail: "With `C-x C-f`, open `src/main.rs` and `src/lib.rs` of *hello*, then `/work/projects/polyglot/src/main.rs` (typing a `/` after the offered directory starts over from the root) and `../README.md` from there. Watch the buffer names: two files called *main.rs* become `main.rs<hello>` and `main.rs<polyglot>`."
-    demo: 'C-x C-f ~400 "src/main.rs" RET ~400 C-x C-f ~400 "lib.rs" RET ~400 C-x C-f ~400 "/work/projects/polyglot/src/main.rs" RET ~400 C-x C-f ~400 "../README.md" RET'
+    goal: Open hello's main.rs and lib.rs
+    detail: "This lesson works in `/work/projects`, where *hello* is `/work/projects/hello/`. (`/work/hello` is the copy of hello from lesson 2.3; leave it alone here.) Its README.md is open, so `C-x C-f` offers `/work/projects/hello/`: type `src/main.rs`, `RET`. Then `C-x C-f` again: the prompt now starts in `src/`, so `lib.rs` is enough. From any other buffer, type the whole path right after what the prompt offers, `/work/projects/hello/src/main.rs`: a `/` after the offered directory starts over from the root."
+    demo: 'C-x C-f ~400 "/work/projects/hello/src/main.rs" RET ~400 C-x C-f ~400 "/work/projects/hello/src/lib.rs" RET'
     conditions:
-      - text: hello's main.rs and lib.rs are open
-        elisp: '(and (find-buffer-visiting "/work/projects/hello/src/main.rs") (find-buffer-visiting "/work/projects/hello/src/lib.rs"))'
-        hint: "C-x C-f, type src/main.rs, RET. Then C-x C-f again: the prompt now starts in src/, so lib.rs is enough."
+      - text: hello's main.rs is open
+        elisp: '(find-buffer-visiting "/work/projects/hello/src/main.rs")'
+        hint: "The file is /work/projects/hello/src/main.rs. Not /work/hello/src/main.rs: that is lesson 2.3's copy, which this step does not look at."
+      - text: hello's lib.rs is open
+        elisp: '(find-buffer-visiting "/work/projects/hello/src/lib.rs")'
+        hint: "Next to main.rs: /work/projects/hello/src/lib.rs. After opening main.rs the prompt already offers /work/projects/hello/src/, so lib.rs RET is enough."
+  - id: open-polyglot
+    goal: Open polyglot's main.rs and README.md
+    detail: "A second project: open `/work/projects/polyglot/src/main.rs`, typed right after the directory the prompt offers. Then its `README.md`: from the prompt in `src/`, `../README.md` goes one folder up. Watch the buffer names: the two files called *main.rs* become `main.rs<hello>` and `main.rs<polyglot>`, and the two READMEs `README.md<hello>` and `README.md<polyglot>`."
+    demo: 'C-x C-f ~400 "/work/projects/polyglot/src/main.rs" RET ~400 C-x C-f ~400 "/work/projects/polyglot/README.md" RET'
+    conditions:
       - text: polyglot's main.rs and README.md are open
         elisp: '(and (find-buffer-visiting "/work/projects/polyglot/src/main.rs") (find-buffer-visiting "/work/projects/polyglot/README.md"))'
         hint: "In the C-x C-f prompt, type /work/projects/polyglot/src/main.rs right after what is there; the second / starts a fresh path. Then ../README.md from there."
-      - text: the two main.rs buffers have different names
-        elisp: '(let ((a (find-buffer-visiting "/work/projects/hello/src/main.rs")) (b (find-buffer-visiting "/work/projects/polyglot/src/main.rs"))) (and a b (string-prefix-p "main.rs<" (buffer-name a)) (string-prefix-p "main.rs<" (buffer-name b))))'
-        hint: "Emacs adds the directory in angle brackets when two buffers would have the same name: main.rs<hello>, main.rs<polyglot>."
+      - text: hello's main.rs and lib.rs are still open
+        elisp: '(and (find-buffer-visiting "/work/projects/hello/src/main.rs") (find-buffer-visiting "/work/projects/hello/src/lib.rs"))'
+        hint: "The previous step opened them. If one was closed, open it again: /work/projects/hello/src/main.rs and lib.rs next to it."
+      # Files of lesson 2.3's copy (/work/hello) change the names the later
+      # steps type: main.rs<projects/hello>, lib.rs<projects>. The setup
+      # closes them; this catches the ones opened by mistake in step 1.
+      - text: nothing from /work/hello (lesson 2.3's copy) is open
+        elisp: '(not (seq-find (lambda (b) (string-prefix-p "/work/hello/" (or (buffer-file-name b) ""))) (buffer-list)))'
+        hint: "A file under /work/hello is open, lesson 2.3's copy of hello, and its buffer names get mixed up with this lesson's. Close each one: C-x C-f /work/hello/src/main.rs RET shows it, C-x k RET kills it."
+      - text: the two main.rs are main.rs<hello> and main.rs<polyglot>
+        elisp: '(let ((a (find-buffer-visiting "/work/projects/hello/src/main.rs")) (b (find-buffer-visiting "/work/projects/polyglot/src/main.rs"))) (and a b (equal (buffer-name a) "main.rs<hello>") (equal (buffer-name b) "main.rs<polyglot>")))'
+        hint: "Emacs adds the folder in angle brackets when two buffers would have the same name, and only as much of the path as it needs: main.rs<hello> and main.rs<polyglot>."
   - id: switch
     goal: Switch to main.rs<hello>, back, and back again
     detail: "`C-x b` switches by name: type `main.rs<h`, `TAB`, `RET`. `C-x b RET` with nothing typed goes back to the buffer you were just in. `C-x <left>` walks back through what this window showed before, `C-x <right>` forward."
@@ -84,7 +104,7 @@ steps:
         hint: "Write it next to README.md: the prompt starts in /work/projects/hello/, so CHANGES.md is enough."
       - text: the buffer now visits CHANGES.md
         state: { file: /work/projects/hello/CHANGES.md }
-        hint: "After C-x C-w the buffer's name and file are CHANGES.md."
+        hint: "Look at the mode line: after C-x C-w the buffer is called CHANGES.md. If it still says README.md<hello>, C-x C-w ran in another buffer; switch to README.md<hello> and write again."
   - id: kill-two
     goal: Kill CHANGES.md and polyglot's main.rs
     detail: "`C-x k RET` kills the current buffer. Then `C-x k`, `main.rs<p`, `TAB`, `RET` kills the other. Watch hello's buffer lose its `<hello>`: there is only one *main.rs* left."
