@@ -3,7 +3,9 @@
 # foreground.  TigerVNC's Xvnc is an X server and a VNC server in one;
 # it listens for VNC on 127.0.0.1 only, without authentication, because
 # the only way to it is sessiond's /vnc bridge, which the gateway
-# authenticates.  No window manager runs: the Emacs frame is full screen.
+# authenticates.  No window manager runs: the Emacs frame covers the
+# screen (base.el fits it to the display), and the screen follows the
+# browser pane through SetDesktopSize.
 #
 # Environment (defaults match sessiond's, internal/protocol SessiondConfig):
 #   PG_DISPLAY       X display          (:1)
@@ -23,7 +25,7 @@ exec Xvnc "$display" \
   -SecurityTypes None \
   -dpi "${PG_VNC_DPI:-110}" \
   -AlwaysShared \
-  -AcceptSetDesktopSize \
+  -AcceptSetDesktopSize=1 \
   -desktop "Emacs Playground" \
   -nolisten tcp \
   "$@"

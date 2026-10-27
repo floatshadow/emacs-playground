@@ -1,7 +1,9 @@
 #!/bin/sh
-# pg-gui-frame: open the full-screen GUI frame of the playground daemon
-# on the Xvnc display (emacs.md sections 6 and 7) and stay in the
-# foreground while it exists, so a supervisor can re-run it.
+# pg-gui-frame: open the GUI frame of the playground daemon on the Xvnc
+# display (emacs.md sections 6 and 7) and stay in the foreground while it
+# exists, so a supervisor can re-run it.  The frame covers the screen
+# because base.el fits it to the display; (fullscreen . fullboth) needs a
+# window manager, so it is not passed (the same command as sessiond's).
 #
 # Waits up to 10 s for the X display and for the daemon.
 # Environment: PG_DISPLAY (:1), PG_EMACS_SERVER (playground).
@@ -32,4 +34,4 @@ until emacsclient -s "$server" -e t >/dev/null 2>&1; do
   sleep 0.1
 done
 
-exec emacsclient -c -s "$server" --frame-parameters='((fullscreen . fullboth))' "$@"
+exec emacsclient -c -s "$server" "$@"
