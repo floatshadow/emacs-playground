@@ -250,6 +250,14 @@ These refine the docs; the code is authoritative where they differ.
 
 The triage of docs/feedback/2026-10-27-newcomer-review.md assigned every item to an area and fixed the contracts the fixes share: progress reset ("Start over"), "Watch it" as a demonstration (`demo` op, `demonstrated` status), "Skip this step" (`skip` op, `skipped` status) and nudge suppression. The contracts are in api.md (§2.4, §3.4, §4.1) and docs/feedback/2026-10-27-fix-plan.md §3; the decisions taken there (§4) refine the docs until each area updates its own: the backend lands the protocol additions first and regenerates `web/src/protocol.gen.ts`, and the smoke, review and replay scripts reset progress when they finish.
 
+Emacs side (emacs.md §5, §6, §10):
+
+- Key events name `real-this-command`: C-k is `kill-line` (not `kill-region`), M-y `yank-pop`, C-y on an empty kill ring `yank`, TAB in a prompt `minibuffer-complete`. Conditions may keep the old names as alternatives. M-y is the built-in `yank-pop` until the completion module (lesson 4.2) binds `consult-yank-pop`; `editing.el` no longer binds it whenever consult is installed.
+- The agent's checks, states, snapshots and setups use the learner's frame: the frame of the last command (or the client frame made last), not whatever frame Emacs has selected when a call runs from a timer.
+- `WindowSpec.windowState` is `window-state-get` with each window's file added to its buffer entry (`(file . NAME)`); `open` and `reset-step` put windows back by file, and `reset-step` closes the unmodified workspace file buffers the spec does not list.
+- In tmux frames Home, End and Delete are `<home>`, `<end>` and `<deletechar>`. The selected mode line is violet (`#7a58c4`), inactive ones `#232639`. ws-butler's lighter is hidden and it is not in the state's `minors`. A reset setup starts its `open` files on line 1. The GUI frame fits itself to the X screen whenever RandR changes it.
+- `test/config-test.el` loads `test/modules-test.el` (init.el with base and editing) in the session image, so `make emacs-test` covers the modules too.
+
 ## 6. Slice 1 scope
 
 What this round builds (everything else stays a TODO with its doc section):
