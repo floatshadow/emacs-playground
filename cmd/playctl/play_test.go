@@ -40,7 +40,7 @@ func expected(demo string) []string {
 		case protocol.DemoKey:
 			out = append(out, "K:"+t.Key)
 		case protocol.DemoText:
-			for _, c := range splitText(t.Text) {
+			for _, c := range protocol.SplitDemoText(t.Text) {
 				switch c {
 				case "\n":
 					out = append(out, "K:RET")
@@ -206,7 +206,7 @@ func TestSelectLessons(t *testing.T) {
 }
 
 func TestSplitText(t *testing.T) {
-	got := strings.Join(splitText("ab\ncd\t\nx"), "|")
+	got := strings.Join(protocol.SplitDemoText("ab\ncd\t\nx"), "|")
 	if got != "ab|\n|cd|\t|\n|x" {
 		t.Fatalf("%q", got)
 	}

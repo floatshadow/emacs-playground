@@ -49,8 +49,16 @@ type Loader struct {
 	// Checkpoint takes the checkpoint of a starting step; force retakes an
 	// existing one.
 	Checkpoint func(ctx context.Context, lessonID, stepID string, force bool) error
-	Emit       func(protocol.Event)
-	Log        *slog.Logger
+	// RestoreStep restores a step's checkpoint (files and windows) and
+	// reports false when the step has none. "Go to this step" uses it for
+	// steps after the first.
+	RestoreStep func(ctx context.Context, lessonID, stepID string) (bool, error)
+	// PlayDemo plays a demo string into Emacs at playctl pacing; the
+	// fast-forward to a step without a checkpoint replays the earlier
+	// steps' demos with it.
+	PlayDemo func(ctx context.Context, demo string) error
+	Emit     func(protocol.Event)
+	Log      *slog.Logger
 	// SetupTimeout bounds the agent's setup op (default 10 s).
 	SetupTimeout time.Duration
 	// Ready, when set, waits until Emacs is not restarting and the
@@ -169,17 +177,95 @@ func (l *Loader) alreadyActive(req protocol.ScenarioRequest) (protocol.ScenarioR
 	return protocol.ScenarioResult{Step: *act, Index: idx, Count: n, Modules: l.Modules.Current()}, true
 }
 
-// finish runs setup, takes the checkpoint and activates the step. Caller
-// holds l.mu.
+// FastForwardTimeout bounds the replay of earlier steps' demos when "Go to
+// this step" targets a step without a checkpoint.
+const FastForwardTimeout = 3 * time.Minute
+
+// RehearsalSettle is how long the fast-forward waits for a replayed step's
+// conditions after its demo.
+const RehearsalSettle = 10 * time.Second
+
+// finish runs setup, brings the workspace to the step's starting state,
+// takes the checkpoint and activates the step. Caller holds l.mu.
+//
+// For the first step the starting state is the lesson's setup. For a later
+// step ("Go to this step", "Do this step again", resuming a lesson) it is
+// the step's checkpoint, restored after the setup when it exists; else the
+// earlier steps' demos are replayed with nothing recorded and the
+// checkpoint is taken from the result. A later step's checkpoint is never
+// overwritten with the lesson's initial state (api.md §3.4).
 func (l *Loader) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset, forceCheckpoint bool) {
 	l.setup(ctx, sc, reset)
 	st := &sc.Steps[idx]
+	if idx > 0 {
+		if l.RestoreStep != nil {
+			ok, err := l.RestoreStep(ctx, sc.ID, st.ID)
+			if err != nil {
+				l.log().Warn("restoring the step's checkpoint", "lesson", sc.ID, "step", st.ID, "err", err)
+			}
+			if ok {
+				l.Engine.Activate(sc, idx)
+				return
+			}
+		}
+		l.fastForward(ctx, sc, idx)
+		forceCheckpoint = true
+	}
 	if st.TakesCheckpoint() && l.Checkpoint != nil {
 		if err := l.Checkpoint(ctx, sc.ID, st.ID, forceCheckpoint); err != nil {
 			l.log().Warn("checkpoint at scenario load", "err", err)
 		}
 	}
 	l.Engine.Activate(sc, idx)
+}
+
+// fastForward replays the demos of the steps before idx into Emacs, each
+// rehearsed by the engine (Engine.Rehearse: conditions are evaluated but
+// nothing is recorded or emitted), waiting for each step's conditions before
+// the next demo. A step whose demo does not complete it is logged and the
+// replay goes on.
+func (l *Loader) fastForward(ctx context.Context, sc *protocol.Scenario, idx int) {
+	if l.PlayDemo == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), FastForwardTimeout)
+	defer cancel()
+	start := time.Now()
+	for i := 0; i < idx && ctx.Err() == nil; i++ {
+		st := &sc.Steps[i]
+		l.Engine.Rehearse(sc, i)
+		if st.Demo == "" {
+			l.log().Warn("fast-forward: the step has no demo", "lesson", sc.ID, "step", st.ID)
+			continue
+		}
+		if err := l.PlayDemo(ctx, st.Demo); err != nil {
+			l.log().Warn("fast-forward: playing the demo", "lesson", sc.ID, "step", st.ID, "err", err)
+			continue
+		}
+		if !l.rehearsed(ctx, st.ID) {
+			l.log().Warn("fast-forward: the demo did not complete the step", "lesson", sc.ID, "step", st.ID)
+		}
+	}
+	l.log().Info("fast-forwarded", "lesson", sc.ID, "to", sc.Steps[idx].ID, "took", time.Since(start).Round(time.Millisecond))
+}
+
+// rehearsed polls the rehearsed step's conditions for up to RehearsalSettle.
+func (l *Loader) rehearsed(ctx context.Context, stepID string) bool {
+	deadline := time.Now().Add(RehearsalSettle)
+	for {
+		res, ok := l.Engine.Check(ctx)
+		if ok && res.StepID == stepID && res.Complete {
+			return true
+		}
+		if !ok || time.Now().After(deadline) {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
 }
 
 func (l *Loader) setup(ctx context.Context, sc *protocol.Scenario, reset bool) {

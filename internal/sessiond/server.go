@@ -81,8 +81,10 @@ type Server struct {
 	wsCount atomic.Int64
 	done    chan struct{}
 	stateMu sync.Mutex
-	bg      sync.WaitGroup
-	addr    atomic.Value // string
+	// skipMu serialises rpc skip.
+	skipMu sync.Mutex
+	bg     sync.WaitGroup
+	addr   atomic.Value // string
 
 	fakeMu     sync.Mutex
 	fakeCancel context.CancelFunc
@@ -302,10 +304,12 @@ func (s *Server) wire() {
 	s.loader = &scenario.Loader{
 		Workspace: cfg.Workspace, Root: s.preview.Root(), CacheDir: filepath.Join(s.playgroundDir(), "cache"),
 		Fetch: fetch, Agent: s.agent, Restart: s.sup, Modules: s.modules, Engine: s.engine,
-		Checkpoint: s.stepCheckpoint,
-		Ready:      s.sup.WaitReady,
-		Emit:       func(ev protocol.Event) { s.bus.Publish(ev) },
-		Log:        log.With("component", "scenario"),
+		Checkpoint:  s.stepCheckpoint,
+		RestoreStep: s.restoreStep,
+		PlayDemo:    s.playDemo,
+		Ready:       s.sup.WaitReady,
+		Emit:        func(ev protocol.Event) { s.bus.Publish(ev) },
+		Log:         log.With("component", "scenario"),
 	}
 	s.eventsH = &events.Handler{Bus: s.bus, Hello: s.hello, Track: s.track, Done: s.done, Log: log}
 }

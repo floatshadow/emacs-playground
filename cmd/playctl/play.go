@@ -314,70 +314,13 @@ func (p *player) sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
-func (p *player) scaled(ms int) time.Duration {
-	s := p.speed
-	if s <= 0 {
-		s = 1
-	}
-	return time.Duration(float64(ms)/s) * time.Millisecond
-}
-
-// playDemo replays a demo string with the browser's DemoPlayer pacing
-// (frontend.md §7): one rpc keys per chord, typed text in chunks with
-// newlines sent as RET and tabs as TAB, pauses kept as written.
+// playDemo replays a demo string through rpc keys with playctl's pacing
+// (protocol.PlayDemo: 170 ms per chord, 70 ms per character, newlines as
+// RET and tabs as TAB, pauses kept as written).
 func (p *player) playDemo(ctx context.Context, demo string) error {
-	toks, err := protocol.ParseDemo(demo)
-	if err != nil {
-		return err
-	}
-	for _, t := range toks {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-		switch t.Kind {
-		case protocol.DemoKey:
-			if err := p.c.rpc(ctx, protocol.OpKeys, protocol.KeysRequest{Keys: t.Key}, nil); err != nil {
-				return fmt.Errorf("keys %s: %w", t.Key, err)
-			}
-			p.sleep(ctx, p.scaled(protocol.DemoChordDelayMs))
-		case protocol.DemoText:
-			for _, chunk := range splitText(t.Text) {
-				req := protocol.KeysRequest{Text: chunk}
-				switch chunk {
-				case "\n":
-					req = protocol.KeysRequest{Keys: "RET"}
-				case "\t":
-					req = protocol.KeysRequest{Keys: "TAB"}
-				}
-				if err := p.c.rpc(ctx, protocol.OpKeys, req, nil); err != nil {
-					return fmt.Errorf("text %q: %w", chunk, err)
-				}
-				p.sleep(ctx, p.scaled(protocol.DemoCharDelayMs*len([]rune(chunk))))
-			}
-		case protocol.DemoPause:
-			p.sleep(ctx, time.Duration(t.PauseMs)*time.Millisecond)
-		}
-	}
-	return nil
-}
-
-// splitText splits typed text into runs and single "\n" or "\t" elements.
-func splitText(s string) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' || s[i] == '\t' {
-			if i > start {
-				out = append(out, s[start:i])
-			}
-			out = append(out, s[i:i+1])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		out = append(out, s[start:])
-	}
-	return out
+	return protocol.PlayDemo(ctx, demo, p.speed, func(ctx context.Context, req protocol.KeysRequest) error {
+		return p.c.rpc(ctx, protocol.OpKeys, req, nil)
+	})
 }
 
 // awaitComplete polls rpc check until the step is complete, the engine has
