@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/events"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/gwclient"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/supervisor"
 )
 
@@ -141,11 +143,24 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 		if err := httpx.DecodeJSON(w, r, &req); err != nil {
 			return err
 		}
-		if req.LessonID == "" {
-			return httpx.BadRequest("lessonId is required")
+		if req.LessonID != "" && !gwclient.ValidLessonID(req.LessonID) {
+			return httpx.BadRequest("lessonId is not a valid lesson id")
 		}
+		// An empty lessonId forgets every lesson ("Start over").
 		s.engine.Drop(req.LessonID)
 		res = protocol.Empty{}
+	case protocol.OpDemo:
+		var req protocol.DemoRequest
+		if err := httpx.DecodeJSON(w, r, &req); err != nil {
+			return err
+		}
+		res, err = s.rpcDemo(ctx, req)
+	case protocol.OpSkip:
+		var req protocol.SkipRequest
+		if err := httpx.DecodeJSON(w, r, &req); err != nil {
+			return err
+		}
+		res, err = s.rpcSkip(ctx, req)
 	default:
 		return httpx.NotFound(fmt.Sprintf("unknown operation %q", op))
 	}
@@ -300,10 +315,11 @@ func (s *Server) rpcCheckpoint(ctx context.Context, req protocol.CheckpointReque
 	if len(label) > 200 {
 		return nil, httpx.BadRequest("label is limited to 200 characters")
 	}
-	sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	spec, _ := s.sup.Snapshot(sctx)
+	bufs, globals := s.bufferStates(sctx), s.globals(sctx)
 	cancel()
-	meta, err := s.ckpt.Take(ctx, checkpoint.ManualRef(label), label, nil, spec)
+	meta, err := s.ckpt.TakeWith(ctx, checkpoint.Meta{Ref: checkpoint.ManualRef(label), Label: label, Spec: spec, Buffers: bufs, Globals: globals})
 	if err != nil {
 		return nil, httpx.Internal("could not take the checkpoint").Wrap(err)
 	}
@@ -351,12 +367,36 @@ func (s *Server) rpcRestore(ctx context.Context, req protocol.RestoreRequest) (a
 	if err != nil {
 		return nil, err
 	}
-	n, meta, err := s.ckpt.Restore(ctx, ref)
+	n, meta, err := s.restoreCheckpoint(ctx, ref)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, httpx.NotFound("no such checkpoint")
 		}
 		return nil, httpx.Internal("restore failed").Wrap(err)
+	}
+	if meta.Step != nil {
+		s.engine.ResetTo(meta.Step.LessonID, meta.Step.StepID)
+	} else if lesson, step, ok := splitStepRef(ref); ok {
+		s.engine.ResetTo(lesson, step)
+	}
+	return protocol.RestoreResult{RestoredFiles: n}, nil
+}
+
+// restoreCheckpoint puts the workspace files back to ref and asks the agent
+// to restore the windows recorded with it (reset-step). The module set
+// (emacs.d/modules.el) is kept: modules only ever grow (emacs.md §4), and
+// the running Emacs has the current set loaded. A missing checkpoint is
+// os.ErrNotExist.
+func (s *Server) restoreCheckpoint(ctx context.Context, ref string) (int, checkpoint.Meta, error) {
+	mods := s.modules.Current()
+	n, meta, err := s.ckpt.Restore(ctx, ref)
+	if err != nil {
+		return 0, meta, err
+	}
+	if after := s.modules.Current(); !slices.Equal(after, mods) {
+		if err := s.modules.Write(mods); err != nil {
+			s.log.Warn("keeping modules.el across a restore", "err", err)
+		}
 	}
 	spec := meta.Spec
 	if spec == nil {
@@ -366,13 +406,155 @@ func (s *Server) rpcRestore(ctx context.Context, req protocol.RestoreRequest) (a
 		if err := s.agent.Call(ctx, protocol.AgentOpResetStep, protocol.AgentResetStepArgs{Spec: *spec}, 10*time.Second, nil); err != nil {
 			s.log.Warn("reset-step after restore", "err", err)
 		}
+		// reset-step put the buffers on the restored files; the edits
+		// that were unsaved when the checkpoint was taken, the undo
+		// histories and the session variables go back.
+		s.restoreBuffers(ctx, meta.Buffers, spec)
+		s.restoreGlobals(ctx, meta.Globals)
 	}
-	if meta.Step != nil {
-		s.engine.ResetTo(meta.Step.LessonID, meta.Step.StepID)
-	} else if lesson, step, ok := splitStepRef(ref); ok {
-		s.engine.ResetTo(lesson, step)
+	return n, meta, nil
+}
+
+// restoreStep restores a step's checkpoint for the scenario loader ("Go to
+// this step"): files and windows, no engine change (the loader activates
+// the step next). It reports false when the step has no checkpoint.
+func (s *Server) restoreStep(ctx context.Context, lessonID, stepID string) (bool, error) {
+	ref := checkpoint.StepRef(lessonID, stepID)
+	if !s.ckpt.Exists(ctx, ref) {
+		return false, nil
 	}
-	return protocol.RestoreResult{RestoredFiles: n}, nil
+	if _, _, err := s.restoreCheckpoint(ctx, ref); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+// restartIfDirty puts the active step back to its checkpoint when the
+// learner ran a command in it since it started or was last reset, without
+// counting a reset (demo start and skip, api.md §3.4). It reports whether
+// it restored.
+func (s *Server) restartIfDirty(ctx context.Context, act protocol.StepRef) bool {
+	if !s.engine.Dirty() {
+		return false
+	}
+	if _, _, err := s.restoreCheckpoint(ctx, checkpoint.StepRef(act.LessonID, act.StepID)); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			s.log.Warn("restoring the step before its demo", "lesson", act.LessonID, "step", act.StepID, "err", err)
+		}
+		return false
+	}
+	return s.engine.Restart(act.LessonID, act.StepID)
+}
+
+// rpcDemo brackets the browser's "Watch it" (api.md §3.4, §4.1).
+func (s *Server) rpcDemo(ctx context.Context, req protocol.DemoRequest) (any, error) {
+	if req.Phase != protocol.DemoStart && req.Phase != protocol.DemoEnd {
+		return nil, httpx.BadRequest("phase must be start or end")
+	}
+	act := s.engine.Active()
+	if act == nil || req.StepID == "" || act.StepID != req.StepID {
+		return nil, httpx.Conflict("that step is not the active step")
+	}
+	if req.Phase == protocol.DemoEnd {
+		if !s.engine.EndDemo(req.StepID) {
+			return nil, httpx.Conflict("that step is not the active step")
+		}
+		return protocol.DemoResult{}, nil
+	}
+	restored := s.restartIfDirty(ctx, *act)
+	if !s.engine.StartDemo(req.StepID) {
+		return nil, httpx.Conflict("that step is not the active step")
+	}
+	return protocol.DemoResult{Restored: restored}, nil
+}
+
+// SkipTimeout bounds rpc skip: the demo, the wait for its conditions and
+// the next step's checkpoint.
+const SkipTimeout = 60 * time.Second
+
+// skipSettle is how long rpc skip waits for the step's conditions after
+// its demo (file events, compilation output).
+const skipSettle = 8 * time.Second
+
+// rpcSkip does the active step for the learner ("Skip this step", api.md
+// §3.4): back to the step's checkpoint when commands ran, the step's demo
+// played into Emacs with completions held, then the step is recorded
+// skipped and the next one starts.
+func (s *Server) rpcSkip(ctx context.Context, req protocol.SkipRequest) (any, error) {
+	act := s.engine.Active()
+	if act == nil || req.StepID == "" || act.StepID != req.StepID {
+		return nil, httpx.Conflict("that step is not the active step")
+	}
+	if !s.skipMu.TryLock() {
+		return nil, httpx.Conflict("a skip is already running")
+	}
+	defer s.skipMu.Unlock()
+	// The skip finishes even when the browser goes away.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), SkipTimeout)
+	defer cancel()
+	var demo string
+	if sc := s.engine.Scenario(); sc != nil && sc.ID == act.LessonID {
+		if i := sc.StepIndex(act.StepID); i >= 0 {
+			demo = sc.Steps[i].Demo
+		}
+	}
+	s.restartIfDirty(ctx, *act)
+	if !s.engine.BeginSkip(act.StepID) {
+		return nil, httpx.Conflict("that step is not the active step")
+	}
+	completed := false
+	if demo != "" {
+		if err := s.playDemo(ctx, demo); err != nil {
+			s.log.Warn("skip: playing the demo", "lesson", act.LessonID, "step", act.StepID, "err", err)
+		}
+		completed = s.awaitComplete(ctx, act.StepID, skipSettle)
+		if !completed {
+			s.log.Warn("skip: the step's demo did not complete it (curriculum defect)", "lesson", act.LessonID, "step", act.StepID)
+		}
+	}
+	next, ok := s.engine.FinishSkip(ctx, act.StepID)
+	if !ok {
+		s.engine.AbortSkip()
+		return nil, httpx.Conflict("the step changed while it was being skipped")
+	}
+	return protocol.SkipResult{Next: next, DemoCompleted: completed}, nil
+}
+
+// awaitComplete evaluates the active step until its conditions hold, it is
+// no longer stepID, or d passes.
+func (s *Server) awaitComplete(ctx context.Context, stepID string, d time.Duration) bool {
+	deadline := time.Now().Add(d)
+	for {
+		res, ok := s.engine.Check(ctx)
+		if !ok || res.StepID != stepID {
+			return false
+		}
+		if res.Complete {
+			return true
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}
+
+// playDemo plays a demo string into the frame the learner sees, at
+// playctl's pacing (protocol.PlayDemo).
+func (s *Server) playDemo(ctx context.Context, demo string) error {
+	return protocol.PlayDemo(ctx, demo, 1, func(ctx context.Context, req protocol.KeysRequest) error {
+		if ok, reason := s.sup.Ready(); !ok {
+			return errors.New(reason)
+		}
+		return s.sup.SendKeys(ctx, "", req.Keys, req.Text)
+	})
 }
 
 // splitStepRef parses refs/playground/<part>/<lesson>/<step>.

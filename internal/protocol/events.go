@@ -350,16 +350,25 @@ func (*CheckEvent) Type() EventType { return EventCheck }
 // StepStatus is the status reported by StepEvent.
 type StepStatus string
 
-// Step statuses (architecture.md §5.3).
+// Step statuses (architecture.md §5.3, api.md §4.1).
 const (
 	StepLoaded   StepStatus = "loaded"
 	StepComplete StepStatus = "complete"
 	StepReset    StepStatus = "reset"
+	// StepDemonstrated: every condition held while the step's demo latch was
+	// set ("Watch it"); the step stays active.
+	StepDemonstrated StepStatus = "demonstrated"
+	// StepSkipped: the learner skipped the step; the next step's "loaded"
+	// follows (or LessonComplete on the last step).
+	StepSkipped StepStatus = "skipped"
+	// StepDropped: a progress reset forgot the active step; no step is
+	// active until the next scenario load.
+	StepDropped StepStatus = "dropped"
 )
 
-// StepEvent reports step transitions. After "complete" the engine advances
-// and emits "loaded" for the next step; for the last step it sets
-// LessonComplete instead.
+// StepEvent reports step transitions. After "complete" and "skipped" the
+// engine advances and emits "loaded" for the next step; for the last step it
+// sets LessonComplete instead.
 type StepEvent struct {
 	Envelope
 	LessonID string     `json:"lessonId"`
@@ -369,7 +378,8 @@ type StepEvent struct {
 	Index int `json:"index"`
 	// Count is the number of steps in the scenario.
 	Count int `json:"count"`
-	// LessonComplete is true on the "complete" event of the last step.
+	// LessonComplete is true on the "complete" or "skipped" event of the
+	// last step.
 	LessonComplete bool `json:"lessonComplete,omitempty"`
 }
 

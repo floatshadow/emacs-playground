@@ -65,7 +65,8 @@ pnpm 11 enforces a minimum release age for new versions; when it adds entries to
 | `make images`, `make image-gateway`, `make image-session` | build images |
 | `make dev` | session container on the host network, gateway from source, Vite on :5173 |
 | `make e2e` | browser smoke scenarios against the running local stack (`web/e2e/smoke.mjs`, needs Chrome on CDP :9222) |
-| `make curriculum-play` | replay every ready lesson's demos against the running stack (`playctl curriculum play all`) |
+| `make curriculum-play` | replay every ready lesson's demos twice against the running stack (`playctl curriculum play all -repeat 2`; progress reset afterwards) |
+| `make curriculum-watch` | replay Part 0 (`PART=…`) as "Watch it" demonstrations, then as the learner (`playctl curriculum play -watch`) |
 | `make emacs-test` | the agent's and the config's ERT tests inside the session image |
 | `make fonts` | web fonts for `make dev` into `.dev/fonts` (the gateway image's fonts stage) |
 | `make shell` | attach your terminal to the local session's Emacs (`tmux -L pg attach -t emacs`) |
@@ -132,12 +133,12 @@ go run ./cmd/playctl protocol typescript -o web/src/protocol.gen.ts [-check]
 go run ./cmd/playctl config check deploy/config.json
 go run ./cmd/playctl curriculum validate curriculum
 go run ./cmd/playctl curriculum build curriculum -o artifacts/curriculum [-lenient]   # -lenient drops broken lessons (test builds only)
-go run ./cmd/playctl curriculum play <lesson id | 2.3 | part:N | part dir | all> -session http://127.0.0.1:8080/s/local [-timeout 30s] [-speed 1]
+go run ./cmd/playctl curriculum play <lesson id | 2.3 | part:N | part dir | all> -session http://127.0.0.1:8080/s/local [-timeout 30s] [-speed 1] [-watch] [-repeat N] [-reset-progress=false]
 go run ./cmd/playctl fonts -o .dev/fonts
 python3 curriculum/tools/validate.py          # the curriculum agent's extra content checks (PyYAML)
 ```
 
-`curriculum play` loads each lesson through `/rpc/scenario`, plays every step's demo through `/rpc/keys` with the browser's pacing and requires each step to complete; it prints a table and exits non-zero on failures. The session URL is sessiond itself (`http://127.0.0.1:7000` under `make dev`) or the gateway's session path. Run it on a fresh workspace (`make reset-workspace`) for results that match a learner going through the course in order: configuration modules unlock monotonically (emacs.md §4), so a lesson replayed after later parts runs with more modules than its scenario lists.
+`curriculum play` loads each lesson through `/rpc/scenario`, plays every step's demo through `/rpc/keys` with playctl's pacing (170 ms per chord, 70 ms per character) and requires each step to complete; it prints a table, lists the failed steps with their unmet conditions again, and exits non-zero on failures. With a gateway session path (`…/s/<id>`) it resets each played lesson's progress afterwards (`-reset-progress=false` keeps it), so replays do not pose as the learner's progress. `-watch` first plays each step as the browser's "Watch it" (`demo start`, the demo, `demo end`), requires a `step demonstrated` event on `/events` with the step still active, resets it with `restore {}` and then plays the keys as the learner; `-repeat N` plays every lesson N times in a row. The session URL is sessiond itself (`http://127.0.0.1:7000` under `make dev`) or the gateway's session path. Run it on a fresh workspace (`make reset-workspace`) for results that match a learner going through the course in order: configuration modules unlock monotonically (emacs.md §4), so a lesson replayed after later parts runs with more modules than its scenario lists.
 
 ### Web (`web/`)
 
@@ -249,6 +250,16 @@ These refine the docs; the code is authoritative where they differ.
 ### Decisions for the newcomer-review fixes (2026-10-27)
 
 The triage of docs/feedback/2026-10-27-newcomer-review.md assigned every item to an area and fixed the contracts the fixes share: progress reset ("Start over"), "Watch it" as a demonstration (`demo` op, `demonstrated` status), "Skip this step" (`skip` op, `skipped` status) and nudge suppression. The contracts are in api.md (§2.4, §3.4, §4.1) and docs/feedback/2026-10-27-fix-plan.md §3; the decisions taken there (§4) refine the docs until each area updates its own: the backend lands the protocol additions first and regenerates `web/src/protocol.gen.ts`, and the smoke, review and replay scripts reset progress when they finish.
+
+Backend decisions from the fixes (backend.md §3.6, §3.8, §3.12):
+
+- The engine's debounce is trailing, 40 ms after the last trigger and at most 120 ms after the first (`steps.DefaultDebounce`, `DefaultDebounceMax`); key → `check` is about 50 ms.
+- "Go to this step" (`scenario {stepId}` for a step after the first, also the web's resume target) restores that step's checkpoint after the setup, else fast-forwards by replaying the earlier steps' demos into Emacs with the engine rehearsing them quietly (`Engine.Rehearse`), up to 10 s per step for its conditions and 3 minutes in all; the RPC returns when the step is active. The server-side demo player is `protocol.PlayDemo` (playctl pacing), shared by playctl, skip and the fast-forward.
+- Every checkpoint restore keeps `emacs.d/modules.el` (modules only grow); before, a step reset could put an older module set on disk under a running Emacs that had the newer one loaded.
+- Checkpoints also keep the unsaved text of file buffers and every file buffer's undo history (`checkpoint.Meta.Buffers`), and the Emacs session variables steps rely on (`sessiond.GlobalVars`: kill ring, minibuffer and search histories, keyboard macro and counters; `checkpoint.Meta.Globals`). Both are captured and restored through the agent's `eval` by `internal/sessiond/unsaved.go`, bounded, and a restore applies them after `reset-step`. A step often starts with the previous step's unsaved edit, since auto-save waits five seconds, and "Watch it" followed by "Do it yourself" must not leave the demo's kills, commands or macro counts behind. Add a variable to `GlobalVars` when a lesson depends on another piece of session state.
+- The tap drops a lone `ESC` (or other late key) whose bytes arrived before the agent's last command, and clears the pending prefix, instead of feeding it to the tracker: a silently pending `ESC` would turn the learner's next `C-x` into `C-M-x` in the tracker and hide that prefix.
+- Leaving GUI mode closes Emacs's X connections (`x-close-connection`) after deleting the X frames; if that fails, Xvnc keeps running rather than dropping under Emacs. Xvnc runs with `-AcceptSetDesktopSize=1`; the GUI frame command has no `fullscreen` parameter.
+- `playctl curriculum play` resets each played lesson's progress afterwards when `-session` is a gateway session path; `-watch` replays as demonstrations; `-repeat N`; `make curriculum-play` replays every lesson twice, `make curriculum-watch` Part 0 as demonstrations.
 
 ## 6. Slice 1 scope
 

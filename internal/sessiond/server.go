@@ -81,8 +81,10 @@ type Server struct {
 	wsCount atomic.Int64
 	done    chan struct{}
 	stateMu sync.Mutex
-	bg      sync.WaitGroup
-	addr    atomic.Value // string
+	// skipMu serialises rpc skip.
+	skipMu sync.Mutex
+	bg     sync.WaitGroup
+	addr   atomic.Value // string
 
 	fakeMu     sync.Mutex
 	fakeCancel context.CancelFunc
@@ -302,10 +304,12 @@ func (s *Server) wire() {
 	s.loader = &scenario.Loader{
 		Workspace: cfg.Workspace, Root: s.preview.Root(), CacheDir: filepath.Join(s.playgroundDir(), "cache"),
 		Fetch: fetch, Agent: s.agent, Restart: s.sup, Modules: s.modules, Engine: s.engine,
-		Checkpoint: s.stepCheckpoint,
-		Ready:      s.sup.WaitReady,
-		Emit:       func(ev protocol.Event) { s.bus.Publish(ev) },
-		Log:        log.With("component", "scenario"),
+		Checkpoint:  s.stepCheckpoint,
+		RestoreStep: s.restoreStep,
+		PlayDemo:    s.playDemo,
+		Ready:       s.sup.WaitReady,
+		Emit:        func(ev protocol.Event) { s.bus.Publish(ev) },
+		Log:         log.With("component", "scenario"),
 	}
 	s.eventsH = &events.Handler{Bus: s.bus, Hello: s.hello, Track: s.track, Done: s.done, Log: log}
 }
@@ -489,10 +493,12 @@ func (s *Server) stepCheckpoint(ctx context.Context, lessonID, stepID string, fo
 	if !force && s.ckpt.Exists(ctx, ref) {
 		return nil
 	}
-	sctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	spec, _ := s.sup.Snapshot(sctx)
+	bufs, globals := s.bufferStates(sctx), s.globals(sctx)
 	cancel()
-	meta, err := s.ckpt.Take(ctx, ref, lessonID+"/"+stepID, &protocol.StepRef{LessonID: lessonID, StepID: stepID}, spec)
+	meta, err := s.ckpt.TakeWith(ctx, checkpoint.Meta{Ref: ref, Label: lessonID + "/" + stepID,
+		Step: &protocol.StepRef{LessonID: lessonID, StepID: stepID}, Spec: spec, Buffers: bufs, Globals: globals})
 	if err != nil {
 		return err
 	}

@@ -3,6 +3,7 @@ package steps
 import (
 	"context"
 	"log/slog"
+	"maps"
 	"os"
 	"reflect"
 	"strings"
@@ -12,10 +13,14 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
-// Timing (backend.md §3.8).
+// Timing (backend.md §3.8). An evaluation runs DefaultDebounce after the
+// last trigger of a burst (a key event and the state that follows it a few
+// milliseconds later), but never later than DefaultDebounceMax after the
+// burst's first trigger, so a stream of events cannot postpone it.
 const (
-	DefaultDebounce = 150 * time.Millisecond
-	DefaultTick     = 2 * time.Second
+	DefaultDebounce    = 40 * time.Millisecond
+	DefaultDebounceMax = 120 * time.Millisecond
+	DefaultTick        = 2 * time.Second
 )
 
 // QuitCommands count towards quits_in_window.
@@ -49,10 +54,36 @@ type Saved struct {
 // LessonState is the progress of one lesson.
 type LessonState struct {
 	// Done maps step id to completion time (ms).
-	Done   map[string]int64 `json:"done,omitempty"`
-	Hints  map[string]int   `json:"hints,omitempty"`
-	Resets map[string]int   `json:"resets,omitempty"`
+	Done map[string]int64 `json:"done,omitempty"`
+	// Skipped maps step id to the time the learner skipped it (ms).
+	Skipped map[string]int64 `json:"skipped,omitempty"`
+	// Demonstrated maps step id to the time a "Watch it" demonstration
+	// completed it (ms).
+	Demonstrated map[string]int64 `json:"demonstrated,omitempty"`
+	Hints        map[string]int   `json:"hints,omitempty"`
+	Resets       map[string]int   `json:"resets,omitempty"`
 }
+
+// finished reports whether resuming the lesson passes over stepID: done and
+// skipped steps are finished, a demonstrated one is practised (api.md §2.4).
+func (ls *LessonState) finished(stepID string) bool {
+	return ls != nil && (ls.Done[stepID] != 0 || ls.Skipped[stepID] != 0)
+}
+
+// hold says what the engine does when the active step's conditions hold.
+type hold int
+
+const (
+	// holdNone: record the completion (done, or demonstrated under the
+	// demo latch) and advance.
+	holdNone hold = iota
+	// holdSkip: a skip is replaying the step's demo; nothing is recorded
+	// until FinishSkip, but check events flow.
+	holdSkip
+	// holdQuiet: a "Go to this step" fast-forward replays earlier steps;
+	// nothing is recorded or emitted.
+	holdQuiet
+)
 
 // Options configure an Engine.
 type Options struct {
@@ -66,10 +97,13 @@ type Options struct {
 	Log       *slog.Logger
 	// Locale selects nudge text from localised strings (default "en").
 	Locale string
-	// Now, Debounce and Tick are overridable for tests.
-	Now      func() time.Time
-	Debounce time.Duration
-	Tick     time.Duration
+	// Now, Debounce, DebounceMax and Tick are overridable for tests.
+	// DebounceMax defaults to DefaultDebounceMax with the default debounce,
+	// else to three times Debounce.
+	Now         func() time.Time
+	Debounce    time.Duration
+	DebounceMax time.Duration
+	Tick        time.Duration
 }
 
 // Engine evaluates the active step. Methods are safe for concurrent use.
@@ -96,6 +130,18 @@ type Engine struct {
 	nudged       map[string]bool
 	reported     map[string]bool
 	saved        Saved
+	// commands counts agent key events since the step started or was last
+	// reset ("did the learner do anything here?").
+	commands int
+	// demoLatch is set by StartDemo: a completion is then recorded as
+	// demonstrated, not done, and the step stays active. demoPlaying is
+	// true between StartDemo and EndDemo (stuck rules wait).
+	// demonstrated is set once the demonstrated event went out for the
+	// latch. All three clear when the step (re)starts.
+	demoLatch    bool
+	demoPlaying  bool
+	demonstrated bool
+	hold         hold
 
 	shellCache shellCache
 	patterns   patternCache
@@ -110,6 +156,12 @@ func New(opt Options) *Engine {
 	}
 	if opt.Debounce <= 0 {
 		opt.Debounce = DefaultDebounce
+		if opt.DebounceMax <= 0 {
+			opt.DebounceMax = DefaultDebounceMax
+		}
+	}
+	if opt.DebounceMax < opt.Debounce {
+		opt.DebounceMax = 3 * opt.Debounce
 	}
 	if opt.Tick <= 0 {
 		opt.Tick = DefaultTick
@@ -153,17 +205,10 @@ func (e *Engine) savedLocked() Saved {
 		out.Active = &a
 	}
 	for id, ls := range e.saved.Lessons {
-		c := &LessonState{Done: map[string]int64{}, Hints: map[string]int{}, Resets: map[string]int{}}
-		for k, v := range ls.Done {
-			c.Done[k] = v
+		out.Lessons[id] = &LessonState{
+			Done: maps.Clone(ls.Done), Skipped: maps.Clone(ls.Skipped), Demonstrated: maps.Clone(ls.Demonstrated),
+			Hints: maps.Clone(ls.Hints), Resets: maps.Clone(ls.Resets),
 		}
-		for k, v := range ls.Hints {
-			c.Hints[k] = v
-		}
-		for k, v := range ls.Resets {
-			c.Resets[k] = v
-		}
-		out.Lessons[id] = c
 	}
 	return out
 }
@@ -177,6 +222,12 @@ func (e *Engine) lesson(id string) *LessonState {
 	if ls.Done == nil {
 		ls.Done = map[string]int64{}
 	}
+	if ls.Skipped == nil {
+		ls.Skipped = map[string]int64{}
+	}
+	if ls.Demonstrated == nil {
+		ls.Demonstrated = map[string]int64{}
+	}
 	if ls.Hints == nil {
 		ls.Hints = map[string]int{}
 	}
@@ -186,14 +237,15 @@ func (e *Engine) lesson(id string) *LessonState {
 	return ls
 }
 
-// FirstIncomplete returns the index of the first step of sc not yet done
-// according to saved progress, or 0 when every step is done.
+// FirstIncomplete returns the index of the first step of sc that is neither
+// done nor skipped according to saved progress, or 0 when every step is.
+// A demonstrated step is resumed so the learner practises it (api.md §2.4).
 func (e *Engine) FirstIncomplete(sc *protocol.Scenario) int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	ls := e.saved.Lessons[sc.ID]
 	for i := range sc.Steps {
-		if ls == nil || ls.Done[sc.Steps[i].ID] == 0 {
+		if !ls.finished(sc.Steps[i].ID) {
 			return i
 		}
 	}
@@ -216,7 +268,7 @@ func (e *Engine) Active() *protocol.StepRef {
 }
 
 func (e *Engine) activeLocked() *protocol.StepRef {
-	if e.sc == nil || e.idx < 0 || e.idx >= len(e.sc.Steps) {
+	if e.sc == nil || e.idx < 0 || e.idx >= len(e.sc.Steps) || e.hold == holdQuiet {
 		return nil
 	}
 	return &protocol.StepRef{LessonID: e.sc.ID, StepID: e.sc.Steps[e.idx].ID}
@@ -245,6 +297,7 @@ func (e *Engine) Activate(sc *protocol.Scenario, idx int) protocol.StepRef {
 	if idx < 0 || idx >= len(sc.Steps) {
 		idx = 0
 	}
+	e.hold = holdNone
 	evs := e.startStepLocked(idx, protocol.StepLoaded)
 	ref := *e.activeLocked()
 	saved := e.savedLocked()
@@ -257,12 +310,32 @@ func (e *Engine) Activate(sc *protocol.Scenario, idx int) protocol.StepRef {
 	return ref
 }
 
+// Rehearse makes step idx of sc active without recording or emitting
+// anything: completions are not recorded, check, step and nudge events
+// are not emitted, progress is neither reported nor persisted. The scenario
+// loader uses it to replay the steps before the one "Go to this step" asked
+// for, evaluating each step's conditions after its demo (Check); Activate
+// ends it. Command counts restart for the step as with Activate.
+func (e *Engine) Rehearse(sc *protocol.Scenario, idx int) {
+	sc.AssignIDs()
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.sc == nil || e.sc.ID != sc.ID {
+		e.lessonCounts = map[string]int{}
+	}
+	e.sc = sc
+	e.hold = holdQuiet
+	e.startStepLocked(idx, protocol.StepLoaded)
+}
+
 // startStepLocked resets per-step state and returns the step event.
 func (e *Engine) startStepLocked(idx int, status protocol.StepStatus) []protocol.Event {
 	e.idx = idx
 	e.gen++
 	e.startedAt = e.opt.Now()
 	e.counts = map[string]int{}
+	e.commands = 0
+	e.demoLatch, e.demoPlaying, e.demonstrated = false, false, false
 	e.lastResults = nil
 	e.lastComplete = false
 	e.nudged = map[string]bool{}
@@ -271,6 +344,9 @@ func (e *Engine) startStepLocked(idx int, status protocol.StepStatus) []protocol
 	e.lastUnbound = ""
 	e.shellCache.clear()
 	if e.sc == nil || idx >= len(e.sc.Steps) {
+		return nil
+	}
+	if e.hold == holdQuiet {
 		return nil
 	}
 	e.saved.Active = &protocol.StepRef{LessonID: e.sc.ID, StepID: e.sc.Steps[idx].ID}
@@ -288,44 +364,86 @@ func (e *Engine) inProgressLocked() []protocol.ProgressReport {
 	}
 	key := a.LessonID + "\x00" + a.StepID
 	ls := e.saved.Lessons[a.LessonID]
-	if e.reported[key] || (ls != nil && ls.Done[a.StepID] != 0) {
+	if e.reported[key] || ls.finished(a.StepID) || (ls != nil && ls.Demonstrated[a.StepID] != 0) {
 		return nil
 	}
 	e.reported[key] = true
 	return []protocol.ProgressReport{{LessonID: a.LessonID, StepID: a.StepID, Status: protocol.ProgressInProgress, At: e.opt.Now().UnixMilli()}}
 }
 
+// statusOf is the saved status of a step, for reports that carry it along
+// (hints): done, skipped, demonstrated or in-progress.
+func statusOf(ls *LessonState, stepID string) protocol.ProgressStatus {
+	switch {
+	case ls == nil:
+		return protocol.ProgressInProgress
+	case ls.Done[stepID] != 0:
+		return protocol.ProgressDone
+	case ls.Skipped[stepID] != 0:
+		return protocol.ProgressSkipped
+	case ls.Demonstrated[stepID] != 0:
+		return protocol.ProgressDemonstrated
+	}
+	return protocol.ProgressInProgress
+}
+
 // Drop forgets the active step when it belongs to lessonID, and the lesson's
-// saved progress (the gateway reset it).
+// saved progress (the gateway reset it). With an empty lessonID it forgets
+// every lesson's progress and the active step whatever its lesson ("Start
+// over"). A forgotten active step emits step {status: dropped}. It reports
+// whether an active step was forgotten.
 func (e *Engine) Drop(lessonID string) bool {
 	e.mu.Lock()
-	dropped := false
-	if e.sc != nil && e.sc.ID == lessonID {
+	var evs []protocol.Event
+	if e.sc != nil && (lessonID == "" || e.sc.ID == lessonID) {
+		if a := e.activeLocked(); a != nil {
+			evs = append(evs, &protocol.StepEvent{LessonID: a.LessonID, StepID: a.StepID, Status: protocol.StepDropped,
+				Index: e.idx, Count: len(e.sc.Steps)})
+		}
 		e.sc = nil
 		e.idx = -1
 		e.gen++
+		e.hold = holdNone
+		e.demoLatch, e.demoPlaying, e.demonstrated = false, false, false
 		e.saved.Active = nil
-		dropped = true
 	}
-	delete(e.saved.Lessons, lessonID)
-	for k := range e.reported {
-		if strings.HasPrefix(k, lessonID+"\x00") {
-			delete(e.reported, k)
+	if lessonID == "" {
+		e.saved.Lessons = map[string]*LessonState{}
+		e.reported = map[string]bool{}
+	} else {
+		delete(e.saved.Lessons, lessonID)
+		for k := range e.reported {
+			if strings.HasPrefix(k, lessonID+"\x00") {
+				delete(e.reported, k)
+			}
 		}
 	}
 	saved := e.savedLocked()
 	e.mu.Unlock()
+	e.emit(evs...)
 	e.persist(saved)
-	return dropped
+	return len(evs) > 0
 }
 
 // ResetTo restarts step stepID of the active lesson after its checkpoint was
-// restored: counters clear, the reset count increments and is reported, and
-// step {status: reset} is emitted. It returns false when the step is not
-// part of the active lesson.
+// restored ("Reset this step", "Do it yourself"): counters clear, the demo
+// latch clears, the reset count increments and is reported, and step
+// {status: reset} is emitted. It returns false when the step is not part of
+// the active lesson.
 func (e *Engine) ResetTo(lessonID, stepID string) bool {
+	return e.restart(lessonID, stepID, true)
+}
+
+// Restart is ResetTo without counting a reset: "Watch it" and "Skip this
+// step" put a step back to its checkpoint before playing its demo (api.md
+// §3.4).
+func (e *Engine) Restart(lessonID, stepID string) bool {
+	return e.restart(lessonID, stepID, false)
+}
+
+func (e *Engine) restart(lessonID, stepID string, count bool) bool {
 	e.mu.Lock()
-	if e.sc == nil || e.sc.ID != lessonID {
+	if e.sc == nil || e.sc.ID != lessonID || e.hold == holdQuiet {
 		e.mu.Unlock()
 		return false
 	}
@@ -335,21 +453,137 @@ func (e *Engine) ResetTo(lessonID, stepID string) bool {
 		return false
 	}
 	ls := e.lesson(lessonID)
-	ls.Resets[stepID]++
+	if count {
+		ls.Resets[stepID]++
+	}
 	delete(ls.Done, stepID)
+	delete(ls.Skipped, stepID)
+	delete(ls.Demonstrated, stepID)
 	evs := e.startStepLocked(idx, protocol.StepReset)
 	resets, hints := ls.Resets[stepID], ls.Hints[stepID]
-	rep := protocol.ProgressReport{LessonID: lessonID, StepID: stepID, Status: protocol.ProgressInProgress, Resets: &resets, At: e.opt.Now().UnixMilli()}
+	rep := protocol.ProgressReport{LessonID: lessonID, StepID: stepID, Status: protocol.ProgressInProgress, At: e.opt.Now().UnixMilli()}
+	if resets > 0 {
+		rep.Resets = &resets
+	}
 	if hints > 0 {
 		rep.HintsUsed = &hints
 	}
 	saved := e.savedLocked()
 	e.mu.Unlock()
 	e.emit(evs...)
-	e.report(rep)
+	if count {
+		e.report(rep)
+	}
 	e.persist(saved)
 	e.Trigger()
 	return true
+}
+
+// Dirty reports whether the learner ran a command in the active step since
+// it started or was last reset (demo start and skip restore the checkpoint
+// first when it is).
+func (e *Engine) Dirty() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.commands > 0
+}
+
+// StartDemo sets the demo latch of the active step stepID (rpc demo start,
+// api.md §4.1): until the step restarts, a completion is recorded as
+// demonstrated and the step stays active. It returns false when stepID is
+// not the active step.
+func (e *Engine) StartDemo(stepID string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	a := e.activeLocked()
+	if a == nil || a.StepID != stepID || e.hold != holdNone {
+		return false
+	}
+	e.demoLatch, e.demoPlaying = true, true
+	return true
+}
+
+// EndDemo clears the playing flag (rpc demo end); the latch stays. It
+// returns false when stepID is not the active step.
+func (e *Engine) EndDemo(stepID string) bool {
+	e.mu.Lock()
+	a := e.activeLocked()
+	ok := a != nil && a.StepID == stepID
+	if ok {
+		e.demoPlaying = false
+	}
+	e.mu.Unlock()
+	if ok {
+		e.Trigger()
+	}
+	return ok
+}
+
+// Latched reports whether the active step's demo latch is set.
+func (e *Engine) Latched() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.demoLatch
+}
+
+// BeginSkip holds completions of the active step stepID while a skip replays
+// its demo (rpc skip). It returns false when stepID is not the active step
+// or another skip runs.
+func (e *Engine) BeginSkip(stepID string) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	a := e.activeLocked()
+	if a == nil || a.StepID != stepID || e.hold != holdNone {
+		return false
+	}
+	e.hold = holdSkip
+	e.demoLatch, e.demoPlaying, e.demonstrated = false, false, false
+	return true
+}
+
+// AbortSkip releases a hold taken by BeginSkip without skipping.
+func (e *Engine) AbortSkip() {
+	e.mu.Lock()
+	if e.hold == holdSkip {
+		e.hold = holdNone
+	}
+	e.mu.Unlock()
+	e.Trigger()
+}
+
+// FinishSkip records the active step stepID as skipped, emits step
+// {status: skipped}, takes the next step's checkpoint and activates it
+// (step loaded), like a completion. It returns the next step's id (nil
+// after the last step) and false when stepID is no longer the active step.
+func (e *Engine) FinishSkip(ctx context.Context, stepID string) (*string, bool) {
+	e.mu.Lock()
+	if e.hold == holdSkip {
+		e.hold = holdNone
+	}
+	a := e.activeLocked()
+	if a == nil || a.StepID != stepID {
+		e.mu.Unlock()
+		return nil, false
+	}
+	sc, idx := e.sc, e.idx
+	now := e.opt.Now()
+	ls := e.lesson(sc.ID)
+	ls.Skipped[stepID] = now.UnixMilli()
+	rep := protocol.ProgressReport{LessonID: sc.ID, StepID: stepID, Status: protocol.ProgressSkipped, At: now.UnixMilli()}
+	if h := ls.Hints[stepID]; h > 0 {
+		rep.HintsUsed = &h
+	}
+	if r := ls.Resets[stepID]; r > 0 {
+		rep.Resets = &r
+	}
+	last := idx+1 >= len(sc.Steps)
+	ev := &protocol.StepEvent{LessonID: sc.ID, StepID: stepID, Status: protocol.StepSkipped, Index: idx, Count: len(sc.Steps), LessonComplete: last}
+	next := e.advanceLocked(ctx, sc, idx, []protocol.Event{ev}, rep)
+	if next == nil {
+		return nil, true
+	}
+	id := next.ID
+	return &id, true
 }
 
 // Hint records that hint level was shown for stepID of the active lesson.
@@ -367,12 +601,8 @@ func (e *Engine) Hint(stepID string, level int) bool {
 		return true
 	}
 	ls.Hints[stepID] = level
-	status := protocol.ProgressInProgress
-	if ls.Done[stepID] != 0 {
-		status = protocol.ProgressDone
-	}
 	hints := level
-	rep := protocol.ProgressReport{LessonID: lessonID, StepID: stepID, Status: status, HintsUsed: &hints, At: e.opt.Now().UnixMilli()}
+	rep := protocol.ProgressReport{LessonID: lessonID, StepID: stepID, Status: statusOf(ls, stepID), HintsUsed: &hints, At: e.opt.Now().UnixMilli()}
 	if r := ls.Resets[stepID]; r > 0 {
 		rep.Resets = &r
 	}
@@ -391,6 +621,7 @@ func (e *Engine) OnKey(ev *protocol.KeyEvent) {
 		e.counts[ev.Cmd]++
 		e.lessonCounts[ev.Cmd]++
 	}
+	e.commands++
 	e.lastKeyAt = now
 	if QuitCommands[ev.Cmd] {
 		e.quits = append(e.quits, now)
@@ -455,13 +686,16 @@ func (e *Engine) Trigger() {
 	}
 }
 
-// Run evaluates on triggers (at most once per Debounce) and on every Tick
-// until ctx ends.
+// Run evaluates on triggers and on every Tick until ctx ends. Triggers are
+// debounced on the trailing edge: the evaluation runs Debounce after the
+// last trigger of a burst, and at the latest DebounceMax after its first
+// (backend.md §3.8).
 func (e *Engine) Run(ctx context.Context) {
 	tick := time.NewTicker(e.opt.Tick)
 	defer tick.Stop()
 	var timer *time.Timer
 	var timerC <-chan time.Time
+	var first time.Time
 	defer func() {
 		if timer != nil {
 			timer.Stop()
@@ -472,14 +706,21 @@ func (e *Engine) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-e.trigger:
+			now := time.Now()
 			if timerC == nil {
-				if timer == nil {
-					timer = time.NewTimer(e.opt.Debounce)
-				} else {
-					timer.Reset(e.opt.Debounce)
-				}
-				timerC = timer.C
+				first = now
 			}
+			wait := e.opt.Debounce
+			if left := first.Add(e.opt.DebounceMax).Sub(now); left < wait {
+				wait = max(left, 0)
+			}
+			if timer == nil {
+				timer = time.NewTimer(wait)
+			} else {
+				timer.Stop()
+				timer.Reset(wait)
+			}
+			timerC = timer.C
 		case <-timerC:
 			timerC = nil
 			e.evaluate(ctx, false)
@@ -581,18 +822,54 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 		e.lastComplete = complete
 		evs = append(evs, &protocol.CheckEvent{LessonID: sc.ID, StepID: step.ID, Conditions: results, Complete: complete})
 	}
-	if !complete {
-		evs = append(evs, e.stuckLocked(step, now)...)
+	switch {
+	case e.hold == holdQuiet:
+		// A fast-forward rehearses the step: nothing goes out.
+		e.mu.Unlock()
+		return out, true
+	case !complete:
+		if !e.demoPlaying && e.hold == holdNone {
+			evs = append(evs, e.stuckLocked(step, now)...)
+		}
 		e.mu.Unlock()
 		e.emit(evs...)
+		return out, true
+	case e.hold == holdSkip:
+		// A skip is replaying the demo; FinishSkip records the step.
+		e.mu.Unlock()
+		e.emit(evs...)
+		return out, true
+	case e.demoLatch:
+		// "Watch it": the demonstration completed the step. Record it once
+		// as demonstrated; the step stays active for the learner.
+		if e.demonstrated {
+			e.mu.Unlock()
+			e.emit(evs...)
+			return out, true
+		}
+		e.demonstrated = true
+		ls := e.lesson(sc.ID)
+		ls.Demonstrated[step.ID] = now.UnixMilli()
+		evs = append(evs, &protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepDemonstrated, Index: idx, Count: len(sc.Steps)})
+		rep := protocol.ProgressReport{LessonID: sc.ID, StepID: step.ID, Status: protocol.ProgressDemonstrated, At: now.UnixMilli()}
+		if h := ls.Hints[step.ID]; h > 0 {
+			rep.HintsUsed = &h
+		}
+		if r := ls.Resets[step.ID]; r > 0 {
+			rep.Resets = &r
+		}
+		saved := e.savedLocked()
+		e.mu.Unlock()
+		e.emit(evs...)
+		e.report(rep)
+		e.persist(saved)
 		return out, true
 	}
 
 	// Complete: record, advance.
 	ls := e.lesson(sc.ID)
 	ls.Done[step.ID] = now.UnixMilli()
-	next := idx + 1
-	last := next >= len(sc.Steps)
+	last := idx+1 >= len(sc.Steps)
 	evs = append(evs, &protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepComplete, Index: idx, Count: len(sc.Steps), LessonComplete: last})
 	rep := protocol.ProgressReport{LessonID: sc.ID, StepID: step.ID, Status: protocol.ProgressDone, At: now.UnixMilli()}
 	if h := ls.Hints[step.ID]; h > 0 {
@@ -601,6 +878,18 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 	if r := ls.Resets[step.ID]; r > 0 {
 		rep.Resets = &r
 	}
+	e.advanceLocked(ctx, sc, idx, evs, rep)
+	return out, true
+}
+
+// advanceLocked finishes step idx of sc (completed or skipped): it emits
+// evs, reports rep, takes the next step's checkpoint and activates it
+// (step loaded). After the last step no step is active. It is called with
+// e.mu held and returns with it released; the result is the step now
+// active (nil after the last step, or when the scenario changed meanwhile).
+func (e *Engine) advanceLocked(ctx context.Context, sc *protocol.Scenario, idx int, evs []protocol.Event, rep protocol.ProgressReport) *protocol.Step {
+	next := idx + 1
+	last := next >= len(sc.Steps)
 	var nextStep *protocol.Step
 	if last {
 		e.idx = next
@@ -617,15 +906,15 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 	e.report(rep)
 	e.persist(saved)
 	if last {
-		return out, true
+		return nil
 	}
 	if nextStep.TakesCheckpoint() && e.opt.Hooks.Checkpoint != nil {
 		e.opt.Hooks.Checkpoint(ctx, sc.ID, nextStep.ID)
 	}
 	e.mu.Lock()
-	if e.sc != sc {
+	if e.sc != sc || e.idx != -1 {
 		e.mu.Unlock()
-		return out, true
+		return nil
 	}
 	loaded := e.startStepLocked(next, protocol.StepLoaded)
 	reports := e.inProgressLocked()
@@ -635,7 +924,7 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 	e.report(reports...)
 	e.persist(saved)
 	e.Trigger()
-	return out, true
+	return nextStep
 }
 
 // stuckLocked evaluates the step's stuck rules (edge-triggered: a rule

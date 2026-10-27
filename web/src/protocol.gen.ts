@@ -51,6 +51,11 @@ export const CondAll = "all" satisfies ConditionKind;
 export const CondAny = "any" satisfies ConditionKind;
 export const CondNot = "not" satisfies ConditionKind;
 
+/** DemoPhase is the phase of a "Watch it" demonstration. */
+export type DemoPhase = "start" | "end";
+export const DemoStart = "start" satisfies DemoPhase;
+export const DemoEnd = "end" satisfies DemoPhase;
+
 /** DemoTokenKind is the kind of a demo string token. */
 export type DemoTokenKind = "key" | "text" | "pause";
 export const DemoKey = "key" satisfies DemoTokenKind;
@@ -174,9 +179,11 @@ export const PrefixFromTap = "tap" satisfies PrefixSource;
 export const PrefixFromAgent = "agent" satisfies PrefixSource;
 
 /** ProgressStatus is the status of a lesson or step in progress records. */
-export type ProgressStatus = "not-started" | "in-progress" | "done";
+export type ProgressStatus = "not-started" | "in-progress" | "demonstrated" | "skipped" | "done";
 export const ProgressNotStarted = "not-started" satisfies ProgressStatus;
 export const ProgressInProgress = "in-progress" satisfies ProgressStatus;
+export const ProgressDemonstrated = "demonstrated" satisfies ProgressStatus;
+export const ProgressSkipped = "skipped" satisfies ProgressStatus;
 export const ProgressDone = "done" satisfies ProgressStatus;
 
 /**
@@ -191,7 +198,7 @@ export const PtyReplaced = "replaced" satisfies PtyControlType;
 export const PtyPong = "pong" satisfies PtyControlType;
 
 /** RPCOp names a session RPC: POST /s/{id}/rpc/{op} (api.md §3.4). */
-export type RPCOp = "keys" | "eval" | "rescue" | "scenario" | "check" | "hint" | "checkpoint" | "checkpoints" | "restore" | "mode" | "modules" | "restart-emacs" | "stuck" | "status" | "describe" | "drop-step" | "open";
+export type RPCOp = "keys" | "eval" | "rescue" | "scenario" | "check" | "hint" | "checkpoint" | "checkpoints" | "restore" | "mode" | "modules" | "restart-emacs" | "stuck" | "status" | "describe" | "drop-step" | "open" | "demo" | "skip";
 export const OpKeys = "keys" satisfies RPCOp;
 export const OpEval = "eval" satisfies RPCOp;
 export const OpRescue = "rescue" satisfies RPCOp;
@@ -209,6 +216,8 @@ export const OpStatus = "status" satisfies RPCOp;
 export const OpDescribe = "describe" satisfies RPCOp;
 export const OpDropStep = "drop-step" satisfies RPCOp;
 export const OpOpen = "open" satisfies RPCOp;
+export const OpDemo = "demo" satisfies RPCOp;
+export const OpSkip = "skip" satisfies RPCOp;
 
 /** SessionBackend selects how sessions are provided. */
 export type SessionBackend = "static" | "docker";
@@ -248,10 +257,13 @@ export const VSplit = "vsplit" satisfies SplitKind;
 export const HSplit = "hsplit" satisfies SplitKind;
 
 /** StepStatus is the status reported by StepEvent. */
-export type StepStatus = "loaded" | "complete" | "reset";
+export type StepStatus = "loaded" | "complete" | "reset" | "demonstrated" | "skipped" | "dropped";
 export const StepLoaded = "loaded" satisfies StepStatus;
 export const StepComplete = "complete" satisfies StepStatus;
 export const StepReset = "reset" satisfies StepStatus;
+export const StepDemonstrated = "demonstrated" satisfies StepStatus;
+export const StepSkipped = "skipped" satisfies StepStatus;
+export const StepDropped = "dropped" satisfies StepStatus;
 
 /** UserKind says how a user authenticated. */
 export type UserKind = "local" | "invite" | "oidc";
@@ -616,6 +628,23 @@ export interface CurriculumIndex {
   tables: Tables;
 }
 
+/**
+ * DemoRequest brackets the browser's "Watch it" (api.md §3.4, §4.1). The
+ * RPC fails with ErrConflict unless StepID is the active step.
+ */
+export interface DemoRequest {
+  stepId: string;
+  phase: DemoPhase;
+}
+
+/**
+ * DemoResult reports whether demo start restored the step's checkpoint
+ * first (a command ran since the step started or was last reset).
+ */
+export interface DemoResult {
+  restored: boolean;
+}
+
 /** DemoToken is one element of a step's demo string. */
 export interface DemoToken {
   kind: DemoTokenKind;
@@ -659,11 +688,14 @@ export interface Diagnostic {
 }
 
 /**
- * DropStepRequest tells sessiond to forget the active step if it belongs to
- * LessonID (sent by the gateway after POST /progress/reset).
+ * DropStepRequest tells sessiond to forget saved progress after
+ * POST /progress/reset (sent by the gateway). With LessonID it forgets that
+ * lesson's progress and the active step if it belongs to the lesson; with an
+ * empty LessonID it forgets all progress and the active step. A forgotten
+ * active step emits a StepEvent with status StepDropped.
  */
 export interface DropStepRequest {
-  lessonId: string;
+  lessonId?: string;
 }
 
 /** EchoEvent is an echo-area message the agent did not filter as noise. */
@@ -1047,10 +1079,12 @@ export interface LessonFront {
 
 /**
  * LessonProgress is the progress of one lesson. Status is done when every
- * step of the lesson's scenario is done.
+ * step of the lesson's scenario is done, in-progress when any step is above
+ * not-started, else not-started.
  */
 export interface LessonProgress {
   status: ProgressStatus;
+  counts: ProgressCounts;
   steps: Record<string, StepProgress>;
 }
 
@@ -1334,6 +1368,18 @@ export interface Progress {
   updatedAt: number;
 }
 
+/** ProgressCounts counts a lesson's steps by status. */
+export interface ProgressCounts {
+  done: number;
+  demonstrated: number;
+  skipped: number;
+  /**
+   * Total is the number of steps in the bundle's scenario (0 when the
+   * lesson is not in the loaded bundle).
+   */
+  total: number;
+}
+
 /**
  * ProgressReport is POST /internal/sessions/{id}/progress from sessiond.
  * HintsUsed and Resets, when present, are the step's absolute totals since
@@ -1352,9 +1398,12 @@ export interface ProgressReport {
   at?: number;
 }
 
-/** ProgressResetRequest is POST /api/v1/progress/reset. */
+/**
+ * ProgressResetRequest is POST /api/v1/progress/reset. An empty LessonID
+ * (or no body at all) clears every lesson of the user ("Start over").
+ */
 export interface ProgressResetRequest {
-  lessonId: string;
+  lessonId?: string;
 }
 
 /** ProjectRef is a project entry (CURRICULUM.md Part 14). */
@@ -1626,6 +1675,30 @@ export interface ShellCond {
 }
 
 /**
+ * SkipRequest asks sessiond to do the active step for the learner ("Skip
+ * this step", api.md §3.4). The RPC fails with ErrConflict unless StepID is
+ * the active step. Not idempotent.
+ */
+export interface SkipRequest {
+  stepId: string;
+}
+
+/** SkipResult names the step now active. */
+export interface SkipResult {
+  /**
+   * Next is the id of the step loaded after the skipped one, or null when
+   * the skipped step was the last (the lesson is complete).
+   */
+  next: string | null;
+  /**
+   * DemoCompleted is true when the step's conditions held after sessiond
+   * played its demo (false means a curriculum defect; the step is skipped
+   * anyway).
+   */
+  demoCompleted: boolean;
+}
+
+/**
  * State is the snapshot of the selected window's buffer and the frame layout
  * that the agent emits after commands and UI changes (api.md §5, emacs.md
  * §10.2). sessiond forwards it unchanged apart from stamping seq and ts.
@@ -1740,9 +1813,9 @@ export interface Step {
 }
 
 /**
- * StepEvent reports step transitions. After "complete" the engine advances
- * and emits "loaded" for the next step; for the last step it sets
- * LessonComplete instead.
+ * StepEvent reports step transitions. After "complete" and "skipped" the
+ * engine advances and emits "loaded" for the next step; for the last step it
+ * sets LessonComplete instead.
  */
 export interface StepEvent {
   t: "step";
@@ -1755,7 +1828,10 @@ export interface StepEvent {
   index: number;
   /** Count is the number of steps in the scenario. */
   count: number;
-  /** LessonComplete is true on the "complete" event of the last step. */
+  /**
+   * LessonComplete is true on the "complete" or "skipped" event of the
+   * last step.
+   */
   lessonComplete?: boolean;
 }
 
@@ -1961,6 +2037,8 @@ export interface RpcOps {
   "describe": { request: DescribeRequest; result: DescribeResult };
   "drop-step": { request: DropStepRequest; result: Empty };
   "open": { request: OpenRequest; result: OpenResult };
+  "demo": { request: DemoRequest; result: DemoResult };
+  "skip": { request: SkipRequest; result: SkipResult };
 }
 
 // Constants.

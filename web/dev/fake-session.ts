@@ -324,7 +324,11 @@ export async function startFakeSession(opts: FakeOptions) {
     stepId: string,
     patch: Partial<LessonProgress['steps'][string]>,
   ) {
-    const lp = (progress[lessonId] ??= { status: 'in-progress', steps: {} })
+    const lp = (progress[lessonId] ??= {
+      status: 'in-progress',
+      counts: { done: 0, demonstrated: 0, skipped: 0, total: 0 },
+      steps: {},
+    })
     const cur = lp.steps[stepId] ?? { status: 'in-progress', hintsUsed: 0, resets: 0 }
     lp.steps[stepId] = { ...cur, ...patch }
     const scenario = bundleFor(lessonId)?.scenario
@@ -332,6 +336,13 @@ export async function startFakeSession(opts: FakeOptions) {
       scenario && scenario.steps.every((s) => lp.steps[s.id]?.status === 'done')
         ? 'done'
         : 'in-progress'
+    const statuses = Object.values(lp.steps).map((s) => s.status)
+    lp.counts = {
+      done: statuses.filter((s) => s === 'done').length,
+      demonstrated: statuses.filter((s) => s === 'demonstrated').length,
+      skipped: statuses.filter((s) => s === 'skipped').length,
+      total: scenario?.steps.length ?? 0,
+    }
     progressAt = Date.now()
   }
 
