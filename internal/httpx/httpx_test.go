@@ -48,10 +48,6 @@ func TestDecodeJSON(t *testing.T) {
 	if err := DecodeJSON(httptest.NewRecorder(), r, &v); err != nil || v.Keys != "C-x C-f" {
 		t.Fatalf("%v %+v", err, v)
 	}
-	r = httptest.NewRequest("POST", "/", strings.NewReader(`{"keys":"C-x C-f","extra":1}`))
-	if err := DecodeJSONStrict(httptest.NewRecorder(), r, &v); err == nil {
-		t.Fatal("strict should reject unknown fields")
-	}
 	r = httptest.NewRequest("POST", "/", strings.NewReader(``))
 	if err := DecodeJSON(httptest.NewRecorder(), r, &v); err != nil {
 		t.Fatalf("empty body: %v", err)

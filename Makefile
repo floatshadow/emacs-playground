@@ -92,7 +92,7 @@ web/node_modules: web/package.json web/pnpm-lock.yaml
 	cd web && $(PNPM) install --frozen-lockfile
 	@touch web/node_modules
 
-.PHONY: build go-build web-build gateway sessiond playctl
+.PHONY: build go-build web-build gateway
 build: go-build web-build ## build Go binaries (bin/) and the web bundle (web/dist)
 go-build:
 	$(GO) build ./...

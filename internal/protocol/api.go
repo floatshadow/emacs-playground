@@ -135,13 +135,6 @@ func ProgressRank(s ProgressStatus) int {
 	return -1
 }
 
-// ProgressFinished reports whether resuming a lesson passes over a step with
-// status s: done and skipped steps are finished; a demonstrated step is
-// resumed so the learner practises it.
-func ProgressFinished(s ProgressStatus) bool {
-	return s == ProgressDone || s == ProgressSkipped
-}
-
 // StepProgress is the progress of one step.
 type StepProgress struct {
 	Status      ProgressStatus `json:"status"`

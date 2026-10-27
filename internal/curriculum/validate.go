@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/floatshadow/emacs-playground/internal/protocol"
@@ -59,7 +60,7 @@ func validateIndex(src *Source, r reporter) {
 			r.warnf(w+".outcome", "missing outcome sentence")
 		}
 		for _, m := range p.Modules {
-			if !contains(Modules, m) {
+			if !slices.Contains(Modules, m) {
 				r.errorf(w+".modules", "unknown module %q (emacs.md §3)", m)
 			}
 		}
@@ -203,7 +204,7 @@ func validateScenario(l *Lesson, r reporter) {
 			r.errorf("tags", "unknown tag %q (gui, remote, project)", t)
 		}
 	}
-	if s.Mode == protocol.LessonGUI && !contains(s.Tags, protocol.TagGUI) {
+	if s.Mode == protocol.LessonGUI && !slices.Contains(s.Tags, protocol.TagGUI) {
 		r.warnf("tags", "mode gui lessons should carry the gui tag")
 	}
 	if len(s.Modules) == 0 {
@@ -211,7 +212,7 @@ func validateScenario(l *Lesson, r reporter) {
 	}
 	seenMod := map[string]bool{}
 	for _, m := range s.Modules {
-		if !contains(Modules, m) {
+		if !slices.Contains(Modules, m) {
 			r.errorf("modules", "unknown module %q (emacs.md §3)", m)
 		}
 		if seenMod[m] {
@@ -231,7 +232,7 @@ func validateScenario(l *Lesson, r reporter) {
 			checkRelPath(dst, "preview.follow", r)
 		}
 	}
-	if s.Remote != nil && s.Remote.Box && !contains(s.Tags, protocol.TagRemote) {
+	if s.Remote != nil && s.Remote.Box && !slices.Contains(s.Tags, protocol.TagRemote) {
 		r.warnf("remote", "lessons that use the box should carry the remote tag")
 	}
 	validateSetup(l, r)
@@ -275,11 +276,12 @@ func validateScenario(l *Lesson, r reporter) {
 			validateCondition(c, cw, true, r)
 		}
 		for j, rule := range st.Stuck {
-			validateStuck(rule, w+".stuck["+itoa(j)+"]", r)
+			sw := w + ".stuck[" + itoa(j) + "]"
+			validateStuck(rule, sw, r)
 			if prev, dup := condIDs[rule.ID]; dup {
-				r.errorf(w+".stuck["+itoa(j)+"].id", "id %q is also used at %s", rule.ID, prev)
+				r.errorf(sw+".id", "id %q is also used at %s", rule.ID, prev)
 			}
-			condIDs[rule.ID] = w + ".stuck[" + itoa(j) + "]"
+			condIDs[rule.ID] = sw
 		}
 	}
 }
@@ -311,8 +313,7 @@ func validateSetup(l *Lesson, r reporter) {
 			continue
 		}
 		// A file opened from the fixtures should exist in them.
-		if l.FixtureDir != "" && su.Root != "" && strings.HasPrefix(o, strings.TrimSuffix(su.Root, "/")+"/") {
-			rel := strings.TrimPrefix(o, strings.TrimSuffix(su.Root, "/")+"/")
+		if rel, ok := strings.CutPrefix(o, strings.TrimSuffix(su.Root, "/")+"/"); ok && l.FixtureDir != "" && su.Root != "" {
 			if _, err := os.Stat(filepath.Join(l.FixtureDir, filepath.FromSlash(rel))); err != nil {
 				r.warnf("setup.open["+itoa(i)+"]", "%s is not in the fixtures (it must be created by an earlier lesson)", o)
 			}
@@ -346,16 +347,15 @@ func validateFixtures(dir, rel string, r reporter) {
 		name, _ := filepath.Rel(dir, p)
 		where := path.Join(rel, filepath.ToSlash(name))
 		switch {
-		case d.IsDir(), d.Type().IsRegular():
+		case d.IsDir():
+		case d.Type().IsRegular():
+			if info, err := d.Info(); err == nil && info.Size() > 10<<20 {
+				r.warnf(where, "fixture file larger than 10 MB")
+			}
 		case d.Type()&fs.ModeSymlink != 0:
 			r.errorf(where, "symlinks are not allowed in fixtures")
 		default:
 			r.errorf(where, "only regular files and directories are allowed in fixtures")
-		}
-		if d.Type().IsRegular() {
-			if info, err := d.Info(); err == nil && info.Size() > 10<<20 {
-				r.warnf(where, "fixture file larger than 10 MB")
-			}
 		}
 		return nil
 	})
@@ -381,12 +381,13 @@ func checkRelPath(p, where string, r reporter) bool {
 
 func validateCondition(c *protocol.Condition, w string, top bool, r reporter) {
 	kinds := c.Kinds()
-	if len(kinds) != 1 {
-		if len(kinds) == 0 {
-			r.errorf(w, "no condition kind (event, elisp, file, shell, layout, state, all, any, not)")
-		} else {
-			r.errorf(w, "exactly one condition kind allowed, found %v", kinds)
-		}
+	switch len(kinds) {
+	case 0:
+		r.errorf(w, "no condition kind (event, elisp, file, shell, layout, state, all, any, not)")
+		return
+	case 1:
+	default:
+		r.errorf(w, "exactly one condition kind allowed, found %v", kinds)
 		return
 	}
 	if !top && (c.ID != "" || !c.Hint.IsZero()) {

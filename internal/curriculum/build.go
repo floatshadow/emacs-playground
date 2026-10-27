@@ -23,13 +23,15 @@ type BuildOptions struct {
 	// Version identifies the build ("2026.10.26+fe00636"); default: the
 	// build date.
 	Version string
-	// BuiltAt is the build time; default: SOURCE_DATE_EPOCH or now.
+	// BuiltAt is the build time; default: now (playctl curriculum build
+	// passes SOURCE_DATE_EPOCH when set).
 	BuiltAt time.Time
 }
 
 // Build writes the bundle for src into out (protocol/curriculum.go layout).
-// Callers must not build a source whose Load reported errors. Existing curriculum*.json,
-// lessons/ and fixtures/ in out are replaced; other files are left alone.
+// Callers must not build a source whose Load reported errors. Existing
+// curriculum*.json, lessons/ and fixtures/ in out are replaced; other files
+// are left alone.
 func Build(src *Source, out string, opt BuildOptions) error {
 	if opt.BuiltAt.IsZero() {
 		opt.BuiltAt = time.Now().UTC()

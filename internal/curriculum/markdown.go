@@ -36,10 +36,8 @@ func SplitFrontMatter(data []byte) (protocol.LessonFront, string, error) {
 	default:
 		return front, text, fmt.Errorf("front matter is not closed with ---")
 	}
-	if err := DecodeYAML([]byte(yamlPart), &front); err != nil {
-		return front, strings.TrimLeft(body, "\n"), err
-	}
-	return front, strings.TrimLeft(body, "\n"), nil
+	err := DecodeYAML([]byte(yamlPart), &front)
+	return front, strings.TrimLeft(body, "\n"), err
 }
 
 func validateFront(f protocol.LessonFront, r reporter) {
@@ -79,7 +77,7 @@ func validateMarkdown(body string, r reporter) {
 		}
 	}
 	for _, m := range leafRe.FindAllStringSubmatch(text, -1) {
-		if strings.HasPrefix(m[0], ":::") || strings.Contains(m[0], ":::") {
+		if strings.Contains(m[0], ":::") {
 			continue
 		}
 		if !knownLeaves[m[1]] {

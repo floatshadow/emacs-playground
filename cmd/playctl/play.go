@@ -44,8 +44,8 @@ import (
 // -watch plays every step the way the browser's "Watch it" does (rpc demo
 // start, the demo, rpc demo end) and requires a step demonstrated event
 // with the step still active; then it resets the step (rpc restore {}) and
-// plays the same keys as the learner, requiring the step to complete
-// (R1). -repeat N plays every lesson N times in a row (flaky demos, X4).
+// plays the same keys as the learner, requiring the step to complete.
+// -repeat N plays every lesson N times in a row, to expose flaky demos.
 func curriculumPlay(args []string) int {
 	fs := flag.NewFlagSet("curriculum play", flag.ExitOnError)
 	session := fs.String("session", envOr("PG_PLAY_SESSION", "http://127.0.0.1:7000"), "session URL: sessiond or <gateway>/s/<id>")
@@ -164,12 +164,11 @@ func selectLessons(src *curriculum.Source, sel []string) ([]*curriculum.Lesson, 
 	}
 	for _, s := range sel {
 		matched = false
-		switch {
-		case s == "all":
+		if s == "all" {
 			for _, id := range src.Order {
 				add(id)
 			}
-		default:
+		} else {
 			for _, p := range src.Index.Parts {
 				if s == p.ID || s == fmt.Sprintf("part:%d", p.N) {
 					for _, ref := range p.Lessons {
@@ -214,25 +213,36 @@ func newSessionClient(base string) (*sessionClient, error) {
 	}, nil
 }
 
-func (c *sessionClient) rpc(ctx context.Context, op protocol.RPCOp, req, res any) error {
-	body, err := json.Marshal(req)
+// post sends v as JSON to u with the session's Origin. A non-2xx response
+// becomes an *httpx.Error; the caller closes the body of a 2xx one.
+func (c *sessionClient) post(ctx context.Context, u string, v any) (*http.Response, error) {
+	body, err := json.Marshal(v)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	r, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+protocol.PathRPC+string(op), bytes.NewReader(body))
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	r.Header.Set("Content-Type", "application/json")
 	r.Header.Set("Origin", c.origin)
 	resp, err := c.hc.Do(r)
 	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		defer resp.Body.Close()
+		return nil, httpx.DecodeProblem(resp)
+	}
+	return resp, nil
+}
+
+func (c *sessionClient) rpc(ctx context.Context, op protocol.RPCOp, req, res any) error {
+	resp, err := c.post(ctx, c.base+protocol.PathRPC+string(op), req)
+	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		return httpx.DecodeProblem(resp)
-	}
 	var env protocol.RawRPCResponse
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&env); err != nil {
 		return fmt.Errorf("rpc %s: %w", op, err)
@@ -246,22 +256,11 @@ func (c *sessionClient) rpc(ctx context.Context, op protocol.RPCOp, req, res any
 // resetProgress clears one lesson's progress through the gateway's API
 // (POST <origin>/api/v1/progress/reset {lessonId}).
 func (c *sessionClient) resetProgress(ctx context.Context, lessonID string) error {
-	body, _ := json.Marshal(protocol.ProgressResetRequest{LessonID: lessonID})
-	r, err := http.NewRequestWithContext(ctx, http.MethodPost, c.origin+protocol.APIPrefix+"/progress/reset", bytes.NewReader(body))
+	resp, err := c.post(ctx, c.origin+protocol.APIPrefix+"/progress/reset", protocol.ProgressResetRequest{LessonID: lessonID})
 	if err != nil {
 		return err
 	}
-	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set("Origin", c.origin)
-	resp, err := c.hc.Do(r)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode/100 != 2 {
-		return httpx.DecodeProblem(resp)
-	}
-	return nil
+	return resp.Body.Close()
 }
 
 // subscribe opens the session's /events stream (for -watch).
@@ -628,7 +627,7 @@ func printResults(w io.Writer, results []stepResult) int {
 	_ = tw.Flush()
 	if failed > 0 {
 		// The failures again, with their last check, where a long table
-		// cannot hide them (X4).
+		// cannot hide them.
 		fmt.Fprintln(w, "\nFailed steps:")
 		for _, r := range results {
 			if !r.OK {

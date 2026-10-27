@@ -66,10 +66,15 @@ func WithLogger(ctx context.Context, l *slog.Logger) context.Context {
 
 // Logger returns the request-scoped logger (with request_id and any
 // attributes added by later middleware), or slog.Default().
-func Logger(ctx context.Context) *slog.Logger { return logger(ctx) }
+func Logger(ctx context.Context) *slog.Logger {
+	if l, ok := ctx.Value(loggerKey{}).(*slog.Logger); ok {
+		return l
+	}
+	return slog.Default()
+}
 
-// Logging logs one line per request at info (debug for /healthz and
-// /metrics) with method, path, status, bytes, duration and request_id, and
+// Logging logs one line per request at info (debug for successful polling
+// requests, see pollSuffixes) with method, path, status, bytes, duration and request_id, and
 // stores a request-scoped logger in the context. WebSocket upgrades are
 // logged when they end, with status 101.
 func Logging(base *slog.Logger) Middleware {

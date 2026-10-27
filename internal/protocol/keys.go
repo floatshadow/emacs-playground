@@ -61,19 +61,6 @@ func (k Key) String() string {
 	return b.String()
 }
 
-// IsPrintable reports whether the key inserts a single printable character
-// (no modifiers other than none, base is one printable rune or SPC).
-func (k Key) IsPrintable() bool {
-	if k.Mods != 0 || k.Func {
-		return false
-	}
-	if k.Base == "SPC" {
-		return true
-	}
-	r, n := utf8.DecodeRuneInString(k.Base)
-	return n == len(k.Base) && unicode.IsPrint(r) && r != ' '
-}
-
 // ParseKey parses one key token: optional modifier prefixes followed by a
 // single character, a named key (RET TAB SPC ESC DEL LFD NUL), or a
 // function key in angle brackets (<f3>, <left>, <deletechar>). F1 to F35

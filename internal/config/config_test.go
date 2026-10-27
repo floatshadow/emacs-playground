@@ -5,6 +5,8 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -148,11 +150,37 @@ func TestSessiond(t *testing.T) {
 	if cfg.SessionID != "abc" || cfg.VNCPort != 5902 || cfg.GUIEnabled || cfg.Listen != ":7000" || cfg.Workspace != "/work" {
 		t.Fatalf("%+v", cfg)
 	}
-	back, err := LoadSessiond(SessiondEnv(cfg))
+	back, err := LoadSessiond(sessiondEnv(cfg))
 	if err != nil || *back != *cfg {
 		t.Fatalf("round trip: %+v %v", back, err)
 	}
 	if _, err := LoadSessiond([]string{"PG_TERM_SIZE=wide"}); err == nil {
 		t.Fatal("want error")
 	}
+}
+
+// sessiondEnv renders cfg back to environment variables (the inverse of
+// LoadSessiond).
+func sessiondEnv(cfg *protocol.SessiondConfig) []string {
+	v := reflect.ValueOf(cfg).Elem()
+	t := v.Type()
+	var out []string
+	for i := 0; i < t.NumField(); i++ {
+		name := t.Field(i).Tag.Get("env")
+		if name == "" {
+			continue
+		}
+		fv := v.Field(i)
+		var s string
+		switch fv.Kind() {
+		case reflect.Bool:
+			s = strconv.FormatBool(fv.Bool())
+		case reflect.Int, reflect.Int64:
+			s = strconv.FormatInt(fv.Int(), 10)
+		default:
+			s = fv.String()
+		}
+		out = append(out, name+"="+s)
+	}
+	return out
 }

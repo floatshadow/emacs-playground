@@ -187,14 +187,6 @@ func TestParseKeys(t *testing.T) {
 			t.Errorf("ParseKeys(%q): want error", bad)
 		}
 	}
-	k, _ := ParseKey("a")
-	if !k.IsPrintable() {
-		t.Error("a should be printable")
-	}
-	k, _ = ParseKey("C-a")
-	if k.IsPrintable() {
-		t.Error("C-a should not be printable")
-	}
 }
 
 func TestParseDemo(t *testing.T) {

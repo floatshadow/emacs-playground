@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 
 	"github.com/floatshadow/emacs-playground/internal/protocol"
@@ -44,7 +43,8 @@ func (e *Error) WithDetails(d any) *Error { c := *e; c.Details = d; return &c }
 // Wrap returns a copy of e with a cause attached.
 func (e *Error) Wrap(err error) *Error { c := *e; c.Err = err; return &c }
 
-// Errorf-style constructors for the stable codes (api.md §1).
+// newErr builds an *Error; the constructors below cover the stable codes
+// (api.md §1).
 func newErr(status int, code protocol.ErrorCode, msg string) *Error {
 	return &Error{Status: status, Code: code, Message: msg}
 }
@@ -158,12 +158,4 @@ func DecodeProblem(resp *http.Response) *Error {
 		p.Status = resp.StatusCode
 	}
 	return &Error{Status: p.Status, Code: p.Code, Message: p.Message, Details: p.Details}
-}
-
-// logger returns the request logger or the default.
-func logger(ctx context.Context) *slog.Logger {
-	if l, ok := ctx.Value(loggerKey{}).(*slog.Logger); ok {
-		return l
-	}
-	return slog.Default()
 }

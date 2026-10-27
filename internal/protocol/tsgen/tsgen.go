@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/constant"
+	"go/importer"
 	"go/parser"
 	"go/token"
 	"go/types"
@@ -69,10 +70,9 @@ func roots() []any {
 }
 
 type gen struct {
-	src     *source
-	named   map[string]reflect.Type
-	order   []string
-	enumUse map[string]bool
+	src   *source
+	named map[string]reflect.Type
+	order []string
 }
 
 // Generate renders the TypeScript file. srcDir is the protocol package
@@ -82,12 +82,10 @@ func Generate(srcDir string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	g := &gen{src: src, named: map[string]reflect.Type{}, enumUse: map[string]bool{}}
+	g := &gen{src: src, named: map[string]reflect.Type{}}
 	for _, r := range roots() {
 		g.visit(reflect.TypeOf(r))
 	}
-	// Always emit SplitKind (used by the custom Layout form).
-	g.enumUse["SplitKind"] = true
 
 	var b bytes.Buffer
 	b.WriteString(Header)
@@ -114,18 +112,14 @@ func Generate(srcDir string) ([]byte, error) {
 	}
 
 	// Custom-JSON types.
-	customNames := []string{}
+	customTypes := make([]reflect.Type, 0, len(custom))
 	for t := range custom {
-		customNames = append(customNames, t.Name())
+		customTypes = append(customTypes, t)
 	}
-	sort.Strings(customNames)
-	for _, n := range customNames {
-		for t, ts := range custom {
-			if t.Name() == n {
-				writeDoc(&b, src.typeDocs[n], "")
-				fmt.Fprintf(&b, "export type %s = %s;\n\n", n, ts)
-			}
-		}
+	sort.Slice(customTypes, func(i, j int) bool { return customTypes[i].Name() < customTypes[j].Name() })
+	for _, t := range customTypes {
+		writeDoc(&b, src.typeDocs[t.Name()], "")
+		fmt.Fprintf(&b, "export type %s = %s;\n\n", t.Name(), custom[t])
 	}
 
 	// Structs.
@@ -371,8 +365,9 @@ func parseSource(dir string) (*source, error) {
 	if len(files) == 0 {
 		return nil, fmt.Errorf("tsgen: no package protocol in %s", dir)
 	}
-	// Type-check (stdlib only) to get constant values and types.
-	conf := types.Config{Importer: importerFor(fset)}
+	// Type-check (stdlib only, through the source importer) to get constant
+	// values and types.
+	conf := types.Config{Importer: importer.ForCompiler(fset, "source", nil)}
 	info := &types.Info{Defs: map[*ast.Ident]types.Object{}}
 	if _, err := conf.Check("github.com/floatshadow/emacs-playground/internal/protocol", fset, files, info); err != nil {
 		return nil, fmt.Errorf("tsgen: typecheck: %w", err)

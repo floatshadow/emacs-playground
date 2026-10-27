@@ -2,10 +2,10 @@
 //
 //	playctl curriculum validate [dir]
 //	playctl curriculum build [dir] -o out/
-//	playctl curriculum play <lesson>... | all [-session URL] [-dir curriculum]
+//	playctl curriculum play <lesson>... | all [-session URL] [-watch] [-repeat N]
 //	playctl config schema | check <file>
 //	playctl protocol typescript [-o file] [-check]
-//	playctl dev | session shell | images build [image]
+//	playctl dev | fonts | session shell | images build [image]
 //	playctl version
 package main
 
@@ -24,6 +24,7 @@ commands:
   curriculum validate [dir]            schema-check the curriculum source (default ./curriculum)
   curriculum build [dir] -o out/       build curriculum.json, lesson bundles and fixture tarballs
   curriculum play <lesson>... | all [-session URL] [-dir curriculum] [-timeout 30s] [-speed 1]
+                     [-watch] [-repeat N] [-reset-progress=false]
                                        replay every step's demo in a session and require completion
   config schema                        print the configuration JSON Schema
   config check <file>                  validate a configuration file

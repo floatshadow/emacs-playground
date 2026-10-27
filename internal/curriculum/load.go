@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -371,13 +372,13 @@ func loadTables(src *Source, locales map[string]bool, diags *Diagnostics) {
 		base := strings.TrimSuffix(name, ".yaml")
 		table, loc, ok := strings.Cut(base, ".")
 		if !ok {
-			if !contains(TableNames, base) {
+			if !slices.Contains(TableNames, base) {
 				reporter{diags: diags, file: path.Join(TablesDir, name)}.warnf("", "unknown table file")
 			}
 			continue
 		}
 		r := reporter{diags: diags, file: path.Join(TablesDir, name)}
-		if !contains(TableNames, table) {
+		if !slices.Contains(TableNames, table) {
 			r.warnf("", "unknown table %q", table)
 			continue
 		}
@@ -409,36 +410,27 @@ func loadTables(src *Source, locales map[string]bool, diags *Diagnostics) {
 func decodeTable(file, name string, t *protocol.Tables) error {
 	switch name {
 	case TableExits:
-		var v []protocol.ExitRow
-		if err := DecodeYAMLFile(file, &v); err != nil {
-			return err
-		}
-		t.Exits = v
+		return decodeTableFile(file, &t.Exits)
 	case TableHabits:
-		var v []protocol.HabitRow
-		if err := DecodeYAMLFile(file, &v); err != nil {
-			return err
-		}
-		t.Habits = v
+		return decodeTableFile(file, &t.Habits)
 	case TableGloss:
-		var v map[string]string
-		if err := DecodeYAMLFile(file, &v); err != nil {
-			return err
-		}
-		t.Gloss = v
+		return decodeTableFile(file, &t.Gloss)
 	case TableCheats:
-		var v map[string][]protocol.CheatRow
-		if err := DecodeYAMLFile(file, &v); err != nil {
-			return err
-		}
-		t.Cheats = v
+		return decodeTableFile(file, &t.Cheats)
 	case TableGlossary:
-		var v map[string]string
-		if err := DecodeYAMLFile(file, &v); err != nil {
-			return err
-		}
-		t.Glossary = v
+		return decodeTableFile(file, &t.Glossary)
 	}
+	return nil
+}
+
+// decodeTableFile replaces *dst with the decoded file; on error *dst is
+// left unchanged.
+func decodeTableFile[T any](file string, dst *T) error {
+	var v T
+	if err := DecodeYAMLFile(file, &v); err != nil {
+		return err
+	}
+	*dst = v
 	return nil
 }
 
@@ -460,15 +452,6 @@ func normaliseTables(t *protocol.Tables) {
 	if t.Glossary == nil {
 		t.Glossary = map[string]string{}
 	}
-}
-
-func contains(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }

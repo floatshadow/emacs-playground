@@ -42,17 +42,8 @@ func NoContent(w http.ResponseWriter) { w.WriteHeader(http.StatusNoContent) }
 // DecodeJSON decodes the request body into v. An empty body decodes as {}.
 // Bodies larger than MaxJSONBody, malformed JSON and trailing data yield a
 // 400 invalid_request *Error. Unknown fields are accepted (forward
-// compatibility); use DecodeJSONStrict where typos matter.
+// compatibility).
 func DecodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
-	return decode(w, r, v, false)
-}
-
-// DecodeJSONStrict is DecodeJSON with unknown fields rejected.
-func DecodeJSONStrict(w http.ResponseWriter, r *http.Request, v any) error {
-	return decode(w, r, v, true)
-}
-
-func decode(w http.ResponseWriter, r *http.Request, v any, strict bool) error {
 	body := http.MaxBytesReader(w, r.Body, MaxJSONBody)
 	data, err := io.ReadAll(body)
 	if err != nil {
@@ -67,9 +58,6 @@ func decode(w http.ResponseWriter, r *http.Request, v any, strict bool) error {
 		data = []byte("{}")
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
-	if strict {
-		dec.DisallowUnknownFields()
-	}
 	if err := dec.Decode(v); err != nil {
 		return BadRequest("invalid JSON: " + err.Error()).Wrap(err)
 	}

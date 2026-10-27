@@ -100,8 +100,6 @@ type Sources struct {
 	// File is the configuration file path. Empty: PG_CONFIG from Env, else
 	// DefaultPath if it exists, else no file.
 	File string
-	// RequireFile makes a missing file an error even when File is empty.
-	RequireFile bool
 	// Env is the environment as KEY=VALUE pairs (os.Environ()).
 	Env []string
 	// Set are "key.path=value" overrides applied last (flags).
@@ -122,7 +120,7 @@ func Load(src Sources) (*protocol.Config, error) {
 			path = DefaultPath
 		}
 	}
-	if err := applyFile(&cfg, path, explicit || src.RequireFile); err != nil {
+	if err := applyFile(&cfg, path, explicit); err != nil {
 		return nil, err
 	}
 	if err := ApplyEnv(&cfg, src.Env); err != nil {

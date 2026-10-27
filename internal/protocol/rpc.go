@@ -297,7 +297,7 @@ type RPCSpec struct {
 	// Request and Result are zero values of the request and result types.
 	Request any
 	Result  any
-	// Idempotent is false for keys and restore.
+	// Idempotent is false for keys, restore, demo and skip.
 	Idempotent bool
 	// Internal ops are called by the gateway, not by the browser.
 	Internal bool

@@ -3,7 +3,6 @@ package config
 import (
 	"fmt"
 	"reflect"
-	"strconv"
 
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
@@ -45,32 +44,6 @@ func LoadSessiond(env []string) (*protocol.SessiondConfig, error) {
 		return nil, fmt.Errorf("PG_LOG_FORMAT: %q is not json or text", cfg.LogFormat)
 	}
 	return cfg, nil
-}
-
-// SessiondEnv renders cfg back to environment variables (the gateway uses
-// it to build session container environments).
-func SessiondEnv(cfg *protocol.SessiondConfig) []string {
-	v := reflect.ValueOf(cfg).Elem()
-	t := v.Type()
-	var out []string
-	for i := 0; i < t.NumField(); i++ {
-		name := t.Field(i).Tag.Get("env")
-		if name == "" {
-			continue
-		}
-		fv := v.Field(i)
-		var s string
-		switch fv.Kind() {
-		case reflect.Bool:
-			s = strconv.FormatBool(fv.Bool())
-		case reflect.Int, reflect.Int64:
-			s = strconv.FormatInt(fv.Int(), 10)
-		default:
-			s = fv.String()
-		}
-		out = append(out, name+"="+s)
-	}
-	return out
 }
 
 // RedactedSessiond returns sessiond's configuration with secrets redacted.

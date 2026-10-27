@@ -170,25 +170,8 @@ type Condition struct {
 // When several are set (an authoring error caught by validation) the first
 // in declaration order wins.
 func (c *Condition) Kind() ConditionKind {
-	switch {
-	case c.Event != nil:
-		return CondEvent
-	case c.Elisp != "":
-		return CondElisp
-	case c.File != nil:
-		return CondFile
-	case c.Shell != nil:
-		return CondShell
-	case c.Layout != "":
-		return CondLayout
-	case c.State != nil:
-		return CondState
-	case c.All != nil:
-		return CondAll
-	case c.Any != nil:
-		return CondAny
-	case c.Not != nil:
-		return CondNot
+	if kinds := c.Kinds(); len(kinds) > 0 {
+		return kinds[0]
 	}
 	return ""
 }
