@@ -864,6 +864,40 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
           (pg-test-value (pg-test-call "open" snap)))
         (should (equal (pg-test--shown-files) (list main hello)))))))
 
+(ert-deftest pg-agent/op-setup-reset-starts-at-the-top ()
+  "With reset, the files of a setup start on their first line, in their windows too."
+  (pg-test-with-agent
+    (let ((readme (pg-test-file "hello/README.md" "one\ntwo\nthree\nfour\nfive\nsix\n"))
+          (main (pg-test-file "hello/src/main.rs" "fn main() {}\n")))
+      (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/src/main.rs" "hello/README.md"))
+                                             (layout . "(vsplit hello/src/main.rs hello/README.md)")
+                                             (reset . t)
+                                             (workspace . ,pg-test--dir))))
+      ;; The learner moved to line 5 of README.md in the lower window.
+      (let ((w (get-buffer-window (get-file-buffer readme))))
+        (with-selected-window w (goto-char (point-min)) (forward-line 4))
+        (should (= (with-current-buffer (get-file-buffer readme)
+                     (line-number-at-pos (window-point w)))
+                   5)))
+      (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/src/main.rs" "hello/README.md"))
+                                             (layout . "(vsplit hello/src/main.rs hello/README.md)")
+                                             (reset . t)
+                                             (workspace . ,pg-test--dir))))
+      (let ((w (get-buffer-window (get-file-buffer readme))))
+        (should (= (window-point w) 1))
+        (should (= (window-start w) 1))
+        (should (= (with-current-buffer (get-file-buffer readme) (point)) 1)))
+      (should (get-file-buffer main))
+      ;; Without reset (a step's own setup) the position stays.
+      (let ((w (get-buffer-window (get-file-buffer readme))))
+        (with-selected-window w (goto-char (point-min)) (forward-line 2))
+        (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/src/main.rs" "hello/README.md"))
+                                               (layout . "(vsplit hello/src/main.rs hello/README.md)")
+                                               (workspace . ,pg-test--dir))))
+        (should (= (with-current-buffer (get-file-buffer readme)
+                     (line-number-at-pos (window-point (get-buffer-window (get-file-buffer readme)))))
+                   3))))))
+
 (ert-deftest pg-agent/op-setup ()
   "setup opens files, applies a layout pattern and evaluates a form."
   (pg-test-with-agent

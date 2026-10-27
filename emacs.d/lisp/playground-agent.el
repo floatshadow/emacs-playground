@@ -1654,17 +1654,43 @@ turned the mode on."
     (auto-save-visited-mode 1)
     t))
 
+(defun playground--start-at-top (buffers &optional windows-too)
+  "Put point at the start of each of BUFFERS.
+With WINDOWS-TOO, also every window of the learner's frame that shows
+one of them (window start included), and forget the positions those
+windows remember for them, which `switch-to-buffer' would bring back.
+A buffer kept from an earlier visit otherwise opens where that visit
+left it, and a lesson's \"the cursor is on line 5\" can already be
+true when it starts."
+  (dolist (b buffers)
+    (when (buffer-live-p b)
+      (with-current-buffer b (goto-char (point-min)))))
+  (when windows-too
+    (dolist (w (window-list (playground--learner-frame) 'nomini))
+      (when (memq (window-buffer w) buffers)
+        (with-current-buffer (window-buffer w)
+          (set-window-start w (point-min))
+          (set-window-point w (point-min))))
+      (set-window-prev-buffers
+       w (seq-remove (lambda (entry) (memq (car-safe entry) buffers))
+                     (window-prev-buffers w))))))
+
 (defun playground--setup-now (args)
-  "The work of `playground--op-setup' (ARGS), at top level."
+  "The work of `playground--op-setup' (ARGS), at top level.
+With reset, the files of `open' start at their first line, in their
+buffers and in the windows that show them, before the setup's eval
+\(which may move them on purpose)."
   (let* ((playground-agent-workspace
           (file-name-as-directory (or (alist-get 'workspace args) playground-agent-workspace)))
          (open (append (alist-get 'open args) nil))
          (layout (alist-get 'layout args))
          (form (alist-get 'eval args))
          (compile-cmd (alist-get 'compile args))
+         (reset (eq (alist-get 'reset args) t))
+         (opened nil)
          (first nil))
     (playground--sync-changed-buffers playground-agent-workspace)
-    (when (eq (alist-get 'reset args) t)
+    (when reset
       (playground--restore-auto-save)
       (playground--in-user-window
         ;; Tabs from an earlier lesson (3.7, project tabs) are not part of
@@ -1679,7 +1705,10 @@ turned the mode on."
           (playground--forget-places (playground--absolute root)))))
     (dolist (path open)
       (let ((b (find-file-noselect (playground--absolute path))))
+        (push b opened)
         (unless first (setq first b))))
+    (when reset
+      (playground--start-at-top opened))
     (playground--in-user-window
       (let ((ignore-window-parameters t))
         (cond
@@ -1699,6 +1728,9 @@ turned the mode on."
           (delete-other-windows)
           (playground--unside-sole-window)
           (switch-to-buffer first)))))
+    ;; A layout saved as a window state (.eld) brings its own positions.
+    (when (and reset (not (and layout (string-suffix-p ".eld" layout))))
+      (playground--start-at-top opened t))
     (when (and form (not (string-empty-p form)))
       (playground--in-user-window (eval (car (read-from-string form)) t)))
     (when (and compile-cmd (not (string-empty-p compile-cmd)))
