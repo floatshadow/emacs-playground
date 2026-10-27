@@ -900,14 +900,15 @@ await check('B16', 'the selected mode line is brighter; no wb', async (h, note) 
   assert(ml.length >= 2 && box, `expected two mode lines, found ${ml.length}`)
   const rh = box.height / rows.length
   const colors = []
+  // Sample each mode line over its whole height: a thin strip through the
+  // middle of the row lands on the `----` fill and measures the foreground.
   for (const [i] of ml.slice(0, 2)) {
-    const y = Math.round(box.y + rh * i + rh / 2) - 1
     colors.push(
       await dominantColor(h.page, {
         x: Math.round(box.x + box.width * 0.55),
-        y,
+        y: Math.round(box.y + rh * i + 1),
         width: Math.round(box.width * 0.4),
-        height: 2,
+        height: Math.max(2, Math.floor(rh) - 2),
       }),
     )
   }
@@ -921,9 +922,14 @@ await check('B16', 'the selected mode line is brighter; no wb', async (h, note) 
     `mode-line backgrounds ${JSON.stringify(colors)}; selected ${selectedTop ? 'top' : 'bottom'}; contrast ${ratio.toFixed(2)}`,
   )
   assert(sel > other && ratio >= 2.0, 'the selected mode line is not clearly brighter')
-  const wb = rows.some((r) => / wb\)/.test(r))
+  // Lesson 0.1 runs without the editing module; ws-butler comes with it,
+  // so look for its lighter in a lesson that has it (1.1).
+  await h.load(L11)
+  await sleep(500)
+  const wbRows = await h.screen()
+  const wb = wbRows.some((r) => / wb\)/.test(r))
   const where = await h.where()
-  note(`" wb)" on screen: ${wb}; Where am I mentions Ws-butler: ${/Ws-butler/.test(where)}`)
+  note(`1.1: " wb)" on screen: ${wb}; Where am I mentions Ws-butler: ${/Ws-butler/.test(where)}`)
   assert(!wb && !/Ws-butler/.test(where), 'ws-butler still shows')
 })
 

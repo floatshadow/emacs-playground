@@ -26,6 +26,8 @@
 //      frame=gui; back to Terminal, frame=terminal
 //   9  lesson 3.8: the Markdown preview pane shows a line saved from Emacs
 //   10 playctl curriculum play for every lesson of Parts 0-3 (PG_SMOKE_PLAY=0 skips)
+//   11 playctl curriculum play -watch for Part 0: every step as a Watch it
+//      demonstration, then Do it yourself (fix plan R1; PG_SMOKE_PLAY=0 skips)
 //
 // Scenario 6 runs after 9 because it and 10 both start from Part 0's module
 // set (base agent); the results are reported in scenario order.
@@ -53,6 +55,8 @@ const only = (process.env.PG_SMOKE_ONLY ?? '')
   .map((s) => s.trim())
   .filter(Boolean)
 const runPlay = (process.env.PG_SMOKE_PLAY ?? '1') !== '0'
+// `go run` for playctl: Go may live in ~/.local/go (AGENTS.md §3).
+const goEnv = { ...process.env, PATH: `${process.env.HOME}/.local/go/bin:${process.env.PATH}` }
 const workspace = process.env.PG_WORKSPACE ?? join(repo, 'workspace')
 mkdirSync(out, { recursive: true })
 
@@ -631,8 +635,9 @@ try {
         '-session',
         `${url}/s/local`,
       ],
-      { cwd: repo, encoding: 'utf8', timeout: 60 * 60 * 1000, maxBuffer: 64 << 20 },
+      { cwd: repo, encoding: 'utf8', timeout: 60 * 60 * 1000, maxBuffer: 64 << 20, env: goEnv },
     )
+    if (r.error) throw r.error
     writeFileSync(join(out, '10-play.txt'), r.stdout + '\n' + r.stderr)
     await page.goto(url + '/', { waitUntil: 'load' })
     await page.locator('h1').first().waitFor({ timeout: 15000 })
@@ -640,7 +645,37 @@ try {
     if (r.status !== 0) {
       const failed = r.stdout
         .split('\n')
-        .filter((l) => /\s(fail|timeout|error)\s/.test(l))
+        .filter((l) => /\s(FAIL|fail|timeout|error)\s/.test(l))
+        .slice(0, 20)
+      throw new Error(`${summary}\n${failed.join('\n')}`)
+    }
+    return summary
+  })
+
+  await scenario(11, 'playctl curriculum play -watch, Part 0', async () => {
+    if (!runPlay) return 'skipped (PG_SMOKE_PLAY=0)'
+    await setModules(['base', 'agent'])
+    const r = spawnSync(
+      'go',
+      [
+        'run',
+        './cmd/playctl',
+        'curriculum',
+        'play',
+        '-watch',
+        'part:0',
+        '-session',
+        `${url}/s/local`,
+      ],
+      { cwd: repo, encoding: 'utf8', timeout: 30 * 60 * 1000, maxBuffer: 64 << 20, env: goEnv },
+    )
+    if (r.error) throw r.error
+    writeFileSync(join(out, '11-watch.txt'), r.stdout + '\n' + r.stderr)
+    const summary = (r.stdout.match(/^\d+ steps, .*$/m) ?? ['no summary'])[0]
+    if (r.status !== 0) {
+      const failed = r.stdout
+        .split('\n')
+        .filter((l) => /\s(FAIL|fail|timeout|error)\s/.test(l))
         .slice(0, 20)
       throw new Error(`${summary}\n${failed.join('\n')}`)
     }
