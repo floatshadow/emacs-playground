@@ -146,6 +146,9 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 	write(t, ws, "emacs.d/modules.el", "(setq playground-modules '(base agent))\n")
 	write(t, ws, "emacs.d/elpa/vertico/vertico.el", ";; pkg")
 	write(t, ws, ".playground/state.json", "{}")
+	// Empty directories, which git cannot hold: a restore recreates them.
+	_ = os.MkdirAll(filepath.Join(ws, "hello/docs"), 0o755)
+	_ = os.MkdirAll(filepath.Join(ws, "emacs.d/elpa/empty"), 0o755)
 
 	ref := StepRef("02-buffers-and-files/03-opening-files", "open")
 	spec := &protocol.WindowSpec{Files: []protocol.FileSpec{{Path: "hello/src/main.rs", Point: 1, Visible: true}}, Layout: "single"}
@@ -156,6 +159,9 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 	}
 	if meta.CreatedAt != 1761472000000 || meta.Ref != ref {
 		t.Fatalf("meta %+v", meta)
+	}
+	if !reflect.DeepEqual(meta.EmptyDirs, []string{"hello/docs"}) {
+		t.Fatalf("empty dirs %v", meta.EmptyDirs)
 	}
 	// The learner's index and branch are untouched: no HEAD, nothing staged.
 	if out := gitOut(t, ws, "status", "--porcelain"); strings.Contains(out, "A ") || strings.Contains(out, "M ") || strings.Contains(out, ".playground") {
@@ -233,12 +239,22 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// A file moved into the empty directory, and a new empty directory.
+	write(t, ws, "hello/docs/moved.md", "moved")
+	_ = os.MkdirAll(filepath.Join(ws, "hello/extra"), 0o755)
+
 	n, rmeta, err := m.Restore(ctx, ref)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n != 4 || rmeta.Spec == nil {
+	if n != 5 || rmeta.Spec == nil {
 		t.Fatalf("restored %d meta %+v", n, rmeta)
+	}
+	if ents, err := os.ReadDir(filepath.Join(ws, "hello/docs")); err != nil || len(ents) != 0 {
+		t.Fatalf("hello/docs must be back and empty: %v %v", ents, err)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "hello/extra")); err == nil {
+		t.Fatal("a directory made after the checkpoint survived")
 	}
 	if st, err := os.Stat(filepath.Join(ws, "emacs.d/modules.el")); err != nil || !st.ModTime().Equal(old) {
 		t.Fatalf("unchanged file rewritten: %v %v", st.ModTime(), err)

@@ -133,6 +133,10 @@ type Meta struct {
 	// Globals is the printed alist of Emacs session variables (kill ring,
 	// histories, keyboard macro) when the checkpoint was taken.
 	Globals string `json:"globals,omitempty"`
+	// EmptyDirs are the workspace's empty directories (workspace-relative),
+	// which a commit cannot hold; a restore recreates them (lesson 2.6
+	// moves files into a docs folder made in the step before).
+	EmptyDirs []string `json:"emptyDirs,omitempty"`
 }
 
 // BufferState is what a checkpoint keeps of one file buffer besides the
@@ -370,6 +374,7 @@ func (m *Manager) TakeWith(ctx context.Context, meta Meta) (Meta, error) {
 		return Meta{}, err
 	}
 	meta.CreatedAt = m.Now().UnixMilli()
+	meta.EmptyDirs = m.emptyDirs()
 	if err := m.writeMeta(meta); err != nil {
 		return meta, err
 	}
@@ -520,5 +525,74 @@ func (m *Manager) Restore(ctx context.Context, ref string) (int, Meta, error) {
 	if err != nil {
 		meta = Meta{Ref: ref, Label: strings.TrimPrefix(ref, RefPrefix)}
 	}
+	// git has no empty directories: git clean removed the ones that
+	// existed at the checkpoint if anything was put into them since.
+	m.makeDirs(meta.EmptyDirs)
 	return len(files), meta, nil
+}
+
+// skipDir reports whether the empty-directory walk leaves the directory
+// rel (slash-separated, workspace-relative) out: git and playground state,
+// build output (KeepDirs) and the package directories of emacs.d.
+func skipDir(rel string) bool {
+	if rel == ".git" || rel == PlaygroundDir {
+		return true
+	}
+	base := path.Base(rel)
+	for _, d := range KeepDirs {
+		if base == d {
+			return true
+		}
+	}
+	for _, p := range ExcludePatterns {
+		if strings.HasPrefix(p, "/") && strings.HasSuffix(p, "/") && strings.TrimSuffix(strings.TrimPrefix(p, "/"), "/") == rel {
+			return true
+		}
+	}
+	return false
+}
+
+// maxEmptyDirs bounds the empty directories recorded with a checkpoint.
+const maxEmptyDirs = 1000
+
+// emptyDirs lists the empty directories of the workspace (workspace-
+// relative, slash-separated), which a commit cannot hold.
+func (m *Manager) emptyDirs() []string {
+	var out []string
+	_ = filepath.WalkDir(m.Workspace, func(p string, d os.DirEntry, err error) error {
+		if err != nil || !d.IsDir() || p == m.Workspace {
+			return nil
+		}
+		rel, rerr := filepath.Rel(m.Workspace, p)
+		if rerr != nil {
+			return filepath.SkipDir
+		}
+		rel = filepath.ToSlash(rel)
+		if skipDir(rel) {
+			return filepath.SkipDir
+		}
+		if ents, err := os.ReadDir(p); err == nil && len(ents) == 0 && len(out) < maxEmptyDirs {
+			out = append(out, rel)
+		}
+		return nil
+	})
+	return out
+}
+
+// makeDirs recreates recorded empty directories inside the workspace.
+func (m *Manager) makeDirs(dirs []string) {
+	if len(dirs) == 0 {
+		return
+	}
+	root, err := os.OpenRoot(m.Workspace)
+	if err != nil {
+		return
+	}
+	defer root.Close()
+	for _, rel := range dirs {
+		if rel == "" || path.IsAbs(rel) || path.Clean(rel) != rel || rel == ".." || strings.HasPrefix(rel, "../") {
+			continue
+		}
+		_ = root.MkdirAll(filepath.FromSlash(rel), 0o755)
+	}
 }
