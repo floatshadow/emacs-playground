@@ -323,16 +323,10 @@ func (a *App) Run(ctx context.Context) error {
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	defer signal.Stop(hup)
-	for {
+	for ctx.Err() == nil {
 		select {
 		case <-hup:
-			if err := a.Curriculum.Reload(); err != nil {
-				a.log.Error("gateway: curriculum reload", "err", err)
-			}
-			if err := a.SyncInvites(ctx); err != nil {
-				a.log.Error("gateway: invites reload", "err", err)
-			}
-			continue
+			a.reload(ctx)
 		case err := <-errc:
 			if errors.Is(err, http.ErrServerClosed) {
 				return nil
@@ -340,7 +334,6 @@ func (a *App) Run(ctx context.Context) error {
 			return err
 		case <-ctx.Done():
 		}
-		break
 	}
 	a.log.Info("gateway: shutting down")
 	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -351,6 +344,16 @@ func (a *App) Run(ctx context.Context) error {
 	return srv.Shutdown(sctx)
 }
 
+// reload re-reads the curriculum bundle and the invites file (SIGHUP).
+func (a *App) reload(ctx context.Context) {
+	if err := a.Curriculum.Reload(); err != nil {
+		a.log.Error("gateway: curriculum reload", "err", err)
+	}
+	if err := a.SyncInvites(ctx); err != nil {
+		a.log.Error("gateway: invites reload", "err", err)
+	}
+}
+
 // ---- routes -----------------------------------------------------------------
 
 type sessionCtxKey struct{}
@@ -359,6 +362,9 @@ func (a *App) routes() http.Handler {
 	mux := http.NewServeMux()
 	protect := a.Auth.Middleware
 	api := protocol.APIPrefix
+	noEndpoint := httpx.Handle(func(w http.ResponseWriter, r *http.Request) error {
+		return httpx.NotFound("no such endpoint")
+	})
 
 	mux.HandleFunc("GET /healthz", a.healthz)
 
@@ -378,9 +384,7 @@ func (a *App) routes() http.Handler {
 	// user, their sessions, progress and workspace volume after a
 	// confirmation; playctl export-user is its counterpart.
 	a.Curriculum.Routes(mux, protect, a.internalAuth)
-	mux.Handle(api+"/", httpx.Handle(func(w http.ResponseWriter, r *http.Request) error {
-		return httpx.NotFound("no such endpoint")
-	}))
+	mux.Handle(api+"/", noEndpoint)
 
 	// Session proxy.
 	mux.Handle("/s/{id}/{rest...}", protect(a.Proxy))
@@ -389,9 +393,7 @@ func (a *App) routes() http.Handler {
 	mux.Handle("POST "+protocol.InternalSessionsPath+"{id}/progress", a.internalAuth(httpx.Handle(a.internalProgress)))
 	mux.Handle("POST "+protocol.InternalSessionsPath+"{id}/stuck", a.internalAuth(httpx.Handle(a.internalStuck)))
 	mux.Handle("POST "+protocol.InternalSessionsPath+"{id}/heartbeat", a.internalAuth(httpx.Handle(a.internalHeartbeat)))
-	mux.Handle("/internal/", httpx.Handle(func(w http.ResponseWriter, r *http.Request) error {
-		return httpx.NotFound("no such endpoint")
-	}))
+	mux.Handle("/internal/", noEndpoint)
 
 	// Fonts and the web app.
 	mux.Handle("GET /fonts/{file...}", a.fonts())

@@ -50,8 +50,10 @@ type Session struct {
 }
 
 // Usable reports whether the session accepts traffic (ready or idle).
-func (s *Session) Usable() bool {
-	return s.State == protocol.SessionReady || s.State == protocol.SessionIdle
+func (s *Session) Usable() bool { return usable(s.State) }
+
+func usable(st protocol.SessionState) bool {
+	return st == protocol.SessionReady || st == protocol.SessionIdle
 }
 
 // OwnedBy reports whether userID may use the session.
@@ -134,6 +136,22 @@ type entry struct {
 	// WebSockets, touch, or start.
 	lastActivity  time.Time
 	lastPersisted time.Time
+}
+
+// markStopped records that the entry's container is gone; callers hold mu.
+func (e *entry) markStopped(at time.Time) {
+	e.rec.State = protocol.SessionStopped
+	e.rec.StoppedAt = at.UnixMilli()
+	e.rec.ContainerID = ""
+	e.h.ContainerID = ""
+}
+
+// exitReason explains why a session container is no longer running.
+func exitReason(st Status) string {
+	if st.OOMKilled {
+		return "the session ran out of memory"
+	}
+	return "the session container stopped"
 }
 
 // Service implements Manager.
@@ -333,7 +351,7 @@ func (s *Service) Get(ctx context.Context, id string) (*Session, error) {
 	state := e.rec.State
 	endpoint := e.endpoint
 	s.mu.Unlock()
-	if s.o.Static && state != protocol.SessionReady && state != protocol.SessionIdle {
+	if s.o.Static && !usable(state) {
 		// The local session may have come up since: probe once.
 		if s.health(ctx, endpoint) == nil {
 			s.markReady(ctx, id)
@@ -350,23 +368,30 @@ func (s *Service) ForUser(ctx context.Context, userID string) (*Session, error) 
 		return s.Get(ctx, s.o.StaticID)
 	}
 	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.latest(userID)
+	if e == nil {
+		return nil, ErrNotFound
+	}
+	return s.snapshot(e), nil
+}
+
+// latest returns the user's most recently created session that is not
+// removed, or nil; callers hold mu.
+func (s *Service) latest(userID string) *entry {
 	var best *entry
 	for _, e := range s.entries {
 		if e.rec.UserID == userID && e.rec.State != protocol.SessionRemoved && (best == nil || e.rec.CreatedAt > best.rec.CreatedAt) {
 			best = e
 		}
 	}
-	defer s.mu.Unlock()
-	if best == nil {
-		return nil, ErrNotFound
-	}
-	return s.snapshot(best), nil
+	return best
 }
 
 func (s *Service) markReady(ctx context.Context, id string) {
 	now := s.now()
 	s.update(ctx, id, func(e *entry) {
-		if e.rec.State != protocol.SessionReady && e.rec.State != protocol.SessionIdle {
+		if !usable(e.rec.State) {
 			e.lastActivity = now
 		}
 		e.rec.State = protocol.SessionReady
@@ -429,12 +454,7 @@ func (s *Service) activeCount() int {
 func (s *Service) ensureDocker(ctx context.Context, userID string) (*Session, error) {
 	// Reuse the user's current session if its container still runs.
 	s.mu.Lock()
-	var cur *entry
-	for _, e := range s.entries {
-		if e.rec.UserID == userID && e.rec.State != protocol.SessionRemoved && (cur == nil || e.rec.CreatedAt > cur.rec.CreatedAt) {
-			cur = e
-		}
-	}
+	cur := s.latest(userID)
 	var curID string
 	var h Handle
 	var state protocol.SessionState
@@ -451,7 +471,7 @@ func (s *Service) ensureDocker(ctx context.Context, userID string) (*Session, er
 				return nil, httpx.SessionUnavailable("could not inspect your session").Wrap(err)
 			}
 			if st.Running {
-				if state == protocol.SessionReady || state == protocol.SessionIdle {
+				if usable(state) {
 					s.markReady(ctx, curID)
 					return s.Get(ctx, curID)
 				}
@@ -459,18 +479,11 @@ func (s *Service) ensureDocker(ctx context.Context, userID string) (*Session, er
 				return s.finishStart(ctx, curID)
 			}
 			// The container died (OOM, crash) or vanished: re-create.
-			reason := "the session container stopped"
-			if st.OOMKilled {
-				reason = "the session ran out of memory"
-			}
 			s.audit(ctx, userID, "session.exited", "session="+curID+" state="+st.State)
 			_ = s.o.Backend.Remove(ctx, h, true)
 			s.update(ctx, curID, func(e *entry) {
-				e.rec.State = protocol.SessionStopped
-				e.rec.StoppedAt = s.now().UnixMilli()
-				e.rec.Failure = reason
-				e.h.ContainerID = ""
-				e.rec.ContainerID = ""
+				e.markStopped(s.now())
+				e.rec.Failure = exitReason(st)
 			})
 		default:
 			// Stopped, failed, or a stale stopping: make sure no container
@@ -621,10 +634,7 @@ func (s *Service) stop(ctx context.Context, id, action string) error {
 		s.o.Logger.Error("sessions: stopping", "session_id", id, "err", err)
 	}
 	s.update(ctx, id, func(e *entry) {
-		e.rec.State = protocol.SessionStopped
-		e.rec.StoppedAt = s.now().UnixMilli()
-		e.rec.ContainerID = ""
-		e.h.ContainerID = ""
+		e.markStopped(s.now())
 		e.ws = 0
 	})
 	s.audit(ctx, userID, action, "session="+id)
@@ -756,16 +766,9 @@ func (s *Service) Reap(ctx context.Context) error {
 			}
 			if !st.Running {
 				_ = s.o.Backend.Remove(ctx, it.h, true)
-				reason := "the session container stopped"
-				if st.OOMKilled {
-					reason = "the session ran out of memory"
-				}
 				s.update(ctx, it.id, func(e *entry) {
-					e.rec.State = protocol.SessionStopped
-					e.rec.StoppedAt = now.UnixMilli()
-					e.rec.Failure = reason
-					e.rec.ContainerID = ""
-					e.h.ContainerID = ""
+					e.markStopped(now)
+					e.rec.Failure = exitReason(st)
 					e.ws = 0
 				})
 				s.audit(ctx, it.user, "session.exited", "session="+it.id+" state="+st.State)
@@ -801,9 +804,9 @@ func (s *Service) refreshStatic(ctx context.Context) {
 	s.mu.Unlock()
 	err := s.health(ctx, endpoint)
 	switch {
-	case err == nil && state != protocol.SessionReady && state != protocol.SessionIdle:
+	case err == nil && !usable(state):
 		s.markReady(ctx, id)
-	case err != nil && (state == protocol.SessionReady || state == protocol.SessionIdle):
+	case err != nil && usable(state):
 		s.update(ctx, id, func(e *entry) {
 			e.rec.State = protocol.SessionStarting
 			e.rec.Failure = "the session container stopped answering " + endpoint.String() + "/healthz"
@@ -896,7 +899,7 @@ func (s *Service) Rebuild(ctx context.Context) error {
 			errs = append(errs, err)
 			continue
 		}
-		if st.Running && (rec.State == protocol.SessionReady || rec.State == protocol.SessionIdle) {
+		if st.Running && usable(rec.State) {
 			// Running sessions survive a gateway restart; nobody is
 			// connected through this gateway yet. A new gateway container
 			// (an upgrade) joins their networks again.
@@ -911,12 +914,7 @@ func (s *Service) Rebuild(ctx context.Context) error {
 		// Gone, or caught mid-start or mid-stop: stop it cleanly; the next
 		// Ensure re-creates it on its volume.
 		_ = s.o.Backend.Remove(ctx, h, true)
-		s.update(ctx, rec.ID, func(e *entry) {
-			e.rec.State = protocol.SessionStopped
-			e.rec.StoppedAt = now.UnixMilli()
-			e.rec.ContainerID = ""
-			e.h.ContainerID = ""
-		})
+		s.update(ctx, rec.ID, func(e *entry) { e.markStopped(now) })
 	}
 	if err := s.pruneNetworks(ctx); err != nil {
 		errs = append(errs, err)
@@ -973,10 +971,7 @@ func (s *Service) Call(ctx context.Context, sess *Session, op protocol.RPCOp, re
 		return err
 	}
 	r.Header.Set("Content-Type", "application/json")
-	r.Header.Set(protocol.HeaderUser, sess.UserID)
-	if sess.ProxySecret != "" {
-		r.Header.Set(protocol.HeaderProxySecret, sess.ProxySecret)
-	}
+	setSessiondHeaders(r, sess)
 	if id := httpx.RequestIDFrom(ctx); id != "" {
 		r.Header.Set(protocol.HeaderRequestID, id)
 	}
@@ -1004,10 +999,7 @@ func (s *Service) Status(ctx context.Context, sess *Session) (*protocol.StatusRe
 	if err != nil {
 		return nil, err
 	}
-	r.Header.Set(protocol.HeaderUser, sess.UserID)
-	if sess.ProxySecret != "" {
-		r.Header.Set(protocol.HeaderProxySecret, sess.ProxySecret)
-	}
+	setSessiondHeaders(r, sess)
 	resp, err := s.o.HTTPClient.Do(r)
 	if err != nil {
 		return nil, httpx.SessionUnavailable("the session did not answer").Wrap(err)
@@ -1021,6 +1013,15 @@ func (s *Service) Status(ctx context.Context, sess *Session) (*protocol.StatusRe
 		return nil, err
 	}
 	return &st, nil
+}
+
+// setSessiondHeaders identifies the user and authenticates the gateway to
+// sessiond, as the proxy does.
+func setSessiondHeaders(r *http.Request, sess *Session) {
+	r.Header.Set(protocol.HeaderUser, sess.UserID)
+	if sess.ProxySecret != "" {
+		r.Header.Set(protocol.HeaderProxySecret, sess.ProxySecret)
+	}
 }
 
 // keyedMutex serialises work per key (per user).

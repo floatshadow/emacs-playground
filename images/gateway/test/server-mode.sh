@@ -13,8 +13,8 @@
 #
 #   images/gateway/test/server-mode.sh [gateway image]
 #
-# Run from the repository root (on this machine the work directory must be
-# on a path the Docker daemon can see; with a remote daemon that is the shared home directory).
+# Run from the repository root: the work directory (artifacts/) is
+# bind-mounted, so it must be on a path the Docker daemon can see.
 set -eu
 image=${1:-ghcr.io/floatshadow/emacs-playground/gateway:dev}
 port=${PG_IT_PORT:-18081}

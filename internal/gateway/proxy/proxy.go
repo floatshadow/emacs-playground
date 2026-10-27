@@ -76,11 +76,8 @@ func New(o Options) *Proxy {
 	return &Proxy{o: o, proxies: map[string]*cached{}, userWS: map[string]int{}}
 }
 
-type reqInfo struct {
-	userID string
-}
-
-type infoKey struct{}
+// userKey carries the user id from serve to the proxy's Rewrite.
+type userKey struct{}
 
 // ServeHTTP proxies a request whose pattern binds {id} (and optionally
 // {rest...}).
@@ -146,7 +143,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) error {
 			u.RawPath = "/"
 		}
 	}
-	out := r.WithContext(context.WithValue(r.Context(), infoKey{}, reqInfo{userID: user.ID}))
+	out := r.WithContext(context.WithValue(r.Context(), userKey{}, user.ID))
 	out.URL = &u
 	p.proxyFor(sess).ServeHTTP(w, out)
 	return nil
@@ -194,8 +191,8 @@ func (p *Proxy) proxyFor(sess *sessions.Session) *httputil.ReverseProxy {
 			if secret != "" {
 				h.Set(protocol.HeaderProxySecret, secret)
 			}
-			if info, ok := pr.In.Context().Value(infoKey{}).(reqInfo); ok {
-				h.Set(protocol.HeaderUser, info.userID)
+			if userID, ok := pr.In.Context().Value(userKey{}).(string); ok {
+				h.Set(protocol.HeaderUser, userID)
 			}
 			if id := httpx.RequestIDFrom(pr.In.Context()); id != "" {
 				h.Set(protocol.HeaderRequestID, id)

@@ -3,6 +3,7 @@ package progress
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -57,7 +58,7 @@ func (s *Service) Apply(ctx context.Context, userID string, rep protocol.Progres
 	}
 	if s.Steps != nil {
 		steps, ok := s.Steps.StepIDs(rep.LessonID)
-		if ok && !containsStr(steps, rep.StepID) {
+		if ok && !slices.Contains(steps, rep.StepID) {
 			return httpx.BadRequest("step " + rep.StepID + " is not in lesson " + rep.LessonID)
 		}
 		// Every row is a lesson and step of the bundle: a session cannot
@@ -175,15 +176,6 @@ func (s *Service) Reset(ctx context.Context, userID, lessonID string) error {
 	}
 	_ = s.Store.Audit(ctx, store.AuditEvent{At: s.now().UnixMilli(), UserID: userID, Action: "progress.reset", Details: details})
 	return nil
-}
-
-func containsStr(list []string, s string) bool {
-	for _, x := range list {
-		if x == s {
-			return true
-		}
-	}
-	return false
 }
 
 // Bounds on what one stuck report stores: the last 200 events (api.md

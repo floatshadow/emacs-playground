@@ -1,7 +1,6 @@
 package curriculum
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -45,19 +44,17 @@ type Options struct {
 type Server struct {
 	o Options
 
-	mu       sync.RWMutex
-	root     *os.Root
-	loaded   bool
-	loadErr  error
-	version  string
-	format   int
-	locales  []string            // index locales besides the default
-	lessons  map[string][]string // ready lesson id → step ids
-	modTime  time.Time
-	checked  time.Time
-	etagMu   sync.Mutex
-	etags    map[string]etagEntry
-	indexDoc *protocol.CurriculumIndex
+	mu      sync.RWMutex
+	root    *os.Root
+	loaded  bool
+	loadErr error
+	version string
+	locales []string            // index locales besides the default
+	lessons map[string][]string // ready lesson id → step ids
+	modTime time.Time
+	checked time.Time
+	etagMu  sync.Mutex
+	etags   map[string]etagEntry
 }
 
 type etagEntry struct {
@@ -168,8 +165,7 @@ func (s *Server) Reload() error {
 	s.mu.Lock()
 	old := s.root
 	s.root, s.loaded, s.loadErr = root, true, nil
-	s.version, s.format, s.locales, s.lessons = idx.Version, idx.Format, locales, lessons
-	s.indexDoc = &idx
+	s.version, s.locales, s.lessons = idx.Version, locales, lessons
 	if st != nil {
 		s.modTime = st.ModTime()
 	}
@@ -206,13 +202,6 @@ func (s *Server) StepIDs(lessonID string) ([]string, bool) {
 	defer s.mu.RUnlock()
 	steps, ok := s.lessons[lessonID]
 	return steps, ok
-}
-
-// Index returns the parsed default-locale index, or nil.
-func (s *Server) Index() *protocol.CurriculumIndex {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.indexDoc
 }
 
 // maybeReload reloads in author mode when curriculum.json changed.
@@ -480,24 +469,4 @@ func (s *Server) etag(name string, st fs.FileInfo, f io.Reader) (string, error) 
 	s.etags[name] = etagEntry{size: st.Size(), mtime: st.ModTime(), etag: etag}
 	s.etagMu.Unlock()
 	return etag, nil
-}
-
-// ReadScenario returns a lesson's scenario.json (stuck reports, tests).
-func (s *Server) ReadScenario(lessonID string) (*protocol.Scenario, error) {
-	root, err := s.rootOrErr()
-	if err != nil {
-		return nil, err
-	}
-	if !lessonIDRe.MatchString(lessonID) {
-		return nil, fs.ErrNotExist
-	}
-	data, err := root.ReadFile(protocol.LessonDir(lessonID) + "/" + protocol.BundleScenario)
-	if err != nil {
-		return nil, err
-	}
-	var sc protocol.Scenario
-	if err := json.NewDecoder(bytes.NewReader(data)).Decode(&sc); err != nil {
-		return nil, err
-	}
-	return &sc, nil
 }

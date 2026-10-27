@@ -69,6 +69,16 @@ func New(mode protocol.AuthMode, o Options) (Authenticator, error) {
 	if o.SessionDays <= 0 {
 		o.SessionDays = 30
 	}
+	switch mode {
+	case protocol.AuthNone:
+		return &noneAuth{o: o}, nil
+	case protocol.AuthInvite, protocol.AuthOIDC:
+	default:
+		return nil, errors.New("auth: unknown mode " + string(mode))
+	}
+	if o.Signer == nil {
+		return nil, errors.New("auth: " + string(mode) + " mode needs a cookie signer")
+	}
 	base := &cookieAuth{
 		o:        o,
 		secure:   strings.HasPrefix(strings.ToLower(o.PublicURL), "https:"),
@@ -77,21 +87,10 @@ func New(mode protocol.AuthMode, o Options) (Authenticator, error) {
 		codeLim:  limit.New(20, time.Minute),
 		seen:     map[string]time.Time{},
 	}
-	switch mode {
-	case protocol.AuthNone:
-		return &noneAuth{o: o}, nil
-	case protocol.AuthInvite:
-		if o.Signer == nil {
-			return nil, errors.New("auth: invite mode needs a cookie signer")
-		}
+	if mode == protocol.AuthInvite {
 		return &inviteAuth{cookieAuth: base}, nil
-	case protocol.AuthOIDC:
-		if o.Signer == nil {
-			return nil, errors.New("auth: oidc mode needs a cookie signer")
-		}
-		return &oidcAuth{cookieAuth: base}, nil
 	}
-	return nil, errors.New("auth: unknown mode " + string(mode))
+	return &oidcAuth{cookieAuth: base}, nil
 }
 
 // ---- none ------------------------------------------------------------------

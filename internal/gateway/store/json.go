@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"sort"
 	"sync"
+
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // JSONFile is the local-mode store file name under the data directory.
@@ -251,7 +253,7 @@ func (r jsonSessions) ByUser(_ context.Context, userID string) (*Session, error)
 	defer r.s.mu.Unlock()
 	var best *Session
 	for _, v := range r.s.d.Sessions {
-		if v.UserID != userID || v.State == "removed" {
+		if v.UserID != userID || v.State == protocol.SessionRemoved {
 			continue
 		}
 		if best == nil || v.CreatedAt > best.CreatedAt || (v.CreatedAt == best.CreatedAt && v.ID > best.ID) {

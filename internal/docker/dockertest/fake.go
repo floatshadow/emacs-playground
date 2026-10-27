@@ -24,14 +24,13 @@ type FakeContainer struct {
 }
 
 // Fake is an in-memory docker.Client. All methods are safe for concurrent
-// use. Calls records the method names in order.
+// use.
 type Fake struct {
 	mu         sync.Mutex
 	next       int
 	containers map[string]*FakeContainer
 	volumes    map[string]docker.Volume
 	networks   map[string]*FakeNetwork
-	Calls      []string
 
 	// FailCreate, FailStart make the next CreateContainer or StartContainer
 	// call fail (consumed on use).
@@ -57,8 +56,6 @@ func New() *Fake {
 		networks: map[string]*FakeNetwork{}, Now: time.Now}
 }
 
-func (f *Fake) call(name string) { f.Calls = append(f.Calls, name) }
-
 // Ping implements docker.Client.
 func (f *Fake) Ping(context.Context) error { return nil }
 
@@ -69,7 +66,6 @@ func (f *Fake) Close() error { return nil }
 func (f *Fake) CreateContainer(_ context.Context, spec docker.ContainerSpec) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.call("create " + spec.Name)
 	if err := f.FailCreate; err != nil {
 		f.FailCreate = nil
 		return "", err
@@ -105,7 +101,6 @@ func (f *Fake) get(id string) (*FakeContainer, error) {
 // StartContainer implements docker.Client.
 func (f *Fake) StartContainer(_ context.Context, id string) error {
 	f.mu.Lock()
-	f.call("start " + id)
 	if err := f.FailStart; err != nil {
 		f.FailStart = nil
 		f.mu.Unlock()
@@ -130,7 +125,6 @@ func (f *Fake) StartContainer(_ context.Context, id string) error {
 func (f *Fake) StopContainer(_ context.Context, id string, _ time.Duration) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.call("stop " + id)
 	c, err := f.get(id)
 	if err != nil {
 		return err
@@ -143,7 +137,6 @@ func (f *Fake) StopContainer(_ context.Context, id string, _ time.Duration) erro
 func (f *Fake) RemoveContainer(_ context.Context, id string, force bool) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.call("remove " + id)
 	c, err := f.get(id)
 	if err != nil {
 		return err
@@ -204,7 +197,6 @@ func (f *Fake) ListContainers(_ context.Context, labels map[string]string) ([]do
 func (f *Fake) CreateVolume(_ context.Context, name string, labels map[string]string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.call("volume create " + name)
 	if _, ok := f.volumes[name]; !ok {
 		f.volumes[name] = docker.Volume{Name: name, Labels: labels, CreatedAt: f.Now()}
 	}
@@ -215,7 +207,6 @@ func (f *Fake) CreateVolume(_ context.Context, name string, labels map[string]st
 func (f *Fake) RemoveVolume(_ context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.call("volume remove " + name)
 	if _, ok := f.volumes[name]; !ok {
 		return fmt.Errorf("volume %s: %w", name, docker.ErrNotFound)
 	}
@@ -251,7 +242,6 @@ func (f *Fake) ListVolumes(_ context.Context, labels map[string]string) ([]docke
 func (f *Fake) CreateNetwork(_ context.Context, spec docker.NetworkSpec) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.call("network create " + spec.Name)
 	if _, ok := f.networks[spec.Name]; ok {
 		return "", fmt.Errorf("network %s: %w", spec.Name, docker.ErrConflict)
 	}
@@ -272,7 +262,6 @@ func (f *Fake) CreateNetwork(_ context.Context, spec docker.NetworkSpec) (string
 func (f *Fake) RemoveNetwork(_ context.Context, name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.call("network remove " + name)
 	n, ok := f.networks[name]
 	if !ok {
 		return fmt.Errorf("network %s: %w", name, docker.ErrNotFound)
@@ -288,7 +277,6 @@ func (f *Fake) RemoveNetwork(_ context.Context, name string) error {
 func (f *Fake) ConnectNetwork(_ context.Context, network, container string, aliases []string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.call("network connect " + network + " " + container)
 	n, ok := f.networks[network]
 	if !ok {
 		return fmt.Errorf("network %s: %w", network, docker.ErrNotFound)
@@ -303,7 +291,6 @@ func (f *Fake) ConnectNetwork(_ context.Context, network, container string, alia
 func (f *Fake) DisconnectNetwork(_ context.Context, network, container string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.call("network disconnect " + network + " " + container)
 	if n, ok := f.networks[network]; ok {
 		delete(n.Members, container)
 	}

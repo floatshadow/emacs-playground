@@ -12,7 +12,6 @@ import (
 type Limiter struct {
 	n      int
 	window time.Duration
-	now    func() time.Time
 
 	mu      sync.Mutex
 	buckets map[string]*bucket
@@ -26,11 +25,8 @@ type bucket struct {
 
 // New returns a limiter allowing n events per window per key.
 func New(n int, window time.Duration) *Limiter {
-	return &Limiter{n: n, window: window, now: time.Now, buckets: map[string]*bucket{}}
+	return &Limiter{n: n, window: window, buckets: map[string]*bucket{}}
 }
-
-// WithClock replaces the clock (tests).
-func (l *Limiter) WithClock(now func() time.Time) *Limiter { l.now = now; return l }
 
 // Allow records an event for key and reports whether it is within the
 // limit. A nil limiter allows everything.
@@ -38,7 +34,7 @@ func (l *Limiter) Allow(key string) bool {
 	if l == nil || l.n <= 0 {
 		return true
 	}
-	now := l.now()
+	now := time.Now()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if now.Sub(l.sweep) > l.window {
