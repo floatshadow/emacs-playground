@@ -9,28 +9,47 @@ import en from './en.json'
 import zhCN from './zh-CN.json'
 import { setRequestLocale } from '../api/http'
 import { useUiStore } from '../store/ui'
+import { missingKeys } from './keys'
 
-export const LOCALES = [
-  { id: 'en', label: 'English' },
-  { id: 'zh-CN', label: '简体中文' },
-] as const
+const ALL_LOCALES = [
+  { id: 'en', label: 'English', strings: en },
+  { id: 'zh-CN', label: '简体中文', strings: zhCN },
+]
+
+/**
+ * The locales offered in the preferences: those whose strings cover every
+ * English key. A partial translation stays in the bundle but is not
+ * offered, so a page is never half in one language.
+ */
+export const LOCALES = ALL_LOCALES.filter((l) => missingKeys(en, l.strings).length === 0).map(
+  ({ id, label }) => ({ id, label }),
+)
+
+// A stored (or browser-derived) locale that is not offered falls back to English.
+if (!LOCALES.some((l) => l.id === useUiStore.getState().locale)) {
+  useUiStore.setState({ locale: 'en' })
+}
 
 const initial = useUiStore.getState().locale
 
+function applyLocale(locale: string) {
+  setRequestLocale(locale)
+  if (typeof document !== 'undefined') document.documentElement.lang = locale
+}
+
 void i18n.use(initReactI18next).init({
-  resources: { en: { translation: en }, 'zh-CN': { translation: zhCN } },
+  resources: Object.fromEntries(ALL_LOCALES.map((l) => [l.id, { translation: l.strings }])),
   lng: initial,
   fallbackLng: 'en',
   interpolation: { escapeValue: false },
   returnNull: false,
 })
-setRequestLocale(initial)
+applyLocale(initial)
 
 useUiStore.subscribe((s, prev) => {
   if (s.locale !== prev.locale) {
-    setRequestLocale(s.locale)
+    applyLocale(s.locale)
     void i18n.changeLanguage(s.locale)
-    if (typeof document !== 'undefined') document.documentElement.lang = s.locale
   }
 })
 

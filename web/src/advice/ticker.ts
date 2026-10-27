@@ -6,8 +6,11 @@
  * an unbound sequence as cmd "undefined". Consecutive typing commands
  * (self-insert-command and friends) collapse into one entry, "typed N
  * characters" with the last twelve, so a word does not push the chords out
- * of view. Entries are kept oldest first (max 40); the view shows
- * the newest six, newest first.
+ * of view. A prefix argument (C-u 40, M-5, M--) folds into the command it
+ * is for: C-u 4 0 = is one entry. C-g after a prefix cancels it: Emacs
+ * reports "C-x C-g" as undefined, the ticker shows it as cancelled. Entries
+ * are kept oldest first (max 40); the view shows the newest six, newest
+ * first.
  */
 import type { KeyEvent, PrefixEvent } from '../protocol.gen'
 
@@ -25,6 +28,11 @@ export interface TickerEntry {
   typed?: string
   /** Typing runs: how many characters were typed. */
   count?: number
+  /**
+   * The keys were played by the playground (a demo, a skip, the replay of
+   * earlier steps), not typed by the learner: stuck patterns ignore it.
+   */
+  replayed?: boolean
 }
 
 export const TICKER_MAX = 40
@@ -51,6 +59,15 @@ export function typedChar(keys: string): string {
 
 /** Command name the agent reports for an unbound key (protocol.UndefinedCommand). */
 export const UNDEFINED_COMMAND = 'undefined'
+
+/** Commands that build a prefix argument for the next command. */
+export const PREFIX_ARG_COMMANDS: ReadonlySet<string> = new Set([
+  'universal-argument',
+  'universal-argument-more',
+  'universal-argument-minus',
+  'digit-argument',
+  'negative-argument',
+])
 
 /** Commands shown in the quit colour and counted by the "three C-g" pattern. */
 export const QUIT_COMMANDS: ReadonlySet<string> = new Set([
@@ -79,7 +96,13 @@ function push(entries: TickerEntry[], e: TickerEntry): TickerEntry[] {
   return out
 }
 
-export function kindForCommand(cmd: string): TickerKind {
+/** True for keys that end in C-g after a prefix: Emacs calls them undefined, the learner cancelled. */
+export function isCancelledPrefix(cmd: string | undefined, keys: readonly string[]): boolean {
+  return cmd === UNDEFINED_COMMAND && keys.length > 1 && keys[keys.length - 1] === 'C-g'
+}
+
+export function kindForCommand(cmd: string, keys: readonly string[] = []): TickerKind {
+  if (isCancelledPrefix(cmd, keys)) return 'quit'
   if (cmd === UNDEFINED_COMMAND) return 'unbound'
   if (QUIT_COMMANDS.has(cmd)) return 'quit'
   return 'ok'
@@ -115,13 +138,37 @@ export function splitKeys(keys: string, mx?: boolean): string[] {
   return ks.length ? ks : ['?']
 }
 
-export function tickerOnKey(entries: TickerEntry[], ev: KeyEvent, now: number): TickerEntry[] {
-  const base = dropPending(entries)
+/** Appends next to keys, unless next already starts with them. */
+function joinKeys(keys: string[], next: string[]): string[] {
+  if (keys.length <= next.length && keys.every((k, i) => next[i] === k)) return next
+  return [...keys, ...next]
+}
+
+/**
+ * Adds a key event. replayed: the playground played the keys (they are
+ * shown, and stuck patterns ignore them).
+ */
+export function tickerOnKey(
+  entries: TickerEntry[],
+  ev: KeyEvent,
+  now: number,
+  replayed = false,
+): TickerEntry[] {
+  let base = dropPending(entries)
   const at = ev.ts ?? now
-  if (!ev.mx && TYPING_COMMANDS.has(ev.cmd)) {
+  // The prefix argument's entries fold into the command that used it.
+  let argKeys: string[] = []
+  if (!PREFIX_ARG_COMMANDS.has(ev.cmd)) {
+    let i = base.length
+    while (i > 0 && PREFIX_ARG_COMMANDS.has(base[i - 1]?.cmd ?? '')) i--
+    for (const e of base.slice(i)) argKeys = joinKeys(argKeys, e.keys)
+    base = base.slice(0, i)
+  }
+  const mark = replayed ? { replayed: true } : {}
+  if (!ev.mx && TYPING_COMMANDS.has(ev.cmd) && argKeys.length === 0) {
     const ch = typedChar(ev.keys)
     const last = base[base.length - 1]
-    if (last && last.typed !== undefined && last.cmd === ev.cmd) {
+    if (last && last.typed !== undefined && last.cmd === ev.cmd && !!last.replayed === replayed) {
       // Same id: the entry grows in place (no new ticker card, no new
       // announcement for screen readers on every letter).
       const typed = [...(last.typed + ch)].slice(-TYPED_SHOWN).join('')
@@ -131,6 +178,7 @@ export function tickerOnKey(entries: TickerEntry[], ev: KeyEvent, now: number): 
         typed,
         count: (last.count ?? 1) + 1,
         at,
+        ...mark,
       }
       return [...base.slice(0, -1), merged]
     }
@@ -142,14 +190,17 @@ export function tickerOnKey(entries: TickerEntry[], ev: KeyEvent, now: number): 
       at,
       typed: ch,
       count: 1,
+      ...mark,
     })
   }
+  const keys = joinKeys(argKeys, splitKeys(ev.keys, ev.mx))
   const e: TickerEntry = {
     id: nextId++,
-    keys: splitKeys(ev.keys, ev.mx),
+    keys,
     cmd: ev.cmd,
-    kind: kindForCommand(ev.cmd),
+    kind: kindForCommand(ev.cmd, keys),
     at,
+    ...mark,
   }
   if (ev.mx) e.mx = true
   return push(base, e)
@@ -208,6 +259,14 @@ export function selectTicker(
         gloss: 'This is a prefix: it does nothing alone.',
       }
     }
+    if (isCancelledPrefix(entry.cmd, entry.keys)) {
+      return {
+        entry,
+        last: i === 0,
+        label: 'cancelled',
+        gloss: 'C-g cancelled the keys before it',
+      }
+    }
     if (entry.kind === 'unbound') {
       return {
         entry,
@@ -242,6 +301,7 @@ export function missingGlosses(
         !e.gloss &&
         e.cmd !== undefined &&
         e.cmd !== '' &&
+        e.cmd !== UNDEFINED_COMMAND &&
         !(e.cmd in gloss) &&
         !(e.cmd in described),
     )

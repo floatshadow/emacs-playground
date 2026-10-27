@@ -393,6 +393,52 @@ describe('step views', () => {
     expect(views[0]?.hint).toEqual({ forText: 'b', text: 'hb' })
   })
 
+  it('a step demonstrated before the page opened is still watched until it starts again', () => {
+    const progress: LessonProgress = {
+      status: 'in-progress',
+      counts: { done: 0, demonstrated: 1, skipped: 0, total: 2 },
+      steps: { open: { status: 'demonstrated', hintsUsed: 0, resets: 0 } },
+    }
+    const view = (startedHere: boolean) =>
+      selectStepView({
+        scenario: SCENARIO,
+        lessonId: 'L/1',
+        activeStepId: 'open',
+        outcomes: {},
+        progress,
+        startedHere,
+        checks: {},
+        hintLevels: {},
+        locale: 'en',
+      })[0]
+    expect(view(false)?.watched).toBe(true)
+    expect(view(true)?.watched).toBe(false)
+    // The reducer records which step started while the page listened.
+    const s = run([
+      hello(),
+      { t: 'step', lessonId: 'L/1', stepId: 'open', status: 'reset', index: 0, count: 2 },
+    ])
+    expect(s.startedHere).toEqual({ lessonId: 'L/1', stepId: 'open' })
+    expect(run([hello()]).startedHere).toBeNull()
+  })
+
+  it('a condition without a hint gives an empty hint text (the view says try Watch it)', () => {
+    const views = selectStepView({
+      scenario: {
+        ...SCENARIO,
+        steps: [{ id: 'open', goal: 'Open', conditions: [{ text: 'a', elisp: 't' }] }],
+      },
+      lessonId: 'L/1',
+      activeStepId: 'open',
+      outcomes: {},
+      progress: undefined,
+      checks: {},
+      hintLevels: { 'L/1#open': 1 },
+      locale: 'en',
+    })
+    expect(views[0]?.hint).toEqual({ forText: 'a', text: '' })
+  })
+
   it('no hint at level 0; unknown conditions are flagged', () => {
     const views = selectStepView({
       scenario: SCENARIO,

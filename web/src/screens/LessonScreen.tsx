@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { Link, useParams } from 'react-router'
+import { Link, Navigate, useLocation, useParams } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import { ApiError } from '../api/http'
 import { useCurriculum, useEnsureSession, useLesson, useMe } from '../api/queries'
@@ -25,7 +25,12 @@ import lessonStyles from '../components/lesson/Lesson.module.css'
 /** /lesson/:lessonId — the lesson id contains a slash, so the route is a trailing wildcard. */
 export default function LessonScreen() {
   const params = useParams()
-  const lessonId = params['*'] ?? ''
+  const location = useLocation()
+  const raw = params['*'] ?? ''
+  // Lesson ids never end in a slash: /lesson/<id>/ is /lesson/<id>.
+  const lessonId = raw.replace(/\/+$/, '')
+  if (lessonId !== raw)
+    return <Navigate to={`/lesson/${lessonId}${location.search}${location.hash}`} replace />
   return <LessonView key={lessonId} lessonId={lessonId} />
 }
 
@@ -59,15 +64,21 @@ function LessonView({ lessonId }: { lessonId: string }) {
   let left
   if (lesson.isError) {
     const notFound = lesson.error instanceof ApiError && lesson.error.status === 404
+    // A 404 for a lesson the course map lists as planned: not written yet.
+    const planned = notFound && found?.lesson.status === 'planned'
     left = (
       <aside className={lessonStyles.lesson}>
-        <h1>{notFound ? t('lesson.notFound') : t('lesson.error')}</h1>
+        <h1>
+          {planned ? t('lesson.notFound') : notFound ? t('lesson.noSuchLesson') : t('lesson.error')}
+        </h1>
         <p>
-          {notFound
+          {planned
             ? t('lesson.notFoundBody')
-            : lesson.error instanceof Error
-              ? lesson.error.message
-              : ''}
+            : notFound
+              ? t('lesson.noSuchLessonBody')
+              : lesson.error instanceof Error
+                ? lesson.error.message
+                : ''}
         </p>
         <p>
           <Link to="/">{t('lesson.backToMap')}</Link>

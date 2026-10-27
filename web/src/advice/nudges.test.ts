@@ -39,6 +39,20 @@ describe('habit cards (layer 2)', () => {
     expect(s.cards.length).toBe(before)
   })
 
+  it('C-_ (how a terminal sends Ctrl+/) gets the C-/ card', () => {
+    const ev: Event = {
+      t: 'key',
+      keys: 'C-_',
+      cmd: 'undo',
+      buf: 'main.rs',
+      mode: 'rust-ts-mode',
+      frame: 'terminal',
+    }
+    const s = reduce(initialSessionData(), ev, 1000)
+    expect(s.cards.map((c) => c.id)).toEqual(['habit:C-/'])
+    expect(s.cards[0]?.title).toBe('Coming from VS Code? C-/ is not toggle comment.')
+  })
+
   it('demo playback raises no habit cards and does not use them up', () => {
     const key: Event = {
       t: 'key',
@@ -194,6 +208,32 @@ describe('stuck patterns', () => {
     rec = record()
     rec.keys('C-g').wait(5000).keys('C-g').wait(5000).keys('C-g')
     expect(ids(rec.replay(), rec.now())).not.toContain('panic')
+  })
+
+  it('three C-g played by the playground (a demo, a replay) are not panic', () => {
+    rec = record()
+    rec.keys('C-g C-g C-g')
+    const start = { ...initialSessionData(), quietHabitsUntil: Number.POSITIVE_INFINITY }
+    expect(ids(rec.replay(start), rec.now())).not.toContain('panic')
+  })
+
+  it('cancelling a prefix twice with C-g is not an unbound key', () => {
+    let s = initialSessionData()
+    for (const [i, seq] of [1, 2].entries())
+      s = reduce(
+        s,
+        {
+          t: 'key',
+          seq,
+          keys: 'C-x C-g',
+          cmd: 'undefined',
+          buf: 'main.rs',
+          mode: 'rust-ts-mode',
+          frame: 'terminal',
+        },
+        1000 + i,
+      )
+    expect(ids(s, 1100).some((id) => id.startsWith('unbound:'))).toBe(false)
   })
 
   it('the same unbound key twice asks about C-h k', () => {

@@ -7,7 +7,9 @@
  * chord or one typed character at a time, at human pace (600 ms per chord,
  * 120 ms per character), while the caption strip under the screen names
  * every key; rpc('demo', end) follows in any case. Any learner keypress in
- * the terminal stops it.
+ * the terminal stops it, and so does any change of the active step (Go to
+ * this step, another lesson, the step ending): the demo's keys belong to the
+ * step it was started on and are never sent into another.
  */
 import { parseDemo, planDemo, WATCH_PACING, type DemoAction } from '../../lib/demo'
 import { sleep } from '../../lib/time'
@@ -44,17 +46,20 @@ export function cancelDemo(byLearnerInput = false): void {
 
 /**
  * Runs actions with pacing; resolves true when finished, false when
- * cancelled. onSent(n) is called after the n-th action was sent.
+ * cancelled. onSent(n) is called after the n-th action was sent. Nothing is
+ * sent once stillOn() returns false (the step the actions belong to is no
+ * longer the active one).
  */
 export async function runActions(
   actions: DemoAction[],
   signal: AbortSignal,
   send: SendFn = sendRpc,
   onSent?: (n: number) => void,
+  stillOn: () => boolean = () => true,
 ): Promise<boolean> {
   try {
     for (const [i, a] of actions.entries()) {
-      if (signal.aborted) return false
+      if (signal.aborted || !stillOn()) return false
       await send(a, signal)
       onSent?.(i + 1)
       await sleep(a.delayMs, signal)
@@ -89,12 +94,23 @@ export async function playDemo(stepId: string, goal: string, demo: string): Prom
   const lessonId = session.activeStep?.lessonId
   if (lessonId) session.markWatched(lessonId, stepId)
   focusTerminal()
-  const off = onTerminalInput(() => {
+  const offInput = onTerminalInput(() => {
     if (current === ctl) {
       cancelDemo(true)
       toast(i18n.t('demo.cancelled'))
     }
   })
+  const onStep = () => {
+    const a = useSessionStore.getState().activeStep
+    return !!a && a.lessonId === lessonId && a.stepId === stepId
+  }
+  const offStep = useSessionStore.subscribe((s, prev) => {
+    if (s.activeStep !== prev.activeStep && current === ctl && !onStep()) cancelDemo()
+  })
+  const off = () => {
+    offInput()
+    offStep()
+  }
   let latched = false
   try {
     try {
@@ -113,8 +129,12 @@ export async function playDemo(stepId: string, goal: string, demo: string): Prom
       // An older sessiond without the demo op: play anyway (it counts as done there).
       if (!unknownOp(e)) throw e
     }
-    await runActions(actions, ctl.signal, sendRpc, (n) =>
-      useUiStore.getState().setDemoSent(stepId, n),
+    await runActions(
+      actions,
+      ctl.signal,
+      sendRpc,
+      (n) => useUiStore.getState().setDemoSent(stepId, n),
+      onStep,
     )
   } catch (e) {
     if (!ctl.signal.aborted) toast(i18n.t('demo.failed', { error: errorMessage(e) }), 'error')

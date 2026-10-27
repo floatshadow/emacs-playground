@@ -37,6 +37,14 @@ export function TaskPanel({
           </Button>
         </div>
       )}
+      {load.displaced && !load.loading && (
+        <div className={lessonStyles.notice} role="status">
+          <p>{t('lesson.displaced')}</p>
+          <Button size="small" variant="primary" onClick={load.loadHere}>
+            {t('lesson.loadHere')}
+          </Button>
+        </div>
+      )}
       {load.loading && !load.error && <p className={lessonStyles.loading}>{t('lesson.loading')}</p>}
       <Steps
         views={steps.views}

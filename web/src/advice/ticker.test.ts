@@ -119,6 +119,39 @@ describe('ticker reducer', () => {
     expect(t).toHaveLength(5)
   })
 
+  it('a C-g that cancels a prefix shows as cancelled, not unbound', () => {
+    const t = tickerOnKey([], key('C-x C-g', 'undefined'), 1)
+    expect(t[0]?.kind).toBe('quit')
+    const v = selectTicker(t, DEFAULT_GLOSS, {})
+    expect(v[0]?.label).toBe('cancelled')
+    expect(missingGlosses(t, DEFAULT_GLOSS, {})).toEqual([])
+  })
+
+  it('folds a prefix argument into the command it is for', () => {
+    let t = tickerOnKey([], key('C-u', 'universal-argument'), 1)
+    t = tickerOnKey(t, key('4', 'digit-argument'), 2)
+    t = tickerOnKey(t, key('0', 'digit-argument'), 3)
+    t = tickerOnKey(t, key('=', 'self-insert-command', { prefixArg: '40' }), 4)
+    expect(t.map((e) => [e.keys.join(' '), e.cmd])).toEqual([['C-u 4 0 =', 'self-insert-command']])
+    expect(t[0]?.typed).toBeUndefined()
+    // Keys that already include the argument are not doubled.
+    t = tickerOnKey(t, key('C-u', 'universal-argument'), 5)
+    t = tickerOnKey(t, key('C-u C-SPC', 'set-mark-command', { prefixArg: '(4)' }), 6)
+    expect(t.at(-1)?.keys).toEqual(['C-u', 'C-SPC'])
+    // The next typing starts a run of its own.
+    t = tickerOnKey(t, key('a', 'self-insert-command'), 7)
+    expect(t.at(-1)?.typed).toBe('a')
+  })
+
+  it("marks replayed keys and keeps them out of the learner's typing runs", () => {
+    let t = tickerOnKey([], key('a', 'self-insert-command'), 1, true)
+    t = tickerOnKey(t, key('b', 'self-insert-command'), 2)
+    expect(t.map((e) => [e.typed, !!e.replayed])).toEqual([
+      ['a', true],
+      ['b', false],
+    ])
+  })
+
   it('marks gaps once', () => {
     let t = tickerGap([], 1)
     t = tickerGap(t, 2)

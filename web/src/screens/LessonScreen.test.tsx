@@ -95,6 +95,7 @@ beforeEach(() => {
 })
 afterEach(() => {
   disconnectSession()
+  server.resetHandlers()
 })
 
 function renderApp() {
@@ -538,6 +539,151 @@ describe('LessonScreen against a fake events stream', () => {
     })
     send(cs(43))
     expect(screen.getByText(/is not save/)).toBeInTheDocument()
+  })
+
+  it('a demo stops when the active step changes: no keys go into another step', async () => {
+    const user = userEvent.setup()
+    await openLesson()
+    await user.click(screen.getByRole('button', { name: 'Watch it' }))
+    await screen.findByRole('status', { name: 'Demo caption' })
+    await waitFor(() =>
+      expect(rpcCalls).toContainEqual({ op: 'demo', body: { stepId: 'open', phase: 'start' } }),
+    )
+    send({
+      t: 'step',
+      seq: 50,
+      lessonId: LESSON,
+      stepId: 'save',
+      status: 'loaded',
+      index: 2,
+      count: 4,
+    })
+    expect(screen.queryByRole('status', { name: 'Demo caption' })).toBeNull()
+    await waitFor(() =>
+      expect(rpcCalls).toContainEqual({ op: 'demo', body: { stepId: 'open', phase: 'end' } }),
+    )
+    const sent = rpcCalls.filter((c) => c.op === 'keys').length
+    await new Promise((r) => setTimeout(r, 1500))
+    expect(rpcCalls.filter((c) => c.op === 'keys').length).toBe(sent)
+  })
+
+  it('Go to this step covers the screen until the step is active', async () => {
+    const user = userEvent.setup()
+    let release: () => void = () => undefined
+    server.use(
+      http.post('/s/local/rpc/scenario', async ({ request }) => {
+        const body = await request.json()
+        rpcCalls.push({ op: 'scenario', body })
+        if ((body as { stepId?: string }).stepId === 'save')
+          await new Promise<void>((r) => (release = r))
+        return HttpResponse.json({ ok: true, result: { step: body, modules: [] } })
+      }),
+    )
+    await openLesson()
+    await user.click(screen.getAllByRole('button', { name: 'Go to this step' })[1] as HTMLElement)
+    expect(
+      await screen.findByRole('status', { name: 'Going to step 3: Save it…' }),
+    ).toBeInTheDocument()
+    expect(useSessionStore.getState().quietHabitsUntil).toBe(Number.POSITIVE_INFINITY)
+    act(() => release())
+    await waitFor(() => expect(screen.queryByRole('status', { name: /^Going to step/ })).toBeNull())
+    expect(useSessionStore.getState().quietHabitsUntil).toBeLessThan(Number.POSITIVE_INFINITY)
+  })
+
+  it('after a reload a demonstrated step still offers Do it yourself', async () => {
+    server.use(
+      http.get('/api/v1/progress', () =>
+        HttpResponse.json({
+          lessons: {
+            [LESSON]: {
+              status: 'in-progress',
+              counts: { done: 0, demonstrated: 1, skipped: 0, total: 4 },
+              steps: { open: { status: 'demonstrated', hintsUsed: 0, resets: 0 } },
+            },
+          },
+          updatedAt: 2,
+        }),
+      ),
+    )
+    renderApp()
+    await waitFor(() => expect(ws.server.clients().length).toBe(1))
+    send({ ...hello, step: { lessonId: LESSON, stepId: 'open' } } as Event)
+    send(state())
+    const steps = await screen.findByRole('list', { name: 'Steps' })
+    const first = await waitFor(() => {
+      const li = steps.querySelector('[aria-current="step"]')
+      expect(li).not.toBeNull()
+      return li as HTMLElement
+    })
+    expect(within(first).getByRole('button', { name: 'Do it yourself' })).toBeInTheDocument()
+    expect(rpcCalls.some((c) => c.op === 'scenario')).toBe(false)
+    // Once the step starts again (Do it yourself, a reset) it is the learner's.
+    send({
+      t: 'step',
+      seq: 3,
+      lessonId: LESSON,
+      stepId: 'open',
+      status: 'reset',
+      index: 0,
+      count: 4,
+    })
+    expect(within(first).queryByRole('button', { name: 'Do it yourself' })).toBeNull()
+  })
+
+  it('a finished lesson is not loaded again: its ticks and Lesson complete show', async () => {
+    const done = { status: 'done', hintsUsed: 0, resets: 0 }
+    server.use(
+      http.get('/api/v1/progress', () =>
+        HttpResponse.json({
+          lessons: {
+            [LESSON]: {
+              status: 'done',
+              counts: { done: 3, demonstrated: 0, skipped: 1, total: 4 },
+              steps: {
+                open: done,
+                edit: done,
+                save: { ...done, status: 'skipped' },
+                oops: done,
+              },
+            },
+          },
+          updatedAt: 2,
+        }),
+      ),
+    )
+    renderApp()
+    await waitFor(() => expect(ws.server.clients().length).toBe(1))
+    send(hello)
+    send(state())
+    expect(await screen.findByText(/Lesson complete\./)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Start this lesson over' })).toBeInTheDocument()
+    await new Promise((r) => setTimeout(r, 300))
+    expect(rpcCalls.some((c) => c.op === 'scenario')).toBe(false)
+  })
+
+  it('when another page loads another lesson, this one offers to load it again', async () => {
+    const user = userEvent.setup()
+    await openLesson()
+    rpcCalls.length = 0
+    send({
+      t: 'step',
+      seq: 60,
+      lessonId: '00-orientation/02-getting-unstuck',
+      stepId: 'prompt',
+      status: 'loaded',
+      index: 0,
+      count: 3,
+    })
+    const button = await screen.findByRole('button', { name: 'Load this lesson here' })
+    await new Promise((r) => setTimeout(r, 300))
+    expect(rpcCalls.some((c) => c.op === 'scenario')).toBe(false)
+    await user.click(button)
+    await waitFor(() =>
+      expect(rpcCalls).toContainEqual({
+        op: 'scenario',
+        body: { lessonId: LESSON, stepId: 'open' },
+      }),
+    )
   })
 
   it('Rescue calls the rpc and names what was done', async () => {

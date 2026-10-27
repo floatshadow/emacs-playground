@@ -99,6 +99,13 @@ export interface SessionData {
    * loaded again.
    */
   watched: { lessonId: string; stepId: string } | null
+  /**
+   * The step that was last loaded or reset while this page listened. When
+   * the active step is not this one it started before the page opened (a
+   * reload), and its saved progress tells how it went so far: a
+   * "demonstrated" status means the demonstration latch is still set.
+   */
+  startedHere: { lessonId: string; stepId: string } | null
   /** True while the demo player plays (resets from its restore keep `watched`). */
   demoPlaying: boolean
   mode: FrameKind
@@ -130,9 +137,11 @@ export interface SessionData {
   /** rpc('describe') glosses for commands missing from tables.gloss. */
   described: Record<string, string>
   /**
-   * Key events before this time (ms) raise no habit cards: the demo player
-   * is typing, not the learner, and a habit shows once per session, so a
-   * demo that uses C-s to search must not use up "C-s is not save".
+   * Key events before this time (ms) raise no habit cards and their ticker
+   * entries are marked replayed (no stuck patterns): the demo player or
+   * sessiond is typing, not the learner, and a habit shows once per
+   * session, so a demo that uses C-s to search must not use up "C-s is not
+   * save".
    */
   quietHabitsUntil: number
 }
@@ -150,6 +159,7 @@ export function initialSessionData(): SessionData {
     outcomes: {},
     lessonsComplete: [],
     watched: null,
+    startedHere: null,
     demoPlaying: false,
     mode: 'terminal',
     modules: [],
@@ -231,12 +241,13 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
       const lastKeyTs = ev.ts !== undefined ? Math.max(base.lastKeyTs, ev.ts) : base.lastKeyTs
       // Clicks and scrolling are not keys: no ticker entry, no habit card.
       if (!ev.mx && isMouseOnly(ev.keys)) return { ...base, echoLive: null, lastKeyTs }
-      const ticker = tickerOnKey(base.ticker, ev, now)
+      const quiet = now < base.quietHabitsUntil
+      const ticker = tickerOnKey(base.ticker, ev, now, quiet)
       const entry = ticker[ticker.length - 1]
       const totalCommands = base.totalCommands + 1
       let cards = base.cards
       let habitsSeen = base.habitsSeen
-      if (entry && now >= base.quietHabitsUntil) {
+      if (entry && !quiet) {
         const mentioned = mentionedNow(base.mentions, base.activeStep)
         const card = habitCardFor(entry, base.tables.habits, habitsSeen, totalCommands, mentioned)
         if (card) {
@@ -377,6 +388,7 @@ function reduceStep(base: SessionData, ev: Extract<Event, { t: 'step' }>): Sessi
         outcomes: setOutcome(base.outcomes, ev.lessonId, ev.stepId, null),
         lessonsComplete: base.lessonsComplete.filter((x) => x !== ev.lessonId),
         watched: keepWatched ? base.watched : null,
+        startedHere: { lessonId: ev.lessonId, stepId: ev.stepId },
       }
       if (ev.status === 'loaded' && otherLesson) {
         // The ticker, the pending prefix and the habit cards belong to the lesson.

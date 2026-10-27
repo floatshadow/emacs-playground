@@ -29,6 +29,12 @@ const SPECIAL_MODES = [
 
 export const DEFAULT_EXITS: ExitRow[] = [
   {
+    id: 'waiting',
+    when: { waiting: { not: null } },
+    why: 'Every key goes to a loop of its own: {waiting.what}.',
+    how: '{waiting.leave} leaves it. Rescue me does too.',
+  },
+  {
     id: 'minibuffer-prompt',
     when: { 'minibuffer.kind': 'prompt' },
     why: 'A prompt is open: {minibuffer.prompt}',
@@ -231,7 +237,7 @@ export const DEFAULT_GLOSS: Record<string, string> = {
   'isearch-backward': 'Search backward as you type',
   'isearch-repeat-forward': 'Jump to the next match',
   'isearch-exit': 'Stop searching and stay here',
-  'isearch-abort': 'Cancel the search and go back',
+  'isearch-abort': 'Drop what did not match, or cancel the search',
   'execute-extended-command': 'Run any command by name',
   'query-replace': 'Replace text, asking at each match',
   'query-replace-regexp': 'Replace a pattern, asking at each match',

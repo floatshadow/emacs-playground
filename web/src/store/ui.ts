@@ -69,6 +69,12 @@ export interface UiStore extends Prefs {
   focusLock: FocusLock
   /** "Skip this step" is running: the screen is covered until it returns. */
   skipping: { stepId: string; goal: string } | null
+  /**
+   * A lesson is being put at a later step (Go to this step, or the resume
+   * target on opening it): sessiond restores or replays the earlier steps,
+   * and the screen is covered until it returns. n is the step's number.
+   */
+  stepJump: { n: number; goal: string } | null
   /** The browser-reserved-key toast is shown once per tab. */
   reservedKeyToastShown: boolean
   toasts: Toast[]
@@ -86,6 +92,7 @@ export interface UiStore extends Prefs {
   setFocusMode(on: boolean): void
   setFocusLock(lock: FocusLock): void
   setSkipping(s: { stepId: string; goal: string } | null): void
+  setStepJump(j: { n: number; goal: string } | null): void
   markReservedKeyToast(): void
   toast(text: string, tone?: Toast['tone']): void
   dismissToast(id: number): void
@@ -112,6 +119,7 @@ export const useUiStore = create<UiStore>()((set, get) => ({
   focusMode: false,
   focusLock: 'off',
   skipping: null,
+  stepJump: null,
   reservedKeyToastShown: false,
   toasts: [],
   hintLevels: {},
@@ -139,6 +147,7 @@ export const useUiStore = create<UiStore>()((set, get) => ({
   setFocusMode: (focusMode) => set({ focusMode }),
   setFocusLock: (focusLock) => set({ focusLock }),
   setSkipping: (skipping) => set({ skipping }),
+  setStepJump: (stepJump) => set({ stepJump }),
   markReservedKeyToast: () => set({ reservedKeyToastShown: true }),
   toast: (text, tone = 'info') => {
     const id = toastId++

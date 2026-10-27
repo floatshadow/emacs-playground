@@ -36,6 +36,15 @@ describe('extendedKeySequence', () => {
     expect(extendedKeySequence(key('Enter', { shiftKey: true }))).toBe('\x1b[13;2u')
     expect(extendedKeySequence(key('Backspace', { ctrlKey: true }))).toBe('\x1b[127;5u')
   })
+  it('keeps Ctrl in Ctrl+Alt chords on symbols legacy encodes without it', () => {
+    // C-M-_ (undo-redo) is Ctrl+Alt+Shift+Minus; e.key is the shifted character.
+    expect(extendedKeySequence(key('_', { ctrlKey: true, altKey: true, shiftKey: true }))).toBe(
+      '\x1b[95;7u',
+    )
+    expect(extendedKeySequence(key('/', { ctrlKey: true, altKey: true }))).toBe('\x1b[47;7u')
+    expect(extendedKeySequence(key('\\', { ctrlKey: true, altKey: true }))).toBe('\x1b[92;7u')
+    expect(extendedKeySequence(key(' ', { ctrlKey: true, altKey: true }))).toBeNull()
+  })
   it('ignores key releases, Cmd and AltGr', () => {
     expect(extendedKeySequence({ ...key(';', { ctrlKey: true }), type: 'keyup' })).toBeNull()
     expect(extendedKeySequence(key(';', { ctrlKey: true, metaKey: true }))).toBeNull()

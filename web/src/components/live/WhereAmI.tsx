@@ -18,7 +18,8 @@ export function WhereAmI() {
         <dt>{t('where.buffer')}</dt>
         <dd>
           {view.buffer}
-          {view.modified && <em> {t('where.unsaved')}</em>}
+          {/* Only a file's buffer has changes to save; *compilation* and friends do not. */}
+          {view.modified && view.file && <em> {t('where.unsaved')}</em>}
         </dd>
         <dt>{t('where.mode')}</dt>
         <dd>

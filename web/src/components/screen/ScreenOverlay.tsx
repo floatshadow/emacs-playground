@@ -35,6 +35,7 @@ export function ScreenOverlay({ onReattach }: { onReattach(): void }) {
   const modulesRestarting = useSessionStore((s) => s.modulesRestarting)
   const mode = useSessionStore((s) => s.mode)
   const skipping = useUiStore((s) => s.skipping)
+  const stepJump = useUiStore((s) => s.stepJump)
 
   let card: ReactNode = null
   if (skipping) {
@@ -45,6 +46,15 @@ export function ScreenOverlay({ onReattach }: { onReattach(): void }) {
         <div className={styles.overlayCard}>
           <strong>{t('stuck.skipping')}</strong>
           <span>{t('stuck.skippingBody')}</span>
+        </div>
+      </div>
+    )
+  } else if (stepJump) {
+    card = (
+      <div className={styles.skipOverlay} role="status" aria-label={t('steps.jumping', stepJump)}>
+        <div className={styles.overlayCard}>
+          <strong>{t('steps.jumping', stepJump)}</strong>
+          <span>{t('steps.jumpingBody')}</span>
         </div>
       </div>
     )

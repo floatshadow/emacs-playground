@@ -179,6 +179,14 @@ export function LessonPane({
     >
       <h1>{title}</h1>
       {bundle.front?.summary && <p className={styles.lede}>{bundle.front.summary}</p>}
+      {load.displaced && !load.loading && (
+        <div className={styles.notice} role="status">
+          <p>{t('lesson.displaced')}</p>
+          <Button size="small" variant="primary" onClick={load.loadHere}>
+            {t('lesson.loadHere')}
+          </Button>
+        </div>
+      )}
       <StepsSlotContext.Provider value={inline ? list : null}>
         <Markdown markdown={markdown} lessonId={bundle.id} className={styles.prose} />
       </StepsSlotContext.Provider>

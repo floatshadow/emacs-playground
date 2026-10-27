@@ -80,3 +80,36 @@ export async function doSkipStep(stepId: string, goal: string): Promise<void> {
     focusTerminal()
   }
 }
+
+/**
+ * Loads a lesson at a step, as "Go to this step" and the resume target do:
+ * for a step after the first, sessiond restores its checkpoint or replays
+ * the earlier steps' demos, which takes up to a few minutes. Any demo stops
+ * first; the screen is covered and the learner's keys wait while it runs,
+ * and the replayed keys raise no habit cards. Keyboard focus that was lost
+ * meanwhile (the clicked button went away) returns to the terminal.
+ * Resolves when the step is active; rejects with the rpc error, which is
+ * toasted unless silent.
+ */
+export async function loadAtStep(
+  lessonId: string,
+  step: { id: string; n: number; goal: string },
+  silent = false,
+): Promise<void> {
+  cancelDemo()
+  const veiled = step.n > 1
+  if (veiled) {
+    useUiStore.getState().setStepJump({ n: step.n, goal: step.goal })
+    useSessionStore.getState().setDemoPlaying(true)
+  }
+  try {
+    await rpc('scenario', { lessonId, stepId: step.id }, { silent })
+  } finally {
+    if (veiled) {
+      useSessionStore.getState().setDemoPlaying(false)
+      useUiStore.getState().setStepJump(null)
+    }
+    const el = document.activeElement
+    if (!el || el === document.body || el === document.documentElement) focusTerminal()
+  }
+}

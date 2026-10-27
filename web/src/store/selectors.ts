@@ -121,7 +121,10 @@ export interface StepView {
   /** Index of the first unmet condition of the active step, or -1. */
   firstUnmet: number
   hintLevel: number
-  /** The hint for the first unmet condition when hintLevel ≥ 1. */
+  /**
+   * The hint for the first unmet condition when hintLevel ≥ 1; text is
+   * empty when the condition has none.
+   */
   hint: { forText: string; text: string } | null
 }
 
@@ -136,6 +139,8 @@ export interface StepsInput {
   progress: LessonProgress | undefined
   /** The active step was watched (session store `watched`). */
   watched?: boolean
+  /** The active step was loaded or reset while this page listened (session store `startedHere`). */
+  startedHere?: boolean
   checks: Record<string, CheckEvent>
   hintLevels: Record<string, number>
   locale: string
@@ -204,13 +209,20 @@ export function selectStepView(inp: StepsInput): StepView[] {
     const unmet = firstUnmet >= 0 ? conds[firstUnmet] : undefined
     const hint =
       status === 'active' && hintLevel > 0 && unmet
-        ? { forText: unmet.text, text: unmet.hint || 'No hint for this one: try "Watch it".' }
+        ? { forText: unmet.text, text: unmet.hint }
         : null
+    // A step that was demonstrated before this page opened (a reload) and
+    // has not started again since is still latched in sessiond: it offers
+    // "Do it yourself" like a step watched in this visit.
+    const watchedBefore =
+      !inp.startedHere &&
+      outcomes[step.id] === undefined &&
+      progress?.steps?.[step.id]?.status === 'demonstrated'
     return {
       step,
       index,
       status,
-      watched: status === 'active' && !!inp.watched,
+      watched: status === 'active' && (!!inp.watched || watchedBefore),
       goal: lt(step.goal, locale),
       detail: lt(step.detail, locale),
       conds,

@@ -433,6 +433,18 @@
   margin: 0 0 6px;
   font-size: 14px;
 }
+/* Not an error: Emacs shows another lesson (useScenarioLoad's displaced). */
+.notice {
+  background: var(--violet-soft);
+  color: var(--ink);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 12px 0;
+}
+.notice p {
+  margin: 0 0 6px;
+  font-size: 14px;
+}
 @keyframes appear {
   from {
     opacity: 0;

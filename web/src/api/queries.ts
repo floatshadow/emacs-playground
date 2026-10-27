@@ -1,7 +1,8 @@
 /**
  * Server state through TanStack Query (frontend.md §3): me, auth config,
  * curriculum, lesson, progress, session and status. Progress is invalidated
- * on step events (see useProgressInvalidation).
+ * on step events (see useProgressInvalidation) and refetched when the page
+ * becomes visible again.
  */
 import { useEffect } from 'react'
 import { QueryClient, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -53,6 +54,7 @@ export function useMe() {
     queryKey: qk.me,
     queryFn: ({ signal }) => api.get<Me>(`${APIPrefix}/me`, signal),
     staleTime: 5 * 60_000,
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -87,11 +89,17 @@ export function useLesson(lessonId: string | undefined) {
   })
 }
 
+/**
+ * Progress changes in other tabs and windows too (a lesson finished
+ * there): it is fetched again whenever this page becomes visible, besides
+ * the step events of this page's session.
+ */
 export function useProgress(enabled = true) {
   return useQuery({
     queryKey: qk.progress,
     queryFn: ({ signal }) => api.get<Progress>(`${APIPrefix}/progress`, signal),
     enabled,
+    refetchOnWindowFocus: 'always',
   })
 }
 

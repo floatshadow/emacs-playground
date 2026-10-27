@@ -162,6 +162,10 @@
     "backToMap": "Back to the course map",
     "notFound": "This lesson is not written yet.",
     "notFoundBody": "It is on the course map as planned. Pick another lesson for now.",
+    "noSuchLesson": "There is no lesson at this address.",
+    "noSuchLessonBody": "The link may be mistyped or out of date. Every lesson is on the course map.",
+    "displaced": "Emacs is now showing another lesson, opened in another tab or window. This lesson's steps are not being checked.",
+    "loadHere": "Load this lesson here",
     "error": "Could not load this lesson."
   },
   "steps": {
@@ -187,7 +191,10 @@
     "showHint": "Show a hint",
     "showKeys": "Show the exact keys",
     "goTo": "Go to this step",
-    "redo": "Do this step again"
+    "redo": "Do this step again",
+    "noHint": "No hint for this one: try \"Watch it\".",
+    "jumping": "Going to step {{n}}: {{goal}}…",
+    "jumpingBody": "Emacs is setting up the lesson as the earlier steps leave it. Your own keys wait until it is done."
   },
   "demo": {
     "watch": "Watch it",
@@ -286,6 +293,8 @@
     "brief": "About this project",
     "notFound": "This project is not written yet.",
     "notFoundBody": "It is listed on the course map as planned.",
+    "noSuchProject": "There is no project at this address.",
+    "noSuchProjectBody": "The link may be mistyped or out of date. Every project is on the course map.",
     "cardTasks_one": "{{count}} task",
     "cardTasks_other": "{{count}} tasks",
     "doneTasks": "{{done}} of {{total}} tasks done"

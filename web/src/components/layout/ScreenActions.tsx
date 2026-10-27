@@ -19,7 +19,7 @@ export function ScreenActions({ preview }: { preview?: boolean }) {
   const togglePreview = useUiStore((s) => s.togglePreview)
   return (
     <>
-      <span className={styles.wideOnly}>
+      <span className={`${styles.wideOnly} ${styles.chipWide}`}>
         <SessionChip />
       </span>
       {me.data?.features?.gui !== false && (

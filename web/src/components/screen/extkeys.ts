@@ -5,7 +5,8 @@
  * keyboard flags, and tmux never forwards Emacs's push to the outer
  * terminal. In the legacy encoding many chords Emacs binds do not exist:
  * C-; (iedit), C-= (expreg), C-? (undo-redo), C-> (multiple cursors),
- * C-1 (digit-argument), C-S-a, C-RET. For exactly those, the terminal pane
+ * C-1 (digit-argument), C-S-a, C-RET, and Ctrl+Alt with a symbol xterm.js
+ * would send without Ctrl (C-M-_, C-M-/, C-M-\). For exactly those, the terminal pane
  * sends a CSI u sequence itself (`ESC [ code ; modifiers u`); tmux
  * (extended-keys always, csi-u) parses it and passes the key to Emacs, and
  * sessiond's input tap decodes it for the ticker. Everything legacy can
@@ -24,7 +25,12 @@ export interface KeyLike {
   altGraph?: boolean
 }
 
-/** Ctrl chords the legacy encoding already carries (C-a … C-z and friends). */
+/**
+ * Ctrl chords the legacy encoding already carries (C-a … C-z and friends).
+ * With Alt as well, xterm.js sends ESC and the plain character, dropping
+ * Ctrl (Ctrl+Alt+_ would be M-_, not C-M-_ undo-redo), so only Ctrl+Alt+SPC
+ * stays legacy.
+ */
 const LEGACY_CTRL = new Set([' ', '@', '[', '\\', ']', '^', '_', '/'])
 
 /**
@@ -45,7 +51,7 @@ export function extendedKeySequence(e: KeyLike): string | null {
     // Ctrl+Shift+letter: the base (lowercase) key with the shift modifier.
     return `\x1b[${ch.toLowerCase().charCodeAt(0)};${mods}u`
   }
-  if (LEGACY_CTRL.has(ch)) return null
+  if (LEGACY_CTRL.has(ch) && (!e.altKey || ch === ' ')) return null
   // A shifted symbol (?, >, %) already carries the shift: report the
   // character itself without it, so C-? reaches Emacs as C-?.
   const isSymbol = !/^[a-z0-9]$/i.test(ch)

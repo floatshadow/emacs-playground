@@ -70,15 +70,25 @@ function ProjectView({ projectId, taskId }: { projectId: string; taskId: string 
   let left
   if (bundle.isError) {
     const notFound = bundle.error instanceof ApiError && bundle.error.status === 404
+    // A 404 for a project the course map lists as planned: not written yet.
+    const planned = notFound && project?.status === 'planned'
     left = (
       <aside className={projectStyles.side}>
-        <h1>{notFound ? t('project.notFound') : t('lesson.error')}</h1>
+        <h1>
+          {planned
+            ? t('project.notFound')
+            : notFound
+              ? t('project.noSuchProject')
+              : t('lesson.error')}
+        </h1>
         <p>
-          {notFound
+          {planned
             ? t('project.notFoundBody')
-            : bundle.error instanceof Error
-              ? bundle.error.message
-              : ''}
+            : notFound
+              ? t('project.noSuchProjectBody')
+              : bundle.error instanceof Error
+                ? bundle.error.message
+                : ''}
         </p>
         <Link to="/">{t('lesson.backToMap')}</Link>
       </aside>

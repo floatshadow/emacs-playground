@@ -93,7 +93,7 @@ export function Step({
         {view.hint && (
           <Hint
             forText={view.hint.forText}
-            text={view.hint.text}
+            text={view.hint.text || t('steps.noHint')}
             level={view.hintLevel}
             keys={view.hintLevel >= 2 ? demoKeys(view.step.demo) : null}
           />

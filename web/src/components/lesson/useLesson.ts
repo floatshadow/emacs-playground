@@ -13,19 +13,35 @@ import { useSessionStore } from '../../store/session'
 import { useUiStore } from '../../store/ui'
 import { hintKey, resumeStep, selectStepView, type StepView } from '../../store/selectors'
 import { switchFrame } from '../screen/frame'
+import { focusTerminal } from '../screen/focus'
+import { loadAtStep } from '../live/actions'
 import { maxHintLevel } from './hintLevel'
+import { cancelDemo } from './demoPlayer'
 import { errorMessage } from '../../lib/errors'
+import { lt } from '../../lib/localtext'
 
 export interface ScenarioLoad {
   loading: boolean
   error: string | null
   retry(): void
+  /**
+   * This page loaded its lesson, and since then another lesson became the
+   * active one (another tab or window loaded it): Emacs no longer shows
+   * this lesson.
+   */
+  displaced: boolean
+  /** Loads this page's lesson again (at its resume target). */
+  loadHere(): void
 }
 
 /**
  * Calls rpc('scenario') when the active step is not already in this lesson
  * (or not the requested step). Waits for hello so a page reload mid-lesson
- * does not restart the lesson.
+ * does not restart the lesson. A lesson whose steps are all done or skipped
+ * is not loaded unless a step is asked for: it shows its saved ticks, and
+ * "Start this lesson over" or a step's "Go to" loads it. Once loaded here,
+ * the lesson is not loaded again on its own when another page replaces it
+ * (the two pages would take Emacs from each other); see `displaced`.
  */
 export function useScenarioLoad(
   lessonId: string,
@@ -37,10 +53,12 @@ export function useScenarioLoad(
   const active = useSessionStore((s) => s.activeStep)
   const outcomes = useSessionStore((s) => s.outcomes)
   const progress = useProgress()
+  const locale = useTranslation().i18n.language
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const requested = useRef<string | null>(null)
+  const [loadedHere, setLoadedHere] = useState(false)
 
   const ready = !!hello && !!sessionId && !!scenario && !progress.isLoading
   // The resume target is decided on fresh progress: after a progress reset
@@ -63,31 +81,44 @@ export function useScenarioLoad(
     }
   }, [active])
 
+  const displaced = loadedHere && !!active && active.lessonId !== lessonId
+
   useEffect(() => {
-    if (!needsLoad || !scenario) return
+    if (!needsLoad || !scenario || displaced) return
     const target =
-      stepId ??
-      resumeStep(scenario, outcomes[lessonId] ?? {}, progress.data?.lessons?.[lessonId]) ??
-      scenario.steps[0]?.id
+      stepId ?? resumeStep(scenario, outcomes[lessonId] ?? {}, progress.data?.lessons?.[lessonId])
+    if (target === undefined && scenario.steps.length > 0) return // finished
     const key = `${lessonId}#${target ?? ''}#${attempt}`
     if (requested.current === key) return
     requested.current = key
     setLoading(true)
     setError(null)
-    rpc('scenario', target ? { lessonId, stepId: target } : { lessonId }, { silent: true })
+    const index = scenario.steps.findIndex((s) => s.id === target)
+    const step = scenario.steps[index]
+    const load = step
+      ? loadAtStep(lessonId, { id: step.id, n: index + 1, goal: lt(step.goal, locale) }, true)
+      : rpc('scenario', { lessonId }, { silent: true })
+    load
       .then(() => {
+        setLoadedHere(true)
         // GUI lessons (mode gui, or tagged gui) open in the GUI frame (frontend.md §8).
         const wantsGui = scenario.mode === 'gui' || (scenario.tags ?? []).includes('gui')
         if (wantsGui && useSessionStore.getState().mode !== 'gui') void switchFrame('gui')
       })
       .catch((e: unknown) => setError(errorMessage(e)))
       .finally(() => setLoading(false))
-  }, [needsLoad, scenario, lessonId, stepId, attempt, progress.data, outcomes])
+  }, [needsLoad, displaced, scenario, lessonId, stepId, attempt, progress.data, outcomes, locale])
 
   return {
     loading: loading || (!ready && !!scenario),
     error,
     retry: () => setAttempt((n) => n + 1),
+    displaced,
+    loadHere: () => {
+      setLoadedHere(false)
+      requested.current = null
+      setAttempt((n) => n + 1)
+    },
   }
 }
 
@@ -125,6 +156,7 @@ export function useLessonSteps(lessonId: string, scenario: Scenario | undefined)
   const checks = useSessionStore((s) => s.checks)
   const outcomes = useSessionStore((s) => s.outcomes)
   const watched = useSessionStore((s) => s.watched)
+  const startedHere = useSessionStore((s) => s.startedHere)
   const lessonsComplete = useSessionStore((s) => s.lessonsComplete)
   const hintLevels = useUiStore((s) => s.hintLevels)
   const progress = useProgress()
@@ -147,6 +179,8 @@ export function useLessonSteps(lessonId: string, scenario: Scenario | undefined)
       outcomes: outcomes[lessonId] ?? {},
       progress: lp,
       watched: !!activeStepId && watched?.lessonId === lessonId && watched.stepId === activeStepId,
+      startedHere:
+        !!activeStepId && startedHere?.lessonId === lessonId && startedHere.stepId === activeStepId,
       checks: activeStepId ? checks : {},
       hintLevels: levels,
       locale: i18n.language,
@@ -157,6 +191,7 @@ export function useLessonSteps(lessonId: string, scenario: Scenario | undefined)
     lessonId,
     outcomes,
     watched,
+    startedHere,
     active,
     checks,
     hintLevels,
@@ -165,25 +200,30 @@ export function useLessonSteps(lessonId: string, scenario: Scenario | undefined)
 
   const activeIndex = views.findIndex((v) => v.status === 'active')
   // Complete: the last step ended this session, or no step is active and
-  // every step is done (skipped and watched steps leave the lesson open).
+  // every step is done or skipped (a watched step leaves the lesson open).
   const complete =
     views.length > 0 &&
     (lessonsComplete.includes(lessonId) ||
-      (activeIndex < 0 && views.every((v) => v.status === 'done')))
+      (activeIndex < 0 && views.every((v) => v.status === 'done' || v.status === 'skipped')))
 
   const onHint = useCallback(
     (view: StepView) => {
       const level = Math.min(view.hintLevel + 1, maxHintLevel(view))
       useUiStore.getState().setHintLevel(hintKey(lessonId, view.step.id), level)
       void rpc('hint', { stepId: view.step.id, level }, { silent: true }).catch(() => undefined)
+      // The hint names keys to press: they go to Emacs, not to the button.
+      focusTerminal()
     },
     [lessonId],
   )
   const onGoTo = useCallback(
     (view: StepView) => {
-      void rpc('scenario', { lessonId, stepId: view.step.id }).catch(() => undefined)
+      const step = { id: view.step.id, n: view.index + 1, goal: view.goal }
+      void loadAtStep(lessonId, step).catch(() => undefined)
     },
     [lessonId],
   )
+  // A demo belongs to this lesson's step: leaving the lesson stops it.
+  useEffect(() => () => cancelDemo(), [lessonId])
   return { views, activeIndex, complete, onHint, onGoTo }
 }

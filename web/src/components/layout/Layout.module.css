@@ -49,7 +49,11 @@
   align-items: center;
   gap: 8px;
   white-space: nowrap;
-  flex: none;
+  /* Shrinks (down to its logo) only once the crumbs are gone: the actions
+     on the right never leave the screen. */
+  flex: 0 1 auto;
+  min-width: 22px;
+  overflow: hidden;
 }
 .brand i {
   width: 22px;
@@ -70,6 +74,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  flex: 0 1000 auto;
 }
 .crumbs a {
   color: inherit;
@@ -208,6 +213,17 @@
 }
 .wideOnly {
   display: inline-flex;
+}
+/* The session chip is the widest action: it goes first when the top bar
+   gets crowded, so "Where am I" and "Rescue me" always fit. */
+@media (max-width: 1180px) {
+  .chipWide {
+    display: none !important;
+  }
+  .topbar {
+    gap: 12px;
+    padding: 0 12px;
+  }
 }
 @media (max-width: 860px) {
   .wideOnly {

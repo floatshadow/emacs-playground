@@ -102,6 +102,35 @@ function focusLessonPane() {
   }
 }
 
+/**
+ * True when ResizeObserver's device-pixel-content-box is the CSS box times
+ * devicePixelRatio (or the ratio is 1, where both agree anyway).
+ */
+function devicePixelBoxReliable(): Promise<boolean> {
+  const dpr = window.devicePixelRatio || 1
+  if (dpr === 1 || typeof ResizeObserver === 'undefined') return Promise.resolve(true)
+  return new Promise((resolve) => {
+    const probe = document.createElement('div')
+    probe.style.cssText = 'position:fixed;left:-1000px;top:0;width:100px;height:10px'
+    document.body.append(probe)
+    const done = (ok: boolean) => {
+      observer.disconnect()
+      probe.remove()
+      resolve(ok)
+    }
+    const observer = new ResizeObserver(([e]) => {
+      const box = e?.devicePixelContentBoxSize?.[0]
+      // Without the box the renderer uses CSS size times the ratio itself.
+      done(!box || Math.abs(box.inlineSize - 100 * dpr) <= 1)
+    })
+    try {
+      observer.observe(probe, { box: 'device-pixel-content-box' })
+    } catch {
+      done(true)
+    }
+  })
+}
+
 class TerminalHost {
   readonly el: HTMLDivElement
   term: Terminal | null = null
@@ -138,16 +167,24 @@ class TerminalHost {
       }),
     )
     term.open(this.el)
-    try {
-      const webgl = new WebglAddon()
-      webgl.onContextLoss(() => webgl.dispose()) // falls back to the DOM renderer
-      term.loadAddon(webgl)
-    } catch {
-      // No WebGL (headless, old GPU): the DOM renderer is used.
-    }
+    void devicePixelBoxReliable().then((reliable) => {
+      // The WebGL renderer sizes its canvas from device-pixel-content-box;
+      // where that reports CSS pixels at a ratio above 1 (Chrome's device
+      // emulation), its canvas would be drawn magnified and clipped.
+      if (!reliable || this.term !== term) return
+      try {
+        const webgl = new WebglAddon()
+        webgl.onContextLoss(() => webgl.dispose()) // falls back to the DOM renderer
+        term.loadAddon(webgl)
+      } catch {
+        // No WebGL (headless, old GPU): the DOM renderer is used.
+      }
+    })
     term.attachCustomKeyEventHandler((e) => {
-      // While "Skip this step" plays the step, the learner's keys wait.
-      if (useUiStore.getState().skipping) {
+      // While sessiond plays steps (Skip this step, Go to this step), the
+      // learner's keys wait.
+      const ui = useUiStore.getState()
+      if (ui.skipping || ui.stepJump) {
         e.preventDefault()
         return false
       }

@@ -53,10 +53,12 @@ export function patternNudges({
   mentioned = [],
 }: PatternInput): Nudge[] {
   const out: Nudge[] = []
-  const done = ticker.filter((e) => e.kind !== 'prefix' && e.kind !== 'gap')
+  // Only the learner's own keys: replayed ones (demos, skips) are not a sign of being stuck.
+  const own = ticker.filter((e) => !e.replayed)
+  const done = own.filter((e) => e.kind !== 'prefix' && e.kind !== 'gap')
   const last = done[done.length - 1]
 
-  const recentQuits = ticker.filter((e) => isQuit(e) && now - e.at < PANIC_WINDOW_MS).length
+  const recentQuits = own.filter((e) => isQuit(e) && now - e.at < PANIC_WINDOW_MS).length
   if (recentQuits >= PANIC_COUNT) {
     out.push({
       id: 'panic',

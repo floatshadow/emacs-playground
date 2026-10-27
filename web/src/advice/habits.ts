@@ -34,6 +34,14 @@ export function habitTitle(key: string, vscode: string): string {
 }
 
 /**
+ * Keys a terminal cannot tell apart, by the name the habits table uses: a
+ * terminal sends Ctrl+/ as the byte of C-_, so Emacs reports C-_ for it.
+ */
+const TERMINAL_KEY_NAMES: Readonly<Record<string, string>> = { 'C-_': 'C-/' }
+
+const terminalKeyName = (key: string) => TERMINAL_KEY_NAMES[key] ?? key
+
+/**
  * The card for a ticker entry, or null when the entry is not a single-key
  * command, matches no habit, the habit was already shown this session, or
  * the lesson mentions the key (mentioned: normalised sequences; a card for
@@ -49,7 +57,7 @@ export function habitCardFor(
   if (entry.kind === 'prefix' || entry.kind === 'gap' || entry.mx) return null
   if (entry.typed !== undefined) return null
   if (entry.keys.length !== 1) return null
-  const key = normalizeKeysLoose(entry.keys[0] ?? '')
+  const key = terminalKeyName(normalizeKeysLoose(entry.keys[0] ?? ''))
   if (seen.has(key)) return null
   const row = habits.find((h) => normalizeKeysLoose(h.key) === key)
   if (!row) return null
