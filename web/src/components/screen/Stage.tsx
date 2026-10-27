@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSessionStore } from '../../store/session'
-import { Ticker } from '../live/Ticker'
+import { TickerArea } from '../live/Ticker'
+import { FocusBanner } from './FocusBanner'
 import { getTerminalHost } from './hosts'
 import { LiveAnnouncer } from './LiveAnnouncer'
 import { ScreenHeader } from './ScreenHeader'
@@ -23,7 +24,10 @@ export function Stage() {
   if (mode === 'gui' && !vncMounted) setVncMounted(true)
   return (
     <main className={styles.stage} aria-label={t('screen.stageLabel')}>
-      <ScreenHeader />
+      <div className={styles.top}>
+        <FocusBanner />
+        <ScreenHeader />
+      </div>
       <div id={SCREEN_WRAP_ID} className={styles.wrap}>
         <div className={styles.screen}>
           <TerminalPane hidden={mode === 'gui'} />
@@ -31,7 +35,7 @@ export function Stage() {
           <ScreenOverlay onReattach={() => getTerminalHost().reattach()} />
         </div>
       </div>
-      <Ticker />
+      <TickerArea />
       <LiveAnnouncer />
     </main>
   )

@@ -9,7 +9,7 @@ import { ScreenActions } from '../components/layout/ScreenActions'
 import { TopBar, type Crumb } from '../components/layout/TopBar'
 import { Workspace } from '../components/layout/Workspace'
 import { LessonPane } from '../components/lesson/LessonPane'
-import { useLessonSteps, useScenarioLoad } from '../components/lesson/useLesson'
+import { useLessonMentions, useLessonSteps, useScenarioLoad } from '../components/lesson/useLesson'
 import { AuthorPanel } from '../components/live/AuthorPanel'
 import { CheatSheet } from '../components/live/CheatSheet'
 import { Nudges } from '../components/live/Nudges'
@@ -38,6 +38,7 @@ function LessonView({ lessonId }: { lessonId: string }) {
   const scenario = lesson.data?.scenario
   const steps = useLessonSteps(lessonId, scenario)
   const load = useScenarioLoad(lessonId, scenario)
+  useLessonMentions(lessonId, lesson.data?.markdown, scenario)
   const found = findLesson(curriculum.data, lessonId)
   const next = nextLesson(curriculum.data, lessonId)
   const modeName = useSessionStore((s) => s.state?.modeName)
@@ -89,11 +90,12 @@ function LessonView({ lessonId }: { lessonId: string }) {
       <RailSection title={t('rail.where')}>
         <WhereAmI />
       </RailSection>
-      <RailSection title={t('rail.nudges')}>
-        <Nudges />
-      </RailSection>
+      {/* Rescue before "Did you mean": cards never push it below the fold (B9). */}
       <RailSection title={t('rail.rescue')}>
         <RescueCard />
+      </RailSection>
+      <RailSection title={t('rail.nudges')}>
+        <Nudges />
       </RailSection>
       <RailSection title={t('cheat.title')} small={modeName}>
         <CheatSheet heading={false} />

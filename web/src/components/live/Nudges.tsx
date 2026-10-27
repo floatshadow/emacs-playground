@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { NUDGES_SHOWN } from '../../advice/habits'
 import { useSessionStore } from '../../store/session'
 import { selectNudges } from '../../store/selectors'
 import { KeyText } from '../common/Kbd'
@@ -17,7 +18,9 @@ function useNow(ms: number): number {
 
 /**
  * "Did you mean" (frontend.md §6): habit cards, stuck patterns and server
- * nudges in one dismissible list. Dismissals last for the session.
+ * nudges in one dismissible list, newest first. Three show; older ones wait
+ * behind "N earlier tips" (B9). Dismissing removes exactly that card, for
+ * the rest of the page session.
  */
 export function Nudges() {
   const { t } = useTranslation()
@@ -27,18 +30,27 @@ export function Nudges() {
   const ticker = useSessionStore((s) => s.ticker)
   const state = useSessionStore((s) => s.state)
   const minibufferSince = useSessionStore((s) => s.minibufferSince)
+  const mentions = useSessionStore((s) => s.mentions)
+  const activeStep = useSessionStore((s) => s.activeStep)
   const dismiss = useSessionStore((s) => s.dismiss)
+  const [showAll, setShowAll] = useState(false)
   const tick = useNow(5000)
   // "Now" is the clock tick or the newest event, whichever is later (pure during render).
   const now = Math.max(tick, ticker[ticker.length - 1]?.at ?? 0, state?.ts ?? 0)
   const nudges = useMemo(
-    () => selectNudges({ cards, serverNudges, dismissed, ticker, state, minibufferSince }, now),
-    [cards, serverNudges, dismissed, ticker, state, minibufferSince, now],
+    () =>
+      selectNudges(
+        { cards, serverNudges, dismissed, ticker, state, minibufferSince, mentions, activeStep },
+        now,
+      ),
+    [cards, serverNudges, dismissed, ticker, state, minibufferSince, mentions, activeStep, now],
   )
   if (nudges.length === 0) return <div className={styles.empty}>{t('nudges.empty')}</div>
+  const shown = showAll ? nudges : nudges.slice(0, NUDGES_SHOWN)
+  const earlier = nudges.length - NUDGES_SHOWN
   return (
     <div>
-      {nudges.map((n) => (
+      {shown.map((n) => (
         <div key={n.id} className={`${styles.nudge} ${styles[n.kind] ?? ''}`}>
           <button
             type="button"
@@ -56,6 +68,16 @@ export function Nudges() {
           </p>
         </div>
       ))}
+      {earlier > 0 && (
+        <button
+          type="button"
+          className={styles.more}
+          aria-expanded={showAll}
+          onClick={() => setShowAll(!showAll)}
+        >
+          {showAll ? t('nudges.fewer') : t('nudges.earlier', { count: earlier })}
+        </button>
+      )}
     </div>
   )
 }

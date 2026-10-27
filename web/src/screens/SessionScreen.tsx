@@ -9,6 +9,7 @@ import { disconnectSession } from '../api/session/connection'
 import { rpc } from '../api/session/rpc'
 import { Button } from '../components/common/Button'
 import { ConfirmDialog } from '../components/common/Dialog'
+import { StartOver } from '../components/course/StartOver'
 import { AppShell } from '../components/layout/AppShell'
 import { SessionChip, TopBar } from '../components/layout/TopBar'
 import { FrameSwitch } from '../components/screen/FrameSwitch'
@@ -202,6 +203,12 @@ export default function SessionScreen() {
               </Button>
             )}
           </div>
+        </section>
+
+        <section className={styles.card} aria-labelledby="s-progress">
+          <h2 id="s-progress">{t('session.progress')}</h2>
+          <p>{t('session.progressBody')}</p>
+          <StartOver />
         </section>
 
         <section className={styles.card} aria-labelledby="s-frame">

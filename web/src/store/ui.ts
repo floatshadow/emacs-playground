@@ -4,6 +4,7 @@
  * persist in localStorage.
  */
 import { create } from 'zustand'
+import type { DemoAction } from '../lib/demo'
 
 export interface Toast {
   id: number
@@ -42,10 +43,20 @@ function savePrefs(p: Prefs) {
   }
 }
 
+/** A demo playing ("Watch it"): what the caption strip shows (frontend.md §7). */
 export interface DemoState {
   stepId: string
   goal: string
+  /** The paced actions of the demo. */
+  actions: DemoAction[]
+  /** How many actions were sent so far. */
+  sent: number
+  /** demo start restored the step's checkpoint first ("Starting from the beginning"). */
+  restored: boolean
 }
+
+/** Focus mode's keyboard lock: being asked for, granted, or not available. */
+export type FocusLock = 'trying' | 'on' | 'off'
 
 export interface UiStore extends Prefs {
   railOpen: boolean
@@ -55,6 +66,9 @@ export interface UiStore extends Prefs {
   /** Extra preview tabs opened from the file tree, per lesson or project id. */
   previewExtra: Record<string, string[]>
   focusMode: boolean
+  focusLock: FocusLock
+  /** "Skip this step" is running: the screen is covered until it returns (S2). */
+  skipping: { stepId: string; goal: string } | null
   /** The browser-reserved-key toast is shown once per tab. */
   reservedKeyToastShown: boolean
   toasts: Toast[]
@@ -70,11 +84,18 @@ export interface UiStore extends Prefs {
   setPreviewTab(owner: string, path: string): void
   addPreviewTab(owner: string, path: string): void
   setFocusMode(on: boolean): void
+  setFocusLock(lock: FocusLock): void
+  setSkipping(s: { stepId: string; goal: string } | null): void
   markReservedKeyToast(): void
   toast(text: string, tone?: Toast['tone']): void
   dismissToast(id: number): void
   setHintLevel(key: string, level: number): void
+  /** Start over: hint levels of every lesson, or of one (keys "<lessonId>#<stepId>"). */
+  clearHintLevels(lessonId?: string): void
   setDemo(d: DemoState | null): void
+  /** The demo player sent its n-th action. */
+  setDemoSent(stepId: string, sent: number): void
+  setDemoRestored(stepId: string): void
   setGuiStarting(on: boolean): void
   setPrefs(p: Partial<Prefs>): void
 }
@@ -89,6 +110,8 @@ export const useUiStore = create<UiStore>()((set, get) => ({
   previewTab: {},
   previewExtra: {},
   focusMode: false,
+  focusLock: 'off',
+  skipping: null,
   reservedKeyToastShown: false,
   toasts: [],
   hintLevels: {},
@@ -114,6 +137,8 @@ export const useUiStore = create<UiStore>()((set, get) => ({
       }
     }),
   setFocusMode: (focusMode) => set({ focusMode }),
+  setFocusLock: (focusLock) => set({ focusLock }),
+  setSkipping: (skipping) => set({ skipping }),
   markReservedKeyToast: () => set({ reservedKeyToastShown: true }),
   toast: (text, tone = 'info') => {
     const id = toastId++
@@ -122,7 +147,19 @@ export const useUiStore = create<UiStore>()((set, get) => ({
   },
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   setHintLevel: (key, level) => set((s) => ({ hintLevels: { ...s.hintLevels, [key]: level } })),
+  clearHintLevels: (lessonId) =>
+    set((s) => ({
+      hintLevels: lessonId
+        ? Object.fromEntries(
+            Object.entries(s.hintLevels).filter(([k]) => !k.startsWith(lessonId + '#')),
+          )
+        : {},
+    })),
   setDemo: (demo) => set({ demo }),
+  setDemoSent: (stepId, sent) =>
+    set((s) => (s.demo?.stepId === stepId ? { demo: { ...s.demo, sent } } : s)),
+  setDemoRestored: (stepId) =>
+    set((s) => (s.demo?.stepId === stepId ? { demo: { ...s.demo, restored: true } } : s)),
   setGuiStarting: (guiStarting) => set({ guiStarting }),
   setPrefs: (p) => {
     set(p)

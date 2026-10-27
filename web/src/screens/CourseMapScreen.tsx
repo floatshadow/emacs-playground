@@ -5,6 +5,7 @@ import { useCurriculum, useProgress } from '../api/queries'
 import { buttonClass } from '../components/common/buttonClass'
 import { CourseMap } from '../components/course/CourseMap'
 import { currentLesson } from '../components/course/progress'
+import { StartOver } from '../components/course/StartOver'
 import { AppShell } from '../components/layout/AppShell'
 import { TopBar } from '../components/layout/TopBar'
 import { useSessionStore } from '../store/session'
@@ -23,6 +24,8 @@ export default function CourseMapScreen() {
     curriculum.data && !progress.isPending
       ? currentLesson(curriculum.data, progress.data, active?.lessonId ?? null)
       : null
+  // Start over appears once there is something to clear.
+  const hasProgress = Object.keys(progress.data?.lessons ?? {}).length > 0
 
   useEffect(() => {
     document.title = `${t('course.crumb')} — Emacs Playground`
@@ -42,6 +45,7 @@ export default function CourseMapScreen() {
           <Link className={buttonClass()} to="/session">
             {t('topbar.session')}
           </Link>
+          {hasProgress && <StartOver />}
           {current && (
             <Link className={buttonClass('primary')} to={`/lesson/${current.id}`}>
               {progress.data?.lessons?.[current.id] ? t('course.continue') : t('course.start')}:{' '}

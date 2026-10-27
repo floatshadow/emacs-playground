@@ -17,7 +17,7 @@ import {
 } from '../protocol.gen'
 import { useSessionStore } from '../store/session'
 import { useUiStore } from '../store/ui'
-import { ApiError, api, lessonPath } from './http'
+import { ApiError, api, lessonPath, request } from './http'
 import { ensureSession, onSessionEvent } from './session/connection'
 import { rpc } from './session/rpc'
 
@@ -95,11 +95,26 @@ export function useProgress(enabled = true) {
   })
 }
 
+/**
+ * POST /progress/reset (api.md §2.4, fix plan contract a): with a lesson id
+ * that lesson's records, without one every record of the user ("Start
+ * over", posted with no body). The page then forgets what it remembers of
+ * that progress (outcomes, hint levels, habit cards and keys seen) and
+ * refetches progress; sessiond drops the active step and says so with a
+ * "dropped" step event.
+ */
+export async function resetProgress(qc: QueryClient, lessonId?: string): Promise<void> {
+  if (lessonId) await api.post<void>(`${APIPrefix}/progress/reset`, { lessonId })
+  else await request<void>(`${APIPrefix}/progress/reset`, { method: 'POST' })
+  useSessionStore.getState().forgetProgress(lessonId)
+  useUiStore.getState().clearHintLevels(lessonId)
+  await qc.invalidateQueries({ queryKey: qk.progress })
+}
+
 export function useResetProgress() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (lessonId: string) => api.post<void>(`${APIPrefix}/progress/reset`, { lessonId }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.progress }),
+    mutationFn: (lessonId?: string) => resetProgress(qc, lessonId),
   })
 }
 

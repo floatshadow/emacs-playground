@@ -3,12 +3,21 @@
  * so the ticker, Where am I and the step list re-render only when their
  * inputs change.
  */
-import type { CheckEvent, Progress, Scenario, State, Step, Tables } from '../protocol.gen'
+import type {
+  CheckEvent,
+  LessonProgress,
+  ProgressStatus,
+  Scenario,
+  State,
+  Step,
+  Tables,
+} from '../protocol.gen'
 import { whereAmI, type LiveContext, type WhereAmIView } from '../advice/exits'
 import type { Nudge } from '../advice/habits'
+import { mentionedNow } from '../advice/mentions'
 import { mergeNudges, patternNudges } from '../advice/patterns'
 import { lt } from '../lib/localtext'
-import type { SessionData } from './session'
+import type { SessionData, StepOutcome } from './session'
 
 /** Memoises a function on the identity of its arguments (last call only). */
 export function memoLast<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
@@ -55,11 +64,22 @@ export function selectWhereAmI(
   )
 }
 
-/** Habit cards, pattern nudges and server nudges merged, minus dismissed ones. */
+/**
+ * Pattern nudges, server nudges and habit cards merged, minus dismissed
+ * ones: the live patterns first, then the newest server nudges and cards
+ * first (the panel shows NUDGES_SHOWN of them, B9).
+ */
 export function selectNudges(
   s: Pick<
     SessionData,
-    'cards' | 'serverNudges' | 'dismissed' | 'ticker' | 'state' | 'minibufferSince'
+    | 'cards'
+    | 'serverNudges'
+    | 'dismissed'
+    | 'ticker'
+    | 'state'
+    | 'minibufferSince'
+    | 'mentions'
+    | 'activeStep'
   >,
   now: number,
 ): Nudge[] {
@@ -68,8 +88,9 @@ export function selectNudges(
     state: s.state,
     minibufferSince: s.minibufferSince,
     now,
+    mentioned: mentionedNow(s.mentions, s.activeStep),
   })
-  return mergeNudges([s.cards, patterns, s.serverNudges], s.dismissed)
+  return mergeNudges([patterns, [...s.serverNudges].reverse(), [...s.cards].reverse()], s.dismissed)
 }
 
 export type CondStatus = 'met' | 'next' | 'unmet' | 'unknown'
@@ -82,12 +103,18 @@ export interface CondView {
   detail?: string
 }
 
-export type StepStatus = 'done' | 'active' | 'todo'
+/**
+ * A step in the list: done (by the learner), demonstrated (watched, not yet
+ * done), skipped, the active one, or still to do.
+ */
+export type StepStatus = 'done' | 'demonstrated' | 'skipped' | 'active' | 'todo'
 
 export interface StepView {
   step: Step
   index: number
   status: StepStatus
+  /** The active step was watched: it offers "Do it yourself" (contract b). */
+  watched: boolean
   goal: string
   detail: string
   conds: CondView[]
@@ -103,8 +130,12 @@ export interface StepsInput {
   lessonId: string
   /** Active step id when the active step belongs to this lesson. */
   activeStepId: string | null
-  /** Steps known done (progress plus this session's step events). */
-  done: ReadonlySet<string>
+  /** This visit's outcomes for the lesson's steps (session store `outcomes`). */
+  outcomes: Readonly<Record<string, StepOutcome>>
+  /** The lesson's saved progress, if any. */
+  progress: LessonProgress | undefined
+  /** The active step was watched (session store `watched`). */
+  watched?: boolean
   checks: Record<string, CheckEvent>
   hintLevels: Record<string, number>
   locale: string
@@ -116,14 +147,44 @@ export function condId(stepId: string, index: number, explicit?: string): string
   return explicit ?? `${stepId}/${index + 1}`
 }
 
-export function selectStepView(inp: StepsInput): StepView[] {
-  const { scenario, activeStepId, done, checks, hintLevels, locale, lessonId } = inp
+/** A saved progress status as a step outcome, if it is one. */
+function savedOutcome(s: ProgressStatus | undefined): StepOutcome | undefined {
+  return s === 'done' || s === 'demonstrated' || s === 'skipped' ? s : undefined
+}
+
+/**
+ * The status of each step (fix plan contract a, fixes X1): the engine's
+ * active step is always active, whatever progress says; steps after it
+ * show no tick (they are evaluated again when reached); other steps show
+ * this visit's outcome, else their saved status when it is done,
+ * demonstrated or skipped, else to do.
+ */
+export function stepStatuses(
+  scenario: Scenario,
+  activeStepId: string | null,
+  outcomes: Readonly<Record<string, StepOutcome>>,
+  progress: LessonProgress | undefined,
+): StepStatus[] {
   const activeIndex = activeStepId ? scenario.steps.findIndex((s) => s.id === activeStepId) : -1
   return scenario.steps.map((step, index) => {
-    const isDone = done.has(step.id) || (activeIndex >= 0 && index < activeIndex)
-    const status: StepStatus =
-      index === activeIndex && !done.has(step.id) ? 'active' : isDone ? 'done' : 'todo'
-    const check = checks[step.id]
+    if (index === activeIndex) {
+      // The last step stays the active one after it completes (the lesson
+      // is complete); only an ending seen in this visit shows over it.
+      const o = outcomes[step.id]
+      return o === 'done' || o === 'skipped' ? o : 'active'
+    }
+    if (activeIndex >= 0 && index > activeIndex) return 'todo'
+    return outcomes[step.id] ?? savedOutcome(progress?.steps?.[step.id]?.status) ?? 'todo'
+  })
+}
+
+export function selectStepView(inp: StepsInput): StepView[] {
+  const { scenario, activeStepId, outcomes, progress, checks, hintLevels, locale, lessonId } = inp
+  const statuses = stepStatuses(scenario, activeStepId, outcomes, progress)
+  return scenario.steps.map((step, index) => {
+    const status: StepStatus = statuses[index] ?? 'todo'
+    // Only the active step's latest check is current; others may be stale.
+    const check = status === 'active' ? checks[step.id] : undefined
     const byId = new Map((check?.conditions ?? []).map((c) => [c.id, c]))
     const base = step.conditions.map((c, i) => {
       const id = condId(step.id, i, c.id)
@@ -150,6 +211,7 @@ export function selectStepView(inp: StepsInput): StepView[] {
       step,
       index,
       status,
+      watched: status === 'active' && !!inp.watched,
       goal: lt(step.goal, locale),
       detail: lt(step.detail, locale),
       conds,
@@ -161,28 +223,18 @@ export function selectStepView(inp: StepsInput): StepView[] {
 }
 
 /**
- * Done step ids for a lesson: this session's completions, plus steps the
- * progress store records as done unless they were (re)loaded this session
- * (redoing a step makes it active again until it completes).
+ * Where to resume a lesson (sessiond's Engine.FirstIncomplete agrees): the
+ * first step that is neither done nor skipped, by this visit's outcome or
+ * else the saved status. A demonstrated step is resumed, so the learner
+ * practises what they watched.
  */
-export function doneSteps(
-  progress: Progress | undefined,
-  lessonId: string,
-  completed: Record<string, string[]>,
-  reopened: Record<string, string[]> = {},
-): Set<string> {
-  const out = new Set<string>(completed[lessonId] ?? [])
-  const again = new Set(reopened[lessonId] ?? [])
-  const lp = progress?.lessons?.[lessonId]
-  if (lp) {
-    for (const [id, sp] of Object.entries(lp.steps ?? {})) {
-      if (sp.status === 'done' && !again.has(id)) out.add(id)
-    }
-  }
-  return out
-}
-
-/** The first step not done, for resuming a lesson. */
-export function resumeStep(scenario: Scenario, done: ReadonlySet<string>): string | undefined {
-  return scenario.steps.find((s) => !done.has(s.id))?.id
+export function resumeStep(
+  scenario: Scenario,
+  outcomes: Readonly<Record<string, StepOutcome>>,
+  progress: LessonProgress | undefined,
+): string | undefined {
+  return scenario.steps.find((s) => {
+    const o = outcomes[s.id] ?? savedOutcome(progress?.steps?.[s.id]?.status)
+    return o !== 'done' && o !== 'skipped'
+  })?.id
 }

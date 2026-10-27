@@ -4,7 +4,7 @@ import { useUiStore } from '../../store/ui'
 import { Button } from '../common/Button'
 import { doRescue } from '../live/actions'
 import { FrameSwitch } from '../screen/FrameSwitch'
-import { enterFocusMode, exitFocusMode } from '../screen/focusMode'
+import { toggleFocusMode } from '../screen/focusMode'
 import { SessionChip } from './TopBar'
 import styles from './Layout.module.css'
 
@@ -34,12 +34,16 @@ export function ScreenActions({ preview }: { preview?: boolean }) {
       )}
       <Button
         className={styles.wideOnly}
-        onClick={() => void (focusMode ? exitFocusMode() : enterFocusMode())}
+        onClick={() => void toggleFocusMode()}
         title={t('topbar.focusTitle')}
         aria-pressed={focusMode}
+        aria-describedby="focus-mode-desc"
       >
         {t('topbar.focus')}
       </Button>
+      <span id="focus-mode-desc" className="sr-only">
+        {t('topbar.focusTitle')}
+      </span>
       <Button
         className={styles.railToggle}
         onClick={() => setRailOpen(!railOpen)}

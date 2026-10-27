@@ -2,10 +2,15 @@
  * Layer 2 of the advice engine (frontend.md §6): VS Code muscle memory.
  *
  * When a single-key command matches a row of tables.habits, one card is
- * created per key per session; cards expire after 12 commands.
+ * created per key, once per session (the keys seen persist in localStorage
+ * across reloads), unless the lesson mentions that key: a card must not
+ * scold the learner for a key the lesson asked for (fix plan contract d).
+ * Cards stay until dismissed or until another lesson loads; the panel shows
+ * the newest three (B9).
  */
 import type { HabitRow, NudgeKind } from '../protocol.gen'
 import { normalizeKeysLoose } from './keys'
+import { isMentioned } from './mentions'
 import type { TickerEntry } from './ticker'
 
 export interface Nudge {
@@ -18,12 +23,12 @@ export interface Nudge {
 export interface HabitCard extends Nudge {
   kind: 'habit'
   key: string
-  /** totalCommands when the card was created; it expires 12 commands later. */
+  /** totalCommands when the card was created. */
   createdAtTotal: number
 }
 
-/** Commands after which a habit card disappears. */
-export const HABIT_TTL_COMMANDS = 12
+/** Cards the "Did you mean" panel shows before "N earlier tips". */
+export const NUDGES_SHOWN = 3
 
 export function habitTitle(key: string, vscode: string): string {
   return `Coming from VS Code? ${key} is not ${vscode}.`
@@ -31,20 +36,25 @@ export function habitTitle(key: string, vscode: string): string {
 
 /**
  * The card for a ticker entry, or null when the entry is not a single-key
- * command, matches no habit, or the habit was already shown this session.
+ * command, matches no habit, the habit was already shown this session, or
+ * the lesson mentions the key (mentioned: normalised sequences; a card for
+ * K is suppressed when one of them starts with K).
  */
 export function habitCardFor(
   entry: TickerEntry,
   habits: readonly HabitRow[],
   seen: ReadonlySet<string>,
   totalCommands: number,
+  mentioned: readonly string[] = [],
 ): HabitCard | null {
   if (entry.kind === 'prefix' || entry.kind === 'gap' || entry.mx) return null
+  if (entry.typed !== undefined) return null
   if (entry.keys.length !== 1) return null
   const key = normalizeKeysLoose(entry.keys[0] ?? '')
   if (seen.has(key)) return null
   const row = habits.find((h) => normalizeKeysLoose(h.key) === key)
   if (!row) return null
+  if (isMentioned(key, mentioned)) return null
   return {
     id: 'habit:' + key,
     kind: 'habit',
@@ -55,8 +65,25 @@ export function habitCardFor(
   }
 }
 
-/** Drops cards older than HABIT_TTL_COMMANDS commands; returns the same array when nothing expired. */
-export function expireCards(cards: HabitCard[], totalCommands: number): HabitCard[] {
-  const kept = cards.filter((c) => totalCommands - c.createdAtTotal <= HABIT_TTL_COMMANDS)
-  return kept.length === cards.length ? cards : kept
+/** localStorage key of the habit keys already shown in a session. */
+export const habitsSeenKey = (sessionId: string) => `pg.habitsSeen.${sessionId}`
+
+/** The habit keys already shown in this session (an earlier page load), or none. */
+export function loadHabitsSeen(sessionId: string): string[] {
+  try {
+    const raw = localStorage.getItem(habitsSeenKey(sessionId))
+    const v: unknown = raw ? JSON.parse(raw) : []
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+export function saveHabitsSeen(sessionId: string, seen: ReadonlySet<string>): void {
+  try {
+    if (seen.size === 0) localStorage.removeItem(habitsSeenKey(sessionId))
+    else localStorage.setItem(habitsSeenKey(sessionId), JSON.stringify([...seen]))
+  } catch {
+    // private mode: "once each" lasts for the tab only
+  }
 }

@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import styles from './Layout.module.css'
 
 /**
- * The rail container. On wide screens it is a plain column; below 1180 px it
+ * The rail container. On wide screens it is a plain column; at 1440 px and below it
  * is hidden unless open, then slides in from the right (the demo's
  * .rail.open) with a close button; Escape closes it.
  */

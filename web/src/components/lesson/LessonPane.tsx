@@ -1,9 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import type { LessonBundle, LessonRef } from '../../protocol.gen'
-import { useMe } from '../../api/queries'
-import { useUiStore } from '../../store/ui'
+import { ApiError } from '../../api/http'
+import { resetProgress, useMe } from '../../api/queries'
+import { rpc } from '../../api/session/rpc'
+import { toast, useUiStore } from '../../store/ui'
+import { useStepTransition } from './stepTransition'
 import { buttonClass } from '../common/buttonClass'
 import { Button } from '../common/Button'
 import { LESSON_PANE_ID } from '../screen/paneIds'
@@ -103,6 +107,22 @@ export function LessonPane({
   const inline = hasStepsMarker(markdown)
   const pane = useRef<HTMLElement>(null)
   const current = steps.views.find((v) => v.status === 'active')
+  const { flash, announce } = useStepTransition(bundle.id, bundle.scenario, pane)
+  const qc = useQueryClient()
+  const [restarting, setRestarting] = useState(false)
+  const startLessonOver = async () => {
+    setRestarting(true)
+    try {
+      await resetProgress(qc, bundle.id)
+      await rpc('scenario', { lessonId: bundle.id, reset: true }, { silent: true })
+      toast(t('lesson.startLessonOverDone'))
+    } catch (e) {
+      const msg = e instanceof ApiError || e instanceof Error ? e.message : String(e)
+      toast(t('startOver.failed', { error: msg }), 'error')
+    } finally {
+      setRestarting(false)
+    }
+  }
   const list = (
     <>
       {load.error && (
@@ -114,7 +134,16 @@ export function LessonPane({
         </div>
       )}
       {load.loading && !load.error && <p className={styles.loading}>{t('lesson.loading')}</p>}
-      <Steps views={steps.views} onHint={steps.onHint} onGoTo={steps.onGoTo} showDetails={author} />
+      <Steps
+        views={steps.views}
+        onHint={steps.onHint}
+        onGoTo={steps.onGoTo}
+        showDetails={author}
+        flash={flash}
+      />
+      <div className="sr-only" role="status" aria-live="polite">
+        {announce}
+      </div>
       {steps.complete && (
         <div className={styles.doneAll} role="status">
           {t('lesson.complete')}{' '}
@@ -127,7 +156,15 @@ export function LessonPane({
             </>
           ) : (
             <Link to="/">{t('lesson.backToMap')}</Link>
-          )}
+          )}{' '}
+          <Button
+            variant="quiet"
+            size="small"
+            disabled={restarting}
+            onClick={() => void startLessonOver()}
+          >
+            {t('lesson.startLessonOver')}
+          </Button>
         </div>
       )}
     </>

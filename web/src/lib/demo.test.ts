@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { describeDemo, parseDemo, planDemo } from './demo'
+import { captionItems, describeDemo, parseDemo, planDemo, WATCH_PACING } from './demo'
 
 describe('parseDemo (port of TestParseDemo)', () => {
   it('tokenises keys, quoted text and pauses', () => {
@@ -35,6 +35,20 @@ describe('planDemo (DemoPlayer pacing)', () => {
       { kind: 'pause', delayMs: 400 },
       { kind: 'keys', keys: 'RET', delayMs: 170 },
     ])
+  })
+  it('plays "Watch it" at human pace: 600 ms per chord, 120 ms per character', () => {
+    const plan = planDemo(parseDemo('C-s ~400 "zz" C-g'), WATCH_PACING)
+    expect(plan.map((a) => a.delayMs)).toEqual([600, 400, 120, 120, 600])
+  })
+  it('captions the keys sent so far, typed text as one growing string', () => {
+    const plan = planDemo(parseDemo('C-x C-f ~300 "src" TAB'))
+    expect(captionItems(plan, 0)).toEqual([])
+    expect(captionItems(plan, 5)).toEqual([
+      { kind: 'keys', keys: 'C-x' },
+      { kind: 'keys', keys: 'C-f' },
+      { kind: 'text', text: 'sr' },
+    ])
+    expect(captionItems(plan, plan.length).at(-1)).toEqual({ kind: 'keys', keys: 'TAB' })
   })
   it('turns newlines and tabs in typed text into RET and TAB', () => {
     expect(

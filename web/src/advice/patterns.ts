@@ -1,12 +1,14 @@
 /**
  * Stuck patterns (frontend.md §6), the fixed rules from the demo's nudges():
  * three C-g within 8 s, the same unbound key twice in a row, typing into a
- * read-only buffer, a prompt open for 20 s, three or more windows. Pure
- * functions of the ticker, the latest state and the clock; no lesson
- * knowledge.
+ * read-only buffer, a prompt open for 20 s, three or more windows (unless
+ * the lesson teaches splitting: C-x 2 or C-x 3 is mentioned). Pure
+ * functions of the ticker, the latest state, the clock and the keys the
+ * lesson mentions.
  */
 import type { State } from '../protocol.gen'
 import type { Nudge } from './habits'
+import { isMentioned } from './mentions'
 import type { TickerEntry } from './ticker'
 
 export const PANIC_WINDOW_MS = 8000
@@ -20,6 +22,8 @@ export interface PatternInput {
   /** When the current minibuffer opened (ms), or null. */
   minibufferSince: number | null
   now: number
+  /** Keys the lesson mentions (mentions.ts): splitting on purpose is no accident. */
+  mentioned?: readonly string[]
 }
 
 const isQuit = (e: TickerEntry) =>
@@ -30,7 +34,13 @@ const isQuit = (e: TickerEntry) =>
     e.cmd === 'abort-recursive-edit' ||
     e.cmd === 'isearch-abort')
 
-export function patternNudges({ ticker, state, minibufferSince, now }: PatternInput): Nudge[] {
+export function patternNudges({
+  ticker,
+  state,
+  minibufferSince,
+  now,
+  mentioned = [],
+}: PatternInput): Nudge[] {
   const out: Nudge[] = []
   const done = ticker.filter((e) => e.kind !== 'prefix' && e.kind !== 'gap')
   const last = done[done.length - 1]
@@ -81,7 +91,8 @@ export function patternNudges({ ticker, state, minibufferSince, now }: PatternIn
     })
   }
 
-  if (state && (state.windows?.length ?? 0) >= MANY_WINDOWS) {
+  const splitsTaught = isMentioned('C-x 2', mentioned) || isMentioned('C-x 3', mentioned)
+  if (state && (state.windows?.length ?? 0) >= MANY_WINDOWS && !splitsTaught) {
     out.push({
       id: 'many-windows',
       kind: 'ask',

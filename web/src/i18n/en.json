@@ -26,7 +26,7 @@
     "connecting": "{{where}} · connecting…",
     "busy": "Emacs is busy",
     "focus": "Focus mode",
-    "focusTitle": "Fullscreen with the keyboard locked, so Ctrl+W and friends reach Emacs",
+    "focusTitle": "Emacs gets the whole window: the lesson and the side panels step aside. Where the browser allows, it also goes fullscreen and locks the keyboard so Ctrl+W and friends reach Emacs. Leave with this button or Shift+Esc.",
     "whereAmI": "Where am I",
     "hidePreview": "Hide preview",
     "showPreview": "Show preview"
@@ -44,9 +44,10 @@
     "gui": "GUI",
     "terminalFrame": "terminal frame",
     "guiFrame": "GUI frame",
-    "guiTitle": "Show the same Emacs in a graphical frame (PDFs, images)",
+    "guiTitle": "Graphical frame: the same Emacs, with the same buffers, drawn with images and mouse menus (PDFs, images). Switch back to the terminal at any time.",
+    "terminalTitle": "Terminal frame: Emacs in a terminal, crisp text and every key",
     "guiUnavailable": "The GUI frame is not enabled on this server",
-    "starting": "starting GUI frame",
+    "starting": "Graphical frame: the same Emacs drawn with images and mouse menus. Starting…",
     "guiTimeout": "The GUI frame did not start. The terminal frame keeps working; try again from the session page."
   },
   "screen": {
@@ -88,6 +89,8 @@
     "waiting": "waiting for the next key",
     "prefixGloss": "This is a prefix: it does nothing alone.",
     "typedName": "typed name",
+    "typed_one": "typed {{count}} character",
+    "typed_other": "typed {{count}} characters",
     "gap": "Some keys were missed while reconnecting."
   },
   "where": {
@@ -105,7 +108,10 @@
   },
   "nudges": {
     "empty": "Nothing to translate yet. VS Code habits that do something else in Emacs will show up here, once each.",
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "earlier_one": "{{count}} earlier tip",
+    "earlier_other": "{{count}} earlier tips",
+    "fewer": "Show fewer tips"
   },
   "cheat": {
     "title": "Keys for this buffer"
@@ -114,7 +120,11 @@
     "button": "Rescue me",
     "explain": "Cancels any prompt, closes extra windows, widens, stops macros and overwrite mode. Never touches your files.",
     "reset": "Reset this step",
+    "resetExplain": "Puts the files and windows back to how this step started; changes since then are lost.",
     "resetTitle": "Restore the files and layout for this step from its checkpoint",
+    "resetConfirmTitle": "Reset this step?",
+    "resetConfirmBody": "The files and windows go back to how this step started. Changes you made since then are lost.",
+    "resetConfirm": "Reset",
     "did": "Rescue: {{what}}.",
     "nothing": "Rescue: you were already in a normal state. Nothing changed.",
     "nothingShort": "nothing to undo",
@@ -131,6 +141,13 @@
     "noteLabel": "What were you trying to do? (optional)",
     "send": "Send report",
     "sent": "Thanks. The report was sent.",
+    "sentBody": "Thanks, the report was sent. If you would rather move on, Emacs can do this step for you.",
+    "skip": "Skip this step",
+    "close": "Close",
+    "skipping": "Emacs is doing this step for you…",
+    "skippingBody": "Watch the screen: the keys are played for you. Your own keys wait until it is done.",
+    "skipped": "Skipped: {{goal}}",
+    "skipFailed": "Could not skip this step: {{error}}",
     "failed": "Could not send the report: {{error}}"
   },
   "lesson": {
@@ -139,6 +156,8 @@
     "loading": "Loading the lesson into Emacs…",
     "loadFailed": "Could not load the lesson files into Emacs: {{error}}",
     "complete": "Lesson complete.",
+    "startLessonOver": "Start this lesson over",
+    "startLessonOverDone": "This lesson starts fresh.",
     "next": "Next:",
     "backToMap": "Back to the course map",
     "notFound": "This lesson is not written yet.",
@@ -150,6 +169,12 @@
     "statusDone": "Done:",
     "statusActive": "Current step:",
     "statusTodo": "Later:",
+    "statusDemonstrated": "Watched, not yet done:",
+    "statusSkipped": "Skipped:",
+    "watchedTag": "watched",
+    "skippedTag": "skipped",
+    "completedAnnounce": "Step done: {{goal}}",
+    "skippedAnnounce": "Step skipped: {{goal}}",
     "cond": {
       "met": "met:",
       "next": "next:",
@@ -166,9 +191,18 @@
   },
   "demo": {
     "watch": "Watch it",
-    "watchTitle": "Play the keys for this step into Emacs; press any key to stop",
+    "watchTitle": "Watch Emacs do this step slowly, every key named below the screen. Watching does not count as done: you do it yourself afterwards. Press any key to stop.",
     "stop": "Stop",
     "playing": "Playing the demo for “{{goal}}”…",
+    "watching": "Watching: {{goal}}",
+    "fromStart": "Starting from the beginning of this step.",
+    "captionLabel": "Demo caption",
+    "captionKeys": "Keys sent so far",
+    "waitingFirst": "the first key comes in a moment",
+    "watched": "You watched this step. Now do it yourself.",
+    "doItYourself": "Do it yourself",
+    "doItTitle": "Put the files and windows back to how this step started, then do it with your own keys",
+    "notActive": "This step is not the current one any more; the demo was not played.",
     "cancelled": "Demo stopped: you pressed a key.",
     "failed": "The demo stopped: {{error}}",
     "bad": "This step's demo cannot be played: {{error}}"
@@ -182,10 +216,23 @@
     "reservedKey": "Your browser may keep that key for itself (Ctrl+W, Ctrl+T, Ctrl+N…). Focus mode, top right, locks the keyboard so the keys reach Emacs."
   },
   "focus": {
+    "banner": "Focus mode: keys go to Emacs, and the lesson and panels step aside.",
+    "trying": "Asking the browser for fullscreen and the keyboard…",
+    "lockOn": "The keyboard is locked: Ctrl+W, Ctrl+T and Ctrl+N reach Emacs too.",
+    "lockOff": "This browser keeps Ctrl+W, Ctrl+T and Ctrl+N; Chrome and Edge lock them in fullscreen.",
+    "leave": "Leave focus mode",
+    "leaveHint": "or Shift+Esc",
     "locked": "Focus mode: fullscreen with the keyboard locked. Hold Esc to leave.",
     "noLock": "Fullscreen is on, but this browser keeps some keys (Ctrl+W, Ctrl+T, Ctrl+N). Chrome and Edge can lock them; Firefox cannot.",
     "refused": "The browser refused fullscreen: {{error}}",
     "unsupported": "Fullscreen is not available in this browser."
+  },
+  "startOver": {
+    "button": "Start over",
+    "title": "Start over?",
+    "body": "This clears the progress of every lesson: ticks, hints and resets. Your files and Emacs stay as they are.",
+    "done": "Progress cleared: every lesson starts fresh.",
+    "failed": "Could not clear the progress: {{error}}"
   },
   "preview": {
     "tabs": "Preview tabs",
@@ -269,12 +316,16 @@
     "minutes": "{{n}} min",
     "state": {
       "done": "done",
+      "finished": "finished",
       "current": "you are here",
       "in-progress": "in progress",
       "not-started": "not started",
       "suggested": "suggested after part {{n}}",
       "planned": "planned"
     },
+    "skippedCount": "{{count}} skipped",
+    "watchedCount": "{{count}} watched",
+    "finishedTitle": "Every step is done, watched or skipped. Open the lesson to practise the steps you watched or skipped.",
     "projects": "Projects",
     "projectsBelow": "See the project list below. Each project has its own checkpoints.",
     "projectsIntro": "Each project mirrors something you already do in VS Code, task by task, with checkpoints you can return to. Later projects mix languages on purpose.",
@@ -306,6 +357,8 @@
     "stopTitle": "Stop the session?",
     "stopBody": "The container stops; your workspace and progress are kept. Opening a lesson starts it again.",
     "stopped": "Session stopped.",
+    "progress": "Progress",
+    "progressBody": "Your ticks, hints and resets for every lesson. Starting over clears them; your files, checkpoints and Emacs configuration stay.",
     "frame": "Frame",
     "frameBody": "The same Emacs can show a terminal frame (crisp text, every key) or a GUI frame (PDFs and images). Buffers are shared; switching is instant.",
     "modules": "Configuration modules",

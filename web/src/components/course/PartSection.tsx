@@ -65,6 +65,7 @@ export function PartSection({
                 part={part}
                 lesson={l}
                 state={lessonState(part, l, index, progress, current)}
+                counts={progress?.lessons?.[l.id]?.counts}
               />
             ))}
           </ul>

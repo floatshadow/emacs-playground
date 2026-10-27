@@ -3,8 +3,11 @@
  *
  * A prefix event adds or replaces the pending entry; a key event removes
  * pending prefix entries and appends the completed command. The agent reports
- * an unbound sequence as cmd "undefined". Entries are kept oldest first (max
- * 40); the view shows the newest six, newest first.
+ * an unbound sequence as cmd "undefined". Consecutive typing commands
+ * (self-insert-command and friends) collapse into one entry, "typed N
+ * characters" with the last twelve, so a word does not push the chords out
+ * of view (B10, R6). Entries are kept oldest first (max 40); the view shows
+ * the newest six, newest first.
  */
 import type { KeyEvent, PrefixEvent } from '../protocol.gen'
 
@@ -18,10 +21,33 @@ export interface TickerEntry {
   kind: TickerKind
   mx?: boolean
   at: number
+  /** Typing runs: the last TYPED_SHOWN characters typed. */
+  typed?: string
+  /** Typing runs: how many characters were typed. */
+  count?: number
 }
 
 export const TICKER_MAX = 40
 export const TICKER_VISIBLE = 6
+
+/** Commands that insert the key typed: consecutive ones collapse into one entry. */
+export const TYPING_COMMANDS: ReadonlySet<string> = new Set([
+  'self-insert-command',
+  'isearch-printing-char',
+  'org-self-insert-command',
+  'term-send-raw',
+])
+
+/** Characters of a typing run the ticker shows. */
+export const TYPED_SHOWN = 12
+
+/** The character a typing command's key inserts ("SPC" is a space). */
+export function typedChar(keys: string): string {
+  const k = keys.trim()
+  if (k === 'SPC') return ' '
+  if (k === 'TAB') return '\t'
+  return k.replace(/^S-/, '')
+}
 
 /** Command name the agent reports for an unbound key (protocol.UndefinedCommand). */
 export const UNDEFINED_COMMAND = 'undefined'
@@ -91,12 +117,39 @@ export function splitKeys(keys: string, mx?: boolean): string[] {
 
 export function tickerOnKey(entries: TickerEntry[], ev: KeyEvent, now: number): TickerEntry[] {
   const base = dropPending(entries)
+  const at = ev.ts ?? now
+  if (!ev.mx && TYPING_COMMANDS.has(ev.cmd)) {
+    const ch = typedChar(ev.keys)
+    const last = base[base.length - 1]
+    if (last && last.typed !== undefined && last.cmd === ev.cmd) {
+      // Same id: the entry grows in place (no new ticker card, no new
+      // announcement for screen readers on every letter).
+      const typed = [...(last.typed + ch)].slice(-TYPED_SHOWN).join('')
+      const merged: TickerEntry = {
+        ...last,
+        keys: splitKeys(ev.keys),
+        typed,
+        count: (last.count ?? 1) + 1,
+        at,
+      }
+      return [...base.slice(0, -1), merged]
+    }
+    return push(base, {
+      id: nextId++,
+      keys: splitKeys(ev.keys),
+      cmd: ev.cmd,
+      kind: 'ok',
+      at,
+      typed: ch,
+      count: 1,
+    })
+  }
   const e: TickerEntry = {
     id: nextId++,
     keys: splitKeys(ev.keys, ev.mx),
     cmd: ev.cmd,
     kind: kindForCommand(ev.cmd),
-    at: ev.ts ?? now,
+    at,
   }
   if (ev.mx) e.mx = true
   return push(base, e)
