@@ -20,7 +20,9 @@ A half-typed key sequence waits too. Press `C-x` and stop: the echo area shows *
 
 ## An extra window
 
-Some commands show their result in a second window without moving your cursor there. :try[C-x C-b], the buffer list, is the classic: suddenly the screen is split. `C-x 1` keeps only the window you are in. Nothing is closed; the list is still a buffer, just not shown. Inside a list like this one, `q` closes it too. (Once Part 2 turns on the files module, `C-x C-b` opens ibuffer, which takes over the current window; `q` closes it the same way.)
+Some commands show their result in a second window without moving your cursor there, and suddenly the screen is split. `C-x 1` keeps only the window you are in. Nothing is closed; what the other window showed is still a buffer, just not shown. Inside a list like that, `q` closes it too.
+
+The buffer list, :try[C-x C-b], shows both behaviours, depending on the modules that are on. The plain list opens in a second window and leaves your cursor where it was. Ibuffer, the richer list that Part 2's files module puts on the same key, takes over the window you are in instead, cursor and all; `C-x 1` then has nothing to delete, and `q` closes the list and brings back what the window showed before.
 
 ## The wrong buffer
 
@@ -28,7 +30,7 @@ Help buffers take the cursor with them: after `C-h k` the cursor is in *Help*, a
 
 ## When everything is wrong at once
 
-`ESC ESC ESC` (Esc three times) gets out of one layer at a time: first the prompt, then the extra windows. And the *Rescue me* button on the right does all of it in one go, without touching your files.
+`ESC ESC ESC` (Esc three times in a row) gets out of one layer per use, not all of them at once: the first `ESC ESC ESC` closes the prompt, and a second `ESC ESC ESC` closes the extra windows. Look at the screen after each one and press it again while something is left. The *Rescue me* button on the right does all of it in one go, without touching your files.
 
 :::aside{title="C-z is not undo"}
 In a terminal, `C-z` would suspend Emacs to the shell. The playground switches it off, so pressing it out of habit does nothing. Undo is `C-/`.
