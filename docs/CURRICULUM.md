@@ -265,14 +265,25 @@ Condition kinds and their fields:
 
 Hints belong to conditions; the hint shown is the first unmet condition's. `stuck` rules use `minibuffer_seconds`, `idle_seconds`, `step_seconds`, `quits_in_window` and `unbound_repeats`. `demo` strings must complete the step when replayed; `playctl curriculum play` enforces this.
 
+Rules learned from the newcomer review (docs/feedback/2026-10-27-fix-plan.md):
+
+- **A hint adds something.** The learner asking for a hint has read the step. Say what to look for on the screen or the usual mistake (Control still held on the second key, the wrong copy of a project, the first match being in a comment), not only the keys the goal or detail already gave. `curriculum/tools/validate.py` rejects a hint whose keys all appear in the step's goal or detail and which has at most eight other words.
+- **Conditions accept the learner's own way.** Check the effect the step asks for (a new `//` comment, the lower window selected), never the demo's exact text. Prefer `state` predicates for what the state reports (`{ "windows.length": 2, "windows.1.selected": true }`; the state lists windows from the frame's first, top-left window) over elisp that depends on which frame or buffer the check runs in.
+- **A demo works from the step's checkpoint, twice.** Watch it restores the step's checkpoint before playing when the learner has run commands, Do it yourself restores it again, and Skip and "Go to this step" replay demos server-side. A demo that opens a file by path types the absolute path right after the directory the prompt offers (`C-x C-f "/work/projects/hello/src/main.rs"`; the second `/` starts over from the root) unless the step teaches relative paths from its own starting buffer. A restore puts back files and windows but not a buffer's minor modes, so a step whose demo toggles a mode either accepts both directions when running the command is the lesson (0.4's `display-line-numbers-mode`), or its setup turns the mode off at lesson load (3.8).
+- **Text holds with every module set.** Modules unlock monotonically, so a Part 0 lesson may run with Part 3's modules: describe both outcomes where a module changes what a key does (0.2's `C-x C-b`: a second window, or ibuffer taking over this one).
+
 ### B.4 Tables
 
 ```yaml
 # tables/exits.yaml — layer 1, evaluated in order against the state object
-- id: minibuffer-prompt
-  when: { minibuffer.kind: prompt }
-  why: "A prompt is open: {minibuffer.prompt}"
-  how: "RET accepts, C-g cancels. TAB completes names."
+- id: minibuffer-number
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "^(Goto|Go to) (line|char)|([Ll]ine number|[Cc]olumn|[Cc]ounter|[Nn]umber)[^?]*$" } }
+  why: "Emacs is asking for a number: {minibuffer.prompt}"
+  how: "Type a number, RET. C-g cancels."
+- id: minibuffer-prompt               # the rest: not any other prompt row
+  when: { "minibuffer.kind": prompt, "minibuffer.prompt": { not: { regex: "M-x|…|^(Goto|Go to) (line|char)|…" } } }
+  why: "A prompt is open at the bottom: {minibuffer.prompt}"
+  how: "RET accepts, C-g cancels. M-p brings back what you typed before."
 - id: isearch
   when: { isearch: true }
   why: "You are searching (I-search)."
@@ -301,6 +312,8 @@ rust-ts-mode:
 ```
 
 `when` predicates support equality, `in`, `not`, `>`, and dotted paths into the state object; `otherWindows` is the list of non-selected windows. Tables are localised per file (`exits.zh-CN.yaml`).
+
+The browser shows every exit row that matches, so the prompt rows are one per kind of question (command name, file, buffer, number, help, bookmark, search, replace, yes or no, multiple choice) and mutually exclusive; `minibuffer-prompt` is the rest. `validate.py` checks them against the prompts Emacs 31 really shows (`EXIT_PROMPT_SAMPLES`). Their regular expressions are evaluated by the browser's JavaScript `RegExp` and by Go's RE2, so they use the syntax both read alike: no inline flags (JavaScript has none; the browser turns a leading `(?i)` into a `RegExp` flag, but the tables spell case out with classes such as `[Ff]ile` so that they work in any browser), no lookaround, no `\A`, `\z`, `\p` or POSIX classes. `validate.py` refuses everything else and, when node is installed, compiles every pattern with `RegExp`. Questions, whose prompts end with `?` and the answers, are kept out of the name rows with anchors or a trailing `[^?]*$`.
 
 ### B.5 Validation and workflow
 
