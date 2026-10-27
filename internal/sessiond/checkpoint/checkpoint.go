@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -272,8 +273,75 @@ func RestoreCommands(ref string) []Command {
 }
 
 func (m *Manager) git(ctx context.Context, env []string, args ...string) (string, error) {
-	out, err := m.Git.Run(ctx, m.Workspace, env, args...)
+	out, err := m.run(ctx, env, args...)
 	return strings.TrimSpace(string(out)), err
+}
+
+// GitTimeout bounds one git command of the manager.
+const GitTimeout = 2 * time.Minute
+
+// StaleLockAge is how old a git lock file must be before the manager
+// removes it. The manager serialises its own git commands, so a lock that
+// outlives one of them was left by a git process that died holding it.
+const StaleLockAge = 10 * time.Second
+
+// lockRe finds the lock file in git's "Unable to create '….lock': File
+// exists" error.
+var lockRe = regexp.MustCompile(`Unable to create '([^']+\.lock)': File exists`)
+
+// run runs one git command for the manager. The command is detached from
+// the caller's cancellation (bounded by GitTimeout instead): a request that
+// ends while git writes the index must not kill git with the lock held, or
+// every later checkpoint and restore fails with "index.lock: File exists".
+// When a lock file left by an earlier git process blocks the command, run
+// removes it if it is older than StaleLockAge (else waits for it to go,
+// up to two seconds) and runs the command once more.
+func (m *Manager) run(ctx context.Context, env []string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), GitTimeout)
+	defer cancel()
+	out, err := m.Git.Run(ctx, m.Workspace, env, args...)
+	if err == nil {
+		return out, nil
+	}
+	match := lockRe.FindStringSubmatch(err.Error())
+	if match == nil {
+		return out, err
+	}
+	lock := match[1]
+	if !filepath.IsAbs(lock) {
+		lock = filepath.Join(m.Workspace, lock)
+	}
+	if !m.clearLock(lock) {
+		return out, err
+	}
+	return m.Git.Run(ctx, m.Workspace, env, args...)
+}
+
+// clearLock waits up to two seconds for the git lock file to go away and
+// removes it when it is older than StaleLockAge. It reports whether the
+// lock is gone.
+func (m *Manager) clearLock(lock string) bool {
+	now := m.Now
+	if now == nil {
+		now = time.Now
+	}
+	for i := 0; ; i++ {
+		fi, err := os.Stat(lock)
+		if errors.Is(err, os.ErrNotExist) {
+			return true
+		}
+		if err != nil {
+			return false
+		}
+		if now().Sub(fi.ModTime()) >= StaleLockAge {
+			rerr := os.Remove(lock)
+			return rerr == nil || errors.Is(rerr, os.ErrNotExist)
+		}
+		if i >= 20 {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
 }
 
 // Init makes the workspace a git repository if it is not one, ignores
@@ -476,7 +544,7 @@ func (m *Manager) stageWorktree(ctx context.Context) error {
 // diffFiles lists paths that differ between ref and the staged working
 // tree. Caller holds m.mu and has called stageWorktree.
 func (m *Manager) diffFiles(ctx context.Context, ref string) ([]string, error) {
-	out, err := m.Git.Run(ctx, m.Workspace, []string{"GIT_INDEX_FILE=" + m.IndexFile()},
+	out, err := m.run(ctx, []string{"GIT_INDEX_FILE=" + m.IndexFile()},
 		"diff-index", "--cached", "--name-only", "-z", "--no-renames", ref, "--")
 	if err != nil {
 		return nil, err
