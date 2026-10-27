@@ -27,7 +27,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // DefaultPath is where the gateway looks for the configuration file when
@@ -51,7 +51,7 @@ func Defaults() protocol.Config {
 			SessionDays: 30,
 		},
 		Sessions: protocol.SessionsConfig{
-			Image:               "ghcr.io/zsy/emacs-playground/session:latest",
+			Image:               "ghcr.io/floatshadow/emacs-playground/session:latest",
 			Network:             "emacs-playground_sessions",
 			Isolation:           protocol.IsolationNetwork,
 			SubnetPool:          "10.231.0.0/16",
@@ -61,7 +61,7 @@ func Defaults() protocol.Config {
 			MaxSessions:         50,
 			VolumeRetentionDays: 30,
 			Egress:              protocol.EgressRegistries,
-			RemoteBox:           protocol.RemoteBoxConfig{Enabled: true, Image: "ghcr.io/zsy/emacs-playground/remote-box:latest"},
+			RemoteBox:           protocol.RemoteBoxConfig{Enabled: true, Image: "ghcr.io/floatshadow/emacs-playground/remote-box:latest"},
 			GUI:                 protocol.GUIConfig{Enabled: true, Geometry: "1600x900"},
 			Terminal:            protocol.TerminalConfig{InitialSize: "120x36"},
 		},

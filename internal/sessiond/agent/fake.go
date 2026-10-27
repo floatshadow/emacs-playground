@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // FakeHandler answers one call: it returns the reply value (marshalled to

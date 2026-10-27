@@ -10,7 +10,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // Modules are the configuration modules of emacs.md §3, in their

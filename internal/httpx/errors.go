@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // Error is an HTTP error with a stable code (backend.md §5). Handlers return

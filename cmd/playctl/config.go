@@ -8,8 +8,8 @@ import (
 
 	"github.com/invopop/jsonschema"
 
-	"github.com/zsy/emacs-playground/internal/config"
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/config"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // configSchema prints the JSON Schema of the gateway configuration file
@@ -45,9 +45,9 @@ func ConfigSchema() ([]byte, error) {
 		ExpandedStruct:             true,
 	}
 	// Best effort: comments need the source tree.
-	_ = r.AddGoComments("github.com/zsy/emacs-playground", "./internal/protocol")
+	_ = r.AddGoComments("github.com/floatshadow/emacs-playground", "./internal/protocol")
 	s := r.Reflect(&protocol.Config{})
-	s.ID = "https://github.com/zsy/emacs-playground/deploy/config.schema.json"
+	s.ID = "https://github.com/floatshadow/emacs-playground/deploy/config.schema.json"
 	s.Title = "Emacs Playground gateway configuration"
 	if s.Description == "" {
 		s.Description = "deploy/config.json (deployment.md §3). Every key is optional; defaults apply."

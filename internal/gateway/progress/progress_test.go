@@ -9,9 +9,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/zsy/emacs-playground/internal/gateway/store"
-	"github.com/zsy/emacs-playground/internal/httpx"
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/gateway/store"
+	"github.com/floatshadow/emacs-playground/internal/httpx"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 type steps map[string][]string

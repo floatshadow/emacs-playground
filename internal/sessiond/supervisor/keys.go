@@ -5,7 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // TmuxKeys converts an Emacs key sequence to tmux send-keys arguments.

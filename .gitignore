@@ -28,3 +28,4 @@ coverage/
 
 # Local exploratory browser scripts
 web/e2e/*.local.mjs
+AGENTS.local.md

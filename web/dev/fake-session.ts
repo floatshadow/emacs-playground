@@ -723,7 +723,7 @@ export async function startFakeSession(opts: FakeOptions) {
       state: 'ready',
       createdAt: started,
       lastActiveAt: lastKeyAt,
-      image: 'ghcr.io/zsy/emacs-playground/session:fake',
+      image: 'ghcr.io/floatshadow/emacs-playground/session:fake',
       gui: true,
       emacs: { version: '31.1', uptimeMs: Date.now() - started },
       mode,

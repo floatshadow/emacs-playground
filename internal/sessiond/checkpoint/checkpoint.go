@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // RefPrefix is the namespace of every checkpoint ref.

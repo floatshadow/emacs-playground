@@ -15,10 +15,10 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/zsy/emacs-playground/internal/gateway/auth"
-	"github.com/zsy/emacs-playground/internal/gateway/sessions"
-	"github.com/zsy/emacs-playground/internal/httpx"
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/gateway/auth"
+	"github.com/floatshadow/emacs-playground/internal/gateway/sessions"
+	"github.com/floatshadow/emacs-playground/internal/httpx"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 type fakeSessions struct {

@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/curriculum"
+	"github.com/floatshadow/emacs-playground/internal/curriculum"
 )
 
 // Compose files of local mode and the dev overlay (deployment.md §2, §4).
@@ -21,7 +21,7 @@ var (
 	devCompose   = append(append([]string(nil), localCompose...), "-f", "compose.dev.yaml")
 )
 
-const imageRepo = "ghcr.io/zsy/emacs-playground/"
+const imageRepo = "ghcr.io/floatshadow/emacs-playground/"
 
 // dev implements `playctl dev` (backend.md §4, frontend.md §15): the session
 // container on the host network, the curriculum built into .dev/curriculum,

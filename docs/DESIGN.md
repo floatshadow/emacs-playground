@@ -140,7 +140,7 @@ Each record: context, decision, consequences. Dates are 2026-10-26 unless noted.
 ```
 compose.yaml  compose.local.yaml  compose.server.yaml  .env.example  Makefile
 deploy/        config.example.json  config.schema.json (generated)  Caddyfile  invites.example.txt  secrets/ (git-ignored)
-go.mod         module github.com/ORG/emacs-playground
+go.mod         module github.com/floatshadow/emacs-playground
 cmd/gateway  cmd/sessiond  cmd/playctl
 internal/      Go packages (backend.md §1)
 web/           React + Vite app (frontend.md §1)

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // Sizes from backend.md §3.7.

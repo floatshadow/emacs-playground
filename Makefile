@@ -17,13 +17,14 @@ export PATH := $(HOME)/.local/go/bin:$(HOME)/go/bin:$(HOME)/.local/bin:$(PATH)
 export COREPACK_ENABLE_DOWNLOAD_PROMPT := 0
 
 TAG ?= latest
+IMAGE_BASE ?= ghcr.io/floatshadow/emacs-playground   # forks: ghcr.io/<owner>/<repo>
 DOMAIN ?=
 GO ?= go
 PNPM ?= pnpm
 COMPOSE ?= docker compose
 LOCAL_FILES := -f compose.yaml -f compose.local.yaml
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -s -w -X github.com/zsy/emacs-playground/internal/buildinfo.Version=$(VERSION)
+LDFLAGS := -s -w -X github.com/floatshadow/emacs-playground/internal/buildinfo.Version=$(VERSION)
 
 .PHONY: help
 help: ## show targets
@@ -33,7 +34,7 @@ help: ## show targets
 
 .PHONY: local
 local: ## local mode: .env, deploy/config.json, ./workspace; pull images (BUILD=1 builds)
-	@printf 'COMPOSE_FILE=compose.yaml:compose.local.yaml\nTAG=%s\nDOMAIN=\n' '$(TAG)' > .env
+	@printf 'COMPOSE_FILE=compose.yaml:compose.local.yaml\nTAG=%s\nIMAGE_BASE=%s\nDOMAIN=\n' '$(TAG)' '$(IMAGE_BASE)' > .env
 	@test -f deploy/config.json || printf '{ "mode": "local", "auth": { "mode": "none" } }\n' > deploy/config.json
 	@mkdir -p workspace/.playground/ssh && chmod 777 workspace workspace/.playground workspace/.playground/ssh
 	@if [ -n "$${BUILD:-}" ]; then $(COMPOSE) $(LOCAL_FILES) build; else $(COMPOSE) $(LOCAL_FILES) pull --ignore-buildable || true; fi
@@ -42,7 +43,7 @@ local: ## local mode: .env, deploy/config.json, ./workspace; pull images (BUILD=
 .PHONY: server
 server: ## server mode: .env with the server overlay; needs deploy/config.json and DOMAIN
 	@test -n "$(DOMAIN)" || { echo "set DOMAIN=emacs.example.edu"; exit 1; }
-	@printf 'COMPOSE_FILE=compose.yaml:compose.server.yaml\nTAG=%s\nDOMAIN=%s\n' '$(TAG)' '$(DOMAIN)' > .env
+	@printf 'COMPOSE_FILE=compose.yaml:compose.server.yaml\nTAG=%s\nIMAGE_BASE=%s\nDOMAIN=%s\n' '$(TAG)' '$(IMAGE_BASE)' '$(DOMAIN)' > .env
 	@if ! grep -q '"server"' deploy/config.json 2>/dev/null; then \
 	  echo "deploy/config.json is not a server config: cp deploy/config.example.json deploy/config.json and edit it"; exit 1; fi
 	@mkdir -p deploy/secrets && touch deploy/secrets/oidc_client_secret && chmod 600 deploy/secrets/oidc_client_secret
@@ -70,9 +71,9 @@ images: ## build images (gateway, session, remote-box)
 
 .PHONY: image-gateway image-session
 image-gateway: ## build only the gateway image
-	docker build -f images/gateway/Dockerfile --build-arg VERSION=$(VERSION) -t ghcr.io/zsy/emacs-playground/gateway:$(TAG) .
+	docker build -f images/gateway/Dockerfile --build-arg VERSION=$(VERSION) -t $(IMAGE_BASE)/gateway:$(TAG) .
 image-session: ## build only the session image
-	docker build -f images/session/Dockerfile --build-arg VERSION=$(VERSION) -t ghcr.io/zsy/emacs-playground/session:$(TAG) .
+	docker build -f images/session/Dockerfile --build-arg VERSION=$(VERSION) -t $(IMAGE_BASE)/session:$(TAG) .
 
 # ---- development --------------------------------------------------------------
 
@@ -146,7 +147,7 @@ check: go-build lint test web-build ## everything CI runs
 e2e: ## browser smoke scenarios against the running local stack (needs Chrome on CDP :9222)
 	cd web && $(PNPM) e2e:smoke
 emacs-test: ## the agent's and the config's ERT tests inside the session image
-	docker run --rm --entrypoint sh ghcr.io/zsy/emacs-playground/session:$(TAG) -c \
+	docker run --rm --entrypoint sh $(IMAGE_BASE)/session:$(TAG) -c \
 	  'cd /opt/playground/emacs.d && emacs --batch -L lisp -l playground-agent -l test/agent-test.el -f ert-run-tests-batch-and-exit && emacs --batch -l early-init.el -l test/config-test.el -f ert-run-tests-batch-and-exit'
 
 .PHONY: clean

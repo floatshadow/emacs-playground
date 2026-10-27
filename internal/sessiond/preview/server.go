@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/zsy/emacs-playground/internal/httpx"
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/httpx"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // SandboxCSP is sent with HTML and other active documents (backend.md

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // DefaultPrefixes is the static prefix list (backend.md §3.6).

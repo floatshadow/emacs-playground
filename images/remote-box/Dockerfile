@@ -5,7 +5,7 @@
 # the SSH target for the TRAMP lessons (Part 12) and the deploy tasks of
 # projects P5 and P6. Build context: the repository root.
 #
-#   docker build -f images/remote-box/Dockerfile -t ghcr.io/zsy/emacs-playground/remote-box:dev .
+#   docker build -f images/remote-box/Dockerfile -t ghcr.io/floatshadow/emacs-playground/remote-box:dev .
 #
 # Stages:
 #   | Stage  | Produces                                                        |
@@ -119,5 +119,5 @@ ENV PATH=/opt/rust/cargo/bin:/opt/uv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbi
     LANG=C.UTF-8
 EXPOSE 22
 LABEL org.opencontainers.image.title="emacs-playground remote box" \
-      org.opencontainers.image.source="https://github.com/zsy/emacs-playground"
+      org.opencontainers.image.source="https://github.com/floatshadow/emacs-playground"
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/sbin/remote-box-entrypoint"]

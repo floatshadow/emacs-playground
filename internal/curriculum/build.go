@@ -15,7 +15,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // BuildOptions configure Build.

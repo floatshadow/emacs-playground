@@ -18,7 +18,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // Limits (backend.md §3.8, §5).

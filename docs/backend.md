@@ -5,7 +5,7 @@ Two services and one CLI in a single Go module. The gateway fronts everything; s
 ## 1. Module layout
 
 ```
-go.mod                               module github.com/ORG/emacs-playground, go 1.25
+go.mod                               module github.com/floatshadow/emacs-playground, go 1.25
 cmd/gateway/main.go                  flag and env parsing, wiring, run
 cmd/sessiond/main.go
 cmd/playctl/main.go

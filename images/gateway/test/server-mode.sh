@@ -14,9 +14,9 @@
 #   images/gateway/test/server-mode.sh [gateway image]
 #
 # Run from the repository root (on this machine the work directory must be
-# under /home/zsy because the Docker daemon is remote).
+# on a path the Docker daemon can see; with a remote daemon that is the shared home directory).
 set -eu
-image=${1:-ghcr.io/zsy/emacs-playground/gateway:dev}
+image=${1:-ghcr.io/floatshadow/emacs-playground/gateway:dev}
 port=${PG_IT_PORT:-18081}
 base=http://127.0.0.1:$port
 origin="Origin: http://localhost:$port"

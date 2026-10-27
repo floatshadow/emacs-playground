@@ -21,13 +21,13 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/zsy/emacs-playground/internal/config"
-	source "github.com/zsy/emacs-playground/internal/curriculum"
-	"github.com/zsy/emacs-playground/internal/docker"
-	"github.com/zsy/emacs-playground/internal/docker/dockertest"
-	"github.com/zsy/emacs-playground/internal/gateway/sessions"
-	"github.com/zsy/emacs-playground/internal/httpx"
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/config"
+	source "github.com/floatshadow/emacs-playground/internal/curriculum"
+	"github.com/floatshadow/emacs-playground/internal/docker"
+	"github.com/floatshadow/emacs-playground/internal/docker/dockertest"
+	"github.com/floatshadow/emacs-playground/internal/gateway/sessions"
+	"github.com/floatshadow/emacs-playground/internal/httpx"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 const publicURL = "http://localhost:8080"

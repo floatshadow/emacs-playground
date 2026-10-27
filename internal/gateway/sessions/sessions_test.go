@@ -15,11 +15,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/docker"
-	"github.com/zsy/emacs-playground/internal/docker/dockertest"
-	"github.com/zsy/emacs-playground/internal/gateway/store"
-	"github.com/zsy/emacs-playground/internal/httpx"
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/docker"
+	"github.com/floatshadow/emacs-playground/internal/docker/dockertest"
+	"github.com/floatshadow/emacs-playground/internal/gateway/store"
+	"github.com/floatshadow/emacs-playground/internal/httpx"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 type clock struct {
@@ -176,7 +176,7 @@ func newDockerFixture(t *testing.T, mutate func(o *Options)) *dockerFixture {
 	}
 	f.opts = Options{
 		Backend: &DockerBackend{Client: f.fake, Version: "v1.2.3"},
-		Store:   f.st, Image: "ghcr.io/zsy/emacs-playground/session:v1",
+		Store:   f.st, Image: "ghcr.io/floatshadow/emacs-playground/session:v1",
 		Limits: Limits{CPUs: 2, Memory: 3 << 30, Pids: 1024}, Network: "emacs-playground_sessions", Runtime: "runc",
 		Env:             map[string]string{"PG_GATEWAY_URL": "http://gateway:8080", "PG_TERM_SIZE": "120x36"},
 		IdleStop:        30 * time.Minute,
@@ -231,7 +231,7 @@ func TestDockerEnsureAndHardening(t *testing.T) {
 	}
 	c := f.container(t, sess.ID)
 	sp := c.Spec
-	if sp.Name != "pg-session-"+sess.ID || sp.Image != "ghcr.io/zsy/emacs-playground/session:v1" || sp.Network != "emacs-playground_sessions" {
+	if sp.Name != "pg-session-"+sess.ID || sp.Image != "ghcr.io/floatshadow/emacs-playground/session:v1" || sp.Network != "emacs-playground_sessions" {
 		t.Fatalf("spec %+v", sp)
 	}
 	if sp.Labels[docker.LabelSession] != sess.ID || sp.Labels[docker.LabelUser] != "u1" || sp.Labels[docker.LabelVersion] != "v1.2.3" || sp.Labels[docker.LabelRole] != docker.RoleSession {

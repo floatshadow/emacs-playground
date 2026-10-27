@@ -19,7 +19,7 @@ import (
 
 func TestHardenAndCreateOptions(t *testing.T) {
 	spec := ContainerSpec{
-		Name: "pg-session-s1", Image: "ghcr.io/zsy/emacs-playground/session:v1",
+		Name: "pg-session-s1", Image: "ghcr.io/floatshadow/emacs-playground/session:v1",
 		Env:     map[string]string{"PG_SESSION_ID": "s1", "PG_SESSION_TOKEN": "tok"},
 		Labels:  map[string]string{LabelSession: "s1", LabelRole: RoleSession},
 		Network: "emacs-playground_sessions", Aliases: []string{"pg-session-s1"},

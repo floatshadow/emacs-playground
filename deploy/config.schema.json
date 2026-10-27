@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/zsy/emacs-playground/deploy/config.schema.json",
+  "$id": "https://github.com/floatshadow/emacs-playground/deploy/config.schema.json",
   "properties": {
     "$schema": {
       "type": "string",

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/gateway/store"
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/gateway/store"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 func TestSignerRoundTrip(t *testing.T) {

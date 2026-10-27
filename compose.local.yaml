@@ -12,7 +12,7 @@ services:
       session:
         condition: service_healthy
   session:
-    image: ghcr.io/zsy/emacs-playground/session:${TAG:-latest}
+    image: ${IMAGE_BASE:-ghcr.io/floatshadow/emacs-playground}/session:${TAG:-latest}
     build:
       context: .
       dockerfile: images/session/Dockerfile
@@ -45,7 +45,7 @@ services:
   # sessiond writes to ./workspace/.playground/ssh, which is milestone M6
   # (TODO(sessiond, deployment.md §6)). Until then sshd runs with no keys.
   remote-box:
-    image: ghcr.io/zsy/emacs-playground/remote-box:${TAG:-latest}
+    image: ${IMAGE_BASE:-ghcr.io/floatshadow/emacs-playground}/remote-box:${TAG:-latest}
     build:
       context: .
       dockerfile: images/remote-box/Dockerfile

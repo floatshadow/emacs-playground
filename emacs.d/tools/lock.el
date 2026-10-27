@@ -10,7 +10,7 @@
 ;;
 ;;   mkdir -p "$OUT" && chmod 777 "$OUT"
 ;;   docker run --rm -v "$PWD/emacs.d:/src:ro" -v "$OUT:/out" \
-;;     ghcr.io/zsy/emacs-playground/session:dev \
+;;     ghcr.io/floatshadow/emacs-playground/session:dev \
 ;;     emacs --batch -l /src/tools/lock.el -f playground-lock-batch \
 ;;       /src/packages.el /out/packages.lock
 ;;

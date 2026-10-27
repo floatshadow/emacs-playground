@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // Timing (backend.md §3.2, §3.3, emacs.md §7).

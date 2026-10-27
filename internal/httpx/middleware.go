@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // Middleware wraps a handler.

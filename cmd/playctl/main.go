@@ -15,7 +15,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/zsy/emacs-playground/internal/buildinfo"
+	"github.com/floatshadow/emacs-playground/internal/buildinfo"
 )
 
 const usage = `usage: playctl <command> [args]

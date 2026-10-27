@@ -15,8 +15,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
-	"github.com/zsy/emacs-playground/internal/sessiond/inputtap"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/inputtap"
 )
 
 // fakeXvnc speaks just enough RFB 3.8 for the bridge: it sends the version

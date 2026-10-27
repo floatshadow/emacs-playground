@@ -9,7 +9,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // SplitFrontMatter separates the YAML front matter of a lesson text from its

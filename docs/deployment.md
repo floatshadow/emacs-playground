@@ -31,7 +31,7 @@ Pulling needs no login as long as the packages are public (repository Packages s
 name: emacs-playground
 services:
   gateway:
-    image: ghcr.io/ORG/emacs-playground/gateway:${TAG:-latest}
+    image: ghcr.io/floatshadow/emacs-playground/gateway:${TAG:-latest}
     build: { context: ., dockerfile: images/gateway/Dockerfile }
     volumes:
       - gateway-data:/data
@@ -60,7 +60,7 @@ services:
     depends_on:
       session: { condition: service_healthy }
   session:
-    image: ghcr.io/ORG/emacs-playground/session:${TAG:-latest}
+    image: ghcr.io/floatshadow/emacs-playground/session:${TAG:-latest}
     build: { context: ., dockerfile: images/session/Dockerfile }
     init: true
     environment:
@@ -77,7 +77,7 @@ services:
       retries: 20
     stop_grace_period: 20s
   remote-box:
-    image: ghcr.io/ORG/emacs-playground/remote-box:${TAG:-latest}
+    image: ghcr.io/floatshadow/emacs-playground/remote-box:${TAG:-latest}
     build: { context: ., dockerfile: images/remote-box/Dockerfile }
     environment:
       AUTHORIZED_KEYS_FILE: /keys/authorized_keys
@@ -177,7 +177,7 @@ Minimal local file (everything else defaults):
 ## 4. Local mode
 
 ```
-git clone https://github.com/ORG/emacs-playground && cd emacs-playground
+git clone https://github.com/floatshadow/emacs-playground && cd emacs-playground
 make local            # writes .env and a minimal deploy/config.json, pulls images (BUILD=1 builds)
 docker compose up
 open http://localhost:8080

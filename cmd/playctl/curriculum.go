@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/curriculum"
+	"github.com/floatshadow/emacs-playground/internal/curriculum"
 )
 
 // curriculumValidate implements `playctl curriculum validate [dir]`

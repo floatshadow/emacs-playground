@@ -10,7 +10,7 @@
 //	go test -tags integration ./internal/sessiond/ -run Integration -v
 //
 // By default the session image is started with testcontainers-go
-// (PG_SESSION_IMAGE, default ghcr.io/zsy/emacs-playground/session:dev).
+// (PG_SESSION_IMAGE, default ghcr.io/floatshadow/emacs-playground/session:dev).
 // PG_SESSIOND_URL points the test at an already running sessiond instead.
 // PG_TEST_FAKE_GATEWAY (a listen address such as 127.0.0.1:17180) starts an
 // in-test gateway serving the lesson 00-orientation/02-first-steps; the
@@ -22,7 +22,7 @@
 //	docker run -d --name pg-it --network host --tmpfs /run:mode=1777 \
 //	  --tmpfs /tmp:mode=1777 --tmpfs /work:mode=1777,exec \
 //	  -e PG_LISTEN=127.0.0.1:17200 -e PG_GATEWAY_URL=http://127.0.0.1:17180 \
-//	  -e PG_AUTHOR_MODE=true ghcr.io/zsy/emacs-playground/session:dev
+//	  -e PG_AUTHOR_MODE=true ghcr.io/floatshadow/emacs-playground/session:dev
 //	PG_SESSIOND_URL=http://127.0.0.1:17200 PG_TEST_FAKE_GATEWAY=127.0.0.1:17180 \
 //	  PG_TEST_GUI=1 go test -tags integration ./internal/sessiond/ -run Integration -v
 package sessiond
@@ -44,7 +44,7 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 func envOr(k, def string) string {
@@ -178,7 +178,7 @@ func sessiondURL(t *testing.T, ctx context.Context, gatewayURL string) string {
 	if u := os.Getenv("PG_SESSIOND_URL"); u != "" {
 		return strings.TrimRight(u, "/")
 	}
-	image := envOr("PG_SESSION_IMAGE", "ghcr.io/zsy/emacs-playground/session:dev")
+	image := envOr("PG_SESSION_IMAGE", "ghcr.io/floatshadow/emacs-playground/session:dev")
 	env := map[string]string{"PG_SESSION_ID": "it", "PG_SESSION_TOKEN": "it", "PG_GATEWAY_URL": gatewayURL, "PG_AUTHOR_MODE": "true"}
 	ctr, err := testcontainers.Run(ctx, image,
 		testcontainers.WithExposedPorts("7000/tcp"),

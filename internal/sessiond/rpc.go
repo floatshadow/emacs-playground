@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/httpx"
-	"github.com/zsy/emacs-playground/internal/protocol"
-	"github.com/zsy/emacs-playground/internal/sessiond/agent"
-	"github.com/zsy/emacs-playground/internal/sessiond/checkpoint"
-	"github.com/zsy/emacs-playground/internal/sessiond/events"
-	"github.com/zsy/emacs-playground/internal/sessiond/supervisor"
+	"github.com/floatshadow/emacs-playground/internal/httpx"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/events"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/supervisor"
 )
 
 // rpc dispatches POST /rpc/{op} (api.md §3.4).

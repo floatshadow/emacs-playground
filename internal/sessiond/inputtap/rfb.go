@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"unicode"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // RFBDecoder passively parses the client-to-server half of an RFB 3.3, 3.7

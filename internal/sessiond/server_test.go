@@ -22,8 +22,8 @@ import (
 	"github.com/coder/websocket"
 	"github.com/klauspost/compress/zstd"
 
-	"github.com/zsy/emacs-playground/internal/config"
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/config"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 const testLesson = `{

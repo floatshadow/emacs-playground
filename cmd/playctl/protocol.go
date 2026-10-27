@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/zsy/emacs-playground/internal/protocol/tsgen"
+	"github.com/floatshadow/emacs-playground/internal/protocol/tsgen"
 )
 
 // protocolTypescript implements `playctl protocol typescript [-o file]

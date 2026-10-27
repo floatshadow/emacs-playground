@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // fakeChecker answers elisp forms from a table; unknown forms are unknown.

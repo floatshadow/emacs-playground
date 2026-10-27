@@ -21,7 +21,7 @@
   "sessions": {
     "backend": "docker",
     "dockerHost": "tcp://socket-proxy:2375",
-    "image": "ghcr.io/zsy/emacs-playground/session:v0.1.0",
+    "image": "ghcr.io/floatshadow/emacs-playground/session:v0.1.0",
     "isolation": "network",
     "subnetPool": "10.231.0.0/16",
     "network": "emacs-playground_sessions",
@@ -31,7 +31,7 @@
     "maxSessions": 50,
     "volumeRetentionDays": 30,
     "egress": "registries",
-    "remoteBox": { "enabled": true, "image": "ghcr.io/zsy/emacs-playground/remote-box:v0.1.0" },
+    "remoteBox": { "enabled": true, "image": "ghcr.io/floatshadow/emacs-playground/remote-box:v0.1.0" },
     "gui": { "enabled": true, "geometry": "1600x900" },
     "terminal": { "initialSize": "120x36" }
   },

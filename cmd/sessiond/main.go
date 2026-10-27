@@ -27,10 +27,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/buildinfo"
-	"github.com/zsy/emacs-playground/internal/config"
-	"github.com/zsy/emacs-playground/internal/protocol"
-	"github.com/zsy/emacs-playground/internal/sessiond"
+	"github.com/floatshadow/emacs-playground/internal/buildinfo"
+	"github.com/floatshadow/emacs-playground/internal/config"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/sessiond"
 )
 
 const usage = `usage: sessiond [flags] [command]

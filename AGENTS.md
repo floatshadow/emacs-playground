@@ -1,6 +1,6 @@
 # AGENTS.md: how to build, test and run Emacs Playground
 
-The operating manual for anyone (human or agent) working in this repository. The specification is in `docs/` (start with `docs/DESIGN.md`); this file covers the machine, the commands, who owns what, and the decisions taken while scaffolding that the docs do not spell out.
+The operating manual for anyone (human or agent) working in this repository. The specification is in `docs/` (start with `docs/DESIGN.md`); this file covers the development environment, the commands, who owns what, and the decisions taken while implementing that the docs do not spell out.
 
 ## 1. The rule
 
@@ -24,27 +24,19 @@ Packages under `internal/gateway` and `internal/sessiond` must not import each o
 
 TODO markers use `TODO(<area>, <doc section>)`, for example `TODO(sessiond, backend.md §3.6)`. Leave one wherever you stop short of the spec.
 
-## 3. The machine
+## 3. Development environment
 
-- Repository: `/home/zsy/emacs-playground`, branch `main`. Commit with `git -c user.name=zsy -c user.email=zsy83229089@gmail.com commit …`.
-- Host tools: Node 24 (npm, corepack), python3, cargo/rustc, git, docker and docker compose. **Not installed on the host: tmux, emacs.** Go is installed in the user's home (below). Never use apt or sudo.
-- Your uid on the host is 1109200046, not 1000. The session container runs as `learner` (uid 1000), so any directory a container must write to through a bind mount must be world-writable: `mkdir -p d && chmod 777 d`. `make local`, `make dev` and `make reset-workspace` do this for `./workspace`.
-- The Docker daemon runs on a different host. Only `/home/zsy` is shared with it: bind mounts and build contexts must be under `/home/zsy`. **`/tmp` is not shared.** Ports published by containers are reachable here at `127.0.0.1`. A container started with `--network host` binds on the daemon host and is reachable at `127.0.0.1` too, and it can reach processes listening on `127.0.0.1` here (verified: a headless Chrome container loaded a page served by `vite preview` on this host).
-- Network access to GitHub, go.dev, npm, ELPA/MELPA, Docker Hub and GHCR works.
+- Required on the machine: Git, Docker Engine 27 or later with Compose v2, Go 1.26 (`go.mod` pins the minor), Node 24 with corepack (pnpm 11.28.8 is pinned in `web/package.json` `packageManager`), python3 with PyYAML for `curriculum/tools/validate.py`. Emacs and tmux are not needed on the host: everything that needs them runs inside the session image.
+- `make` adds `~/.local/go/bin`, `~/go/bin` and `~/.local/bin` to `PATH`, so a Go installed under `~/.local/go` and a pnpm shim installed with `corepack enable --install-directory ~/.local/bin pnpm` work without further setup. Run pnpm from inside `web/` so corepack resolves the pinned version.
+- Commits use the identity configured in the repository (`git config user.name` and `user.email`); never pass `-c user.*` flags or personal details.
+- Containers run as uid 1000 (`learner`). When your uid differs, a directory a container writes to through a bind mount must be world-writable; `make local`, `make dev` and `make reset-workspace` do this for `./workspace`.
+- If your Docker daemon runs elsewhere (a remote host or a VM), bind mounts and build contexts must be on a path the daemon can see, `/tmp` is usually not shared, and published ports are where the daemon is. Keep such machine-specific notes in `AGENTS.local.md` (git-ignored), read after this file; never put local paths or account details in tracked files.
+- Network access needed for builds: GitHub, go.dev, npm, GNU and NonGNU ELPA, MELPA, Docker Hub, GHCR.
 
-### PATH and environment
-
-```sh
-export PATH=/home/zsy/.local/go/bin:/home/zsy/go/bin:/home/zsy/.local/bin:$PATH
-export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
-```
-
-The Makefile sets both itself.
-
-### Toolchain installation (already done; repeat only on a fresh machine)
+### Toolchain installation (fresh machine)
 
 ```sh
-# Go 1.26.10 into ~/.local/go (verify the sha256 from https://go.dev/dl/?mode=json)
+# Go 1.26.x into ~/.local/go (take the sha256 from https://go.dev/dl/?mode=json)
 mkdir -p ~/.cache/go-dl && cd ~/.cache/go-dl
 curl -sSLO https://go.dev/dl/go1.26.10.linux-amd64.tar.gz
 echo "ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5  go1.26.10.linux-amd64.tar.gz" | sha256sum -c -
@@ -55,7 +47,7 @@ corepack enable --install-directory ~/.local/bin pnpm
 corepack install -g pnpm@11.28.8
 ```
 
-pnpm is pinned to **11.28.8** (`web/package.json` `packageManager`). pnpm 12.15.0, the current `latest`, fails on this machine with `ERR_PNPM_STORE_DIR_OPEN_OPERATION_LOCK … Read-only file system (os error 30)` whatever the store directory; 11.28.8 works here and inside the Docker build. Run pnpm from inside `web/` (`cd web && pnpm …`) so corepack resolves the pinned version. pnpm 11 enforces a minimum release age for new versions; when it adds entries to `web/pnpm-workspace.yaml` (`minimumReleaseAgeExclude`), commit them with the lockfile.
+pnpm 11 enforces a minimum release age for new versions; when it adds entries to `web/pnpm-workspace.yaml` (`minimumReleaseAgeExclude`), commit them with the lockfile.
 
 ## 4. Commands
 
@@ -79,7 +71,7 @@ pnpm is pinned to **11.28.8** (`web/package.json` `packageManager`). pnpm 12.15.
 | `make shell` | attach your terminal to the local session's Emacs (`tmux -L pg attach -t emacs`) |
 | `make reset-workspace` | move `./workspace` aside and start fresh |
 
-### Go (module `github.com/zsy/emacs-playground`, Go 1.26)
+### Go (module `github.com/floatshadow/emacs-playground`, Go 1.26)
 
 ```sh
 go build ./...                     # web/ builds without web/dist thanks to the embedweb build tag
@@ -99,7 +91,7 @@ go run ./cmd/gateway -config deploy/config.dev.json             # run (local mod
 go run ./cmd/gateway -config deploy/config.json -set sessions.limits.memory=4g -listen :9000
 go run ./cmd/gateway -config deploy/config.dev.json -web web/dist -fonts .dev/fonts   # bundle and fonts from disk (PG_WEB_DIR, PG_FONTS_DIR)
 go test -tags dockerintegration ./internal/docker/                   # opt-in: the docker backend against the real Engine
-images/gateway/test/server-mode.sh ghcr.io/zsy/emacs-playground/gateway:dev   # server-mode smoke test (from the repo root)
+images/gateway/test/server-mode.sh ghcr.io/floatshadow/emacs-playground/gateway:dev   # server-mode smoke test (from the repo root)
 ```
 
 Stores: local mode keeps `<dataDir>/local.json`, server mode `<dataDir>/playground.db` (SQLite). In local mode the loopback names are interchangeable: a `publicUrl` of `http://localhost:8080` also accepts the Origin `http://127.0.0.1:8080` (and the CSP allows WebSockets to both).
@@ -123,7 +115,7 @@ Real-process integration test (sessiond against the session image, on the host n
 ```sh
 docker run -d --name pg-it --network host --tmpfs /run:mode=1777 --tmpfs /tmp:mode=1777 --tmpfs /work:mode=1777,exec \
   -e PG_LISTEN=127.0.0.1:17200 -e PG_GATEWAY_URL=http://127.0.0.1:17180 -e PG_AUTHOR_MODE=true \
-  ghcr.io/zsy/emacs-playground/session:dev
+  ghcr.io/floatshadow/emacs-playground/session:dev
 PG_SESSIOND_URL=http://127.0.0.1:17200 PG_TEST_FAKE_GATEWAY=127.0.0.1:17180 PG_TEST_GUI=1 \
   go test -tags integration ./internal/sessiond/ -run Integration -v
 docker rm -f pg-it
@@ -131,7 +123,7 @@ docker rm -f pg-it
 
 Without `PG_SESSIOND_URL` the test starts `PG_SESSION_IMAGE` through testcontainers but skips the lesson and GUI parts (a bridge-networked container cannot reach the in-test gateway).
 
-Fast iteration on the running stack without rebuilding images: build `CGO_ENABLED=0` binaries into a directory under `/home/zsy`, then add a Compose overlay that bind-mounts them over `/gateway` and `/usr/local/bin/sessiond` (and `web/dist` with `PG_WEB_DIR`, a built curriculum over `/srv/curriculum`), and `docker compose -f compose.yaml -f compose.local.yaml -f <overlay> up -d --force-recreate`. The Emacs configuration lives in the image (`/opt/playground/emacs.d`, agent from there) and is copied to `./workspace/emacs.d` on the first start only: after changing `emacs.d/modules`, rebuild the session image (about 15 s when only the config changed) and `make reset-workspace`.
+Fast iteration on the running stack without rebuilding images: build `CGO_ENABLED=0` binaries into a directory the Docker daemon can see, then add a Compose overlay that bind-mounts them over `/gateway` and `/usr/local/bin/sessiond` (and `web/dist` with `PG_WEB_DIR`, a built curriculum over `/srv/curriculum`), and `docker compose -f compose.yaml -f compose.local.yaml -f <overlay> up -d --force-recreate`. The Emacs configuration lives in the image (`/opt/playground/emacs.d`, agent from there) and is copied to `./workspace/emacs.d` on the first start only: after changing `emacs.d/modules`, rebuild the session image (about 15 s when only the config changed) and `make reset-workspace`.
 
 ### playctl
 
@@ -176,13 +168,13 @@ docker rm -f pg-chrome
 
 Give the Chrome container `--shm-size=1g`: with Docker's default 64 MB `/dev/shm`, the terminal's WebGL renderer and the VNC canvas exhaust shared memory after a few page loads and Chrome fails later loads with `net::ERR_INSUFFICIENT_RESOURCES` (a blank page).
 
-`web/e2e/smoke.mjs` (`pnpm e2e:smoke`, `make e2e`) connects with `playwright-core` (`chromium.connectOverCDP('http://127.0.0.1:9222')`) and runs the ten integration scenarios against the compose stack (services healthy, course map, lesson 2.3 with the ticker, Where am I, Watch it and Reset, the GUI frame, the Markdown preview of lesson 3.8, `C-x C-b` and Rescue in lesson 0.2, and `playctl curriculum play` for Parts 0-3), writing `artifacts/verify/<n>.png` and `results.json`. Besides the DOM it checks the `/events` frames the page receives (the step's `check`/`step` complete event, `frame` of a key typed in the GUI) and the workspace files on disk (`PG_WORKSPACE`, default `./workspace`). The `C-x C-b` scenario (6) sets Part 0's modules (`base agent`) and runs after scenario 9: from Part 2 on, the files module makes `C-x C-b` ibuffer, which takes over the selected window on purpose (lessons 2.1, 2.3, 3.4), so the second-window exit and the Rescue that closes it are a Parts 0-1 situation. `PG_SMOKE_ONLY=3,4` runs a subset, `PG_SMOKE_PLAY=0` skips the replay. It resets the progress of lessons 0.2, 2.3 and 3.8 first, so it can be re-run, also after a replay (setup with `reset` forgets save-place positions under the lesson root). The canvas-rendered terminal is read through `window.__pgScreenText()` (web/src/components/screen/hosts.ts). `web/e2e/lesson.mjs` (`pnpm e2e:lesson`) is the same kind of walk against the fake session (web/dev/README.md). Wait for `load` plus a selector; `networkidle` hangs with this Chrome. Write screenshots under `/home/zsy/…` (for example `artifacts/`, git-ignored), never `/tmp`. To serve a built bundle without the gateway: `cd web && pnpm preview --port 8080 --host 127.0.0.1 --strictPort`.
+`web/e2e/smoke.mjs` (`pnpm e2e:smoke`, `make e2e`) connects with `playwright-core` (`chromium.connectOverCDP('http://127.0.0.1:9222')`) and runs the ten integration scenarios against the compose stack (services healthy, course map, lesson 2.3 with the ticker, Where am I, Watch it and Reset, the GUI frame, the Markdown preview of lesson 3.8, `C-x C-b` and Rescue in lesson 0.2, and `playctl curriculum play` for Parts 0-3), writing `artifacts/verify/<n>.png` and `results.json`. Besides the DOM it checks the `/events` frames the page receives (the step's `check`/`step` complete event, `frame` of a key typed in the GUI) and the workspace files on disk (`PG_WORKSPACE`, default `./workspace`). The `C-x C-b` scenario (6) sets Part 0's modules (`base agent`) and runs after scenario 9: from Part 2 on, the files module makes `C-x C-b` ibuffer, which takes over the selected window on purpose (lessons 2.1, 2.3, 3.4), so the second-window exit and the Rescue that closes it are a Parts 0-1 situation. `PG_SMOKE_ONLY=3,4` runs a subset, `PG_SMOKE_PLAY=0` skips the replay. It resets the progress of lessons 0.2, 2.3 and 3.8 first, so it can be re-run, also after a replay (setup with `reset` forgets save-place positions under the lesson root). The canvas-rendered terminal is read through `window.__pgScreenText()` (web/src/components/screen/hosts.ts). `web/e2e/lesson.mjs` (`pnpm e2e:lesson`) is the same kind of walk against the fake session (web/dev/README.md). Wait for `load` plus a selector; `networkidle` hangs with this Chrome. Write screenshots under the repository (`artifacts/`, git-ignored), not `/tmp`, which a remote daemon does not share. To serve a built bundle without the gateway: `cd web && pnpm preview --port 8080 --host 127.0.0.1 --strictPort`.
 
 ### Images and Compose
 
 ```sh
-docker build -f images/gateway/Dockerfile -t ghcr.io/zsy/emacs-playground/gateway:dev .
-docker build -f images/session/Dockerfile -t ghcr.io/zsy/emacs-playground/session:dev .
+docker build -f images/gateway/Dockerfile -t ghcr.io/floatshadow/emacs-playground/gateway:dev .
+docker build -f images/session/Dockerfile -t ghcr.io/floatshadow/emacs-playground/session:dev .
 docker compose -f compose.yaml -f compose.local.yaml config -q         # validate
 make local && docker compose up                                          # http://localhost:8080
 docker compose -f compose.yaml -f compose.local.yaml -f compose.dev.yaml up -d session   # dev
@@ -193,8 +185,8 @@ Build contexts are the repository root; `.dockerignore` keeps `node_modules`, `w
 Running the Emacs side's tests (also `make emacs-test`):
 
 ```sh
-docker run --rm --entrypoint sh ghcr.io/zsy/emacs-playground/session:dev -c 'cd /opt/playground/emacs.d && emacs --batch -L lisp -l playground-agent -l test/agent-test.el -f ert-run-tests-batch-and-exit'
-docker run --rm --entrypoint sh ghcr.io/zsy/emacs-playground/session:dev -c 'cd /opt/playground/emacs.d && emacs --batch -l early-init.el -l test/config-test.el -f ert-run-tests-batch-and-exit'
+docker run --rm --entrypoint sh ghcr.io/floatshadow/emacs-playground/session:dev -c 'cd /opt/playground/emacs.d && emacs --batch -L lisp -l playground-agent -l test/agent-test.el -f ert-run-tests-batch-and-exit'
+docker run --rm --entrypoint sh ghcr.io/floatshadow/emacs-playground/session:dev -c 'cd /opt/playground/emacs.d && emacs --batch -l early-init.el -l test/config-test.el -f ert-run-tests-batch-and-exit'
 ```
 
 Wrap `docker run`/`docker exec` commands that carry inline shell code in a script file when a sandbox or worktree guard refuses them.
@@ -203,7 +195,7 @@ Wrap `docker run`/`docker exec` commands that carry inline shell code in a scrip
 
 These refine the docs; the code is authoritative where they differ.
 
-- Module path `github.com/zsy/emacs-playground`; images `ghcr.io/zsy/emacs-playground/{gateway,session,remote-box}`.
+- Module path `github.com/floatshadow/emacs-playground`; images `ghcr.io/floatshadow/emacs-playground/{gateway,session,remote-box}`.
 - Versions: Go 1.26.10; React 19.3.1; Vite 8.3.5; TypeScript 5.9.3 (typescript-eslint 8.72 supports TypeScript below 6.1, so TypeScript 7 is out); ESLint 9.39.5 (eslint-plugin-jsx-a11y 6.10 does not declare ESLint 10); React Router 7.18.4 (the docs' major, though 8 exists); pdfjs-dist 5.7.284 (docs' major); noVNC 1.7.0; Vitest 5.0.5; xterm.js betas from one upstream commit (991857a, 2026-10-13): `@xterm/xterm` 6.1.0-beta.315 (has `vtExtensions.kittyKeyboard`), addon-fit 0.12.0-beta.311, addon-webgl 0.20.0-beta.309, addon-unicode11 0.10.0-beta.310, addon-clipboard 0.3.0-beta.313, addon-web-links 0.13.0-beta.310. Re-pin all six together.
 - TypeScript types are generated directly from Go by `internal/protocol/tsgen` (reflection for structure, the Go AST for enum constants and doc comments), not through invopop/jsonschema and json-schema-to-typescript as api.md §8 sketched. It yields string-literal enums, an `Event` union discriminated by `t`, and an `RpcOps` map of request and result types per op. invopop/jsonschema remains the tool for `deploy/config.schema.json`.
 - Lesson ids are the lesson directory relative to `curriculum/`: `02-buffers-and-files/03-opening-files`, `projects/p6-polyglot`. They contain one slash, which goes into URLs literally (`/api/v1/curriculum/lessons/02-buffers-and-files/03-opening-files`); routes use `{lessonId...}`-style trailing wildcards.

@@ -4,7 +4,7 @@
 # toolchains, the Emacs packages pinned in emacs.d/packages.lock, the
 # playground config and sessiond. Build context: the repository root.
 #
-#   docker build -f images/session/Dockerfile -t ghcr.io/zsy/emacs-playground/session:dev .
+#   docker build -f images/session/Dockerfile -t ghcr.io/floatshadow/emacs-playground/session:dev .
 #
 # Stages (emacs.md §1); the heavy ones are cached independently and only
 # rebuild when their own pins in versions.env change (see "pins"):
@@ -81,7 +81,7 @@ ARG VERSION=dev
 ENV CGO_ENABLED=0
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath \
-      -ldflags "-s -w -X github.com/zsy/emacs-playground/internal/buildinfo.Version=${VERSION}" \
+      -ldflags "-s -w -X github.com/floatshadow/emacs-playground/internal/buildinfo.Version=${VERSION}" \
       -o /out/sessiond ./cmd/sessiond
 
 # ---- emacs-build ------------------------------------------------------------
@@ -292,7 +292,7 @@ FROM config AS final
 ARG VERSION=dev
 LABEL org.opencontainers.image.title="emacs-playground session" \
       org.opencontainers.image.description="Emacs 31.1 with the Emacs Playground configuration, toolchains and sessiond" \
-      org.opencontainers.image.source="https://github.com/zsy/emacs-playground" \
+      org.opencontainers.image.source="https://github.com/floatshadow/emacs-playground" \
       org.opencontainers.image.version="${VERSION}"
 # safe.directory: the workspace is often owned by another uid (a bind
 # mount from the host, a volume created by root), and git then refuses

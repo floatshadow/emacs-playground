@@ -16,8 +16,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
-	"github.com/zsy/emacs-playground/internal/sessiond/inputtap"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/inputtap"
 )
 
 // bash substitutes for `tmux attach` on hosts without tmux.

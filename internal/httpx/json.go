@@ -8,7 +8,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // MaxJSONBody is the default limit for JSON request bodies.

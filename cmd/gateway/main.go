@@ -21,11 +21,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/buildinfo"
-	"github.com/zsy/emacs-playground/internal/config"
-	"github.com/zsy/emacs-playground/internal/gateway"
-	"github.com/zsy/emacs-playground/internal/protocol"
-	"github.com/zsy/emacs-playground/web"
+	"github.com/floatshadow/emacs-playground/internal/buildinfo"
+	"github.com/floatshadow/emacs-playground/internal/config"
+	"github.com/floatshadow/emacs-playground/internal/gateway"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/web"
 )
 
 const usage = `usage: gateway [command] [flags]

@@ -1,7 +1,7 @@
 // Screenshots of every screen against a running app (fake session or real
 // gateway), for visual review:
 //   PG_CDP=http://127.0.0.1:9222 PG_URL=http://127.0.0.1:8090 PG_OUT=../artifacts node e2e/shots.mjs
-// Write screenshots under /home/zsy (the Docker host shares only that), never /tmp.
+// Write screenshots under the repository (artifacts/ is git-ignored): the Docker host may not share /tmp.
 import { chromium } from 'playwright-core'
 
 const cdp = process.env.PG_CDP ?? 'http://127.0.0.1:9222'

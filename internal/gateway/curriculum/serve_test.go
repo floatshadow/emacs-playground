@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	source "github.com/zsy/emacs-playground/internal/curriculum"
-	"github.com/zsy/emacs-playground/internal/protocol"
+	source "github.com/floatshadow/emacs-playground/internal/curriculum"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 func buildBundle(t *testing.T) string {

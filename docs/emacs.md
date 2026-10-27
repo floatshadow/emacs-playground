@@ -200,7 +200,7 @@ ERT tests run with `emacs --batch -l lisp/playground-agent.el -l test/agent-test
 The image is a complete Emacs development environment without the playground:
 
 ```
-docker run -it --rm -v "$PWD:/work" ghcr.io/ORG/emacs-playground/session emacs -nw
+docker run -it --rm -v "$PWD:/work" ghcr.io/floatshadow/emacs-playground/session emacs -nw
 ```
 
 `PLAYGROUND=0` disables the agent module; everything else works. The config in `emacs.d/` also runs on a normal machine with Emacs 31 once the toolchains it expects are installed; Part 12 of the course walks through that.

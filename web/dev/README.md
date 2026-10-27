@@ -36,13 +36,13 @@ node dev/fake-session.ts --port 8098 --sessiond &
 pnpm build && make gateway        # bin/gateway with web/dist embedded (-tags embedweb)
 cat > ~/.cache/pg-ct/config.json <<'EOF'
 { "mode": "local", "listen": "127.0.0.1:8097", "publicUrl": "http://127.0.0.1:8097",
-  "dataDir": "/home/zsy/.cache/pg-ct/data", "auth": { "mode": "none" },
+  "dataDir": "$HOME/.cache/pg-ct/data", "auth": { "mode": "none" },
   "local": { "sessionUrl": "http://127.0.0.1:8098" },
-  "curriculum": { "dir": "/home/zsy/.cache/pg-ct/bundle" } }
+  "curriculum": { "dir": "$HOME/.cache/pg-ct/bundle" } }
 EOF
 bin/gateway -config ~/.cache/pg-ct/config.json &
 PG_CDP=http://127.0.0.1:9222 PG_URL=http://127.0.0.1:8097 PG_OUT=../artifacts node e2e/lesson.mjs
 ```
 
-Use paths under `/home/zsy` (the remote Docker daemon, and so the Chrome
+Use paths the Docker daemon can see (with a remote daemon, under the shared home directory; the Chrome
 container, cannot see `/tmp`), and stop the background processes by pid.

@@ -26,7 +26,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // Header starts the generated file.
@@ -235,7 +235,7 @@ func (g *gen) tsType(t reflect.Type, nullablePtr bool) string {
 	if t == rawMessage {
 		return "unknown"
 	}
-	if t.PkgPath() == "github.com/zsy/emacs-playground/internal/protocol" && t.Kind() == reflect.String {
+	if t.PkgPath() == "github.com/floatshadow/emacs-playground/internal/protocol" && t.Kind() == reflect.String {
 		if _, ok := g.src.enums[t.Name()]; ok {
 			return t.Name()
 		}
@@ -374,7 +374,7 @@ func parseSource(dir string) (*source, error) {
 	// Type-check (stdlib only) to get constant values and types.
 	conf := types.Config{Importer: importerFor(fset)}
 	info := &types.Info{Defs: map[*ast.Ident]types.Object{}}
-	if _, err := conf.Check("github.com/zsy/emacs-playground/internal/protocol", fset, files, info); err != nil {
+	if _, err := conf.Check("github.com/floatshadow/emacs-playground/internal/protocol", fset, files, info); err != nil {
 		return nil, fmt.Errorf("tsgen: typecheck: %w", err)
 	}
 	s := &source{enums: map[string][]enumVal{}, typeDocs: map[string]string{}, fieldDocs: map[string]string{}}

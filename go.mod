@@ -1,4 +1,4 @@
-module github.com/zsy/emacs-playground
+module github.com/floatshadow/emacs-playground
 
 go 1.26.0
 

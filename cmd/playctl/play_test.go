@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/curriculum"
-	"github.com/zsy/emacs-playground/internal/httpx"
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/curriculum"
+	"github.com/floatshadow/emacs-playground/internal/httpx"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 const goodDir = "../../internal/curriculum/testdata/good"

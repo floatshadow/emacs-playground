@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/docker"
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/docker"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // Limits are per-session resource limits.

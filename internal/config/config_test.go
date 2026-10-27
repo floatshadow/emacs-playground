@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 func TestDefaultsValid(t *testing.T) {

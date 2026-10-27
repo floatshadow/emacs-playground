@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
-	"github.com/zsy/emacs-playground/internal/sessiond/agent"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
 )
 
 func TestTmuxKeys(t *testing.T) {

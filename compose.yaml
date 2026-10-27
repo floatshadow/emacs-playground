@@ -5,7 +5,7 @@
 name: emacs-playground
 services:
   gateway:
-    image: ghcr.io/zsy/emacs-playground/gateway:${TAG:-latest}
+    image: ${IMAGE_BASE:-ghcr.io/floatshadow/emacs-playground}/gateway:${TAG:-latest}
     build:
       context: .
       dockerfile: images/gateway/Dockerfile

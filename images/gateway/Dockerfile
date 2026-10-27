@@ -4,7 +4,7 @@
 # bundle (frontend.md §15), the built curriculum bundle (backend.md §2.8) and
 # the web fonts, on distroless. Build context: the repository root.
 #
-#   docker build -f images/gateway/Dockerfile -t ghcr.io/zsy/emacs-playground/gateway:dev .
+#   docker build -f images/gateway/Dockerfile -t ghcr.io/floatshadow/emacs-playground/gateway:dev .
 #
 # Stages: web (pnpm build) → go (gateway and playctl, -tags embedweb) →
 # curriculum (playctl curriculum build) → final.
@@ -37,10 +37,10 @@ ARG VERSION=dev
 ENV CGO_ENABLED=0
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     go build -trimpath -tags embedweb \
-      -ldflags "-s -w -X github.com/zsy/emacs-playground/internal/buildinfo.Version=${VERSION}" \
+      -ldflags "-s -w -X github.com/floatshadow/emacs-playground/internal/buildinfo.Version=${VERSION}" \
       -o /out/gateway ./cmd/gateway && \
     go build -trimpath \
-      -ldflags "-s -w -X github.com/zsy/emacs-playground/internal/buildinfo.Version=${VERSION}" \
+      -ldflags "-s -w -X github.com/floatshadow/emacs-playground/internal/buildinfo.Version=${VERSION}" \
       -o /out/playctl ./cmd/playctl && \
     mkdir -p /out/data
 
@@ -94,7 +94,7 @@ RUN base="https://raw.githubusercontent.com/adobe-fonts/source-serif/${SOURCE_SE
 FROM gcr.io/distroless/static-debian13:nonroot AS final
 ARG VERSION=dev
 LABEL org.opencontainers.image.title="emacs-playground gateway" \
-      org.opencontainers.image.source="https://github.com/zsy/emacs-playground" \
+      org.opencontainers.image.source="https://github.com/floatshadow/emacs-playground" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="GPL-3.0-or-later"
 COPY --from=go /out/gateway /gateway

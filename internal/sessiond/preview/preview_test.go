@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 func mk(t *testing.T, root, rel, content string) {

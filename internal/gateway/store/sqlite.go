@@ -19,7 +19,7 @@ import (
 
 	_ "modernc.org/sqlite" // database/sql driver "sqlite"
 
-	"github.com/zsy/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 // SQLiteFile is the server-mode database file name under the data directory.

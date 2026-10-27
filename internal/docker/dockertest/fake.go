@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/zsy/emacs-playground/internal/docker"
+	"github.com/floatshadow/emacs-playground/internal/docker"
 )
 
 // FakeContainer is a container held by Fake.
