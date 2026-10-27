@@ -46,8 +46,12 @@ States: `creating`, `starting`, `ready`, `idle`, `stopping`, `stopped`, `failed`
 
 | Method and path | Body | Response |
 |---|---|---|
-| `GET /progress` | | `{lessons:{[lessonId]:{status, steps:{[stepId]:{status, hintsUsed, resets, completedAt}}}}, updatedAt}` |
-| `POST /progress/reset` | `{lessonId}` | `204` (clears a lesson's progress; sessiond is told to drop the active step if it matches) |
+| `GET /progress` | | `{lessons:{[lessonId]:{status, counts:{done, demonstrated, skipped, total}, steps:{[stepId]:{status, hintsUsed, resets, completedAt}}}}, updatedAt}` |
+| `POST /progress/reset` | `{lessonId}`, or no body | `204`. With a lesson id, clears that lesson's progress; with no body, `{}` or an empty `lessonId`, clears every lesson of the user ("Start over"). sessiond is then told to drop the active step: `drop-step {lessonId}` or `drop-step {}` (§3.4) |
+
+Step statuses: `not-started`, `in-progress`, `demonstrated` (completed while a "Watch it" demonstration was latched, §4.1), `skipped` (passed with "Skip this step"), `done` (completed by the learner). A step's stored status only rises, in the order `not-started` < `in-progress` < `demonstrated` < `skipped` < `done`; only a reset clears it. `completedAt` is set for `done`. A lesson's `status` is `done` only when every step of its scenario is `done`, `in-progress` when any step is above `not-started`, else `not-started`. `counts.total` is the number of steps in the bundle's scenario (0 when the lesson is not in the bundle); the other counts are steps with that status. Resuming a lesson starts at the first step that is neither `done` nor `skipped`.
+
+"Start over" resets progress only: workspace files, checkpoints and the module set are kept.
 
 ### 2.5 Stuck reports
 
@@ -61,7 +65,7 @@ Authenticated with `Authorization: Bearer <PG_SESSION_TOKEN>`; reachable only on
 |---|---|
 | `GET /internal/curriculum/scenarios/{lessonId}` | scenario JSON |
 | `GET /internal/curriculum/fixtures/{lessonId}` | `application/zstd` tarball; `ETag` honoured |
-| `POST /internal/sessions/{id}/progress` | `{lessonId, stepId, status, hintsUsed?, resets?}` |
+| `POST /internal/sessions/{id}/progress` | `{lessonId, stepId, status, hintsUsed?, resets?, at?}`; `status` is `in-progress`, `demonstrated`, `skipped` or `done` |
 | `POST /internal/sessions/{id}/stuck` | `{lessonId, stepId, note, events:[…]}` |
 | `POST /internal/sessions/{id}/heartbeat` | `{activeWebSockets}` every 30 s (belt and braces for the reaper) |
 
@@ -97,12 +101,12 @@ Request body JSON; response `{"ok":true,"result":…}` or a problem+json error. 
 | `keys` | `{keys:"C-x C-f", frame?:"terminal"|"gui"}` | `{}` | tmux `send-keys` or xdotool; not idempotent |
 | `eval` | `{form:"(buffer-name)", timeoutMs?:2000}` | `{value:any}` | JSON via `json-serialize`; non-serialisable values become strings |
 | `rescue` | `{}` | `{did:["cancelled the prompt", …]}` | `playground-rescue` |
-| `scenario` | `{lessonId, stepId?}` | `{step:{…}}` | loads fixtures, modules, setup; takes checkpoint |
+| `scenario` | `{lessonId, stepId?, reset?}` | `{step:{…}, index, count, modules, restarting}` | loads fixtures, modules, setup; takes checkpoint. With a `stepId` after the first step ("Go to this step", "Do this step again"), after the setup sessiond restores that step's checkpoint when it exists, else fast-forwards by playing the earlier steps' demos itself (nothing recorded) and then takes the step's checkpoint; a step checkpoint is never overwritten with the lesson's initial state. Without `stepId` it resumes at the first step neither `done` nor `skipped` |
 | `check` | `{}` | `{conditions:[{id, ok, detail?}], complete}` | force an evaluation now |
 | `hint` | `{stepId, level}` | `{}` | records hint usage for progress |
 | `checkpoint` | `{label}` | `{ref, createdAt}` | manual checkpoint (projects) |
 | `checkpoints` | `{}` | `{items:[{label, ref, createdAt, files}]}` | |
-| `restore` | `{label}` or `{ref}` | `{restoredFiles:n}` | git restore + `reset-step`; not idempotent |
+| `restore` | `{label}` or `{ref}`, or `{}` for the active step's checkpoint | `{restoredFiles:n}` | git restore + `reset-step`; not idempotent. `{}` is "Reset this step" and "Do it yourself": it clears the step's demo latch and emits `step {status:"reset"}` |
 | `mode` | `{mode:"terminal"|"gui"}` | `{mode}` | starts Xvnc and the GUI frame on demand |
 | `modules` | `{enabled:["base","agent","completion"]}` | `{restarting:bool}` | rewrites `modules.el`; daemon restart with buffer restore |
 | `restart-emacs` | `{}` | `{}` | last resort; buffer restore from the last snapshot |
@@ -110,7 +114,9 @@ Request body JSON; response `{"ok":true,"result":…}` or a problem+json error. 
 | `status` | | `{emacs:{version, pid, uptimeMs, agent:bool}, frames:{terminal:bool, gui:bool}, mode, step, modules}` | also `GET /status` |
 | `open` | `{path}` | `{buffer}` | visits a workspace-relative file in the learner's window (the project file tree); no author mode needed |
 | `describe` | `{keys}` | `{cmd, doc}` | ticker glosses for commands missing from `tables.gloss` |
-| `drop-step` | `{lessonId}` | `{}` | internal: sent by the gateway after `POST /progress/reset`; the proxy refuses it from browsers |
+| `drop-step` | `{lessonId}` or `{}` | `{}` | internal: sent by the gateway after `POST /progress/reset`; the proxy refuses it from browsers. With a lesson id, forgets that lesson's saved progress and the active step if it belongs to it; with `{}`, forgets all saved progress and the active step. A forgotten active step emits `step {status:"dropped"}` |
+| `demo` | `{stepId, phase:"start"\|"end"}` | `{restored:bool}` | the browser's "Watch it" (§4.1). `409` unless `stepId` is the active step. `start`: when a command ran since the step started or was last reset, restores the step's checkpoint first (as `restore {}`, emitting `step {status:"reset"}`, without counting a reset; `restored: true`), then sets the step's demo latch. `end`: the player finished or was stopped; the latch stays |
+| `skip` | `{stepId}` | `{next:stepId\|null, demoCompleted:bool}` | "Skip this step" (§4.1). `409` unless `stepId` is the active step; not idempotent; lasts as long as the demo (at most 60 s). Restores the checkpoint when a command ran since the step started, plays the step's `demo` through the terminal at playctl pacing (170 ms per chord, 70 ms per character) without recording a completion, records `skipped`, emits `step {status:"skipped"}`, takes the next step's checkpoint and emits its `loaded`. `demoCompleted` tells whether the conditions held after the demo |
 
 ### 3.5 `GET /preview/{path}`
 
@@ -128,20 +134,35 @@ Common envelope: `{"t":"<type>","seq":123,"ts":1761472000123, …fields}`.
 |---|---|---|
 | `hello` | `protocol:1, sessionId, mode, emacs:{version, uptimeMs}, frames:{terminal, gui}, step:{lessonId, stepId}|null, modules:[…], replayed:bool` | on connect |
 | `key` | `keys, cmd, buf, mode, frame, prefixArg?` | after each command (agent) |
-| `prefix` | `keys, source:"tap"|"agent"` | a prefix is pending (tap) |
+| `prefix` | `keys, source:"tap"|"agent"` | a prefix is pending (tap); `keys: ""` clears it. A `prefix` never follows the `key` event of the command that consumed its keys (the tap drops a lone ESC that Emacs already used) |
 | `state` | see §5 | after commands and UI changes (agent), coalesced |
 | `echo` | `text` | echo area message of interest (agent filters noise) |
 | `minibuffer` | `open:bool, prompt, depth, kind:"prompt"|"isearch"` | minibuffer enter or exit |
 | `emacs` | `event:"frame-closed"|"frame-opened"|"daemon-restarted"|"suspended"|"resumed"|"unresponsive"|"stopping", frame?:"terminal"|"gui", reason?` | supervisor |
 | `file` | `path, event:"created"|"modified"|"deleted"` | watcher |
 | `check` | `lessonId, stepId, conditions:[{id, ok, detail?}], complete` | step engine |
-| `step` | `lessonId, stepId, status:"loaded"|"complete"|"reset"` | step engine |
+| `step` | `lessonId, stepId, status:"loaded"|"complete"|"reset"|"demonstrated"|"skipped"|"dropped", index, count, lessonComplete?` | step engine (§4.1) |
 | `nudge` | `id, kind:"calm"|"ask", title, body` | stuck rules (server-side ones; the browser adds its own) |
 | `checkpoint` | `label, ref, createdAt` | checkpoint taken |
 | `mode` | `mode` | frame switch |
 | `modules` | `enabled, restarting` | module change |
 | `gap` | `from, to` | subscriber overflow; the browser should request a `state` via `check` or reconnect |
 | `error` | `code, message` | anything the learner should see |
+
+### 4.1 Step lifecycle
+
+The step engine (backend.md §3.8) moves the active step through these events:
+
+| Event status | When | Afterwards |
+|---|---|---|
+| `loaded` | a scenario load, or the engine advanced | the step is active; its checkpoint exists |
+| `reset` | `restore {}` (Reset this step, Do it yourself), or `demo start` restored the checkpoint | the step is active again; checks for it are cleared |
+| `complete` | every condition holds and no demo latch is set | progress `done`; the engine takes the next step's checkpoint and emits its `loaded`, or sets `lessonComplete` on the last step |
+| `demonstrated` | every condition holds while the demo latch is set (emitted once per latch) | progress `demonstrated`; the step stays active, no advance; the browser offers "Do it yourself" (`restore {}`) |
+| `skipped` | `skip` finished | progress `skipped`; the next step's `loaded` follows (or `lessonComplete` on the last step) |
+| `dropped` | `drop-step` forgot the active step (a progress reset) | no step is active until the next `scenario` |
+
+The demo latch is set by `demo {phase:"start"}` and cleared by `restore {}`, a `scenario` load of the step and `drop-step`; only a completion without the latch counts as `done`. Stuck rules are not evaluated while a demo plays (between `demo start` and `demo end`). Keys sent with `keys` (inline "try it", playctl) are learner input.
 
 Example:
 
