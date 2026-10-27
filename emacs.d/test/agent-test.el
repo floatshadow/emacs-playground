@@ -974,6 +974,45 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
                               (with-current-buffer (car names) (buffer-substring 1 (min 200 (point-max))))))
       (dolist (b (seq-filter #'playground--help-buffer-p (buffer-list))) (kill-buffer b)))))
 
+;; `compile' that never asks to save and waits for the run to end.
+(defun pg-test--build (command &optional name)
+  "Run COMMAND as a compilation in buffer NAME (default *compilation*).
+Return the buffer once the run finished."
+  (let* ((compilation-ask-about-save nil)
+         (compilation-buffer-name-function (lambda (_) (or name "*compilation*")))
+         (default-directory pg-test--dir)
+         (b (save-window-excursion (compile command))))
+    (should (pg-test-wait (lambda () (not (get-buffer-process b))) 10))
+    b))
+
+(ert-deftest pg-agent/reset-step-drops-later-builds ()
+  "Build output made since the checkpoint goes, unless its window is part of the step.
+Lesson 2.7: after Watch it and Do it yourself, the demonstration's
+*compilation* made \"the build finished\" hold before the learner built."
+  (pg-test-with-agent
+    (find-file-noselect (pg-test-file "a.txt" "a\n"))
+    (let* ((early (pg-test--build "echo early" "*early*"))
+           (shown (pg-test--build "echo shown" "*shown*")))
+      (switch-to-buffer (get-file-buffer (expand-file-name "a.txt" pg-test--dir)))
+      (delete-other-windows)
+      (set-window-buffer (split-window-below) shown)
+      (should (buffer-local-value 'playground--run-started early))
+      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+        (sleep-for 0.01)
+        ;; The demonstration builds, and so does the learner in the shown window.
+        (let ((later (pg-test--build "echo Finished dev profile"))
+              (again (pg-test--build "echo shown again" "*shown*")))
+          (should (eq again shown))
+          (should (> (buffer-local-value 'playground--run-started later)
+                     (alist-get 'takenAt snap)))
+          (let ((r (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap)))))))
+            (should (>= (alist-get 'killed r) 1)))
+          (should-not (buffer-live-p later))
+          (should (buffer-live-p early))
+          (should (buffer-live-p shown))
+          (should (get-buffer-window shown))
+          (dolist (b (list early shown)) (kill-buffer b)))))))
+
 (ert-deftest pg-agent/op-setup-reset-starts-at-the-top ()
   "With reset, the files of a setup start on their first line, in their windows too."
   (pg-test-with-agent
