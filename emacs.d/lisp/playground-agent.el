@@ -251,14 +251,47 @@ sends the reply itself later.")
   "\"gui\" or \"terminal\" for FRAME."
   (if (display-graphic-p frame) "gui" "terminal"))
 
+(defvar playground--learner-frame nil
+  "The frame the learner's last command ran in (or the newest client frame).")
+
+(defun playground--usable-frame-p (frame)
+  "Non-nil when FRAME is a live, real frame the learner can see.
+The daemon's initial frame is not one."
+  (and (frame-live-p frame)
+       (not (frame-parameter frame 'parent-frame))
+       (not (frame-parameter frame 'tooltip))
+       (not (and (daemonp) (eq frame terminal-frame)))))
+
+(defun playground--learner-frame ()
+  "The frame the learner works in.
+That is the frame of the last command when it still exists.  Calls
+from sessiond run from timers, between commands, with whatever frame
+Emacs last selected (the GUI frame just made, the daemon's own frame
+after a client frame closed), which is not always the one the
+learner is looking at."
+  (cond ((playground--usable-frame-p playground--learner-frame) playground--learner-frame)
+        ((playground--usable-frame-p (selected-frame)) (selected-frame))
+        ((seq-find #'playground--usable-frame-p (frame-list)))
+        (t (selected-frame))))
+
+(defun playground--note-learner-frame (&optional frame)
+  "Remember FRAME (default: the selected one) as the learner's frame."
+  (let ((frame (or frame (selected-frame))))
+    (when (playground--usable-frame-p frame)
+      (setq playground--learner-frame frame))))
+
 (defun playground--user-window ()
   "The window the learner is working in.
-That is the selected window, or the window that was selected when
-the minibuffer was entered."
-  (let ((w (selected-window)))
+That is the selected window of the learner's frame
+\(`playground--learner-frame'), or, while a minibuffer is open
+there, the window that was selected when it was entered."
+  (let* ((frame (playground--learner-frame))
+         (w (frame-selected-window frame)))
     (if (window-minibuffer-p w)
         (let ((m (minibuffer-selected-window)))
-          (if (and m (window-live-p m)) m (frame-first-window)))
+          (if (and m (window-live-p m) (eq (window-frame m) frame))
+              m
+            (frame-first-window frame)))
       w)))
 
 (defun playground--relative (file)
@@ -784,6 +817,7 @@ kind of frame it was typed in, by default the selected window's."
   (unless playground--in-hook
     (let ((playground--in-hook t))
       (playground--safely "post-command"
+        (playground--note-learner-frame)
         (let* ((depth (minibuffer-depth))
                (cmd (if (memq playground--pre-command playground--prefix-arg-commands)
                         playground--pre-command
@@ -909,6 +943,9 @@ kind of frame it was typed in, by default the selected window's."
 (defun playground--on-make-frame ()
   "An emacsclient frame opened (it is selected)."
   (playground--safely "make-frame"
+    ;; The browser shows the frame just made: the terminal frame after
+    ;; a restart, the GUI frame when the learner switches to it.
+    (playground--note-learner-frame)
     (playground--frame-event "opened" (selected-frame))
     (playground--emit-state t)
     ;; After the server has finished setting the frame up (its initial
@@ -1029,7 +1066,10 @@ vectors arrays, and anything else its printed representation."
      (t (format "%S" value)))))
 
 (defmacro playground--in-user-window (&rest body)
-  "Run BODY with the learner's window selected (not the minibuffer)."
+  "Run BODY with the learner's window selected (not the minibuffer).
+The window is in the learner's frame (`playground--learner-frame'),
+so `selected-window', `frame-first-window' and the like mean what the
+learner sees, whichever frame Emacs happens to have selected."
   (declare (indent 0) (debug t))
   `(let ((w (playground--user-window)))
      (if (eq w (selected-window))
@@ -1050,7 +1090,9 @@ vectors arrays, and anything else its printed representation."
     (error "unknown")))
 
 (defun playground--op-check (args &rest _)
-  "Evaluate every form of ARGS: {results:[true|false|\"unknown\"]}."
+  "Evaluate every form of ARGS: {results:[true|false|\"unknown\"]}.
+Each form runs with the learner's window selected in the learner's
+frame (`playground--in-user-window')."
   `((results . ,(vconcat (mapcar #'playground--check-form (alist-get 'forms args))))))
 
 ;;;;; Rescue (emacs.md 10.3)

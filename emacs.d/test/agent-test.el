@@ -587,6 +587,37 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
     (let ((k (pg-test-wait (lambda () (car (pg-test-messages "key"))))))
       (should (equal (alist-get 'cmd k) "minibuffer-complete")))))
 
+(ert-deftest pg-agent/learner-frame ()
+  "The learner's frame is the frame of the last command, while it exists."
+  (pg-test-with-agent
+    (let ((playground--learner-frame nil))
+      (pg-test-command 'forward-char "C-f" nil)
+      (should (eq playground--learner-frame (selected-frame)))
+      (should (eq (playground--learner-frame) (selected-frame)))
+      ;; A frame that is gone (a closed client frame) is not used.
+      (setq playground--learner-frame 'not-a-live-frame)
+      (should (eq (playground--learner-frame) (selected-frame)))
+      (should (eq (playground--user-window) (selected-window))))))
+
+(ert-deftest pg-agent/check-runs-in-the-learners-window ()
+  "check evaluates its forms in the learner's window, not in whatever is selected."
+  (pg-test-with-agent
+    (delete-other-windows)
+    (switch-to-buffer (get-buffer-create "pg-upper"))
+    (let ((lower (split-window-below)))
+      (set-window-buffer lower (get-buffer-create "pg-lower"))
+      ;; The learner works in the lower window; a timer runs with the
+      ;; upper one selected.
+      (cl-letf (((symbol-function 'playground--user-window) (lambda () lower)))
+        (let ((r (pg-test-value
+                  (pg-test-call "check"
+                                `((forms . ,(vector "(not (eq (selected-window) (frame-first-window)))"
+                                                    "(equal (buffer-name) \"pg-lower\")")))))))
+          (should (equal (alist-get 'results r) '(t t))))))
+    (delete-other-windows)
+    (kill-buffer "pg-upper")
+    (kill-buffer "pg-lower")))
+
 (ert-deftest pg-agent/key-frame-is-where-typed ()
   "C-x C-c in the GUI frame is reported as typed there, though the frame is gone."
   (pg-test-with-agent
