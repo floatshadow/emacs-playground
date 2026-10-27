@@ -490,17 +490,51 @@ Pings are left out unless TYPE is \"ping\"."
                    '(("C-x C-f" "find-file") ("C-g" "minibuffer-keyboard-quit"))))))
 
 (ert-deftest pg-agent/unbound-keys ()
-  "Unbound keys run no command; their echo message yields an undefined key event."
+  "An unbound key is one key event, however often its message is shown."
   (pg-test-with-agent
     (pg-test-clear)
-    (playground--on-message "C-c z is undefined")
-    ;; A key bound to the command `undefined' runs the hook as well: once.
-    (pg-test-command 'undefined "C-c z" nil)
+    ;; Emacs runs `undefined' for an unbound key between the command
+    ;; hooks, with `this-command' nil.
+    (let ((num-input-keys (1+ num-input-keys)))
+      (pg-test-command nil "C-z"
+        (playground--on-message "C-z is undefined"))
+      ;; auto-save-visited saves from its idle timer and puts the message
+      ;; back: no key was read since.
+      (playground--on-message "C-z is undefined"))
+    ;; C-h k C-z answers with the same text: the key event is describe-key's.
+    (let ((num-input-keys (+ 2 num-input-keys)))
+      (pg-test-command 'describe-key "C-h k"
+        (playground--on-message "C-z is undefined")))
+    ;; A key bound to the command `undefined' is reported once too.
+    (let ((num-input-keys (+ 3 num-input-keys)))
+      (pg-test-command 'undefined "C-c z"
+        (playground--on-message "C-c z is undefined")))
     (pg-test-settle)
-    (let ((keys (pg-test-messages "key")))
-      (should (= (length keys) 1))
-      (should (equal (alist-get 'keys (car keys)) "C-c z"))
-      (should (equal (alist-get 'cmd (car keys)) "undefined")))))
+    (should (equal (mapcar (lambda (k) (list (alist-get 'keys k) (alist-get 'cmd k)))
+                           (pg-test-messages "key"))
+                   '(("C-z" "undefined") ("C-h k" "describe-key") ("C-c z" "undefined"))))
+    (should (equal (mapcar (lambda (e) (alist-get 'text e)) (pg-test-messages "echo"))
+                   '("C-z is undefined" "C-z is undefined" "C-c z is undefined")))))
+
+(ert-deftest pg-agent/which-key-pages-are-no-command ()
+  "C-h after a prefix pages through which-key; the prefix is still pending after it."
+  (pg-test-with-agent
+    (pg-test-clear)
+    (pg-test-command 'which-key-C-h-dispatch "C-x r C-h" nil)
+    (pg-test-command 'copy-to-register "C-x r s" nil)
+    (pg-test-settle)
+    (should (equal (mapcar (lambda (k) (alist-get 'keys k)) (pg-test-messages "key"))
+                   '("C-x r s")))))
+
+(ert-deftest pg-agent/internal-events-keep-the-learner-frame ()
+  "Focus and mouse-movement events do not make their frame the learner's."
+  (pg-test-with-agent
+    (let ((playground--learner-frame nil))
+      (pg-test-command 'handle-focus-in "<focus-in>" nil)
+      (pg-test-command 'ignore "<mouse-movement>" nil)
+      (should-not playground--learner-frame)
+      (pg-test-command 'forward-char "C-f" nil)
+      (should (eq playground--learner-frame (selected-frame))))))
 
 (ert-deftest pg-agent/keys-before-command ()
   "Keys come from pre-command-hook: C-h k reports C-h k, not the key it described."
@@ -647,15 +681,60 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
                    '("Mark set")))))
 
 (ert-deftest pg-agent/echo-repeat ()
-  "The same message shown twice within a second is sent once."
+  "The same message shown again before another key is sent once."
   (pg-test-with-agent
     (pg-test-clear)
     (playground--on-message "Hello")
     (playground--on-message "Hello")
     (playground--on-message "Bye")
+    (playground--on-message "Bye")
+    ;; After a key, the same text is news again.
+    (let ((num-input-keys (1+ num-input-keys)))
+      (playground--on-message "Bye"))
     (pg-test-settle)
     (should (equal (mapcar (lambda (e) (alist-get 'text e)) (pg-test-messages "echo"))
-                   '("Hello" "Bye")))))
+                   '("Hello" "Bye" "Bye")))))
+
+(ert-deftest pg-agent/rescue-message-repeats ()
+  "Each Rescue says what it did, also when it says the same as the last one."
+  (pg-test-with-agent
+    (delete-other-windows)
+    (switch-to-buffer "*scratch*")
+    (pg-test-clear)
+    ;; (A batch Emacs prints messages without `set-message-function'.)
+    (let ((said "Rescue: nothing to undo; you were already in a normal state."))
+      (pg-test-rescue)
+      (playground--on-message said)
+      (pg-test-rescue)
+      (playground--on-message said)
+      (pg-test-settle)
+      (should (equal (mapcar (lambda (e) (alist-get 'text e)) (pg-test-messages "echo"))
+                     (list said said))))))
+
+(ert-deftest pg-agent/isearch-count-is-noise ()
+  "Isearch prompts are not echo messages, with or without a match count."
+  (dolist (text '("I-search: greet" "1/4 I-search: greet" "?/? I-search: g"
+                  "0/0 Failing I-search: zzz" "2/3 I-search backward: fn"
+                  "1/2+1 Wrapped I-search: x"))
+    (should (playground--noise-p text)))
+  (should-not (playground--noise-p "1/4 files copied")))
+
+(ert-deftest pg-agent/displayed-prompt ()
+  "A prompt is reported as displayed: invisible text out, display strings in."
+  (with-temp-buffer
+    (insert "Replace "
+            (propertize "in region (0L)" 'invisible 'region)
+            (propertize "from point" 'invisible 'from-point)
+            (propertize "in buffer" 'invisible 'full)
+            ": colour"
+            (propertize " " 'display " ->? ")
+            "color")
+    (setq buffer-invisibility-spec '(full region t))
+    (should (equal (playground--displayed-text (point-min) (point-max))
+                   "Replace from point: colour ->? color"))
+    (setq buffer-invisibility-spec '(from-point region t))
+    (should (equal (playground--displayed-text (point-min) 44)
+                   "Replace in buffer: "))))
 
 ;;;; Ops
 
@@ -1376,6 +1455,112 @@ and lose the side window."
         (let ((did (pg-test-rescue)))
           (should unwound)
           (should (equal (seq-take did 2) '("cancelled the prompt" "left the recursive edit"))))))))
+
+(ert-deftest pg-agent/waiting-loops ()
+  "A loop reading keys of its own (a tty menu, avy, which-key) is in the state."
+  (pg-test-with-agent
+    (should (eq (alist-get 'waiting (playground--state)) :null))
+    (should (advice-member-p 'playground-waiting 'popup-menu))
+    (should (advice-member-p 'playground-waiting 'avy-read))
+    (let (inside)
+      (cl-letf (((symbol-function 'pg-test--loop)
+                 (lambda () (setq inside (alist-get 'waiting (playground--state))) 'chosen)))
+        (let ((playground-agent-waiting-loops
+               '((pg-test--loop "menu" "a menu" "closed the menu" "C-g"))))
+          (advice-add 'pg-test--loop :around
+                      (playground--waiting-advice (car playground-agent-waiting-loops))
+                      '((name . playground-waiting)))
+          (should (eq (pg-test--loop) 'chosen))
+          (advice-remove 'pg-test--loop 'playground-waiting)))
+      (should (equal inside '((kind . "menu") (what . "a menu") (leave . "C-g")))))
+    (should (eq (alist-get 'waiting (playground--state)) :null))))
+
+(ert-deftest pg-agent/rescue-waiting-loop ()
+  "Rescue leaves a waiting loop with a C-g it reads, then finishes and replies."
+  (pg-test-with-agent
+    (delete-other-windows)
+    (switch-to-buffer "*scratch*")
+    (let ((unread-command-events nil)
+          (playground--waiting '(popup-menu "menu" "a menu" "closed the menu" "C-g"))
+          (reply nil))
+      (let ((id (cl-incf pg-test--next-id)))
+        (process-send-string
+         pg-test--client
+         (concat (json-serialize `((t . "call") (id . ,id) (op . "rescue")
+                                   (args . ,(make-hash-table)) (timeoutMs . 2000)))
+                 "\n"))
+        ;; The loop reads the C-g...
+        (should (pg-test-wait (lambda () (equal unread-command-events '(?\C-g))) 2))
+        (setq unread-command-events nil)
+        ;; ...and ends; rescue goes on.
+        (setq playground--waiting nil)
+        (setq reply (pg-test-wait
+                     (lambda ()
+                       (seq-find (lambda (m) (and (equal (alist-get 't m) "reply")
+                                                  (equal (alist-get 'id m) id)))
+                                 pg-test--messages))
+                     3)))
+      (should (equal (alist-get 'did (pg-test-value reply)) '("closed the menu"))))))
+
+;;;; Frames
+
+(ert-deftest pg-agent/copy-windows ()
+  "A frame given another frame's window state shows the same windows, same one selected."
+  (pg-test-with-agent
+    (delete-other-windows)
+    (let ((a (find-file-noselect (pg-test-file "a.txt")))
+          (b (find-file-noselect (pg-test-file "b.txt"))))
+      (switch-to-buffer a)
+      (split-window-below)
+      (other-window 1)
+      (switch-to-buffer b)
+      (let ((state (playground--frame-windows (selected-frame))))
+        ;; Sized by proportions: a GUI frame's pixels do not fit a terminal.
+        (should-not (string-match-p "(pixel-\\(?:width\\|height\\) \\." (format "%S" state)))
+        (should (string-match-p "normal-height" (format "%S" state)))
+        (delete-other-windows)
+        (switch-to-buffer "*scratch*")
+        (playground--copy-windows state (selected-frame)))
+      (should (equal (mapcar (lambda (w) (buffer-name (window-buffer w)))
+                             (window-list nil 'nomini (frame-first-window)))
+                     '("a.txt" "b.txt")))
+      (should (eq (window-buffer (selected-window)) b)))))
+
+(ert-deftest pg-agent/reset-step-tabs-in-a-new-frame ()
+  "A frame with one unnamed tab gets the spec's named tab by renaming, not a second tab."
+  (pg-test-with-agent
+    (require 'tab-bar)
+    (let ((main (pg-test-file "hello/main.rs" "fn main() {}\n")))
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (find-file main)
+            (tab-bar-rename-tab "hello")
+            (let ((spec (pg-test--spec (pg-test-value (pg-test-call "snapshot")))))
+              ;; The GUI frame made since starts with one unnamed tab.
+              (tab-bar-rename-tab "")
+              (pg-test-value (pg-test-call "reset-step" `((spec . ,spec))))
+              (should (equal (mapcar (lambda (tab) (alist-get 'name tab))
+                                     (funcall tab-bar-tabs-function))
+                             '("hello")))))
+        (tab-bar-close-other-tabs)
+        (tab-bar-rename-tab "")))))
+
+(ert-deftest pg-agent/op-setup-reset-forgets-tab-names ()
+  "A reset setup leaves one tab without the name an earlier lesson gave it."
+  (pg-test-with-agent
+    (require 'tab-bar)
+    (pg-test-file "p/a.rs" "a\n")
+    (unwind-protect
+        (progn
+          (tab-bar-rename-tab "hello")
+          (pg-test-value (pg-test-call "setup" `((open . ,(vector "p/a.rs"))
+                                                 (layout . "single")
+                                                 (reset . t)
+                                                 (workspace . ,pg-test--dir))))
+          (should (= (length (funcall tab-bar-tabs-function)) 1))
+          (should-not (alist-get 'explicit-name (tab-bar--current-tab))))
+      (tab-bar-rename-tab ""))))
 
 ;;;; Connection
 

@@ -167,8 +167,9 @@ ws-butler (which trims the spaces you added), are left out."
     ;; helpful and elisp-refs while they look up a definition.
     "\\`uncompressing .*\\.gz\\.\\.\\." "\\`Searched [0-9]+/[0-9]+ files"
     ;; Isearch redraws its prompt on every key; the minibuffer event and
-    ;; the state's minibuffer field carry it.
-    "\\`\\(?:Failing \\|Wrapped \\|Overwrapped \\|Pending \\)*\\(?:[[:alpha:] ]+ \\)?I-search")
+    ;; the state's minibuffer field carry it.  The prompt starts with
+    ;; the match count when `isearch-lazy-count' is on ("1/4 ").
+    "\\`\\(?:[0-9?]+/[0-9?+]+ \\)?\\(?:Failing \\|Wrapped \\|Overwrapped \\|Pending \\)*\\(?:[[:alpha:] ]+ \\)?I-search")
   "Regexps for echo-area messages that are not reported.
 \"Mark set\", \"Quit\" and \"Wrote ...\" are kept on purpose."
   :type '(repeat regexp))
@@ -185,6 +186,22 @@ ws-butler (which trims the spaces you added), are left out."
 A mouse drag runs a command for every movement; no key event is sent
 for those (the state still follows the region)."
   :type 'regexp)
+
+(defcustom playground-agent-waiting-loops
+  '((popup-menu "menu" "a menu" "closed the menu" "C-g")
+    (avy--read-candidates "avy" "avy, for the characters to jump to" "left avy" "C-g")
+    (avy-read "avy" "avy, for the letters of the target" "left avy" "C-g")
+    ;; C-g there only goes back to the prefix; a aborts.
+    (which-key-C-h-dispatch "which-key" "which-key, for a key that turns its pages"
+                            "left which-key's pages" "a"))
+  "Functions that read keys in a loop of their own.
+Each entry is (FUNCTION KIND WHAT DID LEAVE).  A menu-bar menu in a
+terminal frame (F10, or a click on the menu bar) runs in `popup-menu'.
+Such a loop is neither a prompt nor a recursive edit, and every key
+goes to it.  While one runs, the state's `waiting' names it (KIND, and
+WHAT is waiting) and the keys that LEAVE it; Rescue leaves it with
+those keys, saying DID."
+  :type '(repeat (list function string string string string)))
 
 (defcustom playground-agent-debug nil
   "When non-nil, log agent traffic to the buffer *playground-agent*."
@@ -216,11 +233,13 @@ not reported a second time.")
   "Command already reported by `minibuffer-exit-hook'.
 A prompt cancelled with C-g is followed by one more run of
 `post-command-hook' for the same command, without its keys.")
-(defvar playground--undefined-reported nil
-  "Keys of an unbound sequence just reported from its echo message.")
 (defvar playground--window-counter 0 "Last window id handed out.")
 (defvar playground--suppress-echo nil "Non-nil while messages must not be reported.")
 (defvar playground--in-hook nil "Guards against re-entering the agent from its own hooks.")
+(defvar playground--waiting nil
+  "The entry of `playground-agent-waiting-loops' whose loop is running, or nil.
+Bound around the loop, so timers that run while it waits for a key
+see it.")
 (defvar playground--pending-layout nil
   "(TIME . SPEC): a layout `open' could not apply yet, and when it was asked.
 Right after a daemon restart sessiond reopens the buffers before any
@@ -284,17 +303,31 @@ The daemon's initial frame is not one."
   (and (playground--top-level-frame-p frame)
        (not (and (daemonp) (eq frame terminal-frame)))))
 
+(defun playground--gui-frames ()
+  "The graphical frames the learner can see, newest first."
+  (seq-filter (lambda (f) (and (playground--usable-frame-p f) (display-graphic-p f)))
+              (frame-list)))
+
 (defun playground--learner-frame ()
   "The frame the learner works in.
-That is the frame of the last command when it still exists.  Calls
-from sessiond run from timers, between commands, with whatever frame
-Emacs last selected (the GUI frame just made, the daemon's own frame
-after a client frame closed), which is not always the one the
-learner is looking at."
-  (cond ((playground--usable-frame-p playground--learner-frame) playground--learner-frame)
-        ((playground--usable-frame-p (selected-frame)) (selected-frame))
-        ((seq-find #'playground--usable-frame-p (frame-list)))
-        (t (selected-frame))))
+That is the frame of the last command when it still exists, unless
+it is a terminal frame while a graphical frame exists: graphical
+frames exist only while sessiond's GUI mode is on (it deletes them
+when it leaves it), and the browser then shows the GUI frame, so the
+newest graphical frame is the learner's.  Calls from sessiond run
+from timers, between commands, with whatever frame Emacs last
+selected (the GUI frame just made, the daemon's own frame after a
+client frame closed), which is not always the one the learner is
+looking at."
+  (let ((last playground--learner-frame)
+        (gui (playground--gui-frames)))
+    (cond ((and (playground--usable-frame-p last)
+                (or (display-graphic-p last) (null gui)))
+           last)
+          (gui (car gui))
+          ((playground--usable-frame-p (selected-frame)) (selected-frame))
+          ((seq-find #'playground--usable-frame-p (frame-list)))
+          (t (selected-frame)))))
 
 (defun playground--note-learner-frame (&optional frame)
   "Remember FRAME (default: the selected one) as the learner's frame."
@@ -642,6 +675,30 @@ DIR non-nil when the children are stacked top to bottom."
     `((count . 1)
       (current . ,(buffer-name (window-buffer (frame-selected-window frame)))))))
 
+(defun playground--displayed-text (beg end)
+  "The text between BEG and END of the current buffer as it is displayed.
+Invisible text (`invisible-p') is left out, and a stretch of text with
+a string `display' property shows that string instead."
+  (let ((pos beg) (out '()))
+    (while (< pos end)
+      (let ((display (get-char-property pos 'display))
+            (next (min (next-single-char-property-change pos 'invisible nil end)
+                       (next-single-char-property-change pos 'display nil end))))
+        (cond ((invisible-p pos))
+              ((stringp display) (push display out))
+              (t (push (buffer-substring-no-properties pos next) out)))
+        (setq pos next)))
+    (substring-no-properties (apply #'concat (nreverse out)))))
+
+(defun playground--prompt ()
+  "The prompt of the active minibuffer, as displayed.
+visual-replace's \"Replace in region (2L)from pointin buffer: \" shows
+one of its three scopes and hides the others.  Read from the current
+buffer when it is the minibuffer, else `minibuffer-prompt'."
+  (if (minibufferp)
+      (playground--displayed-text (point-min) (minibuffer-prompt-end))
+    (substring-no-properties (or (minibuffer-prompt) ""))))
+
 (defun playground--minibuffer ()
   "The open minibuffer or isearch as an object, or :null."
   (let ((mw (active-minibuffer-window)))
@@ -650,7 +707,7 @@ DIR non-nil when the children are stacked top to bottom."
       (with-current-buffer (window-buffer mw)
         (let ((contents (minibuffer-contents-no-properties)))
           `((depth . ,(minibuffer-depth))
-            (prompt . ,(substring-no-properties (or (minibuffer-prompt) "")))
+            (prompt . ,(playground--prompt))
             (contents . ,(if (> (length contents) 1000) (substring contents 0 1000) contents))
             (kind . "prompt")))))
      ((bound-and-true-p isearch-mode)
@@ -749,8 +806,26 @@ DIR non-nil when the children are stacked top to bottom."
           (macro . ,(playground--bool defining-kbd-macro))
           ;; The prefix argument waiting for the next command (C-u ...).
           (prefixArg . ,(if prefix-arg (format "%S" prefix-arg) :null))
+          (waiting . ,(playground--waiting-object))
           (readOnlyReason . ,(playground--read-only-reason))
           (diagAtPoint . ,(playground--diag-at-point pt)))))))
+
+(defun playground--waiting-object ()
+  "The state's `waiting': {kind, what, leave} for a running loop, or :null."
+  (if playground--waiting
+      `((kind . ,(nth 1 playground--waiting))
+        (what . ,(nth 2 playground--waiting))
+        (leave . ,(nth 4 playground--waiting)))
+    :null))
+
+(defun playground--waiting-advice (entry)
+  "Around advice marking the loop of ENTRY, from `playground-agent-waiting-loops'."
+  (lambda (orig &rest args)
+    (let ((playground--waiting entry))
+      (playground--schedule-state)
+      (unwind-protect
+          (apply orig args)
+        (playground--schedule-state)))))
 
 (defun playground--emit-state (&optional force)
   "Send the state unless it equals the last one sent (FORCE sends anyway)."
@@ -786,6 +861,12 @@ knows its keys.")
 (defvar playground--pre-frame nil
   "Kind of the frame the command about to run was typed in.
 C-x C-c deletes its frame before `post-command-hook' runs.")
+
+(defconst playground--prefix-pager-commands '(which-key-C-h-dispatch)
+  "Commands that page through the bindings of a pending prefix.
+which-key runs one for C-h after a prefix; it ends with the prefix
+read again, still pending, so it completed no key sequence and no key
+event is sent for it.")
 
 (defconst playground--prefix-arg-commands
   '(universal-argument universal-argument-more universal-argument-minus
@@ -843,7 +924,6 @@ kind of frame it was typed in, by default the selected window's."
   (unless playground--in-hook
     (let ((playground--in-hook t))
       (playground--safely "post-command"
-        (playground--note-learner-frame)
         (let* ((depth (minibuffer-depth))
                (cmd (if (memq playground--pre-command playground--prefix-arg-commands)
                         playground--pre-command
@@ -861,22 +941,24 @@ kind of frame it was typed in, by default the selected window's."
                             (key-description playground--pre-keys))
                            (t (playground--this-keys))))
                ;; The frame the keys were typed in (C-x C-c deletes it).
-               (frame (and (> (length playground--pre-keys) 0) playground--pre-frame)))
+               (frame (and (> (length playground--pre-keys) 0) playground--pre-frame))
+               ;; Focus and mouse-movement events are no keys of the
+               ;; learner's (a terminal frame hidden behind the GUI frame
+               ;; still gets focus reports).
+               (internal (or (memq cmd playground-agent-ignored-commands)
+                             (string-match-p playground-agent-ignored-keys keys))))
+          (unless internal (playground--note-learner-frame))
           (setq playground--pre-keys [] playground--pre-command nil playground--pre-frame nil)
           ;; Every command started at this depth or deeper has finished.
           (setq playground--early (seq-remove (lambda (e) (>= (car e) depth)) playground--early))
           (when mx (setq playground--mx-armed nil))
           (when (and cmd (eq cmd playground--exit-reported)) (setq early t))
-          (when (and (memq cmd '(nil undefined)) (equal keys playground--undefined-reported))
-            (setq early t))
-          (setq playground--exit-reported nil
-                playground--undefined-reported nil)
+          (setq playground--exit-reported nil)
           (when (and playground--mx-reader (>= (car playground--mx-reader) depth))
             (setq playground--mx-reader nil))
-          (unless (or early
+          (unless (or early internal
                       (memq cmd '(execute-extended-command execute-extended-command-for-buffer))
-                      (memq cmd playground-agent-ignored-commands)
-                      (string-match-p playground-agent-ignored-keys keys)
+                      (memq cmd playground--prefix-pager-commands)
                       (and (null cmd) (string-empty-p keys)))
             (playground--emit (playground--key-event cmd keys mx nil frame)))
           (playground--emit-state))))))
@@ -919,8 +1001,7 @@ kind of frame it was typed in, by default the selected window's."
                                  mx
                                  (window-buffer (playground--user-window))))
               (push (cons outer cmd) playground--early))))
-          (playground--minibuffer-event t (substring-no-properties (or (minibuffer-prompt) ""))
-                                        depth "prompt")
+          (playground--minibuffer-event t (playground--prompt) depth "prompt")
           (playground--schedule-state))))))
 
 (defun playground--on-minibuffer-exit ()
@@ -937,8 +1018,7 @@ kind of frame it was typed in, by default the selected window's."
             (unless (string-empty-p keys)
               (playground--emit (playground--key-event cmd keys nil (current-buffer)))
               (setq playground--exit-reported cmd))))
-        (playground--minibuffer-event nil (substring-no-properties (or (minibuffer-prompt) ""))
-                                      (minibuffer-depth) "prompt")
+        (playground--minibuffer-event nil (playground--prompt) (minibuffer-depth) "prompt")
         (playground--schedule-state)))))
 
 (defun playground--on-isearch-start ()
@@ -966,18 +1046,56 @@ kind of frame it was typed in, by default the selected window's."
   (when (playground--top-level-frame-p frame)
     (playground--emit `((t . "frame") (event . ,event) (kind . ,(playground--frame-kind frame))))))
 
+(defun playground--copy-windows (state to)
+  "Give frame TO the windows of STATE, a `window-state-get' value.
+TO's selected window becomes the one STATE has selected."
+  (when (frame-live-p to)
+    (playground--safely "copy windows"
+      (with-selected-frame to
+        (let ((ignore-window-parameters t))
+          (playground--only-window)
+          (window-state-put state (frame-root-window to) 'safe))))
+    (playground--schedule-state)))
+
+(defun playground--frame-windows (frame)
+  "The window state of FRAME, to put into another frame.
+Without pixel sizes, so the windows are sized by their proportions: a
+GUI frame's pixels mean nothing in a terminal frame, where
+`window-state-put' would find every window too small for them."
+  (playground--drop-pixel-sizes (window-state-get (frame-root-window frame))))
+
+(defun playground--drop-pixel-sizes (state)
+  "Window STATE without its pixel-width and pixel-height entries."
+  (if (proper-list-p state)
+      (mapcar #'playground--drop-pixel-sizes
+              (seq-remove (lambda (e) (memq (car-safe e) '(pixel-width pixel-height))) state))
+    state))
+
 (defun playground--on-make-frame ()
   "An emacsclient frame opened (it is selected)."
   (playground--safely "make-frame"
-    ;; The browser shows the frame just made: the terminal frame after
-    ;; a restart, the GUI frame when the learner switches to it.
-    (playground--note-learner-frame)
-    (playground--frame-event "opened" (selected-frame))
-    (playground--emit-state t)
-    ;; After the server has finished setting the frame up (its initial
-    ;; buffer), restore a layout kept by `open' during a restart.
-    (when playground--pending-layout
-      (run-at-time 0 nil #'playground--apply-pending-layout (selected-frame)))))
+    (let* ((frame (selected-frame))
+           ;; The frame of the last command, not `playground--learner-frame',
+           ;; which already prefers this frame when it is graphical.
+           (previous (and (playground--usable-frame-p playground--learner-frame)
+                          playground--learner-frame)))
+      ;; The browser shows the frame just made: the terminal frame after
+      ;; a restart, the GUI frame when the learner switches to it.
+      (playground--note-learner-frame frame)
+      (playground--frame-event "opened" frame)
+      (playground--emit-state t)
+      ;; After the server has finished setting the frame up (its initial
+      ;; buffer): restore a layout kept by `open' during a restart, else
+      ;; give the new frame the windows of the frame the learner was in,
+      ;; so switching to the GUI frame keeps the lesson's windows.
+      (cond
+       (playground--pending-layout
+        (run-at-time 0 nil #'playground--apply-pending-layout frame))
+       ((and previous (not (eq previous frame)))
+        (run-at-time 0 nil (lambda ()
+                             (when (playground--usable-frame-p previous)
+                               (playground--copy-windows
+                                (playground--frame-windows previous) frame)))))))))
 
 (defun playground--last-frame-on-terminal-p (frame)
   "Non-nil when no other real frame shares FRAME's terminal.
@@ -992,10 +1110,22 @@ learner would call \"the terminal frame\"."
                    (frame-list)))))
 
 (defun playground--on-delete-frame (frame)
-  "FRAME is about to be deleted."
+  "FRAME is about to be deleted.
+When it is the last graphical frame (sessiond leaves GUI mode, or C-x
+C-c in it), its windows go back to the learner's terminal frame: what
+the learner arranged in the GUI frame is still there."
   (playground--safely "delete-frame"
     (when (playground--last-frame-on-terminal-p frame)
       (playground--frame-event "closed" frame))
+    (when (and (display-graphic-p frame)
+               (playground--usable-frame-p frame)
+               (equal (playground--gui-frames) (list frame)))
+      (when-let* ((to (seq-find (lambda (f)
+                                  (and (not (eq f frame)) (playground--usable-frame-p f)))
+                                (frame-list))))
+        (when (eq playground--learner-frame frame)
+          (setq playground--learner-frame to))
+        (run-at-time 0 nil #'playground--copy-windows (playground--frame-windows frame) to)))
     (playground--schedule-state)))
 
 ;;;; Echo area
@@ -1004,26 +1134,23 @@ learner would call \"the terminal frame\"."
   "Non-nil when TEXT should not be reported."
   (seq-some (lambda (re) (string-match-p re text)) playground-agent-echo-noise))
 
-(defvar playground--last-echo nil "(TEXT . TIME) of the last echo sent.")
+(defvar playground--last-echo nil
+  "(TEXT . KEYS) of the last echo sent: its text and `num-input-keys' then.")
 
 (defun playground--echo (text)
-  "Report echo-area TEXT unless it is noise."
+  "Report echo-area TEXT unless it is noise or the last message shown again.
+A message equal to the last one reported, with no key sequence read
+since, is that message displayed again: in another frame's echo area,
+or put back by `map-y-or-n-p' after `auto-save-visited-mode' saved
+from its idle timer.  Echo messages are never key events: an unbound
+key runs `undefined' between the command hooks, which report it."
   (when (and (stringp text) (not playground--suppress-echo) playground-agent-mode)
     (let ((text (string-trim (substring-no-properties text))))
       (unless (or (playground--noise-p text)
-                  ;; The same message redisplayed (in another frame's
-                  ;; echo area, say) within a second is sent once.
-                  (and (equal text (car playground--last-echo))
-                       (< (- (float-time) (cdr playground--last-echo)) 1.0)))
-        (setq playground--last-echo (cons text (float-time)))
+                  (equal (cons text num-input-keys) playground--last-echo))
+        (setq playground--last-echo (cons text num-input-keys))
         (playground--emit `((t . "echo")
-                            (text . ,(if (> (length text) 500) (substring text 0 500) text))))
-        ;; Emacs runs no command, hence no hooks, for an unbound key
-        ;; sequence; its only trace is this message.
-        (when (string-match "\\`\\(.+\\) is undefined\\'" text)
-          (let ((keys (match-string 1 text)))
-            (setq playground--undefined-reported keys)
-            (playground--emit (playground--key-event nil keys nil))))))))
+                            (text . ,(if (> (length text) 500) (substring text 0 500) text))))))))
 
 (defun playground--on-message (message &rest _)
   "Watch MESSAGE on its way to the echo area (`set-message-function')."
@@ -1132,12 +1259,44 @@ frame (`playground--in-user-window')."
 
 (defun playground--op-rescue (_args &optional id)
   "Get the learner out of any confusing state; reply {did:[...]}.
-Leaving minibuffers and recursive edits needs a throw to the command
-loop, so in that case the rest of the work runs from a timer at top
-level and the reply is sent from there."
-  (let ((did (playground--rescue-plan)))
-    (if (null did)
-        `((did . ,(vconcat (playground--rescue-rest nil))))
+A loop reading keys of its own (`playground-agent-waiting-loops') is
+left first, with the keys that leave it, and the rest happens once it
+has ended.  Leaving minibuffers and recursive edits needs a throw to the
+command loop, so in that case the rest of the work runs from a timer
+at top level.  In both cases the reply is sent from there."
+  (if (not playground--waiting)
+      (playground--rescue-from nil id)
+    (let ((left (nth 3 playground--waiting)))
+      (playground--quit-waiting
+       (key-parse (nth 4 playground--waiting))
+       (lambda ()
+         (let ((value (playground--rescue-from (list left) id)))
+           (when (and id (not (eq value 'playground--deferred)))
+             (playground--reply id t value)))))
+      'playground--deferred)))
+
+(defconst playground--quit-waiting-tries 40
+  "Times, 50 ms apart, rescue checks whether a waiting loop has ended.")
+
+(defun playground--quit-waiting (keys then &optional tries)
+  "Make the running waiting loop read KEYS, then call THEN once it has ended.
+The loop reads them as if typed.  Unwinding it with a throw instead
+(as for prompts) would leave a tty menu drawn over a frame that no
+longer redisplays.  TRIES counts the checks so far."
+  (unless tries
+    (setq unread-command-events (append (listify-key-sequence keys) unread-command-events)))
+  (if (and playground--waiting (< (or tries 0) playground--quit-waiting-tries))
+      (run-at-time 0.05 nil #'playground--quit-waiting keys then (1+ (or tries 0)))
+    (funcall then)))
+
+(defun playground--rescue-from (prior id)
+  "Rescue from prompts, recursive edits and the rest, after PRIOR actions.
+Returns the reply value, or `playground--deferred' when the reply to
+call ID is sent later (see `playground--op-rescue')."
+  ;; Newest first, as `playground--rescue-plan' lists them.
+  (let ((did (append (playground--rescue-plan) (reverse prior))))
+    (if (null (playground--rescue-plan))
+        `((did . ,(vconcat (playground--rescue-rest (reverse did)))))
       ;; Phase 2 after unwinding.
       (run-at-time 0 nil (lambda ()
                            (let ((all (playground--rescue-rest (reverse did))))
@@ -1254,6 +1413,8 @@ non-nil when there was something to repair."
             (push "dropped the selection" did)))))
     (discard-input)
     (setq did (nreverse did))
+    ;; Reported even when the last Rescue said the same.
+    (setq playground--last-echo nil)
     (let ((playground--suppress-echo nil))
       (message "%s" (if did
                         (concat "Rescue: " (string-join did ", ") ".")
@@ -1796,9 +1957,12 @@ one that is not current; nil when every tab has a name."
 Named tabs SPEC does not list are closed (a demo's C-x p p opened
 one; the last tab loses its name instead), tabs without a name are
 closed down to the number SPEC has, and named tabs SPEC lists that
-are gone are reopened (from the closed tabs when possible).  Nothing
-happens when SPEC has no tab list or tab-bar is not loaded.  Returns
-the number of tabs closed or opened."
+are gone are made again: an unnamed tab beyond SPEC's number takes
+the name (a frame made after the spec was taken, such as the GUI
+frame, starts with one unnamed tab), else the tab is reopened (from
+the closed tabs when possible).  Nothing happens when SPEC has no tab
+list or tab-bar is not loaded.  Returns the number of tabs closed,
+renamed or opened."
   (let ((want (append (alist-get 'tabs spec) nil))
         (n 0))
     (when (and want (featurep 'tab-bar))
@@ -1824,7 +1988,13 @@ the number of tabs closed or opened."
                 (cl-incf n)))
             (dolist (name want-named)
               (unless (tab-bar--tab-index-by-name name)
-                (playground--reopen-tab name)
+                (let ((spare (and (> (seq-count (lambda (tab) (not (alist-get 'explicit-name tab)))
+                                                 (funcall tab-bar-tabs-function))
+                                      want-unnamed)
+                                  (playground--last-unnamed-tab))))
+                  (if spare
+                      (tab-bar-rename-tab name spare)
+                    (playground--reopen-tab name)))
                 (cl-incf n)))))))
     n))
 
@@ -2102,10 +2272,15 @@ buffers and in the windows that show them, before the setup's eval
       (playground--restore-auto-save)
       (playground--in-user-window
         ;; Tabs from an earlier lesson (3.7, project tabs) are not part of
-        ;; this lesson's layout.
-        (when (and (bound-and-true-p tab-bar-mode)
-                   (> (length (funcall tab-bar-tabs-function)) 1))
-          (playground--safely "setup tabs" (tab-bar-close-other-tabs)))
+        ;; this lesson's layout, nor is the name 3.7 gave the tab kept:
+        ;; the lesson starts with one tab named after its buffer.
+        (when (featurep 'tab-bar)
+          (playground--safely "setup tabs"
+            (when (and (bound-and-true-p tab-bar-mode)
+                       (> (length (funcall tab-bar-tabs-function)) 1))
+              (tab-bar-close-other-tabs))
+            (when (alist-get 'explicit-name (assq 'current-tab (funcall tab-bar-tabs-function)))
+              (tab-bar-rename-tab ""))))
         (playground--clear-desk playground-agent-workspace
                                 (mapcar #'playground--absolute open)))
       (let ((root (alist-get 'root args)))
@@ -2169,9 +2344,11 @@ buffers and in the windows that show them, before the setup's eval
     `((written . ,(abbreviate-file-name file)))))
 
 (defun playground--op-frame (args &rest _)
-  "Open a GUI frame on the display in ARGS."
+  "Open a GUI frame on the display in ARGS.
+No `fullscreen' parameter: it needs a window manager, and there is
+none; the base module fits GUI frames to their display."
   (let* ((display (or (alist-get 'display args) (getenv "PG_DISPLAY") ":1"))
-         (frame (make-frame-on-display display '((fullscreen . fullboth)))))
+         (frame (make-frame-on-display display)))
     (playground--frame-event "opened" frame)
     `((frame . ,(frame-parameter frame 'name)))))
 
@@ -2246,7 +2423,7 @@ Never saves, kills file buffers or reverts."
     r))
 
 (defun playground-gui-frame (&optional display)
-  "Open a full-screen GUI frame on DISPLAY (default $PG_DISPLAY or :1)."
+  "Open a GUI frame on DISPLAY (default $PG_DISPLAY or :1)."
   (interactive)
   (playground--op-frame `((display . ,display))))
 
@@ -2285,6 +2462,9 @@ Never saves, kills file buffers or reverts."
         (advice-add 'eldoc-display-in-echo-area :around #'playground--eldoc-quietly)
         ;; Eldoc also re-shows its last message before each command.
         (advice-add 'eldoc-pre-command-refresh-echo-area :around #'playground--eldoc-quietly)
+        (dolist (entry playground-agent-waiting-loops)
+          (advice-add (car entry) :around (playground--waiting-advice entry)
+                      '((name . playground-waiting))))
         (unless set-message-function (setq set-message-function #'ignore))
         (add-function :before set-message-function #'playground--on-message)
         (add-function :before command-error-function #'playground--on-command-error))
@@ -2295,6 +2475,8 @@ Never saves, kills file buffers or reverts."
     (advice-remove 'eglot--connect #'playground--eglot-connecting)
     (advice-remove 'eldoc-display-in-echo-area #'playground--eldoc-quietly)
     (advice-remove 'eldoc-pre-command-refresh-echo-area #'playground--eldoc-quietly)
+    (dolist (entry playground-agent-waiting-loops)
+      (advice-remove (car entry) 'playground-waiting))
     (remove-function set-message-function #'playground--on-message)
     (remove-function command-error-function #'playground--on-command-error)))
 

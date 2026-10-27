@@ -23,6 +23,12 @@
 (setq ibuffer-show-empty-filter-groups nil
       ibuffer-expert t)
 
+;; ibuffer draws filter groups only once ibuf-ext is loaded (its * and /
+;; commands load it); load it with ibuffer so the first C-x C-b is
+;; grouped too.
+(with-eval-after-load 'ibuffer
+  (require 'ibuf-ext))
+
 (defun playground-ibuffer-group-by-project ()
   "Group ibuffer's list by project, special buffers last."
   (let (groups)
@@ -69,7 +75,15 @@
   (keymap-global-set "C-x C-j" #'dirvish-side)
   (with-eval-after-load 'dirvish
     (keymap-set dirvish-mode-map "TAB" #'dirvish-subtree-toggle)
-    (keymap-set dirvish-mode-map "?" #'dirvish-dispatch)))
+    (keymap-set dirvish-mode-map "?" #'dirvish-dispatch))
+
+  ;; After q (dirvish-quit) the menu bar shows the menus of the buffer
+  ;; now selected, not Dired's: redisplay does not take dirvish putting
+  ;; the windows back for a buffer change, so it is asked to recompute.
+  (defun playground--update-menu-bars (&rest _)
+    "Recompute every frame's menu bar and mode lines."
+    (force-mode-line-update t))
+  (advice-add 'dirvish-quit :after #'playground--update-menu-bars))
 
 ;;;; Lesson 2.7  Projects
 

@@ -144,6 +144,12 @@
 (setq kill-do-not-save-duplicates t
       save-interprogram-paste-before-kill t)
 
+;;;; Lesson 1.4  Incremental search
+
+;; The search prompt counts the matches: "2/4 I-search: greet" is the
+;; second of four.
+(setq isearch-lazy-count t)
+
 ;;;; Lesson 2.3  Opening files, saving
 
 ;; Files save themselves 5 s after you stop typing

@@ -10,8 +10,9 @@
 ;; runs with, using the packages the image ships, and checks settings
 ;; the lessons depend on: what Home, End and Delete arrive as in the
 ;; terminal frame, the M-x messages, the mode-line colours, the mode
-;; line's minor modes, the M-y binding, and how the GUI frame is fitted
-;; to its display.
+;; line's minor modes, the M-y binding, the search's match count, and
+;; how the GUI frame is fitted to its display.  One test loads the
+;; files module on top, for ibuffer's groups.
 
 ;;; Code:
 
@@ -27,6 +28,11 @@
 (declare-function playground--kkp-decode "base")
 (declare-function playground-fit-frame-to-display "base")
 (declare-function playground--frame-fit "base")
+(defvar ibuffer-filter-groups)
+(defvar isearch-lazy-count-current)
+(defvar isearch-lazy-count-total)
+(defvar isearch-lazy-highlight-forward)
+(defvar isearch-suspended)
 
 (unless (featurep 'pg-modules-test-init)
   (let ((process-environment (cons "PG_MODULES=base editing" process-environment)))
@@ -127,6 +133,43 @@
 (ert-deftest pg-modules/m-y-is-yank-pop ()
   "Part 1's M-y is the yank-pop lesson 1.2 teaches; consult's comes in Part 4."
   (should (eq (key-binding (kbd "M-y")) 'yank-pop)))
+
+;;;; Searching
+
+(ert-deftest pg-modules/isearch-counts-matches ()
+  "Lesson 1.4's search prompt shows the match count (\"1/4 I-search: \")."
+  (should isearch-lazy-count)
+  (with-temp-buffer
+    (insert "greet greet greet greet\n")
+    (goto-char (point-min))
+    (let ((isearch-lazy-count-current 1) (isearch-lazy-count-total 4)
+          (isearch-lazy-highlight-forward t) (isearch-forward t)
+          (isearch-error nil) (isearch-suspended nil) (isearch-success t)
+          (isearch-wrapped nil) (isearch-opoint (point)))
+      (should (string-prefix-p "1/4 I-search"
+                               (substring-no-properties (isearch-message-prefix)))))))
+
+;;;; The files module
+
+(ert-deftest pg-modules/ibuffer-groups-on-first-use ()
+  "The first C-x C-b after Emacs starts already groups by project."
+  (load (expand-file-name "modules/files.el" pg-modules-test-dir) nil t)
+  (should-not (featurep 'ibuf-ext))
+  (save-window-excursion
+    (ibuffer nil "*pg-ibuffer*")
+    (unwind-protect
+        (with-current-buffer "*pg-ibuffer*"
+          (should (featurep 'ibuf-ext))
+          (should ibuffer-filter-groups)
+          (should (save-excursion
+                    (goto-char (point-min))
+                    (search-forward "[ Help and messages ]" nil t))))
+      (kill-buffer "*pg-ibuffer*"))))
+
+(ert-deftest pg-modules/dired-menus-go-with-dirvish ()
+  "q in dirvish recomputes the menu bar, which showed Dired's menus until then."
+  (load (expand-file-name "modules/files.el" pg-modules-test-dir) nil t)
+  (should (advice-member-p 'playground--update-menu-bars 'dirvish-quit)))
 
 ;;;; The GUI frame
 
