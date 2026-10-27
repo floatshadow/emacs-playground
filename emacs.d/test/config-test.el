@@ -8,6 +8,9 @@
 ;; early-init.el decides where native code compiled at run time goes:
 ;; somewhere writable whose mount allows executing it (a noexec tmpfs
 ;; does not), else nowhere.  These tests feed it a made-up mount table.
+;;
+;; In the session image this file also loads modules-test.el, the tests
+;; of the configuration modules themselves.
 
 ;;; Code:
 
@@ -68,6 +71,12 @@ of (RELATIVE-MOUNT-POINT . OPTIONS) mounted under it, in order."
     (should-not (playground--mount-options "/"))
     (should (eq (playground--eln-dir-usable-p temporary-file-directory)
                 (file-writable-p temporary-file-directory)))))
+
+;; The modules' own tests load init.el with the packages of the image;
+;; they run with these (`make emacs-test') when those packages exist.
+(when (file-directory-p (or (getenv "PG_SITE_ELPA") "/opt/playground/elpa"))
+  (load (expand-file-name "modules-test.el" (file-name-directory (or load-file-name buffer-file-name)))
+        nil t))
 
 (provide 'config-test)
 ;;; config-test.el ends here

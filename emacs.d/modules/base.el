@@ -244,6 +244,28 @@ stops the daemon itself."
 (playground-with-package kkp
   (global-kkp-mode 1)
 
+  ;; Home, End and Delete.  tmux sends them to the pane the way its own
+  ;; terminal type (tmux-256color) spells them: ESC [ 1 ~, ESC [ 4 ~ and
+  ;; ESC [ 3 ~.  The decoders below take every ESC [ <digit> sequence,
+  ;; and kkp's table of ~ keys knows 7 and 8 for Home and End (rxvt) but
+  ;; not 1 and 4, so it fell back to the code point: End arrived as C-d
+  ;; (delete-char, which deleted text) and Home as C-a.  kkp also names
+  ;; Delete <delete>, which a terminal's `local-function-key-map' turns
+  ;; into DEL (delete-backward-char): Delete deleted backwards.  Here
+  ;; Home and End are <home> and <end>, and Delete is <deletechar>
+  ;; (delete-forward-char) as in a graphical frame; with a modifier it
+  ;; keeps its name, so C-<delete> stays kill-word.
+  (defvar kkp--non-printable-keys-with-tilde-terminator)
+  (with-eval-after-load 'kkp
+    (dolist (key '((1 . "<home>") (4 . "<end>")))
+      (unless (assq (car key) kkp--non-printable-keys-with-tilde-terminator)
+        (push key kkp--non-printable-keys-with-tilde-terminator))))
+
+  (defun playground--kkp-decode (prefix)
+    "Read the rest of a CSI sequence that began with PREFIX; return its key."
+    (let ((keys (kkp--process-keys prefix)))
+      (if (equal keys [delete]) [deletechar] keys)))
+
   ;; kkp switches itself on only after the terminal answers the kitty
   ;; protocol query.  tmux 3.5 forwards the keys but never answers, so
   ;; in tmux frames the decoders are installed directly.
@@ -255,7 +277,7 @@ stops the daemon itself."
                (boundp 'kkp--key-prefixes))
       (dolist (prefix kkp--key-prefixes)
         (define-key input-decode-map (kkp--csi-escape (string prefix))
-                    (lambda (_prompt) (kkp--process-keys prefix))))))
+                    (lambda (_prompt) (playground--kkp-decode prefix))))))
   (add-hook 'tty-setup-hook #'playground--kkp-tmux 90))
 
 ;; Truecolor is announced with COLORTERM=truecolor (set in the image).
