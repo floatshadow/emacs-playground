@@ -220,6 +220,10 @@ async function freshPage(viewport = { width: 1600, height: 1000 }) {
       const all = await steps(lessonId)
       const st = stepId ? all.find((s) => s.id === stepId) : all[0]
       if (!st) throw new Error(`${lessonId} has no step ${stepId}`)
+      // A lesson page still open makes its own lesson active again as soon
+      // as another one loads (useScenarioLoad), and the page opened next
+      // would then load its lesson at the resume target: leave it first.
+      if (page.url().startsWith(url)) await page.goto('about:blank')
       await resetLesson(lessonId)
       const r = await rpc('scenario', { lessonId, stepId: st.id, reset: true })
       if (r.status !== 200) throw new Error('rpc scenario: ' + JSON.stringify(r.body))
