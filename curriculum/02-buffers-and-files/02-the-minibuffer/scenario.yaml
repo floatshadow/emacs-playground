@@ -49,8 +49,10 @@ steps:
         hint: "M-x, type whitespace-mode (TAB helps), RET."
   - id: history
     goal: Run count-words again, from the history
-    detail: "Every prompt remembers what you typed. In *M-x*, `M-p` steps back through earlier commands, `M-n` forward again. Three `M-p` reach *count-words*; `RET` runs it. (`M-r` searches the history by a regexp instead of stepping.)"
-    demo: 'M-x ~500 M-p ~500 M-p ~500 M-p ~500 RET'
+    detail: "Every prompt remembers what you typed. In *M-x*, `M-p` steps back through earlier commands, `M-n` forward again: press `M-p` until the prompt shows *count-words* (three times, if you ran nothing else since), then `RET`. `M-r` searches the history instead of stepping: in *M-x*, `M-r`, type `count-words`, `RET` fills the prompt with the latest match, and `RET` runs it."
+    # M-r finds the entry wherever it is: watching this demo (or any other
+    # command run since) puts count-words at a different distance for M-p.
+    demo: 'M-x ~500 M-r ~500 "count-words" ~300 RET ~600 RET'
     conditions:
       - text: the history was used
         any:
@@ -61,7 +63,7 @@ steps:
         hint: "Open M-x and press M-p (Alt and p). Each press shows an older entry."
       - text: count-words ran again
         event: { command: count-words }
-        hint: "Keep pressing M-p until the prompt shows count-words, then RET. M-n goes the other way."
+        hint: "Keep pressing M-p until the prompt shows count-words, then RET; M-n goes the other way. Or M-r, count-words, RET finds it at once."
   - id: argument
     goal: Type forty equals signs with one key
     detail: "`C-u` gives the next command a number. Go to the end of the file with `M->`, then `C-u 40 =` inserts forty `=` at once. The same trick moves forty lines with `C-u 40 C-n`."

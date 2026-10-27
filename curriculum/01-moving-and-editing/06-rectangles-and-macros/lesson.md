@@ -24,7 +24,7 @@ The motion matters most. A good macro starts at the beginning of a line and ends
 
 After recording, `F4` replays the macro once, and `C-u 4 F4` four times. `C-x C-k r` runs it once on every line of the region.
 
-A macro has a counter. While recording, `F3` inserts its current value and adds one, so each replay inserts the next number. `C-x C-k C-c` sets where the counter starts; set it before you record.
+A macro has a counter. While recording, `F3` inserts its current value and adds one, so each replay inserts the next number. `C-x C-k C-c` sets where the counter starts; set it before you record. A recording uses the value up and starts from 0 next time, so set it again before each new attempt. Between replays it does the same for the next replay: `C-x C-k C-c 2 RET` makes the next row number 2.
 
 :::aside{title="Keep it"}
 A macro lasts until you record another. `C-x C-k n` gives the last one a name, so you can run it with `M-x` later in the session, and `C-x C-k e` edits it as text when one key was wrong.
