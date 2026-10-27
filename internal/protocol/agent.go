@@ -219,6 +219,20 @@ type WindowSpec struct {
 	Selected string `json:"selected,omitempty"`
 	// Tab is the current tab-bar tab name.
 	Tab string `json:"tab,omitempty"`
+	// Tabs are the names of the frame's tab-bar tabs in order, "" for a
+	// tab without an explicit name (its name follows its buffer). A
+	// reset-step closes the named tabs the list does not have and brings
+	// back the named ones it misses, so a step's demo leaves no tab
+	// behind. Absent when the snapshot was taken without tab-bar.
+	Tabs []string `json:"tabs,omitempty"`
+	// TabIndex is the 1-based position of the current tab in Tabs.
+	TabIndex int `json:"tabIndex,omitempty"`
+	// SpecialBuffers is the printed list of the non-file buffers the agent
+	// can make again (help buffers: name and the help command that made
+	// them); opaque to sessiond. A reset-step makes the missing ones again
+	// and kills the help buffers it does not list, so a demo that killed
+	// or opened help buffers leaves the step as it started (lesson 2.5).
+	SpecialBuffers string `json:"specialBuffers,omitempty"`
 	// TakenAt is when the snapshot was taken (ms).
 	TakenAt int64 `json:"takenAt,omitempty"`
 }

@@ -62,6 +62,32 @@
 (defvar playground-config-dir)
 (defvar playground-agent-mode)
 (declare-function project-root "project" (project))
+(declare-function tab-bar-select-tab "tab-bar" (&optional tab-number))
+(declare-function tab-bar-close-tab "tab-bar" (&optional tab-number to-number))
+(declare-function tab-bar-rename-tab "tab-bar" (name &optional tab-number))
+(declare-function tab-bar-new-tab "tab-bar" (&optional arg from-number))
+(declare-function tab-bar-undo-close-tab "tab-bar" ())
+(declare-function tab-bar--tab-index-by-name "tab-bar" (name &optional tabs frame))
+(defvar tab-bar-closed-tabs)
+(defvar help-window-select)
+(defvar help-xref-stack-item)
+(defvar tab-bar-tabs-function)
+(defvar dired-directory)
+(declare-function dired-noselect "dired" (dir-or-list &optional switches))
+(declare-function dired-get-filename "dired" (&optional localp no-error-if-not-filep))
+(declare-function dired-remember-marks "dired" (beg end))
+(declare-function dired-mark-remembered "dired" (alist))
+(declare-function dired-unmark-all-marks "dired" ())
+(declare-function dired-goto-file "dired" (file))
+(defvar ibuffer-filtering-qualifiers)
+(declare-function ibuffer "ibuffer" (&optional other-window-p name qualifiers noselect shrink filter-groups formats))
+(declare-function ibuffer-update "ibuffer" (arg &optional silent))
+(declare-function ibuffer-current-state-list "ibuffer" (&optional pos))
+(declare-function ibuffer-current-buffer "ibuffer" (&optional must-be-live))
+(declare-function ibuffer-unmark-all-marks "ibuffer" ())
+(declare-function ibuffer-mark-on-buffer "ibuf-ext" (func &optional ibuffer-mark-on-buffer-mark group))
+(declare-function ibuffer-jump-to-buffer "ibuf-ext" (name))
+(declare-function list-buffers-noselect "buff-menu" (&optional files-only buffer-list filter-predicate))
 (declare-function iedit-mode "iedit" (&optional arg))
 (declare-function multiple-cursors-mode "multiple-cursors-core" (&optional arg))
 
@@ -1250,7 +1276,9 @@ START POINT), the file name as a fourth element.  Buffer names change
 after the snapshot (uniquify renames README.md to README.md<hello>
 when a second README.md opens); the file names let
 `playground--state-map-files' find the same buffers again.
-`window-state-put' ignores the additions."
+`window-state-put' ignores the additions.  A window on a Dired
+listing, ibuffer or the buffer list gets what it takes to make that
+buffer again (`playground--list-buffer-props')."
   (let ((file-of (lambda (name)
                    (when-let* (((stringp name))
                                (b (get-buffer name)))
@@ -1258,10 +1286,15 @@ when a second README.md opens); the file names let
     (cond
      ((not (proper-list-p state)) state)
      ((and (eq (car state) 'buffer) (stringp (cadr state)))
-      (let ((file (funcall file-of (cadr state))))
-        (if (and file (not (assq 'file (cddr state))))
-            (append state (list (cons 'file file)))
-          state)))
+      (let* ((file (funcall file-of (cadr state)))
+             (extra (and (not file) (not (assq 'dired (cddr state)))
+                         (playground--list-buffer-props
+                          (cadr state) (alist-get 'point (cddr state))))))
+        (cond
+         ((and file (not (assq 'file (cddr state))))
+          (append state (list (cons 'file file))))
+         (extra (append state extra))
+         (t state))))
      ((eq (car state) 'prev-buffers)
       (cons 'prev-buffers
             (mapcar (lambda (entry)
@@ -1270,6 +1303,96 @@ when a second README.md opens); the file names let
                         (if file (append entry (list file)) entry)))
                     (cdr state))))
      (t (mapcar #'playground--state-add-files state)))))
+
+(defun playground--list-buffer-props (name &optional pos)
+  "Window-state properties that let a restore make list buffer NAME again.
+For a Dired listing: its directory, the file on the line at POS (the
+window's point) and its marks; for ibuffer: its filters, its marks and
+the buffer on the line at POS; for the buffer list: a flag.  Nil for
+other buffers.  A step's demo kills or changes these buffers (2.6
+moves files in Dired, 2.5 filters ibuffer), and a reset setup kills
+them, so the window would otherwise come back on another buffer."
+  (when-let* ((b (get-buffer name)))
+    (with-current-buffer b
+      (ignore-errors
+        (save-excursion
+          (when (integerp pos) (goto-char (max (point-min) (min pos (point-max)))))
+          (cond
+           ((and (derived-mode-p 'dired-mode) dired-directory)
+            `((dired . ,(expand-file-name (if (consp dired-directory)
+                                               (car dired-directory)
+                                             dired-directory)))
+              (dired-file . ,(dired-get-filename nil t))
+              (dired-marks . ,(dired-remember-marks (point-min) (point-max)))))
+           ((derived-mode-p 'ibuffer-mode)
+            `((ibuffer . t)
+              (ibuffer-filters . ,ibuffer-filtering-qualifiers)
+              (ibuffer-at . ,(let ((cur (ibuffer-current-buffer)))
+                               (and (buffer-live-p cur) (buffer-name cur))))
+              (ibuffer-marks
+               . ,(delq nil (mapcar (lambda (e)
+                                      (and (buffer-live-p (car e))
+                                           (characterp (cdr e))
+                                           (not (eq (cdr e) ?\s))
+                                           (cons (buffer-name (car e)) (cdr e))))
+                                    (ibuffer-current-state-list))))))
+           ((derived-mode-p 'Buffer-menu-mode)
+            '((buffer-menu . t)))))))))
+
+(defun playground--rebuild-list-buffer (name props)
+  "The list buffer that window-state PROPS describe, made again if needed.
+A Dired listing is visited again and reverted, since a restore has just
+put its files back, with the marks it had; ibuffer gets its filters and
+marks back; the buffer list is regenerated.  NAME is the buffer's name
+when the state was saved.  Nil when PROPS describe no list buffer or the
+directory is gone."
+  (playground--safely "rebuild list buffer"
+    (cond
+     ((assq 'dired props)
+      (let ((dir (alist-get 'dired props)))
+        (when (and (stringp dir) (file-directory-p dir))
+          (require 'dired)
+          (let ((b (dired-noselect dir)))
+            (with-current-buffer b
+              (dired-unmark-all-marks)
+              (revert-buffer)
+              (when-let* ((marks (alist-get 'dired-marks props)))
+                (dired-mark-remembered marks)))
+            b))))
+     ((assq 'ibuffer props)
+      (require 'ibuffer)
+      (require 'ibuf-ext)
+      (let ((b (get-buffer name)))
+        (unless (and b (eq (buffer-local-value 'major-mode b) 'ibuffer-mode))
+          (save-window-excursion (ibuffer nil name nil t))
+          (setq b (get-buffer name)))
+        (when b
+          (with-current-buffer b
+            (setq ibuffer-filtering-qualifiers (alist-get 'ibuffer-filters props))
+            (ibuffer-update nil t)
+            (ibuffer-unmark-all-marks)
+            (dolist (m (alist-get 'ibuffer-marks props))
+              (when-let* ((mb (and (stringp (car m)) (get-buffer (car m)))))
+                (ibuffer-mark-on-buffer (lambda (x) (eq x mb)) (cdr m)))))
+          b)))
+     ((assq 'buffer-menu props)
+      (list-buffers-noselect)))))
+
+(defun playground--list-buffer-point (b props)
+  "PROPS with point on the line of the file or buffer they name in B."
+  (let ((pos (ignore-errors
+               (with-current-buffer b
+                 (save-excursion
+                   (cond
+                    ((stringp (alist-get 'dired-file props))
+                     (and (dired-goto-file (alist-get 'dired-file props)) (point)))
+                    ((stringp (alist-get 'ibuffer-at props))
+                     (goto-char (point-min))
+                     (ibuffer-jump-to-buffer (alist-get 'ibuffer-at props))
+                     (point))))))))
+    (if (integerp pos)
+        (cons (cons 'point pos) (assq-delete-all 'point (copy-alist props)))
+      props)))
 
 (defun playground--buffer-for-file (file &optional visit)
   "The live buffer visiting FILE; with VISIT, visit FILE when it exists."
@@ -1303,11 +1426,18 @@ the absolute names of the spec's files, by its name."
    ((not (proper-list-p state)) state)
    ((and (eq (car state) 'buffer) (stringp (cadr state)))
     (let* ((name (cadr state))
-           (file (or (alist-get 'file (cddr state))
-                     (and files (not (get-buffer name))
-                          (playground--file-by-buffer-name name files))))
-           (b (and (stringp file) (playground--buffer-for-file file t))))
-      (if b (cons 'buffer (cons (buffer-name b) (cddr state))) state)))
+           (props (cddr state))
+           (list-b (and (or (assq 'dired props) (assq 'ibuffer props) (assq 'buffer-menu props))
+                        (playground--rebuild-list-buffer name props)))
+           (file (and (not list-b)
+                      (or (alist-get 'file props)
+                          (and files (not (get-buffer name))
+                               (playground--file-by-buffer-name name files)))))
+           (b (or list-b (and (stringp file) (playground--buffer-for-file file t)))))
+      (cond
+       (list-b (cons 'buffer (cons (buffer-name list-b) (playground--list-buffer-point list-b props))))
+       (b (cons 'buffer (cons (buffer-name b) props)))
+       (t state))))
    ((eq (car state) 'prev-buffers)
     (cons 'prev-buffers
           (mapcar (lambda (entry)
@@ -1341,7 +1471,105 @@ the absolute names of the spec's files, by its name."
                             (window-state-get (frame-root-window frame) t))))))
       (selected . ,(playground--leaf-name (window-buffer (playground--user-window))))
       (tab . ,(alist-get 'current (playground--tabs frame)))
+      ,@(playground--tab-spec frame)
+      (specialBuffers . ,(let ((print-length nil) (print-level nil))
+                           (prin1-to-string (playground--special-buffers))))
       (takenAt . ,(playground--now-ms)))))
+
+(defun playground--help-buffer-p (b)
+  "Non-nil when B is a help buffer the learner can see (not internal)."
+  (and (buffer-live-p b)
+       (eq (buffer-local-value 'major-mode b) 'help-mode)
+       (not (string-prefix-p " " (buffer-name b)))))
+
+(defun playground--readable (x)
+  "X with buffers, windows, frames, markers and the like replaced by nil.
+Nil when the result still does not read back."
+  (let ((clean
+         (named-let walk ((x x))
+           (cond
+            ((consp x) (cons (walk (car x)) (walk (cdr x))))
+            ((and (vectorp x) (not (stringp x))) (vconcat (mapcar #'walk x)))
+            ((or (bufferp x) (windowp x) (framep x) (markerp x) (processp x)
+                 (overlayp x) (window-configuration-p x))
+             nil)
+            (t x)))))
+    (condition-case nil
+        (let ((print-length nil) (print-level nil))
+          (and (equal (car (read-from-string (prin1-to-string clean))) clean) clean))
+      (error nil))))
+
+(defun playground--special-buffers ()
+  "The help buffers of the session and the help command that made each.
+A list of (NAME ITEM), ITEM being the buffer's `help-xref-stack-item'
+made readable; `playground--sync-special-buffers' makes them again."
+  (let (out)
+    (dolist (b (buffer-list))
+      (when (playground--help-buffer-p b)
+        (when-let* ((item (playground--readable
+                           (buffer-local-value 'help-xref-stack-item b)))
+                    ((functionp (car-safe item))))
+          (push (list (buffer-name b) item) out))))
+    (nreverse out)))
+
+(defun playground--sync-special-buffers (printed)
+  "Make the session's help buffers those PRINTED lists.
+PRINTED is a WindowSpec's specialBuffers.  Help buffers it does not
+name, or names with another help command, are killed, and the ones it names that are gone are made again by
+running their help command (outside the learner's windows) and giving
+the result its old name.  A demo that killed help buffers (lesson 2.5's
+* h D) or opened some leaves the step as it started.  Returns the
+number of buffers killed or made."
+  (let ((want (and (stringp printed)
+                   (ignore-errors (car (read-from-string printed)))))
+        (n 0))
+    (when (and (stringp printed) (listp want))
+      ;; A help buffer is kept when the list has its name and the same
+      ;; help command (*Help* may now describe something else).
+      (dolist (b (buffer-list))
+        (when (playground--help-buffer-p b)
+          (let ((entry (assoc (buffer-name b) want)))
+            (unless (and entry
+                         (equal (car-safe (cdr-safe entry))
+                                (playground--readable
+                                 (buffer-local-value 'help-xref-stack-item b))))
+              (let ((kill-buffer-query-functions nil)) (kill-buffer b))
+              (cl-incf n)))))
+      (dolist (entry want)
+        (let ((name (car-safe entry))
+              (item (car-safe (cdr-safe entry))))
+          (when (and (stringp name) (not (get-buffer name)) (functionp (car-safe item)))
+            (playground--safely "remake help buffer"
+              (let* ((plain (get-buffer "*Help*"))
+                     (aside (and plain (not (equal name "*Help*"))
+                                 (with-current-buffer plain
+                                   (rename-buffer "*Help* (aside)" t)))))
+                (unwind-protect
+                    (progn
+                      (save-window-excursion
+                        (let ((help-window-select nil))
+                          (apply (car item) (cdr item))))
+                      (when-let* ((made (get-buffer "*Help*")))
+                        (unless (equal name "*Help*")
+                          (with-current-buffer made (rename-buffer name t)))
+                        (cl-incf n)))
+                  (when (and aside (get-buffer aside) (not (get-buffer "*Help*")))
+                    (with-current-buffer aside (rename-buffer "*Help*"))))))))))
+    n))
+
+(defun playground--tab-spec (frame)
+  "The tabs and tabIndex entries of a WindowSpec for FRAME.
+Tabs are listed by name in order, \"\" for a tab without an explicit
+name (its name follows its buffer, so it identifies nothing)."
+  (when (and (featurep 'tab-bar) (boundp 'tab-bar-tabs-function))
+    (let* ((tabs (funcall tab-bar-tabs-function frame))
+           (i (seq-position tabs 'current-tab (lambda (tab sym) (eq (car-safe tab) sym)))))
+      `((tabs . ,(vconcat (mapcar (lambda (tab)
+                                    (if (alist-get 'explicit-name tab)
+                                        (substring-no-properties (alist-get 'name tab))
+                                      ""))
+                                  tabs)))
+        (tabIndex . ,(1+ (or i 0)))))))
 
 (defun playground--find-buffer (name &optional create)
   "Buffer for layout leaf NAME: a buffer name, a workspace path or a file name.
@@ -1424,13 +1652,93 @@ only frame there is."
   (mapcar (lambda (f) (playground--absolute (alist-get 'path f)))
           (append (alist-get 'files spec) nil)))
 
+(defun playground--select-spec-tab (spec)
+  "Select the tab SPEC (a WindowSpec alist) was taken in.
+By position when the frame has as many tabs as SPEC lists, else the
+tab with SPEC's name.  Never makes a tab (`tab-bar-switch-to-tab'
+makes one for a name it does not find, and an unnamed tab's name is
+whatever buffer it showed)."
+  (when (featurep 'tab-bar)
+    (playground--safely "select tab"
+      (playground--in-user-window
+        (let* ((tabs (funcall tab-bar-tabs-function))
+               (want (append (alist-get 'tabs spec) nil))
+               (index (alist-get 'tabIndex spec))
+               (name (alist-get 'tab spec))
+               (by-name (and (stringp name) (tab-bar--tab-index-by-name name))))
+          (cond
+           ((and (integerp index) want (= (length want) (length tabs))
+                 (<= 1 index (length tabs)))
+            (tab-bar-select-tab index))
+           (by-name (tab-bar-select-tab (1+ by-name)))))))))
+
+(defun playground--last-unnamed-tab ()
+  "1-based index of the last tab without an explicit name, preferring
+one that is not current; nil when every tab has a name."
+  (let ((tabs (funcall tab-bar-tabs-function))
+        (i 0) other current)
+    (dolist (tab tabs)
+      (setq i (1+ i))
+      (unless (alist-get 'explicit-name tab)
+        (if (eq (car-safe tab) 'current-tab) (setq current i) (setq other i))))
+    (or other current)))
+
+(defun playground--reopen-tab (name)
+  "Bring back the tab called NAME: the closed one if there is one, else a new one."
+  (let ((closed (seq-find (lambda (c)
+                            (and (eq (alist-get 'frame c) (selected-frame))
+                                 (equal (alist-get 'name (alist-get 'tab c)) name)))
+                          tab-bar-closed-tabs)))
+    (if closed
+        (progn
+          (let ((tab-bar-closed-tabs (list closed)))
+            (tab-bar-undo-close-tab))
+          (setq tab-bar-closed-tabs (delq closed tab-bar-closed-tabs)))
+      (tab-bar-new-tab)
+      (tab-bar-rename-tab name))))
+
+(defun playground--sync-tabs (spec)
+  "Make the learner's tabs those SPEC (a WindowSpec alist) lists.
+Named tabs SPEC does not list are closed (a demo's C-x p p opened
+one; the last tab loses its name instead), tabs without a name are
+closed down to the number SPEC has, and named tabs SPEC lists that
+are gone are reopened (from the closed tabs when possible).  Nothing
+happens when SPEC has no tab list or tab-bar is not loaded.  Returns
+the number of tabs closed or opened."
+  (let ((want (append (alist-get 'tabs spec) nil))
+        (n 0))
+    (when (and want (featurep 'tab-bar))
+      (playground--safely "sync tabs"
+        (playground--in-user-window
+          (let* ((want-named (seq-remove #'string-empty-p want))
+                 (want-unnamed (- (length want) (length want-named))))
+            (dolist (tab (funcall tab-bar-tabs-function))
+              (let ((name (alist-get 'name tab)))
+                (when (and (alist-get 'explicit-name tab) (not (member name want-named)))
+                  (when-let* ((idx (tab-bar--tab-index-by-name name)))
+                    (if (> (length (funcall tab-bar-tabs-function)) 1)
+                        (tab-bar-close-tab (1+ idx))
+                      (tab-bar-rename-tab "" (1+ idx)))
+                    (cl-incf n)))))
+            (let (extra)
+              (while (and (> (length (funcall tab-bar-tabs-function)) 1)
+                          (> (seq-count (lambda (tab) (not (alist-get 'explicit-name tab)))
+                                        (funcall tab-bar-tabs-function))
+                             want-unnamed)
+                          (setq extra (playground--last-unnamed-tab)))
+                (tab-bar-close-tab extra)
+                (cl-incf n)))
+            (dolist (name want-named)
+              (unless (tab-bar--tab-index-by-name name)
+                (playground--reopen-tab name)
+                (cl-incf n)))))))
+    n))
+
 (defun playground--open-layout (spec)
   "Apply the window part of SPEC (a WindowSpec alist) to the learner's frame.
 The tab comes first: switching tabs afterwards would replace the
 windows just put back with the ones that tab remembers."
-  (when-let* ((tab (alist-get 'tab spec)))
-    (when (and (featurep 'tab-bar) (bound-and-true-p tab-bar-mode))
-      (ignore-errors (playground--in-user-window (tab-bar-switch-to-tab tab)))))
+  (playground--select-spec-tab spec)
   (let ((state (alist-get 'windowState spec))
         (layout (alist-get 'layout spec)))
     (cond
@@ -1499,9 +1807,12 @@ closes it.  Returns the number killed."
   "Put the files and windows back to the spec in ARGS (the step's start).
 Edited buffers are reverted to the restored files, buffers of files
 that are gone are killed, unmodified file buffers the step did not
-start with are closed, then the spec is opened: its files, points
-and windows, each window on the file it showed (whatever the buffer
-is called now), the selected window last."
+start with are closed, the help buffers and the tabs are made those
+of the spec (`playground--sync-special-buffers', `playground--sync-tabs'),
+then the spec is opened: its tab, files,
+points and windows, each window on the file it showed (whatever the
+buffer is called now) or on its Dired listing, ibuffer or buffer list
+made again, the selected window last."
   (let ((reverted 0) (killed 0))
     (dolist (b (buffer-list))
       (let ((file (buffer-file-name b)))
@@ -1527,6 +1838,10 @@ is called now), the selected window last."
       ;; one when the checkpoint has none): close nothing then.
       (when (> (length (alist-get 'files spec)) 0)
         (cl-incf killed (playground--kill-unlisted (playground--spec-files spec))))
+      ;; Help buffers before the windows (ibuffer lists them), and tabs
+      ;; before the windows, which go into the spec's tab.
+      (when spec (playground--sync-special-buffers (alist-get 'specialBuffers spec)))
+      (when spec (playground--sync-tabs spec))
       (when spec (playground--op-open spec)))
     `((reverted . ,reverted) (killed . ,killed))))
 

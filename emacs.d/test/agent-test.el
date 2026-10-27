@@ -24,6 +24,7 @@
 (require 'subr-x)
 (require 'playground-agent)
 (require 'ibuffer)
+(require 'ibuf-ext)
 (require 'dired)
 
 ;;;; The fake sessiond
@@ -740,7 +741,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
         (delete-other-windows)
         (switch-to-buffer "*scratch*")
         (setf (alist-get 'windowState snap) "")
-        (setf (alist-get 'files snap) (vconcat (alist-get 'files snap)))
+        (setq snap (pg-test--spec snap))
         (pg-test-value (pg-test-call "open" snap))
         (should (= (length (window-list)) 2))
         (should (equal (buffer-name (window-buffer (frame-first-window))) "a.txt"))
@@ -825,7 +826,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
         (find-file poly-main)
         (find-file poly)
         (should (equal (buffer-name (get-file-buffer hello)) "README.md<hello>"))
-        (setf (alist-get 'files snap) (vconcat (alist-get 'files snap)))
+        (setq snap (pg-test--spec snap))
         (pg-test-value (pg-test-call "reset-step" `((spec . ,snap)))))
       (should (equal (pg-test--shown-files) (list hello)))
       (should (equal (buffer-name (window-buffer (selected-window))) "README.md"))
@@ -850,7 +851,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
         ;; Another README.md opens and takes the lower window.
         (find-file poly)
         (other-window 1)
-        (setf (alist-get 'files snap) (vconcat (alist-get 'files snap)))
+        (setq snap (pg-test--spec snap))
         (pg-test-value (pg-test-call "open" snap))
         (should (equal (pg-test--shown-files) (list main hello)))
         (should (equal (buffer-file-name (window-buffer (selected-window))) hello))
@@ -863,6 +864,115 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
           (setf (alist-get 'windowState snap) old)
           (pg-test-value (pg-test-call "open" snap)))
         (should (equal (pg-test--shown-files) (list main hello)))))))
+
+(defun pg-test--spec (snap)
+  "SNAP, a parsed snapshot, ready to be sent back as a WindowSpec."
+  (setf (alist-get 'files snap) (vconcat (alist-get 'files snap)))
+  (when (alist-get 'tabs snap)
+    (setf (alist-get 'tabs snap) (vconcat (alist-get 'tabs snap))))
+  snap)
+
+(ert-deftest pg-agent/reset-step-remakes-dired ()
+  "A window on a Dired listing comes back on that listing, up to date (X8)."
+  (pg-test-with-agent
+    (let* ((brief (pg-test-file "inbox/brief.md" "# brief\n"))
+           (notes (pg-test-file "inbox/notes.md" "# notes\n"))
+           (dir (file-name-directory brief)))
+      (delete-other-windows)
+      (find-file brief)
+      (dired dir)
+      (dired-goto-file notes)
+      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+        (should (string-match-p "(dired \\. " (alist-get 'windowState snap)))
+        ;; The demo moves notes.md away and leaves the listing; a reset
+        ;; setup would have killed it.  The restore puts the file back.
+        (make-directory (expand-file-name "docs" dir))
+        (rename-file notes (expand-file-name "docs/notes.md" dir))
+        (kill-buffer (current-buffer))
+        (switch-to-buffer (get-file-buffer brief))
+        (rename-file (expand-file-name "docs/notes.md" dir) notes)
+        (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap))))))
+      (let ((b (window-buffer (selected-window))))
+        (should (eq (buffer-local-value 'major-mode b) 'dired-mode))
+        (with-current-buffer b
+          (should (equal (expand-file-name default-directory) dir))
+          (should (save-excursion (dired-goto-file notes)))
+          (should (equal (dired-get-filename nil t) notes)))))))
+
+(ert-deftest pg-agent/reset-step-ibuffer-filters ()
+  "ibuffer comes back with the filters and marks it had when the step started."
+  (pg-test-with-agent
+    (let ((a (pg-test-file "a.rs" "fn a() {}\n"))
+          (b (pg-test-file "b.md" "# b\n")))
+      (find-file-noselect a)
+      (find-file-noselect b)
+      (delete-other-windows)
+      (ibuffer)
+      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+        (should (string-match-p "(ibuffer \\. t)" (alist-get 'windowState snap)))
+        ;; The demo filters the list and marks a buffer.
+        (setq ibuffer-filtering-qualifiers '((filename . "rs$")))
+        (ibuffer-update nil t)
+        (ibuffer-mark-on-buffer (lambda (x) (eq x (get-file-buffer a))) ?>)
+        (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap))))))
+      (let ((ib (window-buffer (selected-window))))
+        (should (eq (buffer-local-value 'major-mode ib) 'ibuffer-mode))
+        (with-current-buffer ib
+          (should-not ibuffer-filtering-qualifiers)
+          (should-not (seq-find (lambda (e) (not (eq (cdr e) ?\s)))
+                                (ibuffer-current-state-list))))))))
+
+(ert-deftest pg-agent/reset-step-tabs ()
+  "reset-step closes the tabs a step opened and reopens the ones it closed."
+  (pg-test-with-agent
+    (require 'tab-bar)
+    (let ((main (pg-test-file "hello/main.rs" "fn main() {}\n")))
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (find-file main)
+            (tab-bar-rename-tab "hello")
+            (let ((one (pg-test-value (pg-test-call "snapshot"))))
+              (should (equal (alist-get 'tabs one) '("hello")))
+              ;; A demo opens a project tab (C-x p p).
+              (tab-bar-new-tab)
+              (tab-bar-rename-tab "polyglot")
+              (let ((two (pg-test-value (pg-test-call "snapshot"))))
+                (should (equal (alist-get 'tabs two) '("hello" "polyglot")))
+                (should (equal (alist-get 'tabIndex two) 2))
+                (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec one)))))
+                (should (equal (mapcar (lambda (tab) (alist-get 'name tab)) (funcall tab-bar-tabs-function))
+                               '("hello")))
+                ;; The next step started with both tabs, polyglot current;
+                ;; its demo closed polyglot.
+                (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec two)))))
+                (should (equal (mapcar (lambda (tab) (alist-get 'name tab)) (funcall tab-bar-tabs-function))
+                               '("hello" "polyglot")))
+                (should (equal (alist-get 'name (tab-bar--current-tab)) "polyglot")))))
+        (tab-bar-close-other-tabs)
+        (tab-bar-rename-tab "")))))
+
+(ert-deftest pg-agent/reset-step-help-buffers ()
+  "Help buffers killed in a step come back; help buffers opened in it go."
+  (pg-test-with-agent
+    (save-window-excursion
+      (describe-function 'find-file)
+      (with-current-buffer (help-buffer) (rename-uniquely))
+      (describe-function 'save-buffer))
+    (let* ((names (sort (mapcar #'buffer-name (seq-filter #'playground--help-buffer-p (buffer-list)))
+                        #'string<))
+           (snap (pg-test-value (pg-test-call "snapshot"))))
+      (should (= (length names) 2))
+      ;; The demo kills them (ibuffer's * h D) and the learner opens another.
+      (dolist (b (seq-filter #'playground--help-buffer-p (buffer-list))) (kill-buffer b))
+      (save-window-excursion (describe-function 'kill-buffer))
+      (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap)))))
+      (should (equal (sort (mapcar #'buffer-name (seq-filter #'playground--help-buffer-p (buffer-list)))
+                           #'string<)
+                     names))
+      (should (string-match-p "find-file\\|save-buffer"
+                              (with-current-buffer (car names) (buffer-substring 1 (min 200 (point-max))))))
+      (dolist (b (seq-filter #'playground--help-buffer-p (buffer-list))) (kill-buffer b)))))
 
 (ert-deftest pg-agent/op-setup-reset-starts-at-the-top ()
   "With reset, the files of a setup start on their first line, in their windows too."
