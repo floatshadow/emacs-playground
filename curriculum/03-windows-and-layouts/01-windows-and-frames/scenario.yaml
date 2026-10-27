@@ -32,15 +32,20 @@ steps:
         hint: "Two windows, stacked. If you have more, C-x 1 starts over from one."
   - id: edit
     goal: Edit in the lower window and watch the upper one
-    detail: "`C-x o` moves the cursor to the other window. Go to the end with `M->` and type a comment. The upper window shows the change as you type, because both windows show one buffer."
+    detail: "`C-x o` moves the cursor to the other window. Go to the end with `M->` and type a comment of your own, starting with `//`. The upper window shows the change as you type, because both windows show one buffer."
     demo: 'C-x o ~400 M-> ~300 "// typed in the lower window"'
     conditions:
       - text: the lower window is selected
-        elisp: '(and (not (eq (selected-window) (frame-first-window))) (eq (window-buffer (selected-window)) (find-buffer-visiting "/work/projects/hello/src/main.rs")))'
-        hint: "C-x o moves to the next window; the bright mode line marks the selected one."
+        # The state lists the windows from the top one, so windows.1 is the
+        # lower of the two. A state condition reads the learner's frame,
+        # whichever frame the agent's check runs in.
+        state: { "windows.length": 2, "windows.1.selected": true }
+        hint: "C-x o moves the cursor to the other window, and the brighter mode line moves with it. Type only once the lower one is selected."
       - text: main.rs has the new comment
-        elisp: '(let ((b (find-buffer-visiting "/work/projects/hello/src/main.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "typed in the lower window" nil t)))))'
-        hint: "Type the comment in the lower window: // typed in the lower window."
+        # Any line comment of the learner's own, wherever it was typed: the
+        # fixture has one (the TODO), so a second // is a new comment.
+        elisp: '(let ((b (find-buffer-visiting "/work/projects/hello/src/main.rs"))) (and b (with-current-buffer b (>= (how-many "//" (point-min) (point-max)) 2))))'
+        hint: "Any comment of your own will do, as long as it starts with //, for example // checking both windows. The upper window shows it as you type."
       - text: still two windows on main.rs
         layout: "(vsplit main.rs main.rs)"
         hint: "Keep the two windows. If one disappeared, C-x 2 brings the split back."
