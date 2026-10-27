@@ -269,6 +269,14 @@ Emacs side (emacs.md §5, §6, §10):
 - In tmux frames Home, End and Delete are `<home>`, `<end>` and `<deletechar>`. The selected mode line is violet (`#7a58c4`), inactive ones `#232639`. ws-butler's lighter is hidden and it is not in the state's `minors`. A reset setup starts its `open` files on line 1. The GUI frame fits itself to the X screen whenever RandR changes it.
 - `test/config-test.el` loads `test/modules-test.el` (init.el with base and editing) in the session image, so `make emacs-test` covers the modules too.
 
+### Decisions taken while integrating the fixes (2026-10-27)
+
+- sessiond's checkpoint manager runs git detached from the request (`checkpoint.GitTimeout`) and removes a git lock older than 10 s that blocks a command (`checkpoint.StaleLockAge`), then runs the command once more. A browser that navigated away during "Go to this step" used to kill `git restore` with `/work/.git/index.lock` held, and every later checkpoint and restore failed.
+- `reset-step` (Reset this step, Do it yourself, Go to this step from a checkpoint) also restores what is not a file: a window on a Dired listing, ibuffer or the buffer list comes back on that buffer, made again and brought up to date (`windowState` buffer entries carry `(dired . DIR)`, `(ibuffer . t)` with filters and marks, `(buffer-menu . t)`); tabs are made those of the spec (`WindowSpec.tabs`, `tabIndex`: named tabs the spec does not list are closed, listed ones reopened); help buffers are made those of the spec (`WindowSpec.specialBuffers`, remade from `help-xref-stack-item`). sessiond passes the new fields through untouched. `playctl curriculum play -watch all` passes 130 of 130.
+- `web/e2e/smoke.mjs` scenario 11 runs `playctl curriculum play -watch part:0` (R1).
+- A checkpoint restore, once started, runs to the end without the request's cancellation (`Server.restoreCheckpoint`).
+- The web forgets a lesson's outcomes when sessiond drops its active step (a progress reset, possibly from another page) and picks the resume target from refetched progress, so another tab's Start over does not make this page reload the lesson at a later step.
+
 ## 6. Slice 1 scope
 
 What this round builds (everything else stays a TODO with its doc section):
