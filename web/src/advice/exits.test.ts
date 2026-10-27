@@ -43,7 +43,7 @@ describe('exits table over real states (the demo whereAmI as data)', () => {
     expect(w.prompt).toBe('Find file:')
     expect(w.flags).toContain('prompt open')
     expect(w.exits[0]?.why).toBe('A prompt is open: Find file:')
-    expect(w.exits[0]?.how).toBe('RET accepts, C-g cancels. TAB completes names.')
+    expect(w.exits[0]?.how).toBe('RET accepts, C-g cancels. M-p brings back what you typed before.')
   })
 
   it('C-s: searching', () => {

@@ -32,7 +32,7 @@ export const DEFAULT_EXITS: ExitRow[] = [
     id: 'minibuffer-prompt',
     when: { 'minibuffer.kind': 'prompt' },
     why: 'A prompt is open: {minibuffer.prompt}',
-    how: 'RET accepts, C-g cancels. TAB completes names.',
+    how: 'RET accepts, C-g cancels. M-p brings back what you typed before.',
     flag: 'prompt open',
   },
   {

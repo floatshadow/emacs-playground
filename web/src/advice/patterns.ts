@@ -87,7 +87,7 @@ export function patternNudges({
       id: 'mini-stuck',
       kind: 'calm',
       title: 'Still in the prompt?',
-      body: 'RET accepts what you typed. C-g cancels and puts you back where you were. TAB completes names.',
+      body: 'RET accepts what you typed. C-g cancels and puts you back where you were.',
     })
   }
 
