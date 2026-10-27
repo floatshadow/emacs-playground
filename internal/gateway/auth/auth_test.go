@@ -276,6 +276,9 @@ func TestOIDCNotImplemented(t *testing.T) {
 	if rec := f.do("GET", "/api/v1/me", ""); rec.Code != 401 {
 		t.Fatalf("me: %d", rec.Code)
 	}
+	if rec := f.do("POST", PathInviteLogin, `{"code":"whatever-123"}`); rec.Code != 409 || !strings.Contains(rec.Body.String(), `"conflict"`) {
+		t.Fatalf("invite in oidc mode: %d %s", rec.Code, rec.Body)
+	}
 }
 
 func TestClientIP(t *testing.T) {

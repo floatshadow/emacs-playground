@@ -194,18 +194,26 @@ type Stuck struct {
 	Limit *limit.Limiter
 	Now   func() time.Time
 
-	mu     sync.Mutex
-	recent map[string]recentReport
+	mu sync.Mutex
+	// recent holds one entry per report key filed within 30 s, entered
+	// before the store write, so identical reports filed at the same time
+	// wait for the first one's write and share its id.
+	recent map[string]*recentReport
 }
 
+// recentReport is a report filed at at, pending while its write runs;
+// id and err are set before done is closed.
 type recentReport struct {
-	id int64
-	at time.Time
+	at      time.Time
+	pending bool
+	done    chan struct{}
+	id      int64
+	err     error
 }
 
 // NewStuck returns a stuck report filer.
 func NewStuck(st store.Store) *Stuck {
-	return &Stuck{Store: st, Limit: limit.New(10, time.Hour), recent: map[string]recentReport{}}
+	return &Stuck{Store: st, Limit: limit.New(10, time.Hour), recent: map[string]*recentReport{}}
 }
 
 // Allow applies the per-user rate limit.
@@ -222,15 +230,38 @@ func (s *Stuck) File(ctx context.Context, userID, lessonID, stepID, note string,
 	key := strings.Join([]string{userID, lessonID, stepID, note}, "\x00")
 	s.mu.Lock()
 	for k, r := range s.recent {
-		if now.Sub(r.at) > 30*time.Second {
+		if !r.pending && now.Sub(r.at) > 30*time.Second {
 			delete(s.recent, k)
 		}
 	}
 	if r, ok := s.recent[key]; ok {
 		s.mu.Unlock()
-		return r.id, nil
+		select {
+		case <-r.done:
+			return r.id, r.err
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		}
+	}
+	r := &recentReport{at: now, pending: true, done: make(chan struct{})}
+	s.recent[key] = r
+	s.mu.Unlock()
+
+	// Identical reports wait on this write, so it outlives the request.
+	id, err := s.add(context.WithoutCancel(ctx), userID, lessonID, stepID, note, events, now)
+	s.mu.Lock()
+	r.id, r.err, r.pending = id, err, false
+	if err != nil {
+		// A failed write is not remembered: the next report tries again.
+		delete(s.recent, key)
 	}
 	s.mu.Unlock()
+	close(r.done)
+	return id, err
+}
+
+// add bounds and stores one report.
+func (s *Stuck) add(ctx context.Context, userID, lessonID, stepID, note string, events []json.RawMessage, now time.Time) (int64, error) {
 	events = capEvents(events)
 	raw, err := json.Marshal(events)
 	if err != nil {
@@ -238,14 +269,7 @@ func (s *Stuck) File(ctx context.Context, userID, lessonID, stepID, note string,
 	}
 	note = truncate(note, MaxStuckNote)
 	lessonID, stepID = truncate(lessonID, maxIDLen), truncate(stepID, maxIDLen)
-	id, err := s.Store.Stuck().Add(ctx, &store.StuckReport{UserID: userID, LessonID: lessonID, StepID: stepID, CreatedAt: now.UnixMilli(), Note: note, Events: raw})
-	if err != nil {
-		return 0, err
-	}
-	s.mu.Lock()
-	s.recent[key] = recentReport{id: id, at: now}
-	s.mu.Unlock()
-	return id, nil
+	return s.Store.Stuck().Add(ctx, &store.StuckReport{UserID: userID, LessonID: lessonID, StepID: stepID, CreatedAt: now.UnixMilli(), Note: note, Events: raw})
 }
 
 // capEvents keeps the newest events within MaxStuckEvents and

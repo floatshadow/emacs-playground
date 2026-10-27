@@ -293,8 +293,9 @@ func (a *App) Close() error {
 }
 
 // Run serves cfg.listen (and metrics.listen when enabled) and runs the
-// reaper until ctx ends, then shuts down gracefully (10 s drain). SIGHUP
-// reloads the curriculum bundle and the invites file.
+// reaper and the proxy cache pruning until ctx ends, then shuts down
+// gracefully (10 s drain). SIGHUP reloads the curriculum bundle and the
+// invites file.
 func (a *App) Run(ctx context.Context) error {
 	srv := httpx.NewServer(a.cfg.Listen, a.handler, a.log)
 	ln, err := net.Listen("tcp", a.cfg.Listen)
@@ -319,6 +320,7 @@ func (a *App) Run(ctx context.Context) error {
 	rctx, stopReaper := context.WithCancel(ctx)
 	defer stopReaper()
 	go a.Sessions.Run(rctx, time.Minute)
+	go a.Proxy.Run(rctx, time.Minute)
 
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)

@@ -45,7 +45,9 @@ type Options struct {
 type Proxy struct {
 	o Options
 
-	mu      sync.Mutex
+	mu sync.Mutex
+	// proxies caches a ReverseProxy per usable session; entries of
+	// sessions found unusable or gone are dropped (serve, Prune).
 	proxies map[string]*cached
 	userWS  map[string]int
 }
@@ -104,6 +106,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) error {
 		return httpx.Forbidden("this session belongs to someone else")
 	}
 	if !sess.Usable() {
+		p.forget(id, nil)
 		return httpx.SessionUnavailable("the session is " + string(sess.State)).
 			WithDetails(map[string]string{"state": string(sess.State)})
 	}
@@ -212,6 +215,54 @@ func (p *Proxy) proxyFor(sess *sessions.Session) *httputil.ReverseProxy {
 	}
 	p.proxies[sess.ID] = &cached{target: target, secret: secret, rp: rp}
 	return rp
+}
+
+// forget drops the cached proxy of session id; with c non-nil only when
+// it is still c.
+func (p *Proxy) forget(id string, c *cached) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if cur := p.proxies[id]; cur != nil && (c == nil || cur == c) {
+		delete(p.proxies, id)
+	}
+}
+
+// Prune drops the cached proxies of sessions that are gone or no longer
+// usable (stopped, failed, removed), so the cache holds only live
+// sessions. WebSockets already open keep their ReverseProxy.
+func (p *Proxy) Prune(ctx context.Context) {
+	p.mu.Lock()
+	snapshot := make(map[string]*cached, len(p.proxies))
+	for id, c := range p.proxies {
+		snapshot[id] = c
+	}
+	p.mu.Unlock()
+	for id, c := range snapshot {
+		sess, err := p.o.Sessions.Get(ctx, id)
+		if err != nil && !errors.Is(err, sessions.ErrNotFound) {
+			continue
+		}
+		if err != nil || !sess.Usable() {
+			p.forget(id, c)
+		}
+	}
+}
+
+// Run prunes the cache every interval until ctx ends.
+func (p *Proxy) Run(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			p.Prune(ctx)
+		}
+	}
 }
 
 // WebSockets returns the open WebSocket count per user (metrics, tests).

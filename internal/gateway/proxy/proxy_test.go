@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -235,5 +237,67 @@ func TestProxyWebSocket(t *testing.T) {
 			t.Fatalf("not released: %d %d", h.fs.openCount("s1"), h.p.WebSockets("alice"))
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func (f *fakeSessions) set(id string, mod func(s *sessions.Session)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if mod == nil {
+		delete(f.byID, id)
+		return
+	}
+	mod(f.byID[id])
+}
+
+func (p *Proxy) cachedIDs() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	ids := make([]string, 0, len(p.proxies))
+	for id := range p.proxies {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func TestProxyCachePruned(t *testing.T) {
+	h := newHarness(t, false)
+	for _, id := range []string{"s1", "s2", "local"} {
+		user := map[string]string{"s1": "alice", "s2": "bob", "local": "anyone"}[id]
+		if code, m, _ := h.do(t, "GET", "/s/"+id+"/status", user); code != 200 {
+			t.Fatalf("%s: %d %v", id, code, m)
+		}
+	}
+	if got := h.p.cachedIDs(); !slices.Equal(got, []string{"local", "s1", "s2"}) {
+		t.Fatalf("cached %v", got)
+	}
+	ctx := context.Background()
+	h.p.Prune(ctx)
+	if got := h.p.cachedIDs(); len(got) != 3 {
+		t.Fatalf("live sessions pruned: %v", got)
+	}
+	// A stopped session and a forgotten one are dropped by Prune.
+	h.fs.set("s1", func(s *sessions.Session) { s.State = protocol.SessionStopped })
+	h.fs.set("s2", nil)
+	h.p.Prune(ctx)
+	if got := h.p.cachedIDs(); !slices.Equal(got, []string{"local"}) {
+		t.Fatalf("after prune %v", got)
+	}
+	// A request to a session that is no longer usable drops its entry.
+	h.fs.set("local", func(s *sessions.Session) { s.State = protocol.SessionFailed })
+	if code, _, _ := h.do(t, "GET", "/s/local/status", "anyone"); code != 503 {
+		t.Fatalf("failed session: %d", code)
+	}
+	if got := h.p.cachedIDs(); len(got) != 0 {
+		t.Fatalf("after request to a failed session %v", got)
+	}
+	// A restarted session gets a fresh proxy.
+	h.fs.set("s1", func(s *sessions.Session) { s.State = protocol.SessionReady })
+	if code, m, _ := h.do(t, "GET", "/s/s1/status", "alice"); code != 200 {
+		t.Fatalf("restarted: %d %v", code, m)
+	}
+	if got := h.p.cachedIDs(); !slices.Equal(got, []string{"s1"}) {
+		t.Fatalf("after restart %v", got)
 	}
 }

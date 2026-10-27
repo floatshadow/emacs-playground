@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -151,5 +152,92 @@ func TestStuckDedupe(t *testing.T) {
 	}
 	if s.Allow("u9") {
 		t.Fatal("rate limit")
+	}
+}
+
+// gatedStuck holds every Add until gate is closed and counts the adds.
+type gatedStuck struct {
+	store.StuckRepo
+	gate    chan struct{}
+	entered chan struct{}
+	fail    bool
+	mu      sync.Mutex
+	adds    int
+}
+
+func (g *gatedStuck) Add(ctx context.Context, r *store.StuckReport) (int64, error) {
+	g.mu.Lock()
+	g.adds++
+	fail := g.fail
+	g.mu.Unlock()
+	g.entered <- struct{}{}
+	<-g.gate
+	if fail {
+		return 0, errors.New("disk full")
+	}
+	return g.StuckRepo.Add(ctx, r)
+}
+
+type gatedStore struct {
+	store.Store
+	stuck *gatedStuck
+}
+
+func (g gatedStore) Stuck() store.StuckRepo { return g.stuck }
+
+func TestStuckDedupeConcurrent(t *testing.T) {
+	base, _ := store.OpenJSON(t.TempDir())
+	g := &gatedStuck{StuckRepo: base.Stuck(), gate: make(chan struct{}), entered: make(chan struct{}, 8)}
+	s := NewStuck(gatedStore{base, g})
+	ctx := context.Background()
+
+	// Identical reports filed while the first is being written share its id.
+	const n = 5
+	ids, errs := make([]int64, n), make([]error, n)
+	var wg sync.WaitGroup
+	note := "help"
+	file := func(i int) {
+		defer wg.Done()
+		ids[i], errs[i] = s.File(ctx, "u1", "l/a", "open", note, nil)
+	}
+	wg.Add(1)
+	go file(0)
+	<-g.entered
+	for i := 1; i < n; i++ {
+		wg.Add(1)
+		go file(i)
+	}
+	// The others must be waiting on the first write, not writing.
+	time.Sleep(50 * time.Millisecond)
+	close(g.gate)
+	wg.Wait()
+	for i := range n {
+		if errs[i] != nil || ids[i] != ids[0] {
+			t.Fatalf("report %d: id %d (first %d), err %v", i, ids[i], ids[0], errs[i])
+		}
+	}
+	if g.adds != 1 {
+		t.Fatalf("%d reports stored, want 1", g.adds)
+	}
+
+	// A failed write is shared with the reports waiting on it and then
+	// forgotten, so the next report is written.
+	g.gate, g.fail, note = make(chan struct{}), true, "other"
+	wg.Add(2)
+	go file(0)
+	<-g.entered
+	go file(1)
+	time.Sleep(50 * time.Millisecond)
+	close(g.gate)
+	wg.Wait()
+	if errs[0] == nil || errs[1] == nil {
+		t.Fatalf("errors %v, %v; want both failed", errs[0], errs[1])
+	}
+	g.fail = false
+	if _, err := s.File(ctx, "u1", "l/a", "open", "other", nil); err != nil {
+		t.Fatal(err)
+	}
+	if g.adds != 3 {
+		t.Fatalf("%d adds, want 3 (a failed report is written again)", g.adds)
 	}
 }
