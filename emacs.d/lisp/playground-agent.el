@@ -1464,17 +1464,42 @@ the absolute names of the spec's files, by its name."
       (layout . ,(playground--layout-string (playground--tree frame)))
       (windowState . ,(with-selected-frame frame
                         ;; Real buffer names, which the file names are
-                        ;; looked up by.
-                        (let ((window-state-normalize-buffer-name nil))
+                        ;; looked up by, without their text properties.
+                        (let ((window-state-normalize-buffer-name nil)
+                              (print-length nil) (print-level nil))
                           (prin1-to-string
-                           (playground--state-add-files
-                            (window-state-get (frame-root-window frame) t))))))
+                           (playground--plain
+                            (playground--state-add-files
+                             (window-state-get (frame-root-window frame) t)))))))
       (selected . ,(playground--leaf-name (window-buffer (playground--user-window))))
       (tab . ,(alist-get 'current (playground--tabs frame)))
       ,@(playground--tab-spec frame)
       (specialBuffers . ,(let ((print-length nil) (print-level nil))
                            (prin1-to-string (playground--special-buffers))))
       (takenAt . ,(playground--now-ms)))))
+
+(defun playground--plain (x)
+  "X with the text properties of its strings removed.
+A buffer name can carry properties: uniquify keeps the buffer itself
+in `uniquify-orig-buffer' on a name it gave back (main.rs after
+lesson 2.7 closed polyglot's main.rs), and a printed window state
+would then hold an unreadable #<buffer main.rs>."
+  (cond ((stringp x) (substring-no-properties x))
+        ((consp x) (cons (playground--plain (car x)) (playground--plain (cdr x))))
+        ((vectorp x) (vconcat (mapcar #'playground--plain x)))
+        (t x)))
+
+(defun playground--read-state (string)
+  "Read STRING, a printed window state, and return it.
+States saved before `playground--plain' was applied may hold
+unreadable objects (#<buffer main.rs> in a name's text properties):
+those read as nil, and the strings lose their properties."
+  (playground--plain
+   (condition-case nil
+       (car (read-from-string string))
+     (invalid-read-syntax
+      (car (read-from-string
+            (replace-regexp-in-string "#<[^<>]*\\(?:<[^<>]*>[^<>]*\\)*>" "nil" string t t)))))))
 
 (defun playground--help-buffer-p (b)
   "Non-nil when B is a help buffer the learner can see (not internal)."
@@ -1515,11 +1540,12 @@ made readable; `playground--sync-special-buffers' makes them again."
 (defun playground--sync-special-buffers (printed)
   "Make the session's help buffers those PRINTED lists.
 PRINTED is a WindowSpec's specialBuffers.  Help buffers it does not
-name, or names with another help command, are killed, and the ones it names that are gone are made again by
-running their help command (outside the learner's windows) and giving
-the result its old name.  A demo that killed help buffers (lesson 2.5's
-* h D) or opened some leaves the step as it started.  Returns the
-number of buffers killed or made."
+name, or names with another help command, are killed, and the ones it
+names that are gone are made again by running their help command
+\(outside the learner's windows) and giving the result its old name.
+A demo that killed help buffers (lesson 2.5's * h D) or opened some
+leaves the step as it started.  Returns the number of buffers killed
+or made."
   (let ((want (and (stringp printed)
                    (ignore-errors (car (read-from-string printed)))))
         (n 0))
@@ -1555,6 +1581,72 @@ number of buffers killed or made."
                         (cl-incf n)))
                   (when (and aside (get-buffer aside) (not (get-buffer "*Help*")))
                     (with-current-buffer aside (rename-buffer "*Help*"))))))))))
+    n))
+
+;;;; Build output and a step's start
+
+(defvar-local playground--run-started nil
+  "When the run in this compilation buffer started (ms), or nil.
+Set by `playground--on-compilation-start'; `compilation-mode' clears
+it when the next run starts, which sets it again.")
+
+(defun playground--on-compilation-start (proc)
+  "Stamp the buffer of compilation PROC with its start time.
+Runs from `compilation-start-hook' (compile, recompile, grep)."
+  (when-let* ((b (process-buffer proc))
+              ((buffer-live-p b)))
+    (with-current-buffer b
+      (setq playground--run-started (playground--now-ms)))))
+
+(defun playground--spec-shown-buffers (spec)
+  "Names of the buffers the windows of SPEC (a WindowSpec alist) show.
+From its window state, else from its layout pattern."
+  (let ((names '())
+        (state (alist-get 'windowState spec))
+        (layout (alist-get 'layout spec)))
+    (cl-labels ((walk (x)
+                  (when (proper-list-p x)
+                    (if (and (eq (car x) 'buffer) (stringp (cadr x)))
+                        (push (cadr x) names)
+                      (mapc #'walk x))))
+                (leaves (x)
+                  (cond ((stringp x) (push x names))
+                        ((and (symbolp x) x (not (memq x '(vsplit hsplit))))
+                         (push (symbol-name x) names))
+                        ((proper-list-p x) (mapc #'leaves x)))))
+      (when (and (stringp state) (not (string-empty-p state)))
+        (walk (ignore-errors (playground--read-state state))))
+      (when (and (null names) (stringp layout) (not (member layout '("" "single"))))
+        (if (string-prefix-p "(" layout)
+            (leaves (ignore-errors (car (read-from-string layout))))
+          (push layout names))))
+    names))
+
+(defun playground--kill-later-runs (spec)
+  "Kill the build output made after SPEC (a WindowSpec alist) was taken.
+A compilation buffer (compile, grep) whose run started after the
+spec's takenAt holds output the step did not start with: the
+demonstration's build, or the learner's.  A condition that reads it
+\(lesson 2.7 asks whether the build finished) would hold before the
+learner builds anything, so it goes, process and all, unless one of
+the spec's windows shows a buffer of that name (the step's layout
+needs it; lesson 3.5).  Buffers without a start time are kept.
+Returns the number killed."
+  (let ((taken (alist-get 'takenAt spec))
+        (n 0))
+    (when (and (integerp taken) (> taken 0))
+      (let ((shown (playground--spec-shown-buffers spec)))
+        (dolist (b (buffer-list))
+          (let ((started (buffer-local-value 'playground--run-started b)))
+            (when (and (integerp started) (> started taken)
+                       (provided-mode-derived-p (buffer-local-value 'major-mode b)
+                                                'compilation-mode)
+                       (not (member (buffer-name b) shown)))
+              (when-let* ((proc (get-buffer-process b)))
+                (set-process-query-on-exit-flag proc nil))
+              (let ((kill-buffer-query-functions nil))
+                (kill-buffer b))
+              (cl-incf n))))))
     n))
 
 (defun playground--tab-spec (frame)
@@ -1624,7 +1716,7 @@ found by that file, so a window shows the file it showed when the
 state was saved even if its buffer has been renamed since.  FILES,
 absolute file names, help with states saved without them."
   (let ((ignore-window-parameters t)
-        (state (playground--state-map-files (car (read-from-string state)) files)))
+        (state (playground--state-map-files (playground--read-state state) files)))
     (playground--in-user-window
       (playground--leave-side-window)
       (delete-other-windows)
@@ -1809,6 +1901,7 @@ Edited buffers are reverted to the restored files, buffers of files
 that are gone are killed, unmodified file buffers the step did not
 start with are closed, the help buffers and the tabs are made those
 of the spec (`playground--sync-special-buffers', `playground--sync-tabs'),
+build output made since is killed (`playground--kill-later-runs'),
 then the spec is opened: its tab, files,
 points and windows, each window on the file it showed (whatever the
 buffer is called now) or on its Dired listing, ibuffer or buffer list
@@ -1841,6 +1934,7 @@ made again, the selected window last."
       ;; Help buffers before the windows (ibuffer lists them), and tabs
       ;; before the windows, which go into the spec's tab.
       (when spec (playground--sync-special-buffers (alist-get 'specialBuffers spec)))
+      (when spec (cl-incf killed (playground--kill-later-runs spec)))
       (when spec (playground--sync-tabs spec))
       (when spec (playground--op-open spec)))
     `((reverted . ,reverted) (killed . ,killed))))
@@ -2181,6 +2275,7 @@ Never saves, kills file buffers or reverts."
     (funcall hook-fn 'window-buffer-change-functions #'playground--schedule-state)
     (funcall hook-fn 'after-change-major-mode-hook #'playground--schedule-state)
     (funcall hook-fn 'kbd-macro-termination-hook #'playground--kmacro-changed)
+    (funcall hook-fn 'compilation-start-hook #'playground--on-compilation-start)
     (funcall hook-fn 'server-after-make-frame-hook #'playground--on-make-frame)
     (funcall hook-fn 'delete-frame-functions #'playground--on-delete-frame))
   (if on

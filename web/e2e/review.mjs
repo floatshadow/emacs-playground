@@ -1,5 +1,5 @@
 // Acceptance checks for docs/feedback/2026-10-27-fix-plan.md: one check per
-// item of the newcomer review (B1..B18, L1, X3, S1..S5, R1, R9, R10). Each
+// item of the newcomer review (B1..B18, L1, X3, X11, S1..S5, R1, R9, R10). Each
 // check drives the running local stack (http://127.0.0.1:8080) through
 // headless Chrome on CDP :9222 and asserts the behaviour the plan asks for,
 // so before the fixes most checks fail; the plan records that baseline.
@@ -9,7 +9,9 @@
 //
 // Writes artifacts/review/<id>.png and results.json. Every check starts a
 // fresh browser context (empty localStorage) and loads its lesson with
-// `reset`; all progress is reset when the run ends.
+// `reset`; all progress is reset when the run ends. Page loads are paced
+// (pageLoad) because each one asks the gateway for the session, which it
+// allows ten times a minute per user.
 import { chromium } from 'playwright-core'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -35,8 +37,23 @@ const L12 = '01-moving-and-editing/02-kill-and-yank'
 const L24 = '02-buffers-and-files/04-switch-save-kill'
 const L31 = '03-windows-and-layouts/01-windows-and-frames'
 const L35 = '03-windows-and-layouts/05-taming-pop-ups'
+const L27 = '02-buffers-and-files/07-projects'
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Each page load posts /api/v1/sessions, which the gateway allows ten times a
+// minute per user (internal/gateway/server.go createSession); a full run
+// loads more pages than that, so loads wait for room under the limit.
+const loads = []
+async function pageLoad() {
+  for (;;) {
+    const now = Date.now()
+    while (loads.length && now - loads[0] > 61000) loads.shift()
+    if (loads.length < 8) break
+    await sleep(61000 - (now - loads[0]) + 200)
+  }
+  loads.push(Date.now())
+}
 const browser = await chromium.connectOverCDP(cdp)
 
 // --- HTTP ---------------------------------------------------------------
@@ -181,6 +198,7 @@ async function freshPage(viewport = { width: 1600, height: 1000 }) {
     },
     /** Opens a lesson page; the scenario must already be loaded. */
     async open(lessonId, goal) {
+      await pageLoad()
       await page.goto(`${url}/lesson/${lessonId}`, { waitUntil: 'load' })
       await page.locator('.pg-terminal .xterm-screen').waitFor({ timeout: 30000 })
       await page
@@ -202,6 +220,10 @@ async function freshPage(viewport = { width: 1600, height: 1000 }) {
       const all = await steps(lessonId)
       const st = stepId ? all.find((s) => s.id === stepId) : all[0]
       if (!st) throw new Error(`${lessonId} has no step ${stepId}`)
+      // A lesson page still open makes its own lesson active again as soon
+      // as another one loads (useScenarioLoad), and the page opened next
+      // would then load its lesson at the resume target: leave it first.
+      if (page.url().startsWith(url)) await page.goto('about:blank')
       await resetLesson(lessonId)
       const r = await rpc('scenario', { lessonId, stepId: st.id, reset: true })
       if (r.status !== 200) throw new Error('rpc scenario: ' + JSON.stringify(r.body))
@@ -523,6 +545,7 @@ await check('B5', 'Start over and honest step ticks', async (h, note) => {
   )
   assert(activeCount === 1, 'the engine’s active step is not shown as active (X1)')
   assert(ticked.length === 0, 'steps after the active one are ticked')
+  await pageLoad()
   await h.page.goto(url + '/', { waitUntil: 'load' })
   await h.page.getByRole('button', { name: 'Start over' }).first().click({ timeout: 10000 })
   const dlg = h.page.getByRole('dialog')
@@ -535,6 +558,7 @@ await check('B5', 'Start over and honest step ticks', async (h, note) => {
   ).length
   note(`after the course map's Start over: lessons with progress ${left}`)
   assert(left === 0, 'Start over on the course map left progress')
+  await pageLoad()
   await h.page.goto(url + '/session', { waitUntil: 'load' })
   // The Session page is a lazy chunk: wait for it before counting.
   const onSession = await h.page
@@ -642,6 +666,21 @@ await check('B8', 'habit cards respect the lesson and reloads', async (h, note) 
   let cards = await h.cards()
   note(`1.1 after C-b C-l: ${JSON.stringify(cards)}`)
   assert(!cards.some((c) => /C-b is not|C-l is not/.test(c)), 'cards for keys 1.1 teaches')
+  // 3.5 build says "clear the offered command (`C-a C-k`)": two commands in
+  // one span, both instructed (the newcomer's case, review screenshot 145).
+  await h.load(L35, 'build')
+  await h.focus()
+  await h.press(['Control+x', 'p', 'c'], 600)
+  await h.press(['Control+a'], 300)
+  await h.press(['Control+k'], 500)
+  await h.type('sh build.sh')
+  await h.press(['Enter'], 2500)
+  cards = await h.cards()
+  note(`3.5 build after C-x p c, C-a C-k, sh build.sh: ${JSON.stringify(cards)}`)
+  assert(
+    !cards.some((c) => /C-a is not|C-k is not/.test(c)),
+    'cards for C-a C-k, which 3.5 asks for',
+  )
   await h.load(L31, 'split')
   await h.focus()
   await h.press(['Control+x', '2', 'Control+x', '3'], 400)
@@ -662,6 +701,7 @@ await check('B8', 'habit cards respect the lesson and reloads', async (h, note) 
     'the C-s card did not fire in 0.1',
   )
   await h.press(['Control+g'], 400)
+  await pageLoad()
   await h.page.reload({ waitUntil: 'load' })
   await h.page.locator('.pg-terminal .xterm-screen').waitFor({ timeout: 30000 })
   await sleep(1500)
@@ -1023,6 +1063,83 @@ await check('X3', 'a reset lesson starts README.md at line 1', async (h, note) =
   assert(st?.buf === 'README.md' && st?.line === 1, 'README.md kept the previous visit’s line')
 })
 
+await check('X11', '2.7 compile needs the learner’s own build', async (h, note) => {
+  const lastCheck = (t) =>
+    h.since(t, (e) => e.t === 'check' && e.stepId === 'compile').at(-1)?.conditions ?? []
+  const met = (t) =>
+    lastCheck(t)
+      .map((r) => `${r.id}:${r.ok ? 'Y' : 'n'}`)
+      .join(' ')
+  const completed = (t) =>
+    h.since(t, (e) => e.t === 'step' && e.stepId === 'compile' && e.status === 'complete').length
+  // An earlier build (lesson 3.5 builds the same crate) leaves *compilation*.
+  await h.load(L35, 'build')
+  await h.focus()
+  let t = Date.now()
+  await playDemo((await steps(L35))[0].demo)
+  await h.waitEvent(
+    t,
+    (e) => e.t === 'step' && e.stepId === 'build' && e.status === 'complete',
+    15000,
+    '3.5 build complete',
+  )
+  // 2.7 loads at its compile step: C-x p c alone must not complete it.
+  await h.load(L27, 'compile')
+  await h.focus()
+  t = Date.now()
+  await h.press(['Control+x', 'p', 'c'], 1500)
+  note(`after an earlier build, C-x p c alone: complete ${completed(t) > 0}; checks ${met(t)}`)
+  assert(completed(t) === 0, 'C-x p c alone completed compile (an earlier build’s *compilation*)')
+  await h.press(['Control+g'], 400)
+  // Watch it, Do it yourself, then C-x p c alone: still not complete.
+  t = Date.now()
+  await h
+    .active()
+    .getByRole('button', { name: /Watch it/ })
+    .click()
+  await h.waitEvent(
+    t,
+    (e) => e.t === 'step' && e.stepId === 'compile' && /demonstrated|complete/.test(e.status),
+    40000,
+    'end of the demo',
+  )
+  await sleep(1500)
+  t = Date.now()
+  await h
+    .active()
+    .getByRole('button', { name: /Do it yourself/ })
+    .click()
+  await h.waitEvent(t, (e) => e.t === 'step' && e.status === 'reset', 15000, 'reset event')
+  await sleep(1000)
+  await h.focus()
+  t = Date.now()
+  await h.press(['Control+x', 'p', 'c'], 1500)
+  note(
+    `after Watch it and Do it yourself, C-x p c alone: complete ${completed(t) > 0}; checks ${met(t)}`,
+  )
+  assert(completed(t) === 0, 'C-x p c alone completed compile (the demo’s *compilation*)')
+  // The learner's own build completes it, with no card for the instructed keys
+  // and no "Three windows" card for the build output's window.
+  await h.press(['Control+a'], 300)
+  await h.press(['Control+k'], 500)
+  await h.type('sh build.sh')
+  await h.press(['Enter'], 300)
+  await h.waitEvent(
+    t,
+    (e) => e.t === 'step' && e.stepId === 'compile' && e.status === 'complete',
+    15000,
+    'compile complete after the learner’s build',
+  )
+  await sleep(1000)
+  const cards = await h.cards()
+  note(`windows ${h.lastState()?.windows?.length}; cards ${JSON.stringify(cards)}`)
+  assert(
+    !cards.some((c) => /C-a is not|C-k is not/.test(c)),
+    'cards for C-a C-k, which 2.7 asks for',
+  )
+  assert(!cards.some((c) => /Three windows/.test(c)), '"Three windows" card for the build output')
+})
+
 await check('S1', '2.4 step 1 is split', async (h, note) => {
   const all = await steps(L24)
   const [a, b] = all.map((s) => text(s.goal))
@@ -1062,6 +1179,7 @@ await check('S2', 'Skip this step behind I’m stuck', async (h, note) => {
   const status = p.body?.lessons?.[L24]?.steps?.[first.id]?.status
   note(`progress for ${first.id}: ${status}`)
   assert(status === 'skipped', 'progress does not record skipped')
+  await pageLoad()
   await h.page.goto(url + '/', { waitUntil: 'load' })
   const row = h.page.locator('li', { has: h.page.locator(`a[href="/lesson/${L24}"]`) }).first()
   const rowText = (await row.innerText({ timeout: 10000 })).replace(/\s+/g, ' ')

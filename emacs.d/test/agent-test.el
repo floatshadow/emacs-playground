@@ -974,6 +974,76 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
                               (with-current-buffer (car names) (buffer-substring 1 (min 200 (point-max))))))
       (dolist (b (seq-filter #'playground--help-buffer-p (buffer-list))) (kill-buffer b)))))
 
+;; `compile' that never asks to save and waits for the run to end.
+(defun pg-test--build (command &optional name)
+  "Run COMMAND as a compilation in buffer NAME (default *compilation*).
+Return the buffer once the run finished."
+  (let* ((compilation-ask-about-save nil)
+         (compilation-buffer-name-function (lambda (_) (or name "*compilation*")))
+         (default-directory pg-test--dir)
+         (b (save-window-excursion (compile command))))
+    (should (pg-test-wait (lambda () (not (get-buffer-process b))) 10))
+    b))
+
+(ert-deftest pg-agent/reset-step-drops-later-builds ()
+  "Build output made since the checkpoint goes, unless its window is part of the step.
+Lesson 2.7: after Watch it and Do it yourself, the demonstration's
+*compilation* made \"the build finished\" hold before the learner built."
+  (pg-test-with-agent
+    (find-file-noselect (pg-test-file "a.txt" "a\n"))
+    (let* ((early (pg-test--build "echo early" "*early*"))
+           (shown (pg-test--build "echo shown" "*shown*")))
+      (switch-to-buffer (get-file-buffer (expand-file-name "a.txt" pg-test--dir)))
+      (delete-other-windows)
+      (set-window-buffer (split-window-below) shown)
+      (should (buffer-local-value 'playground--run-started early))
+      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+        (sleep-for 0.01)
+        ;; The demonstration builds, and so does the learner in the shown window.
+        (let ((later (pg-test--build "echo Finished dev profile"))
+              (again (pg-test--build "echo shown again" "*shown*")))
+          (should (eq again shown))
+          (should (> (buffer-local-value 'playground--run-started later)
+                     (alist-get 'takenAt snap)))
+          (let ((r (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap)))))))
+            (should (>= (alist-get 'killed r) 1)))
+          (should-not (buffer-live-p later))
+          (should (buffer-live-p early))
+          (should (buffer-live-p shown))
+          (should (get-buffer-window shown))
+          (dolist (b (list early shown)) (kill-buffer b)))))))
+
+(ert-deftest pg-agent/snapshot-with-propertized-buffer-names ()
+  "A buffer name with text properties still gives a readable window state.
+Lesson 3.5 after 2.7: uniquify gave main.rs its name back with the
+buffer in a text property, the state printed #<buffer main.rs> among
+a window's previous buffers, did not read back, and reset-step fell
+back to the layout pattern: the help side window came back as an
+ordinary window, and C-x w s then showed a second one."
+  (pg-test-with-agent
+    (let* ((a (find-file-noselect (pg-test-file "a.txt" "a\n")))
+           (b (find-file-noselect (pg-test-file "b.txt" "b\n")))
+           (side (get-buffer-create "*side*")))
+      (with-current-buffer a (rename-buffer (propertize "a.txt<x>" 'uniquify-orig-buffer a)))
+      (should (text-properties-at 0 (buffer-name a)))
+      (delete-other-windows)
+      (switch-to-buffer a)
+      (switch-to-buffer b)
+      (display-buffer-in-side-window side '((side . right)))
+      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+        (should-not (string-search "#<" (alist-get 'windowState snap)))
+        (should (car (read-from-string (alist-get 'windowState snap))))
+        ;; The step's demo hides the side window (C-x w s); Reset brings it back.
+        (window-toggle-side-windows)
+        (should-not (get-buffer-window side))
+        (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap)))))
+        (should (eq (window-parameter (get-buffer-window side) 'window-side) 'right)))
+      (kill-buffer side)))
+  ;; A state saved before the fix reads with the buffer object as nil.
+  (should (equal (playground--read-state
+                  "((buffer #(\"main.rs\" 0 1 (uniquify-orig-buffer #<buffer main.rs>)) (point . 1)) (prev-buffers (#(\"README.md<hello>\" 0 1 (x #<buffer README.md<hello>>)) 1 1)))")
+                 '((buffer "main.rs" (point . 1)) (prev-buffers ("README.md<hello>" 1 1))))))
+
 (ert-deftest pg-agent/op-setup-reset-starts-at-the-top ()
   "With reset, the files of a setup start on their first line, in their windows too."
   (pg-test-with-agent

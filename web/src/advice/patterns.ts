@@ -1,10 +1,11 @@
 /**
  * Stuck patterns (frontend.md §6), the fixed rules from the demo's nudges():
  * three C-g within 8 s, the same unbound key twice in a row, typing into a
- * read-only buffer, a prompt open for 20 s, three or more windows (unless
- * the lesson teaches splitting: C-x 2 or C-x 3 is mentioned). Pure
- * functions of the ticker, the latest state, the clock and the keys the
- * lesson mentions.
+ * read-only buffer, a prompt open for 20 s, three or more windows after the
+ * learner split one (unless the lesson teaches splitting: C-x 2 or C-x 3 is
+ * mentioned; windows that pop up, such as a build's output, are no
+ * accident). Pure functions of the ticker, the latest state, the clock and
+ * the keys the lesson mentions.
  */
 import type { State } from '../protocol.gen'
 import type { Nudge } from './habits'
@@ -25,6 +26,16 @@ export interface PatternInput {
   /** Keys the lesson mentions (mentions.ts): splitting on purpose is no accident. */
   mentioned?: readonly string[]
 }
+
+/** Commands that split a window (C-x 2, C-x 3 and their relatives). */
+export const SPLIT_COMMANDS: ReadonlySet<string> = new Set([
+  'split-window-below',
+  'split-window-right',
+  'split-window-vertically',
+  'split-window-horizontally',
+  'split-root-window-below',
+  'split-root-window-right',
+])
 
 const isQuit = (e: TickerEntry) =>
   e.kind === 'quit' &&
@@ -92,7 +103,8 @@ export function patternNudges({
   }
 
   const splitsTaught = isMentioned('C-x 2', mentioned) || isMentioned('C-x 3', mentioned)
-  if (state && (state.windows?.length ?? 0) >= MANY_WINDOWS && !splitsTaught) {
+  const learnerSplit = done.some((e) => e.cmd !== undefined && SPLIT_COMMANDS.has(e.cmd))
+  if (state && (state.windows?.length ?? 0) >= MANY_WINDOWS && learnerSplit && !splitsTaught) {
     out.push({
       id: 'many-windows',
       kind: 'ask',

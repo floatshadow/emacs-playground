@@ -4,6 +4,8 @@
  * press. The mentioned keys of a lesson are the key sequences in its
  * Markdown (backticked spans that parse as keys, :kbd[…] and :try[…]) and,
  * per step, in the goal, the detail and every condition hint, normalised.
+ * A key counts as mentioned when it starts one of the commands a mentioned
+ * sequence is made of (isMentioned).
  */
 import type { Scenario } from '../protocol.gen'
 import { isKeySequence, KEY_RE, normalizeKeysLoose } from './keys'
@@ -84,8 +86,64 @@ export function mentionedNow(
   return [...m.lesson, ...(m.steps[active.stepId] ?? [])]
 }
 
-/** True when some mentioned sequence starts with key (C-s in "C-s C-s", not in "C-x C-s"). */
+/**
+ * Prefix keys of the global keymap, C-c (the mode prefix) and the help
+ * keys, normalised. In a mentioned sequence a key after a prefix belongs to
+ * the same command; after any other key a new command starts. Steps write
+ * the keys of several commands in one span: "clear it with `C-a C-k`" is
+ * C-a then C-k, "`C-x 2 C-x 3`" is two splits, while `C-x C-s` and
+ * `C-x p c` are one command each.
+ */
+export const PREFIX_KEYS: ReadonlySet<string> = new Set([
+  'C-x',
+  'C-c',
+  'C-h',
+  '<f1>',
+  'ESC',
+  'M-g',
+  'M-s',
+  'M-s h',
+  'C-x 4',
+  'C-x 5',
+  'C-x 6',
+  'C-x 8',
+  'C-x a',
+  'C-x n',
+  'C-x p',
+  'C-x r',
+  'C-x t',
+  'C-x v',
+  'C-x w',
+  'C-x x',
+  'C-x RET',
+  'C-x ESC',
+  'C-x C-k',
+])
+
+/** The commands of a normalised key sequence: "C-a C-k" → [C-a, C-k], "C-x p c" → [C-x p c]. */
+export function commandsOf(seq: string): string[] {
+  const out: string[] = []
+  let cur: string[] = []
+  for (const k of seq.split(' ')) {
+    if (!k) continue
+    cur.push(k)
+    if (!PREFIX_KEYS.has(cur.join(' '))) {
+      out.push(cur.join(' '))
+      cur = []
+    }
+  }
+  if (cur.length > 0) out.push(cur.join(' '))
+  return out
+}
+
+/**
+ * True when some command of a mentioned sequence is key or starts with it:
+ * C-s in "C-s C-s", C-k in "C-a C-k", C-x 3 in "C-x 2 C-x 3", but not C-s
+ * in "C-x C-s" (commandsOf).
+ */
 export function isMentioned(key: string, mentioned: readonly string[]): boolean {
   const k = normalizeKeysLoose(key)
-  return mentioned.some((m) => m === k || m.startsWith(k + ' '))
+  return mentioned.some(
+    (m) => m === k || commandsOf(m).some((c) => c === k || c.startsWith(k + ' ')),
+  )
 }

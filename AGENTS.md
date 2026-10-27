@@ -165,7 +165,7 @@ cd web && pnpm e2e:smoke            # PG_URL defaults to http://127.0.0.1:8080
 docker rm -f pg-chrome
 ```
 
-`web/e2e/review.mjs` is the acceptance test for the newcomer-review fixes (docs/feedback/2026-10-27-fix-plan.md): one check per review item (B1..B18, L1, X3, S1..S5, R1, R9, R10), each in a fresh browser context against the running local stack. `cd web && node e2e/review.mjs` runs all of them (about ten minutes), `PG_REVIEW_ONLY=B1,B4 node e2e/review.mjs` a subset; it writes `artifacts/review/<id>.png` and `results.json` and resets all progress when it ends.
+`web/e2e/review.mjs` is the acceptance test for the newcomer-review fixes (docs/feedback/2026-10-27-fix-plan.md): one check per review item (B1..B18, L1, X3, X11, S1..S5, R1, R9, R10), each in a fresh browser context against the running local stack. `cd web && node e2e/review.mjs` runs all of them (about ten minutes), `PG_REVIEW_ONLY=B1,B4 node e2e/review.mjs` a subset; it writes `artifacts/review/<id>.png` and `results.json` and resets all progress when it ends.
 
 Give the Chrome container `--shm-size=1g`: with Docker's default 64 MB `/dev/shm`, the terminal's WebGL renderer and the VNC canvas exhaust shared memory after a few page loads and Chrome fails later loads with `net::ERR_INSUFFICIENT_RESOURCES` (a blank page).
 
@@ -276,6 +276,14 @@ Emacs side (emacs.md §5, §6, §10):
 - `web/e2e/smoke.mjs` scenario 11 runs `playctl curriculum play -watch part:0` (R1).
 - A checkpoint restore, once started, runs to the end without the request's cancellation (`Server.restoreCheckpoint`).
 - The web forgets a lesson's outcomes when sessiond drops its active step (a progress reset, possibly from another page) and picks the resume target from refetched progress, so another tab's Start over does not make this page reload the lesson at a later step.
+
+### Decisions taken after the verification of the merged main (2026-10-27)
+
+- Nudge suppression counts each command of a mentioned key sequence: a sequence is cut after every key that is not a prefix key (`web/src/advice/mentions.ts` `PREFIX_KEYS`, `commandsOf`), so "clear it with `C-a C-k`" mentions C-a and C-k while `C-x C-s` still does not mention C-s. Add a prefix there when a lesson writes keys after a new global prefix.
+- The "Three windows is usually an accident" card needs a split command (`split-window-below`, `split-window-right`, …) in the ticker: windows that pop up (2.7's build output) are no accident. Where am I's many-windows row only counts the windows.
+- `reset-step` kills compilation buffers whose run started after the checkpoint (`playground--run-started`, set from `compilation-start-hook`) unless the checkpoint's windows show them (`playground--kill-later-runs`). Conditions that read build output (2.7's "the build finished") therefore hold only for the learner's own build after Watch it, Do it yourself or Reset. A lesson that reads a build from an earlier lesson kills `*compilation*` in its setup's eval (2.7, 3.5), with `kill-buffer-query-functions` bound to nil since a build may still run.
+- Window states in snapshots are printed without text properties (`playground--plain`) and read tolerantly (`playground--read-state`): uniquify can put the buffer itself on a buffer name.
+- `web/e2e/review.mjs` paces page loads (at most eight a minute): every load posts `/api/v1/sessions`, which the gateway allows ten times a minute per user.
 
 ## 6. Slice 1 scope
 

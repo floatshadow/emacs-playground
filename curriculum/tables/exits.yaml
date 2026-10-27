@@ -320,8 +320,8 @@
 
 - id: many-windows
   when: { "windows.length": { gte: 3 } }
-  why: "The frame is split into {windows.length} windows. Three or more is often an accident."
-  how: "C-x 1 keeps only this one. C-c <left> undoes the last layout change."
+  why: "The frame is split into {windows.length} windows."
+  how: "C-x o moves between them. C-x 0 closes this one, C-x 1 keeps only this one."
 
 - id: two-windows
   when: { "windows.length": 2, "otherWindows.mode": { not: { in: [help-mode, helpful-mode, apropos-mode, Info-mode, Buffer-menu-mode, ibuffer-mode, compilation-mode, grep-mode, occur-mode, xref--xref-buffer-mode, dired-mode, bookmark-bmenu-mode, vundo-mode, magit-status-mode, magit-diff-mode, magit-log-mode, eshell-mode, eat-mode, messages-buffer-mode, completion-list-mode] } } }
