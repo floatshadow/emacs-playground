@@ -72,5 +72,12 @@
   (should (eq (key-binding [deletechar]) 'delete-forward-char))
   (should (eq (key-binding [C-delete]) 'kill-word)))
 
+;;;; M-x messages (B15)
+
+(ert-deftest pg-modules/no-abbreviation-tips ()
+  "M-x suggests key bindings but not abbreviations such as M-x em-ve."
+  (should-not extended-command-suggest-shorter)
+  (should suggest-key-bindings))
+
 (provide 'modules-test)
 ;;; modules-test.el ends here

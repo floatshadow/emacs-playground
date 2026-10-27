@@ -114,6 +114,13 @@
 ;; Repeat a command's last key: C-x o o o, C-x { { {.
 (repeat-mode 1)
 
+;; M-x tells you the keys a command is bound to ("You can run the
+;; command `save-buffer' with C-x C-s"), which teaches chords.  It does
+;; not also suggest abbreviations ("... with M-x em-ve"): that message
+;; replaced the answer of M-x emacs-version two seconds after it
+;; appeared, and abbreviations are no help to someone learning names.
+(setq extended-command-suggest-shorter nil)
+
 ;;;; Lesson 1.2  Kill, yank and the kill ring
 
 ;; Typing replaces the selection, as in every other editor.
