@@ -171,7 +171,7 @@ At start the gateway loads `PG_CURRICULUM_DIR/curriculum.json` (the index produc
 
 ### 2.9 Progress
 
-Progress is written by sessiond through `POST /internal/sessions/{id}/progress` when a step completes, when hints are shown (the browser calls `/rpc/hint` so sessiond can count), and on reset. The browser reads `GET /api/v1/progress`. Writing from sessiond rather than the browser keeps progress correct when a tab is closed mid-step. While a curriculum bundle is loaded, reports for lessons or steps it does not have are refused with 400 (the learner can call `/internal` with their own session's token, so the ids are not trusted).
+Progress is written by sessiond through `POST /internal/sessions/{id}/progress` when a step completes, is demonstrated or skipped, when hints are shown (the browser calls `/rpc/hint` so sessiond can count), and on reset. A step's stored status only rises (`not-started` < `in-progress` < `demonstrated` < `skipped` < `done`); `GET /api/v1/progress` adds per-lesson counts, and a lesson is done only when every step of the bundle's scenario is done (api.md §2.4). `POST /api/v1/progress/reset` with no body clears every lesson of the user ("Start over") and sends sessiond `drop-step {}`. The browser reads `GET /api/v1/progress`. Writing from sessiond rather than the browser keeps progress correct when a tab is closed mid-step. While a curriculum bundle is loaded, reports for lessons or steps it does not have are refused with 400 (the learner can call `/internal` with their own session's token, so the ids are not trusted).
 
 ## 3. sessiond
 
@@ -222,6 +222,8 @@ RFB decoder: client messages of type 4 (KeyEvent: down flag and X keysym) on the
 
 Prefix detection: the tap knows the prefix keys from a static list (`C-x`, `C-c`, `C-h`, `M-g`, `M-s`, `M-o`, `C-x 4`, `C-x 5`, `C-x t`, `C-x r`, `C-x n`, `C-x p`, `C-x 8`, `ESC`) and emits `prefix` when a sequence so far is a prefix; the next agent `key` event (or a `C-g`) clears it. The frontend treats `prefix` as advisory and `key` as authoritative.
 
+A lone `ESC` is reported only when the 50 ms meta timeout ends (by a timer, or as stale when the next input arrives), while tmux (`escape-time 0`) hands the byte to Emacs at once. The tap remembers when the agent last reported a command; a key reported late whose bytes arrived before that moment was already used by Emacs (the third `ESC` of `ESC ESC ESC`, which runs `keyboard-escape-quit`), so it is dropped and the pending prefix is cleared instead of emitting `prefix ESC` after the command that consumed it.
+
 ### 3.7 Event bus
 
 `events.Bus` fans out `protocol.Event` values to subscribers. Each event gets a monotonic `seq`. A ring buffer of 500 events supports `?after=<seq>` replay on reconnect. Subscribers have a 256-entry buffer; a slow subscriber gets a `gap` event and the buffer is reset rather than blocking producers. Producers: the agent reader, the input tap, the supervisor, the file watcher, the step engine.
@@ -238,7 +240,7 @@ type Engine struct {
 }
 ```
 
-Triggers: agent `key` and `state` events, `file` events, a 2 s ticker. Evaluation is debounced to 150 ms and runs in one goroutine. Condition kinds:
+Triggers: agent `key` and `state` events, `file` events, a 2 s ticker. Evaluation runs in one goroutine, debounced on the trailing edge: 40 ms after the last trigger of a burst (a key event and the state the agent sends a few milliseconds later), and at most 120 ms after the burst's first trigger, so a stream of events cannot postpone it. A keystroke's check therefore arrives about 50 ms after its key event. Condition kinds:
 
 | Kind | Evaluated by | Notes |
 |---|---|---|
@@ -249,6 +251,14 @@ Triggers: agent `key` and `state` events, `file` events, a 2 s ticker. Evaluatio
 | `time` | sessiond | only inside `stuck` rules: `minibuffer_seconds`, `idle_seconds`, `step_seconds` |
 
 Combinators `all`, `any`, `not`. Results are emitted as `check`. A step completes when every condition is true; the engine emits `step {status: complete}`, reports progress, takes the next checkpoint and advances. Stuck rules are evaluated on the ticker and emit `nudge` events with ids the browser can dismiss.
+
+The step lifecycle is api.md §4.1. Besides completing, a step can be:
+
+- **demonstrated**: `rpc demo {stepId, phase: start}` (the browser's "Watch it") first restores the step's checkpoint when the engine counted any command since the step started or was last reset (files and windows as `restore {}`, a `step reset` event, no reset counted), then sets the step's demo latch and a playing flag. While the latch is set, a completion is recorded as `demonstrated` once (event and progress), the step stays active, nothing advances and no checkpoint is taken. `phase: end` clears the playing flag only; `restore {}`, a reload of the step and `drop-step` clear the latch, so the learner's own completion afterwards is `done`. Stuck rules wait while a demo plays.
+- **skipped**: `rpc skip {stepId}` restores the checkpoint when commands ran, holds completions, plays the step's `demo` into the learner's frame with playctl's pacing (`protocol.PlayDemo`: 170 ms per chord, 70 ms per character), waits up to 8 s for the conditions (`demoCompleted`; false is logged as a curriculum defect), records `skipped`, emits `step {status: skipped}` and advances like a completion (next checkpoint, `loaded`). The call is bounded by 60 s and finishes even when the browser goes away.
+- **dropped**: `drop-step {lessonId}` forgets that lesson's saved progress, `drop-step {}` all of it ("Start over"); a forgotten active step emits `step {status: dropped}`.
+
+Resuming a lesson (`scenario` without `stepId`) starts at the first step that is neither done nor skipped; a demonstrated step is resumed so the learner practises it. The engine's saved state (`/work/.playground/state.json`) keeps done, skipped and demonstrated times per step.
 
 ### 3.9 Checkpoints
 
@@ -276,6 +286,10 @@ Files are served with `http.FileServerFS(root.FS())` where `root` is `os.OpenRoo
 
 `/rpc/scenario {lesson, step}`: fetch scenario JSON and the fixture tarball from the gateway (cached by ETag under `/work/.playground/cache`), ensure modules (write `modules.el`, restart the daemon with buffer restore if changed), extract fixtures into `/work/<root>` (skip existing files unless `setup.reset`), call the agent for `setup.open`, `setup.layout`, `setup.eval`, take the checkpoint, set the engine's active step, emit `step {status: loaded}`.
 
+For a step after the first ("Go to this step", "Do this step again", resuming mid-lesson) the step must start from the state its demo was written for, not from the lesson's initial state. After the setup the loader restores that step's checkpoint when it exists (files and windows, without retaking it). Otherwise it fast-forwards: the engine rehearses each earlier step (`Engine.Rehearse`: conditions evaluated, nothing recorded, emitted or persisted), the step's demo is played into Emacs at playctl pacing and the loader waits up to 10 s for its conditions; then it takes the target step's checkpoint and activates it. The replay is bounded by 3 minutes and survives the browser going away. A later step's checkpoint is never overwritten with the lesson's initial state.
+
+Restoring a checkpoint (step reset, demo start, skip, "Go to this step") keeps `emacs.d/modules.el`: modules only grow (emacs.md §4), and a restored older set would disagree with the running Emacs.
+
 ### 3.13 Configuration
 
 Flags mirror the `PG_*` environment variables (deployment.md §3). `sessiond healthcheck` is the Compose health command: it returns 0 when the HTTP server is up and the agent has said hello.
@@ -288,6 +302,7 @@ With `PG_PROXY_SECRET` set (server mode), a middleware in front of every route c
 |---|---|
 | `playctl curriculum validate [dir]` | schema-check every `scenario.yaml`, lesson front matter, table files; check fixture paths and key names; exit non-zero on errors |
 | `playctl curriculum build [dir] -o out/` | produce `curriculum.json`, lesson bundles and fixture tarballs |
+| `playctl curriculum play <sel>... -session URL [-watch] [-repeat N] [-reset-progress]` | replay lessons' demos against a running session and require each step to complete; `-watch` first plays each step as a "Watch it" demonstration (`demo start`, demo, `demo end`, expect `step demonstrated` with the step still active, then `restore {}`); `-repeat N` plays every lesson N times; with a gateway session URL each played lesson's progress is reset afterwards |
 | `playctl images build [session|gateway|remote-box]` | `docker buildx bake` wrapper with cache settings |
 | `playctl dev` | run the gateway from source against the Compose session, with the Vite dev server proxied |
 | `playctl session shell` | `tmux attach` into the local session |
