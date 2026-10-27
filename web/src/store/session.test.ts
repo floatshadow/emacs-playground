@@ -302,6 +302,7 @@ describe('step views', () => {
       lessons: {
         'L/1': {
           status: 'done' as const,
+          counts: { done: 2, demonstrated: 0, skipped: 0, total: 2 },
           steps: {
             open: { status: 'done' as const, hintsUsed: 0, resets: 0 },
             save: { status: 'done' as const, hintsUsed: 0, resets: 0 },

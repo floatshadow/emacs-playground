@@ -104,12 +104,43 @@ type SessionInfo struct {
 // ProgressStatus is the status of a lesson or step in progress records.
 type ProgressStatus string
 
-// Progress statuses.
+// Progress statuses, lowest first (api.md §2.4). A step's stored status
+// only rises in this order; only a reset clears it.
 const (
 	ProgressNotStarted ProgressStatus = "not-started"
 	ProgressInProgress ProgressStatus = "in-progress"
-	ProgressDone       ProgressStatus = "done"
+	// ProgressDemonstrated: the step completed while a "Watch it"
+	// demonstration was latched.
+	ProgressDemonstrated ProgressStatus = "demonstrated"
+	// ProgressSkipped: the learner passed the step with "Skip this step".
+	ProgressSkipped ProgressStatus = "skipped"
+	ProgressDone    ProgressStatus = "done"
 )
+
+// ProgressRank orders step statuses for "only rises": not-started 0,
+// in-progress 1, demonstrated 2, skipped 3, done 4; unknown statuses -1.
+func ProgressRank(s ProgressStatus) int {
+	switch s {
+	case ProgressNotStarted, "":
+		return 0
+	case ProgressInProgress:
+		return 1
+	case ProgressDemonstrated:
+		return 2
+	case ProgressSkipped:
+		return 3
+	case ProgressDone:
+		return 4
+	}
+	return -1
+}
+
+// ProgressFinished reports whether resuming a lesson passes over a step with
+// status s: done and skipped steps are finished; a demonstrated step is
+// resumed so the learner practises it.
+func ProgressFinished(s ProgressStatus) bool {
+	return s == ProgressDone || s == ProgressSkipped
+}
 
 // StepProgress is the progress of one step.
 type StepProgress struct {
@@ -119,10 +150,22 @@ type StepProgress struct {
 	CompletedAt int64          `json:"completedAt,omitempty"`
 }
 
+// ProgressCounts counts a lesson's steps by status.
+type ProgressCounts struct {
+	Done         int `json:"done"`
+	Demonstrated int `json:"demonstrated"`
+	Skipped      int `json:"skipped"`
+	// Total is the number of steps in the bundle's scenario (0 when the
+	// lesson is not in the loaded bundle).
+	Total int `json:"total"`
+}
+
 // LessonProgress is the progress of one lesson. Status is done when every
-// step of the lesson's scenario is done.
+// step of the lesson's scenario is done, in-progress when any step is above
+// not-started, else not-started.
 type LessonProgress struct {
 	Status ProgressStatus          `json:"status"`
+	Counts ProgressCounts          `json:"counts"`
 	Steps  map[string]StepProgress `json:"steps"`
 }
 
@@ -132,9 +175,10 @@ type Progress struct {
 	UpdatedAt int64                     `json:"updatedAt"`
 }
 
-// ProgressResetRequest is POST /api/v1/progress/reset.
+// ProgressResetRequest is POST /api/v1/progress/reset. An empty LessonID
+// (or no body at all) clears every lesson of the user ("Start over").
 type ProgressResetRequest struct {
-	LessonID string `json:"lessonId"`
+	LessonID string `json:"lessonId,omitempty"`
 }
 
 // StuckRequest is POST /api/v1/stuck (the "I'm stuck" button).

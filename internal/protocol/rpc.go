@@ -24,6 +24,8 @@ const (
 	OpDescribe     RPCOp = "describe"
 	OpDropStep     RPCOp = "drop-step"
 	OpOpen         RPCOp = "open"
+	OpDemo         RPCOp = "demo"
+	OpSkip         RPCOp = "skip"
 )
 
 // RPCResponse is the success body of every RPC: {"ok":true,"result":…}.
@@ -237,10 +239,55 @@ type DescribeResult struct {
 	Doc string `json:"doc"`
 }
 
-// DropStepRequest tells sessiond to forget the active step if it belongs to
-// LessonID (sent by the gateway after POST /progress/reset).
+// DropStepRequest tells sessiond to forget saved progress after
+// POST /progress/reset (sent by the gateway). With LessonID it forgets that
+// lesson's progress and the active step if it belongs to the lesson; with an
+// empty LessonID it forgets all progress and the active step. A forgotten
+// active step emits a StepEvent with status StepDropped.
 type DropStepRequest struct {
-	LessonID string `json:"lessonId"`
+	LessonID string `json:"lessonId,omitempty"`
+}
+
+// DemoPhase is the phase of a "Watch it" demonstration.
+type DemoPhase string
+
+// Demo phases.
+const (
+	// DemoStart is sent before the browser plays the demo.
+	DemoStart DemoPhase = "start"
+	// DemoEnd is sent when the player finished or was stopped.
+	DemoEnd DemoPhase = "end"
+)
+
+// DemoRequest brackets the browser's "Watch it" (api.md §3.4, §4.1). The
+// RPC fails with ErrConflict unless StepID is the active step.
+type DemoRequest struct {
+	StepID string    `json:"stepId"`
+	Phase  DemoPhase `json:"phase"`
+}
+
+// DemoResult reports whether demo start restored the step's checkpoint
+// first (a command ran since the step started or was last reset).
+type DemoResult struct {
+	Restored bool `json:"restored"`
+}
+
+// SkipRequest asks sessiond to do the active step for the learner ("Skip
+// this step", api.md §3.4). The RPC fails with ErrConflict unless StepID is
+// the active step. Not idempotent.
+type SkipRequest struct {
+	StepID string `json:"stepId"`
+}
+
+// SkipResult names the step now active.
+type SkipResult struct {
+	// Next is the id of the step loaded after the skipped one, or null when
+	// the skipped step was the last (the lesson is complete).
+	Next *string `json:"next"`
+	// DemoCompleted is true when the step's conditions held after sessiond
+	// played its demo (false means a curriculum defect; the step is skipped
+	// anyway).
+	DemoCompleted bool `json:"demoCompleted"`
 }
 
 // RPCSpec pairs an operation with its request and result types, for
@@ -275,4 +322,6 @@ var RPCSpecs = []RPCSpec{
 	{Op: OpDescribe, Request: DescribeRequest{}, Result: DescribeResult{}, Idempotent: true},
 	{Op: OpDropStep, Request: DropStepRequest{}, Result: Empty{}, Idempotent: true, Internal: true},
 	{Op: OpOpen, Request: OpenRequest{}, Result: OpenResult{}, Idempotent: true},
+	{Op: OpDemo, Request: DemoRequest{}, Result: DemoResult{}},
+	{Op: OpSkip, Request: SkipRequest{}, Result: SkipResult{}},
 }
