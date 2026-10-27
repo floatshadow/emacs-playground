@@ -113,9 +113,11 @@ config-schema: ## regenerate deploy/config.schema.json
 fonts: ## web fonts for make dev (.dev/fonts, served at /fonts by the dev gateway)
 	$(GO) run ./cmd/playctl fonts -o .dev/fonts
 
-.PHONY: curriculum-validate curriculum-build curriculum-play
-curriculum-play: ## replay every ready lesson's demos against the running local stack
-	$(GO) run ./cmd/playctl curriculum play all -session $${PG_PLAY_SESSION:-http://127.0.0.1:8080/s/local}
+.PHONY: curriculum-validate curriculum-build curriculum-play curriculum-watch
+curriculum-play: ## replay every ready lesson's demos twice against the running local stack (progress reset after)
+	$(GO) run ./cmd/playctl curriculum play all -repeat 2 -session $${PG_PLAY_SESSION:-http://127.0.0.1:8080/s/local}
+curriculum-watch: ## replay Part 0 as Watch it demonstrations, then as the learner (PART=all for every lesson)
+	$(GO) run ./cmd/playctl curriculum play -watch $(or $(PART),part:0) -session $${PG_PLAY_SESSION:-http://127.0.0.1:8080/s/local}
 curriculum-validate: ## validate curriculum/
 	$(GO) run ./cmd/playctl curriculum validate curriculum
 curriculum-build: ## build the curriculum bundle into artifacts/curriculum

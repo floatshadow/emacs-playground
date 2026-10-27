@@ -12,9 +12,14 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path"
+	"slices"
 	"strings"
+	"sync"
 	"text/tabwriter"
 	"time"
+
+	"github.com/coder/websocket"
 
 	"github.com/floatshadow/emacs-playground/internal/curriculum"
 	"github.com/floatshadow/emacs-playground/internal/httpx"
@@ -31,6 +36,16 @@ import (
 // Origin header equal to the URL's origin so the gateway's check passes.
 // sessiond fetches scenarios and fixtures from its gateway, so the gateway
 // must serve a bundle built from the same source.
+//
+// Replays are not a learner's progress: with a gateway session path each
+// lesson's progress is reset after it was played (-reset-progress, default
+// on for such URLs, off for sessiond itself, which has no progress API).
+//
+// -watch plays every step the way the browser's "Watch it" does (rpc demo
+// start, the demo, rpc demo end) and requires a step demonstrated event
+// with the step still active; then it resets the step (rpc restore {}) and
+// plays the same keys as the learner, requiring the step to complete
+// (R1). -repeat N plays every lesson N times in a row (flaky demos, X4).
 func curriculumPlay(args []string) int {
 	fs := flag.NewFlagSet("curriculum play", flag.ExitOnError)
 	session := fs.String("session", envOr("PG_PLAY_SESSION", "http://127.0.0.1:7000"), "session URL: sessiond or <gateway>/s/<id>")
@@ -38,13 +53,28 @@ func curriculumPlay(args []string) int {
 	timeout := fs.Duration("timeout", 30*time.Second, "time a step may take to complete after its demo")
 	speed := fs.Float64("speed", 1, "pacing multiplier for chord and character delays (2 = twice as fast)")
 	keepGoing := fs.Bool("k", true, "continue with the next step after a failure")
+	watch := fs.Bool("watch", false, "play each step as a Watch it demonstration (expect demonstrated), then as the learner (expect complete)")
+	resetProgress := fs.Bool("reset-progress", false, "reset each played lesson's progress afterwards (default: on for a gateway session URL …/s/<id>)")
+	repeat := fs.Int("repeat", 1, "play every lesson this many times in a row")
 	sel, err := parseInterleaved(fs, args)
 	if err != nil {
 		return 2
 	}
 	if len(sel) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: playctl curriculum play <lesson id | part dir | 2.3 | all>... [-session URL]")
+		fmt.Fprintln(os.Stderr, "usage: playctl curriculum play <lesson id | part dir | 2.3 | all>... [-session URL] [-watch] [-repeat N] [-reset-progress=false]")
 		return 2
+	}
+	resetSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "reset-progress" {
+			resetSet = true
+		}
+	})
+	if !resetSet {
+		*resetProgress = gatewaySessionURL(*session)
+	}
+	if *repeat < 1 {
+		*repeat = 1
 	}
 	src, diags := curriculum.Load(*dir)
 	if diags.HasErrors() {
@@ -68,14 +98,44 @@ func curriculumPlay(args []string) int {
 		return 1
 	}
 	p := &player{c: c, timeout: *timeout, speed: *speed, keepGoing: *keepGoing, log: os.Stderr}
+	if *watch {
+		ev, err := c.subscribe(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "-watch needs the session's events: %v\n", err)
+			return 1
+		}
+		defer ev.close()
+		p.events = ev
+	}
 	var results []stepResult
 	for _, l := range lessons {
-		results = append(results, p.playLesson(ctx, l)...)
+		for n := 0; n < *repeat && ctx.Err() == nil; n++ {
+			results = append(results, p.playLesson(ctx, l)...)
+		}
+		if *resetProgress {
+			// Also after an interrupt: the replay is not the learner's.
+			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			if err := c.resetProgress(rctx, l.ID); err != nil {
+				fmt.Fprintf(os.Stderr, "resetting the progress of %s: %v\n", l.ID, err)
+			}
+			cancel()
+		}
 		if ctx.Err() != nil {
 			break
 		}
 	}
 	return printResults(os.Stdout, results)
+}
+
+// gatewaySessionURL reports whether u is a gateway session path
+// (<gateway>/s/<id>) rather than sessiond itself.
+func gatewaySessionURL(u string) bool {
+	pu, err := url.Parse(strings.TrimRight(u, "/"))
+	if err != nil {
+		return false
+	}
+	dir, id := path.Split(pu.Path)
+	return id != "" && strings.HasSuffix(dir, "/s/")
 }
 
 func envOr(k, def string) string {
@@ -183,6 +243,124 @@ func (c *sessionClient) rpc(ctx context.Context, op protocol.RPCOp, req, res any
 	return nil
 }
 
+// resetProgress clears one lesson's progress through the gateway's API
+// (POST <origin>/api/v1/progress/reset {lessonId}).
+func (c *sessionClient) resetProgress(ctx context.Context, lessonID string) error {
+	body, _ := json.Marshal(protocol.ProgressResetRequest{LessonID: lessonID})
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, c.origin+protocol.APIPrefix+"/progress/reset", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Origin", c.origin)
+	resp, err := c.hc.Do(r)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		return httpx.DecodeProblem(resp)
+	}
+	return nil
+}
+
+// subscribe opens the session's /events stream (for -watch).
+func (c *sessionClient) subscribe(ctx context.Context) (*eventLog, error) {
+	u := "ws" + strings.TrimPrefix(c.base, "http") + protocol.PathEvents
+	dctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(dctx, u, &websocket.DialOptions{HTTPHeader: http.Header{"Origin": {c.origin}}})
+	if err != nil {
+		return nil, err
+	}
+	conn.SetReadLimit(4 << 20)
+	rctx, stop := context.WithCancel(context.Background())
+	l := &eventLog{conn: conn, stop: stop, changed: make(chan struct{}, 1)}
+	go l.read(rctx)
+	return l, nil
+}
+
+// eventLog records the step events of an /events stream.
+type eventLog struct {
+	conn    *websocket.Conn
+	stop    context.CancelFunc
+	mu      sync.Mutex
+	steps   []*protocol.StepEvent
+	lastSeq int64
+	err     error
+	changed chan struct{}
+}
+
+func (l *eventLog) read(ctx context.Context) {
+	for {
+		_, data, err := l.conn.Read(ctx)
+		l.mu.Lock()
+		if err != nil {
+			l.err = err
+			l.mu.Unlock()
+			l.notify()
+			return
+		}
+		if ev, derr := protocol.DecodeEvent(data); derr == nil {
+			if s, ok := ev.(*protocol.StepEvent); ok {
+				l.steps = append(l.steps, s)
+			}
+			if seq := ev.Env().Seq; seq > l.lastSeq {
+				l.lastSeq = seq
+			}
+		}
+		l.mu.Unlock()
+		l.notify()
+	}
+}
+
+func (l *eventLog) notify() {
+	select {
+	case l.changed <- struct{}{}:
+	default:
+	}
+}
+
+// mark returns a position: wait looks at step events after it.
+func (l *eventLog) mark() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.steps)
+}
+
+// wait returns the first step event after mark for lessonID and stepID
+// whose status is one of statuses.
+func (l *eventLog) wait(ctx context.Context, mark int, lessonID, stepID string, d time.Duration, statuses ...protocol.StepStatus) (*protocol.StepEvent, error) {
+	deadline := time.NewTimer(d)
+	defer deadline.Stop()
+	for {
+		l.mu.Lock()
+		for _, s := range l.steps[min(mark, len(l.steps)):] {
+			if s.LessonID == lessonID && s.StepID == stepID && slices.Contains(statuses, s.Status) {
+				l.mu.Unlock()
+				return s, nil
+			}
+		}
+		err := l.err
+		l.mu.Unlock()
+		if err != nil {
+			return nil, fmt.Errorf("events stream: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-deadline.C:
+			return nil, fmt.Errorf("no step %v event for %s within %v", statuses, stepID, d)
+		case <-l.changed:
+		}
+	}
+}
+
+func (l *eventLog) close() {
+	l.stop()
+	_ = l.conn.Close(websocket.StatusNormalClosure, "")
+}
+
 func (c *sessionClient) status(ctx context.Context) (protocol.StatusResult, error) {
 	var st protocol.StatusResult
 	r, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+protocol.PathStatus, nil)
@@ -214,6 +392,9 @@ type player struct {
 	speed     float64
 	keepGoing bool
 	log       io.Writer
+	// events is set with -watch: each step is first played as a "Watch it"
+	// demonstration.
+	events *eventLog
 }
 
 func (p *player) playLesson(ctx context.Context, l *curriculum.Lesson) []stepResult {
@@ -243,6 +424,18 @@ func (p *player) playLesson(ctx context.Context, l *curriculum.Lesson) []stepRes
 			}
 		}
 		time.Sleep(300 * time.Millisecond)
+		if p.events != nil {
+			if detail := p.watch(ctx, l.ID, st); detail != "" {
+				r := stepResult{Lesson: l.ID, Step: st.ID, Took: time.Since(start), Detail: "watch: " + detail}
+				out = append(out, r)
+				fmt.Fprintf(p.log, "  ✗ %s %s %s\n", st.ID, r.Took.Round(100*time.Millisecond), r.Detail)
+				if !p.keepGoing {
+					return fail(i+1, "skipped")
+				}
+				continue
+			}
+			time.Sleep(300 * time.Millisecond)
+		}
 		if err := p.playDemo(ctx, st.Demo); err != nil {
 			out = append(out, stepResult{Lesson: l.ID, Step: st.ID, Took: time.Since(start), Detail: "demo: " + err.Error()})
 			if !p.keepGoing {
@@ -314,6 +507,68 @@ func (p *player) sleep(ctx context.Context, d time.Duration) {
 	}
 }
 
+// watch plays step st as the browser's "Watch it" does: rpc demo start,
+// the demo, rpc demo end. The step must report demonstrated (not complete)
+// and stay active; then rpc restore {} ("Do it yourself") must reset it.
+// It returns "" on success, else what went wrong.
+func (p *player) watch(ctx context.Context, lessonID string, st *protocol.Step) string {
+	mark := p.events.mark()
+	if err := p.c.rpc(ctx, protocol.OpDemo, protocol.DemoRequest{StepID: st.ID, Phase: protocol.DemoStart}, nil); err != nil {
+		return "demo start: " + err.Error()
+	}
+	perr := p.playDemo(ctx, st.Demo)
+	// A conflict on end means the step is no longer active: the events
+	// below say why.
+	var he *httpx.Error
+	if err := p.c.rpc(ctx, protocol.OpDemo, protocol.DemoRequest{StepID: st.ID, Phase: protocol.DemoEnd}, nil); err != nil && perr == nil &&
+		!(errors.As(err, &he) && he.Code == protocol.ErrConflict) {
+		perr = fmt.Errorf("demo end: %w", err)
+	}
+	if perr != nil {
+		return "demo: " + perr.Error()
+	}
+	ev, err := p.events.wait(ctx, mark, lessonID, st.ID, p.timeout, protocol.StepDemonstrated, protocol.StepComplete)
+	if err != nil {
+		var res protocol.CheckResult
+		if cerr := p.c.rpc(ctx, protocol.OpCheck, protocol.Empty{}, &res); cerr == nil {
+			return err.Error() + "; unmet: " + unmet(res)
+		}
+		return err.Error()
+	}
+	if ev.Status != protocol.StepDemonstrated {
+		return "the demonstration completed the step as done"
+	}
+	if s, err := p.c.status(ctx); err != nil || s.Step == nil || s.Step.StepID != st.ID {
+		return "the step is no longer active after its demonstration"
+	}
+	mark = p.events.mark()
+	if err := p.c.rpc(ctx, protocol.OpRestore, protocol.RestoreRequest{}, nil); err != nil {
+		return "restore: " + err.Error()
+	}
+	if _, err := p.events.wait(ctx, mark, lessonID, st.ID, 15*time.Second, protocol.StepReset); err != nil {
+		return "after Do it yourself: " + err.Error()
+	}
+	return ""
+}
+
+// unmet lists the conditions of a check result that do not hold.
+func unmet(res protocol.CheckResult) string {
+	var out []string
+	for _, c := range res.Conditions {
+		if !c.OK {
+			s := c.ID
+			if c.Unknown {
+				s += " (unknown)"
+			}
+			if c.Detail != "" {
+				s += ": " + strings.SplitN(c.Detail, "\n", 2)[0]
+			}
+			out = append(out, s)
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
 // playDemo replays a demo string through rpc keys with playctl's pacing
 // (protocol.PlayDemo: 170 ms per chord, 70 ms per character, newlines as
 // RET and tabs as TAB, pauses kept as written).
@@ -327,7 +582,7 @@ func (p *player) playDemo(ctx context.Context, demo string) error {
 // moved past it, or the timeout expires.
 func (p *player) awaitComplete(ctx context.Context, lessonID, stepID string, last bool) (bool, string) {
 	deadline := time.Now().Add(p.timeout)
-	var unmet []string
+	var lastCheck protocol.CheckResult
 	for {
 		var res protocol.CheckResult
 		err := p.c.rpc(ctx, protocol.OpCheck, protocol.Empty{}, &res)
@@ -339,19 +594,7 @@ func (p *player) awaitComplete(ctx context.Context, lessonID, stepID string, las
 			// The engine advanced to the next step: this one completed.
 			return true, ""
 		case err == nil:
-			unmet = unmet[:0]
-			for _, c := range res.Conditions {
-				if !c.OK {
-					s := c.ID
-					if c.Unknown {
-						s += " (unknown)"
-					}
-					if c.Detail != "" {
-						s += ": " + strings.SplitN(c.Detail, "\n", 2)[0]
-					}
-					unmet = append(unmet, s)
-				}
-			}
+			lastCheck = res
 		case errors.As(err, &he) && he.Code == protocol.ErrConflict:
 			// No active step: the lesson completed.
 			if last {
@@ -364,7 +607,7 @@ func (p *player) awaitComplete(ctx context.Context, lessonID, stepID string, las
 			if err != nil {
 				return false, "timeout: " + err.Error()
 			}
-			return false, "timeout; unmet: " + strings.Join(unmet, ", ")
+			return false, "timeout; unmet: " + unmet(lastCheck)
 		}
 		p.sleep(ctx, 300*time.Millisecond)
 	}
@@ -383,6 +626,16 @@ func printResults(w io.Writer, results []stepResult) int {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.Lesson, r.Step, res, r.Took.Round(100*time.Millisecond), r.Detail)
 	}
 	_ = tw.Flush()
+	if failed > 0 {
+		// The failures again, with their last check, where a long table
+		// cannot hide them (X4).
+		fmt.Fprintln(w, "\nFailed steps:")
+		for _, r := range results {
+			if !r.OK {
+				fmt.Fprintf(w, "  %s %s: %s\n", r.Lesson, r.Step, r.Detail)
+			}
+		}
+	}
 	fmt.Fprintf(w, "%d steps, %d passed, %d failed\n", len(results), len(results)-failed, failed)
 	if failed > 0 || len(results) == 0 {
 		return 1
