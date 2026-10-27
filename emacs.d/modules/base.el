@@ -325,4 +325,79 @@ stops the daemon itself."
 ;; No window manager runs under Xvnc: never try to raise or move frames.
 (setq pop-up-frames nil)
 
+;; The GUI frame covers the whole X screen, and follows it when the
+;; screen changes size: the browser asks Xvnc for a screen as large as
+;; its pane (noVNC's resize, RandR on the X side), so the frame is drawn
+;; at the size it is shown instead of being scaled down.  Without a
+;; window manager nothing else would move or resize the frame, and
+;; `fullscreen' only takes effect when the frame is made.
+(defun playground--no-window-manager-p (frame)
+  "Non-nil when no window manager runs on FRAME's X display."
+  (not (ignore-errors
+         (x-window-property "_NET_SUPPORTING_WM_CHECK" frame "AnyPropertyType" 0 nil t))))
+
+(defun playground--display-area (frame)
+  "(X Y WIDTH HEIGHT) in pixels of the monitor FRAME is on."
+  (or (ignore-errors
+        (let ((g (frame-monitor-geometry frame)))
+          (and (consp g) (> (nth 2 g) 0) (> (nth 3 g) 0) g)))
+      (list 0 0 (display-pixel-width frame) (display-pixel-height frame))))
+
+(defun playground--frame-fit (area outer-size text-size)
+  "Position and text size that make a frame's outer edges cover AREA.
+AREA is the monitor's (X Y WIDTH HEIGHT); OUTER-SIZE and TEXT-SIZE are
+the frame's (WIDTH HEIGHT) now, in pixels, whose difference is what
+the menu bar, internal borders and fringes take.  Returns (X Y
+TEXT-WIDTH TEXT-HEIGHT)."
+  (pcase-let ((`(,x ,y ,w ,h) area)
+              (`(,ow ,oh) outer-size)
+              (`(,tw ,th) text-size))
+    (list x y (max 1 (- w (- ow tw))) (max 1 (- h (- oh th))))))
+
+(defun playground--outer-size (frame)
+  "FRAME's outer (WIDTH HEIGHT) in pixels, menu bar included."
+  (pcase-let ((`(,left ,top ,right ,bottom) (frame-edges frame 'outer-edges)))
+    (list (- right left) (- bottom top))))
+
+(defun playground-fit-frame-to-display (&optional frame)
+  "Make the graphical FRAME cover its display exactly.
+Its outer edges (menu bar included) go to the monitor's edges; the
+text area gets what remains, to the pixel.  Does nothing for terminal
+frames, child frames, or when a window manager is in charge.  Returns
+the outer size reached as (WIDTH HEIGHT), or nil."
+  (interactive)
+  (let ((frame (or frame (selected-frame))))
+    (when (and (frame-live-p frame)
+               (eq (framep frame) 'x)
+               (not (frame-parameter frame 'parent-frame))
+               (playground--no-window-manager-p frame))
+      (pcase-let ((`(,x ,y ,tw ,th)
+                   (playground--frame-fit (playground--display-area frame)
+                                          (playground--outer-size frame)
+                                          (list (frame-text-width frame)
+                                                (frame-text-height frame))))
+                  (frame-resize-pixelwise t))
+        ;; An explicit size and `fullscreen' would fight.
+        (when (frame-parameter frame 'fullscreen)
+          (set-frame-parameter frame 'fullscreen nil))
+        (set-frame-position frame x y)
+        (set-frame-size frame tw th t)
+        (playground--outer-size frame)))))
+
+(defun playground--fit-new-frame (frame)
+  "Fit FRAME to its display when it is the playground's GUI frame."
+  (when (and (playground-p) (daemonp) (eq (framep frame) 'x))
+    (ignore-errors (playground-fit-frame-to-display frame))))
+
+(defun playground--fit-frames-on (terminal)
+  "Fit the GUI frames of TERMINAL to its display (monitors changed)."
+  (when (and (playground-p) (daemonp))
+    (dolist (frame (frame-list))
+      (when (and (eq (framep frame) 'x)
+                 (or (null terminal) (eq (frame-terminal frame) terminal)))
+        (ignore-errors (playground-fit-frame-to-display frame))))))
+
+(add-hook 'after-make-frame-functions #'playground--fit-new-frame)
+(add-hook 'display-monitors-changed-functions #'playground--fit-frames-on)
+
 ;;; base.el ends here

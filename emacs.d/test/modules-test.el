@@ -124,5 +124,24 @@
     ;; Other lighters are untouched.
     (should (equal (cdr (assq 'abbrev-mode minor-mode-alist)) '(" Abbrev")))))
 
+;;;; The GUI frame (B13)
+
+(ert-deftest pg-modules/gui-frame-follows-the-display ()
+  "The GUI frame is fitted when it is made and when the display changes size."
+  (should (memq #'playground--fit-new-frame after-make-frame-functions))
+  (should (memq #'playground--fit-frames-on display-monitors-changed-functions))
+  ;; Terminal frames are left alone.
+  (should-not (playground-fit-frame-to-display (selected-frame))))
+
+(ert-deftest pg-modules/gui-frame-fit-arithmetic ()
+  "The outer frame, menu bar included, covers the monitor exactly."
+  ;; 20 px of internal border and fringes, a 40 px menu bar.
+  (should (equal (playground--frame-fit '(0 0 1280 900) '(1000 600) '(980 560))
+                 '(0 0 1260 860)))
+  (should (equal (playground--frame-fit '(0 0 1600 900) '(1600 900) '(1580 860))
+                 '(0 0 1580 860)))
+  (should (equal (playground--frame-fit '(0 0 10 10) '(1000 600) '(980 560))
+                 '(0 0 1 1))))
+
 (provide 'modules-test)
 ;;; modules-test.el ends here
