@@ -149,6 +149,20 @@
 .done {
   color: var(--ok);
 }
+/* Finished with skipped or watched steps: a hollow mark, not a tick. */
+.finished {
+  color: var(--ok);
+}
+.finished::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--ok);
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: -0.5px;
+}
 .current .state,
 .state.current {
   color: var(--violet-ink);

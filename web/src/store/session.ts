@@ -14,7 +14,14 @@ import type {
   State,
   Tables,
 } from '../protocol.gen'
-import { expireCards, habitCardFor, type HabitCard, type Nudge } from '../advice/habits'
+import {
+  habitCardFor,
+  loadHabitsSeen,
+  saveHabitsSeen,
+  type HabitCard,
+  type Nudge,
+} from '../advice/habits'
+import { mentionedNow, type Mentions } from '../advice/mentions'
 import {
   tickerGap,
   tickerNote,
@@ -56,6 +63,13 @@ export interface ActiveStep {
   count?: number
 }
 
+/**
+ * How a step ended in this visit (fix plan contract a): completed by the
+ * learner ("complete" → done), completed while a "Watch it" demonstration
+ * was latched, or skipped.
+ */
+export type StepOutcome = 'done' | 'demonstrated' | 'skipped'
+
 export interface FileMark {
   event: 'created' | 'modified' | 'deleted'
   ts: number
@@ -73,12 +87,21 @@ export interface SessionData {
   /** Latest check by stepId (only for the active lesson). */
   checks: Record<string, CheckEvent>
   activeStep: ActiveStep | null
-  /** Steps completed this session, by lesson id. */
-  completed: Record<string, string[]>
-  /** Steps (re)loaded this session, by lesson id: they are not done until completed again. */
-  reopened: Record<string, string[]>
-  /** Lesson ids whose last step completed this session. */
+  /**
+   * This visit's outcome per step, by lesson id. A step that loads again
+   * (redo, go to) loses its outcome until it ends again.
+   */
+  outcomes: Record<string, Record<string, StepOutcome>>
+  /** Lesson ids whose last step completed (or was skipped) this session. */
   lessonsComplete: string[]
+  /**
+   * The active step was watched: a demo started on it, or it was
+   * demonstrated. It shows "Do it yourself" until the step is reset or
+   * loaded again (contract b).
+   */
+  watched: { lessonId: string; stepId: string } | null
+  /** True while the demo player plays (resets from its restore keep `watched`). */
+  demoPlaying: boolean
   mode: FrameKind
   modules: string[]
   modulesRestarting: boolean
@@ -86,7 +109,11 @@ export interface SessionData {
   cards: HabitCard[]
   dismissed: Set<string>
   habitsSeen: Set<string>
+  /** Keys the current lesson mentions (habit cards and patterns stay quiet for them). */
+  mentions: Mentions | null
   totalCommands: number
+  /** Server time (ts) of the newest key event: older prefix events are stale (B4). */
+  lastKeyTs: number
   emacs: EmacsStatusView
   echo: { text: string; at: number } | null
   /** Echo text still shown: set by echo events, cleared by the next key (exits.yaml session.echo). */
@@ -121,9 +148,10 @@ export function initialSessionData(): SessionData {
     ticker: [],
     checks: {},
     activeStep: null,
-    completed: {},
-    reopened: {},
+    outcomes: {},
     lessonsComplete: [],
+    watched: null,
+    demoPlaying: false,
     mode: 'terminal',
     modules: [],
     modulesRestarting: false,
@@ -131,7 +159,9 @@ export function initialSessionData(): SessionData {
     cards: [],
     dismissed: new Set(),
     habitsSeen: new Set(),
+    mentions: null,
     totalCommands: 0,
+    lastKeyTs: 0,
     emacs: { overlay: null, busy: false },
     echo: null,
     echoLive: null,
@@ -147,25 +177,28 @@ export function initialSessionData(): SessionData {
   }
 }
 
-function addTo(
-  m: Record<string, string[]>,
+function setOutcome(
+  m: SessionData['outcomes'],
   lessonId: string,
   stepId: string,
-): Record<string, string[]> {
-  const cur = m[lessonId] ?? []
-  if (cur.includes(stepId)) return m
-  return { ...m, [lessonId]: [...cur, stepId] }
+  outcome: StepOutcome | null,
+): SessionData['outcomes'] {
+  const cur = m[lessonId] ?? {}
+  if (outcome === null) {
+    if (!(stepId in cur)) return m
+    const next = { ...cur }
+    delete next[stepId]
+    return { ...m, [lessonId]: next }
+  }
+  if (cur[stepId] === outcome) return m
+  return { ...m, [lessonId]: { ...cur, [stepId]: outcome } }
 }
 
-function removeFrom(
-  m: Record<string, string[]>,
+const sameStep = (
+  a: { lessonId: string; stepId: string } | null,
   lessonId: string,
   stepId: string,
-): Record<string, string[]> {
-  const cur = m[lessonId]
-  if (!cur || !cur.includes(stepId)) return m
-  return { ...m, [lessonId]: cur.filter((x) => x !== stepId) }
-}
+) => !!a && a.lessonId === lessonId && a.stepId === stepId
 
 /**
  * The reducer for /events. Pure: the result depends only on the inputs.
@@ -201,23 +234,38 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
       return next
     }
     case 'key': {
+      // Server time only: prefix events carry the same clock (the client's may differ).
+      const lastKeyTs = ev.ts !== undefined ? Math.max(base.lastKeyTs, ev.ts) : base.lastKeyTs
       // Clicks and scrolling are not keys: no ticker entry, no habit card.
-      if (!ev.mx && isMouseOnly(ev.keys)) return { ...base, echoLive: null }
+      if (!ev.mx && isMouseOnly(ev.keys)) return { ...base, echoLive: null, lastKeyTs }
       const ticker = tickerOnKey(base.ticker, ev, now)
       const entry = ticker[ticker.length - 1]
       const totalCommands = base.totalCommands + 1
-      let cards = expireCards(base.cards, totalCommands)
+      let cards = base.cards
       let habitsSeen = base.habitsSeen
       if (entry && now >= base.quietHabitsUntil) {
-        const card = habitCardFor(entry, base.tables.habits, habitsSeen, totalCommands)
+        const mentioned = mentionedNow(base.mentions, base.activeStep)
+        const card = habitCardFor(entry, base.tables.habits, habitsSeen, totalCommands, mentioned)
         if (card) {
           habitsSeen = new Set(habitsSeen).add(card.key)
           cards = [...cards, card]
         }
       }
-      return { ...base, ticker, prefix: null, totalCommands, cards, habitsSeen, echoLive: null }
+      return {
+        ...base,
+        ticker,
+        prefix: null,
+        totalCommands,
+        cards,
+        habitsSeen,
+        echoLive: null,
+        lastKeyTs,
+      }
     }
     case 'prefix': {
+      // A prefix older than the newest command is stale: Emacs already used
+      // its keys (the tap reports a lone ESC from a timer, B4).
+      if (ev.ts !== undefined && ev.ts < base.lastKeyTs) return base
       const keys = ev.keys.trim()
       return { ...base, ticker: tickerOnPrefix(base.ticker, ev, now), prefix: keys || null }
     }
@@ -290,31 +338,8 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
     }
     case 'check':
       return { ...base, checks: { ...base.checks, [ev.stepId]: ev } }
-    case 'step': {
-      const ref = { lessonId: ev.lessonId, stepId: ev.stepId, index: ev.index, count: ev.count }
-      if (ev.status === 'loaded' || ev.status === 'reset') {
-        const sameLesson = base.activeStep?.lessonId === ev.lessonId
-        const checks = { ...(sameLesson || ev.status === 'reset' ? base.checks : {}) }
-        delete checks[ev.stepId]
-        return {
-          ...base,
-          activeStep: ref,
-          checks,
-          completed: removeFrom(base.completed, ev.lessonId, ev.stepId),
-          reopened: addTo(base.reopened, ev.lessonId, ev.stepId),
-          lessonsComplete: base.lessonsComplete.filter((x) => x !== ev.lessonId),
-        }
-      }
-      // complete
-      const completed = addTo(base.completed, ev.lessonId, ev.stepId)
-      const reopened = removeFrom(base.reopened, ev.lessonId, ev.stepId)
-      const lessonsComplete =
-        ev.lessonComplete && !base.lessonsComplete.includes(ev.lessonId)
-          ? [...base.lessonsComplete, ev.lessonId]
-          : base.lessonsComplete
-      const activeStep = ev.lessonComplete ? { ...ref } : base.activeStep
-      return { ...base, completed, reopened, lessonsComplete, activeStep }
-    }
+    case 'step':
+      return reduceStep(base, ev)
     case 'nudge': {
       const n: Nudge = { id: ev.id, kind: ev.kind, title: ev.title, body: ev.body }
       return { ...base, serverNudges: [...base.serverNudges.filter((x) => x.id !== ev.id), n] }
@@ -322,13 +347,84 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
     case 'checkpoint':
       return { ...base, checkpointsVersion: base.checkpointsVersion + 1 }
     case 'mode':
-      return { ...base, mode: ev.mode }
+      // Another frame reads keys from another keyboard: a prefix pending in
+      // the one left behind is not what the learner is in.
+      return { ...base, mode: ev.mode, prefix: ev.mode === base.mode ? base.prefix : null }
     case 'modules':
       return { ...base, modules: ev.enabled ?? base.modules, modulesRestarting: ev.restarting }
     case 'gap':
       return { ...base, ticker: tickerGap(base.ticker, now) }
     case 'error':
       return { ...base, lastError: ev }
+  }
+  return base
+}
+
+/** The step lifecycle (api.md §4.1). */
+function reduceStep(base: SessionData, ev: Extract<Event, { t: 'step' }>): SessionData {
+  const ref: ActiveStep = {
+    lessonId: ev.lessonId,
+    stepId: ev.stepId,
+    index: ev.index,
+    count: ev.count,
+  }
+  switch (ev.status) {
+    case 'loaded':
+    case 'reset': {
+      const otherLesson = base.activeStep?.lessonId !== ev.lessonId
+      const checks = { ...(otherLesson && ev.status === 'loaded' ? {} : base.checks) }
+      delete checks[ev.stepId]
+      // A reset from the demo's own restore (demo start) keeps "watched".
+      const keepWatched =
+        ev.status === 'reset' && base.demoPlaying && sameStep(base.watched, ev.lessonId, ev.stepId)
+      const next: SessionData = {
+        ...base,
+        activeStep: ref,
+        checks,
+        outcomes: setOutcome(base.outcomes, ev.lessonId, ev.stepId, null),
+        lessonsComplete: base.lessonsComplete.filter((x) => x !== ev.lessonId),
+        watched: keepWatched ? base.watched : null,
+      }
+      if (ev.status === 'loaded' && otherLesson) {
+        // The ticker, the pending prefix and the habit cards belong to the
+        // lesson (decision 8; R6, R9, B9).
+        next.ticker = []
+        next.prefix = null
+        next.cards = []
+      }
+      return next
+    }
+    case 'demonstrated':
+      return {
+        ...base,
+        outcomes: setOutcome(base.outcomes, ev.lessonId, ev.stepId, 'demonstrated'),
+        watched: { lessonId: ev.lessonId, stepId: ev.stepId },
+      }
+    case 'complete':
+    case 'skipped': {
+      const outcomes = setOutcome(
+        base.outcomes,
+        ev.lessonId,
+        ev.stepId,
+        ev.status === 'complete' ? 'done' : 'skipped',
+      )
+      const lessonsComplete =
+        ev.lessonComplete && !base.lessonsComplete.includes(ev.lessonId)
+          ? [...base.lessonsComplete, ev.lessonId]
+          : base.lessonsComplete
+      const activeStep = ev.lessonComplete ? { ...ref } : base.activeStep
+      const watched = sameStep(base.watched, ev.lessonId, ev.stepId) ? null : base.watched
+      return { ...base, outcomes, lessonsComplete, activeStep, watched }
+    }
+    case 'dropped': {
+      const dropped = sameStep(base.activeStep, ev.lessonId, ev.stepId)
+      return {
+        ...base,
+        activeStep: dropped ? null : base.activeStep,
+        checks: dropped ? {} : base.checks,
+        watched: sameStep(base.watched, ev.lessonId, ev.stepId) ? null : base.watched,
+      }
+    }
   }
   return base
 }
@@ -343,6 +439,8 @@ export interface SessionStore extends SessionData {
   setConnection(kind: 'events' | 'pty' | 'vnc', st: ConnState): void
   setTables(t: Tables): void
   setDescribed(cmd: string, gloss: string): void
+  /** The keys the lesson on screen mentions (nudge suppression, contract d). */
+  setMentions(m: Mentions | null): void
   /**
    * Demo playback started (true) or ended (false). Habit cards stay quiet
    * while it plays and for tailMs (default DEMO_QUIET_TAIL_MS) after, since
@@ -350,6 +448,15 @@ export interface SessionStore extends SessionData {
    * learner's own typing stopped the demo the tail is 0: their keys count.
    */
   setDemoPlaying(playing: boolean, tailMs?: number): void
+  /** A demo started on this step: it shows "Do it yourself" until reset (contract b). */
+  markWatched(lessonId: string, stepId: string): void
+  /**
+   * "Start over" (contract a): forgets what this page remembers about the
+   * learner's progress: outcomes, completions, checks, habit keys seen
+   * (also in localStorage), habit cards and dismissals. The active step
+   * clears when sessiond's "dropped" event arrives.
+   */
+  forgetProgress(lessonId?: string): void
   /** A synthetic ticker entry (Rescue, Reset). */
   note(entry: { keys: string[]; cmd: string; gloss?: string; kind: TickerEntry['kind'] }): void
   /** Back to the initial state (tests, logout). */
@@ -365,11 +472,55 @@ export const useSessionStore = create<SessionStore>()((set) => ({
     set((s) => (s.connection[kind] === st ? s : { connection: { ...s.connection, [kind]: st } })),
   setTables: (tables) => set({ tables }),
   setDescribed: (cmd, gloss) => set((s) => ({ described: { ...s.described, [cmd]: gloss } })),
+  setMentions: (mentions) => set({ mentions }),
   setDemoPlaying: (playing, tailMs = DEMO_QUIET_TAIL_MS) =>
-    set({ quietHabitsUntil: playing ? Number.POSITIVE_INFINITY : Date.now() + tailMs }),
+    set({
+      demoPlaying: playing,
+      quietHabitsUntil: playing ? Number.POSITIVE_INFINITY : Date.now() + tailMs,
+    }),
+  markWatched: (lessonId, stepId) => set({ watched: { lessonId, stepId } }),
+  forgetProgress: (lessonId) =>
+    set((s) => {
+      if (lessonId) {
+        const outcomes = { ...s.outcomes }
+        delete outcomes[lessonId]
+        return {
+          outcomes,
+          lessonsComplete: s.lessonsComplete.filter((x) => x !== lessonId),
+          checks: s.activeStep?.lessonId === lessonId ? {} : s.checks,
+          watched: s.watched?.lessonId === lessonId ? null : s.watched,
+        }
+      }
+      if (s.sessionId) saveHabitsSeen(s.sessionId, new Set())
+      return {
+        outcomes: {},
+        lessonsComplete: [],
+        checks: {},
+        watched: null,
+        habitsSeen: new Set<string>(),
+        cards: [],
+        dismissed: new Set<string>(),
+      }
+    }),
   note: (entry) => set((s) => ({ ticker: tickerNote(s.ticker, entry, Date.now()) })),
   reset: () => set(initialSessionData()),
 }))
+
+// "Once each" survives reloads (contract d): the habit keys already shown
+// are kept per session in localStorage, read when the session id becomes
+// known and written whenever a card fires.
+useSessionStore.subscribe((s, prev) => {
+  if (s.sessionId && s.sessionId !== prev.sessionId) {
+    const stored = loadHabitsSeen(s.sessionId)
+    if (stored.some((k) => !s.habitsSeen.has(k))) {
+      useSessionStore.setState({ habitsSeen: new Set([...s.habitsSeen, ...stored]) })
+    }
+    return
+  }
+  if (s.sessionId && s.habitsSeen !== prev.habitsSeen && s.habitsSeen.size > 0) {
+    saveHabitsSeen(s.sessionId, s.habitsSeen)
+  }
+})
 
 /** Resolves once the store has a session id (rpc and the panes wait on it). */
 export function whenSessionId(timeoutMs = 30000): Promise<string> {

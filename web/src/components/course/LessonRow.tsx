@@ -1,6 +1,6 @@
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
-import type { LessonRef, Part } from '../../protocol.gen'
+import type { LessonRef, Part, ProgressCounts } from '../../protocol.gen'
 import type { LessonState } from './progress'
 import styles from './Course.module.css'
 
@@ -14,10 +14,13 @@ export function LessonRow({
   part,
   lesson,
   state,
+  counts,
 }: {
   part: Part
   lesson: LessonRef
   state: LessonState
+  /** Step counts from progress (skipped and watched steps show in the label). */
+  counts?: ProgressCounts | undefined
 }) {
   const { t } = useTranslation()
   const title = (
@@ -37,9 +40,22 @@ export function LessonRow({
   // The part heading already says "suggested after part N"; repeating it on
   // every row is noise, so suggested rows read "not started" (dimmed) and
   // carry the suggestion in their tooltip only.
-  const label = t(`course.state.${state === 'suggested' ? 'not-started' : state}`)
+  let label = t(`course.state.${state === 'suggested' ? 'not-started' : state}`)
+  // Skipped and watched steps are not hidden behind "done" (contract c).
+  const skipped = counts?.skipped ?? 0
+  const watched = counts?.demonstrated ?? 0
+  if (state === 'finished') {
+    if (skipped) label += ' · ' + t('course.skippedCount', { count: skipped })
+    if (watched) label += ' · ' + t('course.watchedCount', { count: watched })
+  } else if ((state === 'in-progress' || state === 'current') && skipped) {
+    label += ' · ' + t('course.skippedCount', { count: skipped })
+  }
   const hint =
-    state === 'suggested' ? t('course.state.suggested', { n: part.suggestedAfter }) : undefined
+    state === 'suggested'
+      ? t('course.state.suggested', { n: part.suggestedAfter })
+      : state === 'finished'
+        ? t('course.finishedTitle')
+        : undefined
   return (
     <li className={state === 'current' ? styles.current : undefined}>
       {lesson.status === 'ready' ? (
@@ -55,7 +71,7 @@ export function LessonRow({
       )}
       <span className={`${styles.state} ${styles[state] ?? ''}`} title={hint}>
         {label}
-        {lesson.minutes > 0 && state !== 'done' && state !== 'planned' && (
+        {lesson.minutes > 0 && state !== 'done' && state !== 'finished' && state !== 'planned' && (
           <span className={styles.minutes}> · {t('course.minutes', { n: lesson.minutes })}</span>
         )}
       </span>

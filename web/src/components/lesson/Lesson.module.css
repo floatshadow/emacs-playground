@@ -48,6 +48,9 @@
   background: var(--paper-3);
   padding: 1px 5px;
   border-radius: 3px;
+  /* Long paths (/work/projects/polyglot/src/main.rs) wrap instead of
+     widening the pane past its column at 1440 px and below. */
+  overflow-wrap: anywhere;
 }
 .prose pre {
   background: var(--screen);
@@ -223,6 +226,62 @@
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
+/* Watched (demonstrated) steps and the watched active step: a hollow check. */
+.demonstrated .mark,
+.watched .mark {
+  border-color: var(--ok);
+  border-width: 2px;
+}
+.demonstrated .mark::after,
+.watched .mark::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 5px;
+  height: 9px;
+  border: solid var(--ok);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+/* Skipped steps: an arrow past the step. */
+.skipped .mark {
+  border-color: var(--ink-3);
+  border-style: dashed;
+}
+.skipped .mark::after {
+  content: '→';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 600 11px/1 var(--mono);
+  color: var(--ink-3);
+}
+.skipped .goal,
+.demonstrated .goal {
+  color: var(--ink-2);
+}
+.stateTag {
+  font: 400 12.5px var(--mono);
+  color: var(--ink-3);
+  margin-left: 4px;
+}
+.watchedNote {
+  margin: 10px 0 0;
+  font: italic 14px var(--serif);
+  color: var(--ok);
+}
+/* L1: a step that just ended is highlighted for a moment before the next one scrolls in. */
+.justDone {
+  background: var(--ok-soft);
+  border-radius: 6px;
+  transition: background 0.6s ease-out;
+}
+.justDone .mark {
+  animation: pop 0.3s ease-out;
+}
 .active {
   background: #fff;
   margin: 0 -12px;
@@ -253,6 +312,7 @@
   background: var(--paper-3);
   padding: 1px 4px;
   border-radius: 3px;
+  overflow-wrap: anywhere;
 }
 .conds {
   list-style: none;
@@ -264,6 +324,7 @@
   padding: 2px 0 2px 18px;
   position: relative;
   color: var(--ink-2);
+  overflow-wrap: anywhere;
 }
 .conds li::before {
   content: '';

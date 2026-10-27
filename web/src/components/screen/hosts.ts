@@ -22,6 +22,7 @@ import i18n from '../../i18n'
 import { MODUS_VIVENDI_TINTED, TERMINAL_FONT } from './theme'
 import { emitTerminalInput, isLearnerKeydown, registerTerminalFocus } from './focus'
 import { extendedKeySequence } from './extkeys'
+import { exitFocusMode } from './focusMode'
 import { LESSON_PANE_ID } from './paneIds'
 
 /** The exact xterm.js options from frontend.md §5. */
@@ -145,10 +146,17 @@ class TerminalHost {
       // No WebGL (headless, old GPU): the DOM renderer is used.
     }
     term.attachCustomKeyEventHandler((e) => {
+      // While "Skip this step" plays the step, the learner's keys wait (S2).
+      if (useUiStore.getState().skipping) {
+        e.preventDefault()
+        return false
+      }
       const verdict = classifyKey(e, useUiStore.getState().focusMode)
       if (verdict === 'leave') {
         e.preventDefault()
-        focusLessonPane()
+        // In focus mode the lesson pane is hidden: Shift+Esc leaves focus mode first.
+        if (useUiStore.getState().focusMode) void exitFocusMode().then(focusLessonPane)
+        else focusLessonPane()
         return false
       }
       // Learner input is a real keypress, not whatever reaches onData

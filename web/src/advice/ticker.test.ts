@@ -96,6 +96,29 @@ describe('ticker reducer', () => {
     expect(selectTicker(t, DEFAULT_GLOSS, {})[0]?.gloss).toBe('Nothing is bound to this key here')
   })
 
+  it('collapses a run of typing into one entry with the last 12 characters (B10)', () => {
+    let t: TickerEntry[] = tickerOnKey([], key('C-e', 'move-end-of-line'), 1)
+    for (const [i, ch] of [...'hello world!!'].entries())
+      t = tickerOnKey(t, key(ch === ' ' ? 'SPC' : ch, 'self-insert-command'), 2 + i)
+    expect(t).toHaveLength(2)
+    const run = t[1]
+    expect(run?.count).toBe(13)
+    expect(run?.typed).toBe('ello world!!')
+    // The entry grows in place: the same id, no new card per letter.
+    const id = run?.id
+    t = tickerOnKey(t, key('a', 'self-insert-command'), 30)
+    expect(t[1]?.id).toBe(id)
+    expect(t[1]?.count).toBe(14)
+    // A command ends the run; the next typing starts a new one.
+    t = tickerOnKey(t, key('C-a', 'move-beginning-of-line'), 31)
+    t = tickerOnKey(t, key('x', 'self-insert-command'), 32)
+    expect(t.map((e) => e.count ?? 0)).toEqual([0, 14, 0, 1])
+    // Search typing collapses too, separately from buffer typing.
+    t = tickerOnKey(t, key('z', 'isearch-printing-char'), 33)
+    expect(t.at(-1)?.typed).toBe('z')
+    expect(t).toHaveLength(5)
+  })
+
   it('marks gaps once', () => {
     let t = tickerGap([], 1)
     t = tickerGap(t, 2)

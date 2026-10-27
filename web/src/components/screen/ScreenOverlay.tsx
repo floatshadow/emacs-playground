@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useEnsureSession } from '../../api/queries'
 import { useSessionStore } from '../../store/session'
+import { useUiStore } from '../../store/ui'
 import { Button } from '../common/Button'
 import { doRescue } from '../live/actions'
 import styles from './Screen.module.css'
@@ -33,9 +34,21 @@ export function ScreenOverlay({ onReattach }: { onReattach(): void }) {
   const emacs = useSessionStore((s) => s.emacs)
   const modulesRestarting = useSessionStore((s) => s.modulesRestarting)
   const mode = useSessionStore((s) => s.mode)
+  const skipping = useUiStore((s) => s.skipping)
 
   let card: ReactNode = null
-  if (!sessionId) {
+  if (skipping) {
+    // "Skip this step" (S2): Emacs plays the step; the learner watches
+    // through a light veil and their keys wait (the terminal swallows them).
+    card = (
+      <div className={styles.skipOverlay} role="status" aria-label={t('stuck.skipping')}>
+        <div className={styles.overlayCard}>
+          <strong>{t('stuck.skipping')}</strong>
+          <span>{t('stuck.skippingBody')}</span>
+        </div>
+      </div>
+    )
+  } else if (!sessionId) {
     card = session.isError ? (
       <Card
         title={t('overlay.sessionFailed')}

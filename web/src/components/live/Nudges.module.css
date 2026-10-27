@@ -57,3 +57,19 @@
     transform: translateY(-4px);
   }
 }
+.more {
+  margin-top: 8px;
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  font: italic 13.5px var(--serif);
+  color: var(--violet-ink);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--rule);
+  text-underline-offset: 3px;
+}
+.more:focus-visible {
+  outline: 2px solid var(--violet);
+  outline-offset: 2px;
+}

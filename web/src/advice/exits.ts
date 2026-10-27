@@ -92,6 +92,31 @@ const MINOR_LIGHTERS: Record<string, string> = {
   'apheleia-mode': 'Apheleia',
 }
 
+/**
+ * Minor modes that are housekeeping: they never ask anything of the
+ * learner, so the Mode row does not list them (the configuration hides
+ * their lighters in the mode line too; B16, R8).
+ */
+export const HOUSEKEEPING_MINORS: ReadonlySet<string> = new Set([
+  'ws-butler-mode',
+  'global-ws-butler-mode',
+  'auto-save-visited-mode',
+  'save-place-mode',
+  'recentf-mode',
+  'savehist-mode',
+  'global-auto-revert-mode',
+  'electric-indent-mode',
+  'global-font-lock-mode',
+  'font-lock-mode',
+  'which-key-mode',
+  'gcmh-mode',
+])
+
+/** The minor modes worth naming in the Mode row, as lighters. */
+export function visibleMinors(minors: readonly string[]): string[] {
+  return minors.filter((m) => !HOUSEKEEPING_MINORS.has(m)).map(minorLighter)
+}
+
 /** "eglot--managed-mode" → "Eglot", "flymake-mode" → "Flymake". */
 export function minorLighter(sym: string): string {
   const known = MINOR_LIGHTERS[sym]
@@ -193,7 +218,7 @@ export function whereAmI(
     modified: state.modified,
     modeName: state.modeName,
     mode: state.mode,
-    minors: (state.minors ?? []).map(minorLighter),
+    minors: visibleMinors(state.minors ?? []),
     windows: state.windows?.length ?? 1,
     prompt: mini ? mini.prompt.trim() : null,
     flags,

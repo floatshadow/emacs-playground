@@ -2,15 +2,33 @@
 import type { CurriculumIndex, LessonRef, Part, Progress } from '../../protocol.gen'
 
 export type LessonState =
-  'done' | 'current' | 'in-progress' | 'not-started' | 'suggested' | 'planned'
+  'done' | 'finished' | 'current' | 'in-progress' | 'not-started' | 'suggested' | 'planned'
 
 export function lessonDone(progress: Progress | undefined, id: string): boolean {
   return progress?.lessons?.[id]?.status === 'done'
 }
 
+/**
+ * Every step is done, demonstrated or skipped, but not all are done
+ * (contract c): the row reads "finished · N skipped · M watched".
+ */
+export function lessonFinished(progress: Progress | undefined, id: string): boolean {
+  const lp = progress?.lessons?.[id]
+  const c = lp?.counts
+  if (!lp || !c || c.total <= 0 || lp.status === 'done') return false
+  return c.done + c.demonstrated + c.skipped >= c.total
+}
+
+/** Done, or every step done or skipped: Continue moves past it (a watched step is practised). */
+function lessonPassed(progress: Progress | undefined, id: string): boolean {
+  if (lessonDone(progress, id)) return true
+  const c = progress?.lessons?.[id]?.counts
+  return !!c && c.total > 0 && c.done + c.skipped >= c.total
+}
+
 export function lessonStarted(progress: Progress | undefined, id: string): boolean {
   const s = progress?.lessons?.[id]?.status
-  return s === 'in-progress' || s === 'done'
+  return s !== undefined && s !== 'not-started'
 }
 
 /** Ready lessons in course order. */
@@ -30,11 +48,13 @@ export function currentLesson(
   const ready = allLessons(index).filter((l) => l.status === 'ready')
   if (activeLessonId) {
     const a = ready.find((l) => l.id === activeLessonId)
-    if (a && !lessonDone(progress, a.id)) return a
+    if (a && !lessonPassed(progress, a.id)) return a
   }
   return (
-    ready.find((l) => progress?.lessons?.[l.id]?.status === 'in-progress') ??
-    ready.find((l) => !lessonDone(progress, l.id)) ??
+    ready.find(
+      (l) => progress?.lessons?.[l.id]?.status === 'in-progress' && !lessonPassed(progress, l.id),
+    ) ??
+    ready.find((l) => !lessonPassed(progress, l.id)) ??
     null
   )
 }
@@ -75,6 +95,7 @@ export function lessonState(
   if (lesson.status === 'planned') return 'planned'
   if (lessonDone(progress, lesson.id)) return 'done'
   if (current?.id === lesson.id) return 'current'
+  if (lessonFinished(progress, lesson.id)) return 'finished'
   if (lessonStarted(progress, lesson.id)) return 'in-progress'
   if (part.suggestedAfter !== undefined) {
     const before = index.parts.find((p) => p.n === part.suggestedAfter)

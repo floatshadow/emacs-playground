@@ -40,7 +40,12 @@ export function FrameSwitch() {
       label={t('frame.label')}
       value={mode}
       options={[
-        { value: 'terminal', label: t('frame.terminal'), disabled: !sessionId },
+        {
+          value: 'terminal',
+          label: t('frame.terminal'),
+          disabled: !sessionId,
+          title: t('frame.terminalTitle'),
+        },
         {
           value: 'gui',
           label: t('frame.gui'),

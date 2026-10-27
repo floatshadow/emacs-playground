@@ -13,9 +13,25 @@
 import type { DemoToken } from '../protocol.gen'
 import { formatKey, parseKey } from '../advice/keys.ts'
 
-/** Pacing from protocol.DemoChordDelayMs and DemoCharDelayMs (frontend.md §7). */
+/** Pacing from protocol.DemoChordDelayMs and DemoCharDelayMs (playctl, the fake session). */
 export const CHORD_DELAY_MS = 170
 export const CHAR_DELAY_MS = 70
+
+/** Pacing of a demo: the pause after each chord and after each typed character. */
+export interface DemoPacing {
+  chordMs: number
+  charMs: number
+}
+
+/** playctl's pacing (protocol.DemoChordDelayMs and DemoCharDelayMs). */
+export const REPLAY_PACING: DemoPacing = { chordMs: CHORD_DELAY_MS, charMs: CHAR_DELAY_MS }
+
+/**
+ * "Watch it" plays at human speed so the learner can follow every key in
+ * the caption: 600 ms per chord, 120 ms per typed character (fix plan,
+ * contract b; frontend.md §7).
+ */
+export const WATCH_PACING: DemoPacing = { chordMs: 600, charMs: 120 }
 
 export class DemoParseError extends Error {}
 
@@ -94,21 +110,41 @@ export type DemoAction =
 
 /**
  * Expands tokens into the actions DemoPlayer sends through rpc('keys'): one
- * chord per action followed by 170 ms, one typed character per action
- * followed by 70 ms (newlines and tabs in typed text become RET and TAB), and
- * pauses as given.
+ * chord per action followed by pacing.chordMs (170 ms by default), one typed
+ * character per action followed by pacing.charMs (70 ms by default; newlines
+ * and tabs in typed text become RET and TAB), and pauses as given.
  */
-export function planDemo(tokens: DemoToken[]): DemoAction[] {
+export function planDemo(tokens: DemoToken[], pacing: DemoPacing = REPLAY_PACING): DemoAction[] {
   const out: DemoAction[] = []
   for (const t of tokens) {
-    if (t.kind === 'key' && t.key) out.push({ kind: 'keys', keys: t.key, delayMs: CHORD_DELAY_MS })
+    if (t.kind === 'key' && t.key) out.push({ kind: 'keys', keys: t.key, delayMs: pacing.chordMs })
     else if (t.kind === 'pause') out.push({ kind: 'pause', delayMs: t.pauseMs ?? 0 })
     else if (t.kind === 'text' && t.text) {
       for (const ch of t.text) {
-        if (ch === '\n') out.push({ kind: 'keys', keys: 'RET', delayMs: CHORD_DELAY_MS })
-        else if (ch === '\t') out.push({ kind: 'keys', keys: 'TAB', delayMs: CHORD_DELAY_MS })
-        else out.push({ kind: 'text', text: ch, delayMs: CHAR_DELAY_MS })
+        if (ch === '\n') out.push({ kind: 'keys', keys: 'RET', delayMs: pacing.chordMs })
+        else if (ch === '\t') out.push({ kind: 'keys', keys: 'TAB', delayMs: pacing.chordMs })
+        else out.push({ kind: 'text', text: ch, delayMs: pacing.charMs })
       }
+    }
+  }
+  return out
+}
+
+/** One item of the demo caption: a chord, or a run of typed text. */
+export type CaptionItem = { kind: 'keys'; keys: string } | { kind: 'text'; text: string }
+
+/**
+ * The caption of a playing demo (frontend.md §7): the actions sent so far,
+ * chords one by one and consecutive typed characters as one growing string.
+ */
+export function captionItems(actions: readonly DemoAction[], sent: number): CaptionItem[] {
+  const out: CaptionItem[] = []
+  for (const a of actions.slice(0, Math.max(0, sent))) {
+    if (a.kind === 'keys') out.push({ kind: 'keys', keys: a.keys })
+    else if (a.kind === 'text') {
+      const last = out[out.length - 1]
+      if (last?.kind === 'text') last.text += a.text
+      else out.push({ kind: 'text', text: a.text })
     }
   }
   return out

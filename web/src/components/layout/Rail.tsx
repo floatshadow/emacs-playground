@@ -26,7 +26,7 @@ export function RailSection({
 }
 
 /**
- * The right-hand rail. Below 1180 px it is hidden and opens as a drawer from
+ * The right-hand rail. At 1440 px and below it is hidden and opens as a drawer from
  * the "Where am I" button. With a preview it splits: preview on top, live
  * panels below.
  */

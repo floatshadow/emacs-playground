@@ -3,7 +3,6 @@ import { record, type Recorder } from '../test/recorder'
 import { selectNudges } from '../store/selectors'
 import { initialSessionData, reduce, type SessionData } from '../store/session'
 import type { Event } from '../protocol.gen'
-import { HABIT_TTL_COMMANDS } from './habits'
 import { patternNudges } from './patterns'
 import { calmState } from './fixtures'
 
@@ -57,18 +56,18 @@ describe('habit cards (layer 2)', () => {
     expect(s.cards.map((c) => c.id)).toEqual(['habit:C-s'])
   })
 
-  it('cards expire after 12 commands', () => {
+  it('cards stay until dismissed: no command TTL (B9)', () => {
     rec = record()
     rec.keys('C-s')
     let s = rec.replay()
     expect(ids(s, rec.now())).toContain('habit:C-s')
-    for (let i = 0; i < HABIT_TTL_COMMANDS + 1; i++) {
+    for (let i = 0; i < 30; i++) {
       s = reduce(
         s,
         {
           t: 'key',
-          keys: 'C-f',
-          cmd: 'forward-char',
+          keys: 'C-n',
+          cmd: 'next-line',
           buf: 'main.rs',
           mode: 'rust-ts-mode',
           frame: 'terminal',
@@ -76,7 +75,72 @@ describe('habit cards (layer 2)', () => {
         rec.now(),
       )
     }
-    expect(ids(s, rec.now())).not.toContain('habit:C-s')
+    expect(ids(s, rec.now())).toContain('habit:C-s')
+  })
+
+  it('dismissing one card leaves the others; the newest come first', () => {
+    const key = (k: string, cmd: string): Event => ({
+      t: 'key',
+      keys: k,
+      cmd,
+      buf: 'main.rs',
+      mode: 'rust-ts-mode',
+      frame: 'terminal',
+    })
+    let s = [
+      key('C-f', 'forward-char'),
+      key('C-b', 'backward-char'),
+      key('C-v', 'scroll-up-command'),
+    ].reduce((acc, ev, i) => reduce(acc, ev, 1000 + i), initialSessionData())
+    expect(ids(s, 2000)).toEqual(['habit:C-v', 'habit:C-b', 'habit:C-f'])
+    s = { ...s, dismissed: new Set(['habit:C-f']) }
+    expect(ids(s, 2000)).toEqual(['habit:C-v', 'habit:C-b'])
+  })
+
+  it('a key the lesson mentions raises no card and is not used up (contract d)', () => {
+    const cs: Event = {
+      t: 'key',
+      keys: 'C-s',
+      cmd: 'isearch-forward',
+      buf: 'main.rs',
+      mode: 'rust-ts-mode',
+      frame: 'terminal',
+    }
+    // 1.4 teaches C-s: no "C-s is not save".
+    let s: SessionData = {
+      ...initialSessionData(),
+      activeStep: { lessonId: 'L', stepId: 'a' },
+      mentions: { lessonId: 'L', lesson: ['C-s', 'C-r'], steps: {} },
+    }
+    s = reduce(s, cs, 1000)
+    expect(s.cards).toEqual([])
+    expect(s.habitsSeen.has('C-s')).toBe(false)
+    // 0.1 mentions C-x C-s but not C-s: the card fires.
+    s = { ...s, mentions: { lessonId: 'L', lesson: ['C-x C-s'], steps: {} } }
+    s = reduce(s, cs, 2000)
+    expect(s.cards.map((c) => c.id)).toEqual(['habit:C-s'])
+  })
+
+  it('a step mentions keys too: its goal, detail and hints', () => {
+    const cb: Event = {
+      t: 'key',
+      keys: 'C-b',
+      cmd: 'backward-char',
+      buf: 'main.rs',
+      mode: 'rust-ts-mode',
+      frame: 'terminal',
+    }
+    const mentions = { lessonId: 'L', lesson: [], steps: { a: ['C-b'] } }
+    let s: SessionData = {
+      ...initialSessionData(),
+      activeStep: { lessonId: 'L', stepId: 'a' },
+      mentions,
+    }
+    s = reduce(s, cb, 1000)
+    expect(s.cards).toEqual([])
+    s = { ...s, activeStep: { lessonId: 'L', stepId: 'b' } }
+    s = reduce(s, cb, 2000)
+    expect(s.cards.map((c) => c.id)).toEqual(['habit:C-b'])
   })
 
   it('only single-key commands match; M-x invocations and sequences do not', () => {
@@ -145,6 +209,16 @@ describe('stuck patterns', () => {
     rec = record()
     rec.keys('C-x 2 C-x 2')
     expect(ids(rec.replay(), rec.now())).toContain('many-windows')
+  })
+
+  it('unless the lesson teaches splitting (C-x 2 or C-x 3 mentioned)', () => {
+    rec = record()
+    rec.keys('C-x 2 C-x 3')
+    const s = {
+      ...rec.replay(),
+      mentions: { lessonId: 'L', lesson: ['C-x 2', 'C-x o'], steps: {} },
+    }
+    expect(ids(s, rec.now())).not.toContain('many-windows')
   })
 
   it('a calm state yields nothing', () => {

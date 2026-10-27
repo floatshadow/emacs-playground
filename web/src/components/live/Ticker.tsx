@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { missingGlosses, selectTicker } from '../../advice/ticker'
 import { rpc } from '../../api/session/rpc'
 import { useSessionStore } from '../../store/session'
+import { useUiStore } from '../../store/ui'
+import { DemoCaption } from './DemoCaption'
 import { Keycap } from './Keycap'
 import styles from './Ticker.module.css'
 
@@ -32,6 +34,15 @@ function useDescribe() {
 }
 
 /**
+ * The area under the screen, at a fixed height: the key ticker, or the
+ * caption strip while a demo plays (B7: nothing in the stage changes size).
+ */
+export function TickerArea() {
+  const playing = useUiStore((s) => s.demo !== null)
+  return <div className={styles.area}>{playing ? <DemoCaption /> : <Ticker />}</div>
+}
+
+/**
  * The key ticker (frontend.md §6): newest entry first, left-most and
  * emphasised; six visible. Announced politely to screen readers.
  */
@@ -54,6 +65,19 @@ export function Ticker() {
         entry.kind === 'gap' ? (
           <div key={entry.id} className={styles.gap} title={t('ticker.gap')}>
             <span className="sr-only">{t('ticker.gap')}</span>
+          </div>
+        ) : entry.typed !== undefined ? (
+          <div key={entry.id} className={`${styles.tk} ${styles.ok} ${last ? styles.last : ''}`}>
+            <div className={styles.keys}>
+              <span className={styles.typed}>
+                {(entry.count ?? 1) > [...entry.typed].length ? '…' : ''}“{entry.typed}”
+              </span>
+            </div>
+            <div className={styles.cmd}>{t('ticker.typed', { count: entry.count ?? 1 })}</div>
+            <div className={styles.gloss}>
+              <code className={styles.cmdName}>{label}</code>
+              {g ? ` ${g}` : ''}
+            </div>
           </div>
         ) : (
           <div

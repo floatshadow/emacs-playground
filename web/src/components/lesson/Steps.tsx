@@ -10,12 +10,15 @@ export function Steps({
   onGoTo,
   showDetails,
   label,
+  flash,
 }: {
   views: StepView[]
   onHint(view: StepView): void
   onGoTo?(view: StepView): void
   showDetails?: boolean
   label?: string
+  /** Id of the step that just ended (highlighted for a moment). */
+  flash?: string | null
 }) {
   const { t } = useTranslation()
   return (
@@ -25,6 +28,7 @@ export function Steps({
           key={v.step.id}
           view={v}
           onHint={onHint}
+          flash={flash === v.step.id}
           {...(onGoTo ? { onGoTo } : {})}
           {...(showDetails ? { showDetails } : {})}
         />

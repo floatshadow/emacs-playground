@@ -313,6 +313,12 @@ export async function startFakeSession(opts: FakeOptions) {
     startedAt: number
     fired: Set<string>
     lastCheck: string
+    /** The demo latch (api.md §4.1): a completion now is "demonstrated". */
+    latched?: boolean
+    /** "demonstrated" was emitted for this latch. */
+    demonstrated?: boolean
+    /** skip is playing the step: no completion is recorded. */
+    skipping?: boolean
   }
   let active: Active | null = null
   const progress: Record<string, LessonProgress> = {}
@@ -330,6 +336,10 @@ export async function startFakeSession(opts: FakeOptions) {
       steps: {},
     })
     const cur = lp.steps[stepId] ?? { status: 'in-progress', hintsUsed: 0, resets: 0 }
+    // A step's status only rises (api.md §2.4): in-progress < demonstrated < skipped < done.
+    const rank = ['not-started', 'in-progress', 'demonstrated', 'skipped', 'done']
+    if (patch.status && rank.indexOf(patch.status) < rank.indexOf(cur.status))
+      patch = { ...patch, status: cur.status }
     lp.steps[stepId] = { ...cur, ...patch }
     const scenario = bundleFor(lessonId)?.scenario
     lp.status =
@@ -378,10 +388,10 @@ export async function startFakeSession(opts: FakeOptions) {
     active.startedAt = Date.now()
     active.fired = new Set()
     active.lastCheck = ''
+    active.latched = false
+    active.demonstrated = false
     snapshot(`${active.lessonId}/${step.id}`, { lessonId: active.lessonId, stepId: step.id })
-    setProgress(active.lessonId, step.id, {
-      status: progress[active.lessonId]?.steps[step.id]?.status === 'done' ? 'done' : 'in-progress',
-    })
+    setProgress(active.lessonId, step.id, { status: 'in-progress' })
     publish({
       t: 'step',
       lessonId: active.lessonId,
@@ -419,6 +429,23 @@ export async function startFakeSession(opts: FakeOptions) {
     if (key !== active.lastCheck) {
       active.lastCheck = key
       publish(ev)
+    }
+    if (r.complete && active.skipping) return ev
+    if (r.complete && active.latched) {
+      // Watched, not done: no advance (contract b).
+      if (!active.demonstrated) {
+        active.demonstrated = true
+        setProgress(active.lessonId, step.id, { status: 'demonstrated' })
+        publish({
+          t: 'step',
+          lessonId: active.lessonId,
+          stepId: step.id,
+          status: 'demonstrated',
+          index: active.index,
+          count: active.scenario.steps.length,
+        })
+      }
+      return ev
     }
     if (r.complete) {
       const last = active.index === active.scenario.steps.length - 1
@@ -522,6 +549,92 @@ export async function startFakeSession(opts: FakeOptions) {
     }
   }, 2000)
 
+  /* ---------------- checkpoints of the active step ---------------- */
+  function activeCheckpoint(): Checkpoint | undefined {
+    if (!active) return undefined
+    const stepId = active.scenario.steps[active.index]?.id
+    return checkpoints.find(
+      (c) => c.step?.lessonId === active?.lessonId && c.step?.stepId === stepId,
+    )
+  }
+
+  function commandsSinceStart(): number {
+    if (!active) return 0
+    let n = 0
+    for (const [k, v] of Object.entries(eng.counts)) n += v - (active.base[k] ?? 0)
+    return n
+  }
+
+  function activeStepOr409(stepId: string) {
+    const step = active?.scenario.steps[active.index]
+    if (!active || !step || step.id !== stepId)
+      throw Object.assign(new Error(`${stepId} is not the active step`), {
+        status: 409,
+        code: 'conflict',
+      })
+    return step
+  }
+
+  /**
+   * Restores a checkpoint's files and resets its step. countReset: Reset this
+   * step and Do it yourself count a reset and clear the demo latch; the
+   * restores of demo start and skip do neither.
+   */
+  function restoreCheckpoint(cp: Checkpoint, countReset: boolean): number {
+    const changed = changedFiles(cp)
+    disk.clear()
+    for (const [p, t] of cp.text) disk.set(p, t)
+    blobs.clear()
+    for (const [p, t] of cp.blobs) blobs.set(p, t)
+    eng.revertAll()
+    for (const p of changed)
+      publish({ t: 'file', path: p, event: cp.text.has(p) ? 'modified' : 'deleted' })
+    if (active && cp.step && cp.step.lessonId === active.lessonId) {
+      const idx = active.scenario.steps.findIndex((s) => s.id === cp.step?.stepId)
+      if (idx >= 0) {
+        active.index = idx
+        active.base = { ...eng.counts }
+        active.startedAt = Date.now()
+        active.lastCheck = ''
+        if (countReset) {
+          active.latched = false
+          active.demonstrated = false
+          const resets = (progress[active.lessonId]?.steps[cp.step.stepId]?.resets ?? 0) + 1
+          setProgress(active.lessonId, cp.step.stepId, { resets })
+        }
+        publish({
+          t: 'step',
+          lessonId: active.lessonId,
+          stepId: cp.step.stepId,
+          status: 'reset',
+          index: idx,
+          count: active.scenario.steps.length,
+        })
+      }
+    }
+    afterInput()
+    return changed.length
+  }
+
+  /** Progress reset (api.md §2.4): one lesson, or all with an empty id; drops the active step. */
+  function dropProgress(lessonId: string) {
+    if (lessonId) delete progress[lessonId]
+    else for (const k of Object.keys(progress)) delete progress[k]
+    progressAt = Date.now()
+    if (active && (!lessonId || active.lessonId === lessonId)) {
+      const step = active.scenario.steps[active.index]
+      publish({
+        t: 'step',
+        lessonId: active.lessonId,
+        stepId: step?.id ?? '',
+        status: 'dropped',
+        index: active.index,
+        count: active.scenario.steps.length,
+      })
+      active = null
+    }
+  }
+
   /* ---------------- RPC ---------------- */
   let restarting = false
   async function rpc(op: string, b: Record<string, unknown>): Promise<unknown> {
@@ -613,40 +726,77 @@ export async function startFakeSession(opts: FakeOptions) {
         return { items }
       }
       case 'restore': {
-        const cp = checkpoints.find(
-          (c) => (b['ref'] && c.ref === b['ref']) || (b['label'] && c.label === b['label']),
-        )
+        // {} is the active step's checkpoint ("Reset this step", "Do it yourself").
+        const cp =
+          !b['ref'] && !b['label']
+            ? activeCheckpoint()
+            : checkpoints.find(
+                (c) => (b['ref'] && c.ref === b['ref']) || (b['label'] && c.label === b['label']),
+              )
         if (!cp)
           throw Object.assign(new Error('no such checkpoint'), { status: 404, code: 'not_found' })
-        const changed = changedFiles(cp)
-        disk.clear()
-        for (const [p, t] of cp.text) disk.set(p, t)
-        blobs.clear()
-        for (const [p, t] of cp.blobs) blobs.set(p, t)
-        eng.revertAll()
-        for (const p of changed)
-          publish({ t: 'file', path: p, event: cp.text.has(p) ? 'modified' : 'deleted' })
-        if (active && cp.step && cp.step.lessonId === active.lessonId) {
-          const idx = active.scenario.steps.findIndex((s) => s.id === cp.step?.stepId)
-          if (idx >= 0) {
-            active.index = idx
-            active.base = { ...eng.counts }
-            active.startedAt = Date.now()
-            active.lastCheck = ''
-            const resets = (progress[active.lessonId]?.steps[cp.step.stepId]?.resets ?? 0) + 1
-            setProgress(active.lessonId, cp.step.stepId, { status: 'in-progress', resets })
-            publish({
-              t: 'step',
-              lessonId: active.lessonId,
-              stepId: cp.step.stepId,
-              status: 'reset',
-              index: idx,
-              count: active.scenario.steps.length,
-            })
+        return { restoredFiles: restoreCheckpoint(cp, true) }
+      }
+      case 'demo': {
+        // "Watch it" (api.md §3.4): restore when commands ran, then latch.
+        const step = activeStepOr409(String(b['stepId'] ?? ''))
+        let restored = false
+        if (b['phase'] === 'start' && active) {
+          const cp = activeCheckpoint()
+          if (cp && commandsSinceStart() > 0) {
+            restoreCheckpoint(cp, false)
+            restored = true
           }
+          active.latched = true
+          active.demonstrated = false
         }
-        afterInput()
-        return { restoredFiles: changed.length }
+        void step
+        return { restored }
+      }
+      case 'skip': {
+        // "Skip this step" (api.md §3.4): play the demo here, record skipped, advance.
+        const step = activeStepOr409(String(b['stepId'] ?? ''))
+        const a = active as Active
+        const cp = activeCheckpoint()
+        if (cp && commandsSinceStart() > 0) restoreCheckpoint(cp, false)
+        a.skipping = true
+        let demoCompleted = false
+        try {
+          if (step.demo) {
+            for (const t of step.demo.match(/"(?:[^"\\]|\\.)*"|\S+/g) ?? []) {
+              if (t.startsWith('~'))
+                await new Promise((r) => setTimeout(r, delay(Number(t.slice(1)))))
+              else if (t.startsWith('"')) feed(textToKeys(JSON.parse(t) as string))
+              else feed([t])
+              await new Promise((r) => setTimeout(r, delay(170)))
+            }
+          }
+          const st: State = eng.state(mode)
+          demoCompleted = evaluateStep(a.scenario, step.id, {
+            eng,
+            state: st,
+            disk,
+            base: a.base,
+          }).complete
+        } finally {
+          a.skipping = false
+        }
+        const last = a.index === a.scenario.steps.length - 1
+        setProgress(a.lessonId, step.id, { status: 'skipped' })
+        const ev: Event = {
+          t: 'step',
+          lessonId: a.lessonId,
+          stepId: step.id,
+          status: 'skipped',
+          index: a.index,
+          count: a.scenario.steps.length,
+        }
+        if (last) ev.lessonComplete = true
+        publish(ev)
+        const next = last ? null : (a.scenario.steps[a.index + 1]?.id ?? null)
+        if (!last) startStep(a.index + 1)
+        else a.lastCheck = 'complete'
+        return { next, demoCompleted }
       }
       case 'mode': {
         const want = b['mode'] === 'gui' ? 'gui' : 'terminal'
@@ -694,7 +844,7 @@ export async function startFakeSession(opts: FakeOptions) {
       case 'describe':
         return eng.describeKeys(String(b['keys'] ?? ''))
       case 'drop-step':
-        if (active?.lessonId === b['lessonId']) active = null
+        dropProgress(b['lessonId'] ? String(b['lessonId']) : '')
         return {}
     }
     throw Object.assign(new Error('unknown op ' + op), { status: 404, code: 'not_found' })
@@ -875,11 +1025,9 @@ export async function startFakeSession(opts: FakeOptions) {
           if (r === '/progress')
             return json(res, 200, { lessons: progress, updatedAt: progressAt } satisfies Progress)
           if (r === '/progress/reset' && method === 'POST') {
+            // No body, {} or an empty lessonId: every lesson ("Start over").
             const b = await body(req)
-            const id = String(b['lessonId'] ?? '')
-            delete progress[id]
-            if (active?.lessonId === id) active = null
-            progressAt = Date.now()
+            dropProgress(String(b['lessonId'] ?? ''))
             return noContent(res)
           }
           if (r === '/stuck' && method === 'POST') {

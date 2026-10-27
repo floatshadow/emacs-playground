@@ -266,6 +266,10 @@ describe('LessonScreen against a fake events stream', () => {
       .filter((li) => li.parentElement === steps)
     expect(items[0]).toHaveTextContent(/^Done:/)
     expect(items[1]).toHaveAttribute('aria-current', 'step')
+    // L1: the finished step is highlighted for a moment and announced.
+    expect(items[0]).toHaveClass('justDone')
+    expect(screen.getByText('Step done: Open src/main.rs')).toBeInTheDocument()
+    await waitFor(() => expect(items[0]).not.toHaveClass('justDone'), { timeout: 2000 })
   })
 
   it('shows the ticker, Where am I and the cheat sheet from events', async () => {
@@ -323,6 +327,153 @@ describe('LessonScreen against a fake events stream', () => {
     expect(screen.queryByRole('alert', { name: 'Emacs is restarting.' })).toBeNull()
     send({ t: 'emacs', seq: 16, event: 'unresponsive' })
     expect(screen.getByText('Emacs is busy.')).toBeInTheDocument()
+  })
+
+  it('Watch it is a demonstration: demo start, a caption, Stop, demo end (B6)', async () => {
+    const user = userEvent.setup()
+    await openLesson()
+    await user.click(screen.getByRole('button', { name: 'Watch it' }))
+    const caption = await screen.findByRole('status', { name: 'Demo caption' })
+    expect(caption).toHaveTextContent('Watching: Open src/main.rs')
+    await waitFor(() =>
+      expect(rpcCalls).toContainEqual({ op: 'demo', body: { stepId: 'open', phase: 'start' } }),
+    )
+    await user.click(within(caption).getByRole('button', { name: 'Stop' }))
+    await waitFor(() =>
+      expect(rpcCalls).toContainEqual({ op: 'demo', body: { stepId: 'open', phase: 'end' } }),
+    )
+    expect(screen.queryByRole('status', { name: 'Demo caption' })).toBeNull()
+    // The ticker is back, at the same place.
+    expect(screen.getByLabelText(/^Key ticker/)).toBeInTheDocument()
+  })
+
+  it('a demonstrated step stays active and offers Do it yourself (contract b)', async () => {
+    const user = userEvent.setup()
+    await openLesson()
+    send({
+      t: 'step',
+      seq: 20,
+      lessonId: LESSON,
+      stepId: 'open',
+      status: 'demonstrated',
+      index: 0,
+      count: 4,
+    })
+    const steps = screen.getByRole('list', { name: 'Steps' })
+    const first = within(steps)
+      .getAllByRole('listitem')
+      .filter((li) => li.parentElement === steps)[0] as HTMLElement
+    expect(first).toHaveAttribute('aria-current', 'step')
+    expect(within(first).getByText('You watched this step. Now do it yourself.')).toBeVisible()
+    await user.click(within(first).getByRole('button', { name: 'Do it yourself' }))
+    await waitFor(() => expect(rpcCalls).toContainEqual({ op: 'restore', body: {} }))
+    send({
+      t: 'step',
+      seq: 21,
+      lessonId: LESSON,
+      stepId: 'open',
+      status: 'reset',
+      index: 0,
+      count: 4,
+    })
+    expect(within(first).queryByText('You watched this step. Now do it yourself.')).toBeNull()
+  })
+
+  it('Reset this step asks first (R10)', async () => {
+    const user = userEvent.setup()
+    await openLesson()
+    await user.click(screen.getByRole('button', { name: 'Reset this step' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Reset this step?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Cancel' }))
+    expect(rpcCalls.some((c) => c.op === 'restore')).toBe(false)
+    await user.click(screen.getByRole('button', { name: 'Reset this step' }))
+    await user.click(
+      within(await screen.findByRole('dialog', { name: 'Reset this step?' })).getByRole('button', {
+        name: 'Reset',
+      }),
+    )
+    await waitFor(() => expect(rpcCalls).toContainEqual({ op: 'restore', body: {} }))
+  })
+
+  it('after a stuck report the learner can skip the step (S2)', async () => {
+    const user = userEvent.setup()
+    server.use(
+      http.post('/api/v1/stuck', () => HttpResponse.json({ id: '1' }, { status: 201 })),
+      http.post('/s/local/rpc/skip', async ({ request }) => {
+        rpcCalls.push({ op: 'skip', body: await request.json() })
+        return HttpResponse.json({ ok: true, result: { next: 'edit', demoCompleted: true } })
+      }),
+    )
+    await openLesson()
+    await user.click(screen.getByRole('button', { name: /I'm stuck/ }))
+    const dialog = await screen.findByRole('dialog', { name: 'Report that you are stuck' })
+    await user.click(within(dialog).getByRole('button', { name: 'Send report' }))
+    expect(await within(dialog).findByText(/Emacs can do this step for you/)).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: 'Skip this step' }))
+    await waitFor(() => expect(rpcCalls).toContainEqual({ op: 'skip', body: { stepId: 'open' } }))
+    expect(await screen.findByText('Skipped: Open src/main.rs')).toBeInTheDocument()
+    send({
+      t: 'step',
+      seq: 30,
+      lessonId: LESSON,
+      stepId: 'open',
+      status: 'skipped',
+      index: 0,
+      count: 4,
+    })
+    send({
+      t: 'step',
+      seq: 31,
+      lessonId: LESSON,
+      stepId: 'edit',
+      status: 'loaded',
+      index: 1,
+      count: 4,
+    })
+    const steps = screen.getByRole('list', { name: 'Steps' })
+    const items = within(steps)
+      .getAllByRole('listitem')
+      .filter((li) => li.parentElement === steps)
+    expect(items[0]).toHaveTextContent(/^Skipped:/)
+    expect(items[0]).toHaveTextContent('skipped')
+    expect(items[1]).toHaveAttribute('aria-current', 'step')
+  })
+
+  it('a habit card stays quiet for a key the current step teaches (B8)', async () => {
+    await openLesson()
+    const cs = (seq: number): Event => ({
+      t: 'key',
+      seq,
+      keys: 'C-s',
+      cmd: 'isearch-forward',
+      buf: 'main.rs',
+      mode: 'rust-ts-mode',
+      frame: 'terminal',
+    })
+    // Step "edit" says "C-s finds text as you type": no "C-s is not save".
+    send({
+      t: 'step',
+      seq: 40,
+      lessonId: LESSON,
+      stepId: 'edit',
+      status: 'loaded',
+      index: 1,
+      count: 4,
+    })
+    send(cs(41))
+    expect(screen.queryByText(/is not save/)).toBeNull()
+    // Step "open" does not mention C-s (the lesson only has C-x C-s): the card fires.
+    send({
+      t: 'step',
+      seq: 42,
+      lessonId: LESSON,
+      stepId: 'open',
+      status: 'loaded',
+      index: 0,
+      count: 4,
+    })
+    send(cs(43))
+    expect(screen.getByText(/is not save/)).toBeInTheDocument()
   })
 
   it('Rescue calls the rpc and names what was done', async () => {

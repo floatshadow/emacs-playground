@@ -8,7 +8,7 @@ import { Rail, RailSection } from '../components/layout/Rail'
 import { ScreenActions } from '../components/layout/ScreenActions'
 import { TopBar, type Crumb } from '../components/layout/TopBar'
 import { Workspace } from '../components/layout/Workspace'
-import { useLessonSteps, useScenarioLoad } from '../components/lesson/useLesson'
+import { useLessonMentions, useLessonSteps, useScenarioLoad } from '../components/lesson/useLesson'
 import { Nudges } from '../components/live/Nudges'
 import { RescueCard } from '../components/live/RescueCard'
 import { WhereAmI } from '../components/live/WhereAmI'
@@ -38,6 +38,7 @@ function ProjectView({ projectId, taskId }: { projectId: string; taskId: string 
   const scenario = bundle.data?.scenario
   const steps = useLessonSteps(lessonId, scenario)
   const load = useScenarioLoad(lessonId, scenario, taskId)
+  useLessonMentions(lessonId, bundle.data?.markdown, scenario)
   const active = useSessionStore((s) => s.activeStep)
   const previewHidden = useUiStore((s) => s.previewHidden)
   const project = curriculum.data?.projects.find((p) => p.id === lessonId)
@@ -140,11 +141,11 @@ function ProjectView({ projectId, taskId }: { projectId: string; taskId: string 
             <RailSection title={t('rail.where')}>
               <WhereAmI />
             </RailSection>
-            <RailSection title={t('rail.nudges')}>
-              <Nudges />
-            </RailSection>
             <RailSection title={t('rail.rescue')}>
               <RescueCard />
+            </RailSection>
+            <RailSection title={t('rail.nudges')}>
+              <Nudges />
             </RailSection>
           </Rail>
         }

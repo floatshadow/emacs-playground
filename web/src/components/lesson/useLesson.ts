@@ -6,17 +6,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Scenario } from '../../protocol.gen'
+import { lessonMentions } from '../../advice/mentions'
 import { useProgress } from '../../api/queries'
 import { rpc } from '../../api/session/rpc'
 import { useSessionStore } from '../../store/session'
 import { useUiStore } from '../../store/ui'
-import {
-  doneSteps,
-  hintKey,
-  resumeStep,
-  selectStepView,
-  type StepView,
-} from '../../store/selectors'
+import { hintKey, resumeStep, selectStepView, type StepView } from '../../store/selectors'
 import { switchFrame } from '../screen/frame'
 import { maxHintLevel } from './hintLevel'
 
@@ -39,8 +34,7 @@ export function useScenarioLoad(
   const hello = useSessionStore((s) => s.hello)
   const sessionId = useSessionStore((s) => s.sessionId)
   const active = useSessionStore((s) => s.activeStep)
-  const completed = useSessionStore((s) => s.completed)
-  const reopened = useSessionStore((s) => s.reopened)
+  const outcomes = useSessionStore((s) => s.outcomes)
   const progress = useProgress()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -53,8 +47,10 @@ export function useScenarioLoad(
 
   useEffect(() => {
     if (!needsLoad || !scenario) return
-    const done = doneSteps(progress.data, lessonId, completed, reopened)
-    const target = stepId ?? resumeStep(scenario, done) ?? scenario.steps[0]?.id
+    const target =
+      stepId ??
+      resumeStep(scenario, outcomes[lessonId] ?? {}, progress.data?.lessons?.[lessonId]) ??
+      scenario.steps[0]?.id
     const key = `${lessonId}#${target ?? ''}#${attempt}`
     if (requested.current === key) return
     requested.current = key
@@ -68,13 +64,33 @@ export function useScenarioLoad(
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setLoading(false))
-  }, [needsLoad, scenario, lessonId, stepId, attempt, progress.data, completed, reopened])
+  }, [needsLoad, scenario, lessonId, stepId, attempt, progress.data, outcomes])
 
   return {
     loading: loading || (!ready && !!scenario),
     error,
     retry: () => setAttempt((n) => n + 1),
   }
+}
+
+/**
+ * Tells the session store which keys this lesson mentions, so habit cards
+ * and the "three windows" pattern stay quiet for keys the lesson teaches
+ * (fix plan contract d). Cleared when the screen unmounts.
+ */
+export function useLessonMentions(
+  lessonId: string,
+  markdown: string | undefined,
+  scenario: Scenario | undefined,
+): void {
+  useEffect(() => {
+    if (markdown === undefined && !scenario) return
+    useSessionStore.getState().setMentions(lessonMentions(lessonId, markdown ?? '', scenario))
+    return () => {
+      if (useSessionStore.getState().mentions?.lessonId === lessonId)
+        useSessionStore.getState().setMentions(null)
+    }
+  }, [lessonId, markdown, scenario])
 }
 
 export interface LessonSteps {
@@ -89,15 +105,14 @@ export function useLessonSteps(lessonId: string, scenario: Scenario | undefined)
   const { i18n } = useTranslation()
   const active = useSessionStore((s) => s.activeStep)
   const checks = useSessionStore((s) => s.checks)
-  const completed = useSessionStore((s) => s.completed)
-  const reopened = useSessionStore((s) => s.reopened)
+  const outcomes = useSessionStore((s) => s.outcomes)
+  const watched = useSessionStore((s) => s.watched)
   const lessonsComplete = useSessionStore((s) => s.lessonsComplete)
   const hintLevels = useUiStore((s) => s.hintLevels)
   const progress = useProgress()
 
   const views = useMemo(() => {
     if (!scenario) return []
-    const done = doneSteps(progress.data, lessonId, completed, reopened)
     const activeStepId = active?.lessonId === lessonId ? active.stepId : null
     const levels: Record<string, number> = { ...hintLevels }
     // Hints already revealed in an earlier visit (progress counts them) stay revealed.
@@ -111,7 +126,9 @@ export function useLessonSteps(lessonId: string, scenario: Scenario | undefined)
       scenario,
       lessonId,
       activeStepId,
-      done,
+      outcomes: outcomes[lessonId] ?? {},
+      progress: lp,
+      watched: !!activeStepId && watched?.lessonId === lessonId && watched.stepId === activeStepId,
       checks: activeStepId ? checks : {},
       hintLevels: levels,
       locale: i18n.language,
@@ -120,8 +137,8 @@ export function useLessonSteps(lessonId: string, scenario: Scenario | undefined)
     scenario,
     progress.data,
     lessonId,
-    completed,
-    reopened,
+    outcomes,
+    watched,
     active,
     checks,
     hintLevels,
@@ -129,9 +146,12 @@ export function useLessonSteps(lessonId: string, scenario: Scenario | undefined)
   ])
 
   const activeIndex = views.findIndex((v) => v.status === 'active')
+  // Complete: the last step ended this session, or no step is active and
+  // every step is done (skipped and watched steps leave the lesson open).
   const complete =
     views.length > 0 &&
-    (lessonsComplete.includes(lessonId) || views.every((v) => v.status === 'done'))
+    (lessonsComplete.includes(lessonId) ||
+      (activeIndex < 0 && views.every((v) => v.status === 'done')))
 
   const onHint = useCallback(
     (view: StepView) => {
