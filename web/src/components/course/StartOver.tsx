@@ -5,9 +5,10 @@ import { resetProgress } from '../../api/queries'
 import { toast } from '../../store/ui'
 import { Button } from '../common/Button'
 import { ConfirmDialog } from '../common/Dialog'
+import { errorMessage } from '../../lib/errors'
 
 /**
- * "Start over" (fix plan contract a, B5): clears the progress of every
+ * "Start over" (api.md §2.4): clears the progress of every
  * lesson after a confirmation. Files, checkpoints and the modules stay.
  * On the course map next to Continue, and on the Session page.
  */
@@ -23,7 +24,7 @@ export function StartOver({ variant }: { variant?: 'primary' | 'quiet' }) {
       toast(t('startOver.done'))
       setOpen(false)
     } catch (e) {
-      toast(t('startOver.failed', { error: e instanceof Error ? e.message : String(e) }), 'error')
+      toast(t('startOver.failed', { error: errorMessage(e) }), 'error')
     } finally {
       setBusy(false)
     }

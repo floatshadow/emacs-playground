@@ -6,7 +6,8 @@
 import type { RpcOk, RpcOps } from '../../protocol.gen'
 import { useSessionStore, whenSessionId } from '../../store/session'
 import { toast } from '../../store/ui'
-import { ApiError, request } from '../http'
+import { request } from '../http'
+import { errorMessage } from '../../lib/errors'
 
 export type RpcOp = keyof RpcOps
 export type RpcRequest<K extends RpcOp> = RpcOps[K]['request']
@@ -43,7 +44,7 @@ export async function rpc<K extends RpcOp>(
     return (res?.result ?? {}) as RpcResult<K>
   } catch (e) {
     if (!opts.silent && !(e instanceof DOMException && e.name === 'AbortError')) {
-      const msg = e instanceof ApiError ? e.message : e instanceof Error ? e.message : String(e)
+      const msg = errorMessage(e)
       toast(`${op}: ${msg}`, 'error')
     }
     throw e

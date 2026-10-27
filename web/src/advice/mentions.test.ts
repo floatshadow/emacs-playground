@@ -9,7 +9,7 @@ import {
   proseKeys,
 } from './mentions'
 
-describe('mentioned keys (contract d)', () => {
+describe('mentioned keys', () => {
   it('reads backticked keys, :kbd and :try from lesson Markdown, normalised', () => {
     const md = [
       '`C-f` `C-b` `C-n` `C-p` are the arrows; `M-<` goes to the top.',

@@ -19,7 +19,7 @@ function useNow(ms: number): number {
 /**
  * "Did you mean" (frontend.md §6): habit cards, stuck patterns and server
  * nudges in one dismissible list, newest first. Three show; older ones wait
- * behind "N earlier tips" (B9). Dismissing removes exactly that card, for
+ * behind "N earlier tips". Dismissing removes exactly that card, for
  * the rest of the page session.
  */
 export function Nudges() {

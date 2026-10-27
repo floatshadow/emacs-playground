@@ -4,6 +4,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs'
 // The legacy build runs on browsers without the newest APIs (URL.parse, Chrome < 126).
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import styles from './Preview.module.css'
+import { errorMessage } from '../../lib/errors'
 
 const MIN_SCALE = 0.4
 const MAX_SCALE = 3
@@ -56,7 +57,7 @@ export default function PdfView({
           return loaded
         })
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+        if (!cancelled) setError(errorMessage(e))
       }
     })()
     return () => {

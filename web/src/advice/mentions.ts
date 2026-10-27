@@ -1,5 +1,5 @@
 /**
- * Nudge suppression (fix plan contract d, frontend.md §6): a "Did you
+ * Nudge suppression (frontend.md §6): a "Did you
  * mean" card must not fire for a key the lesson just told the learner to
  * press. The mentioned keys of a lesson are the key sequences in its
  * Markdown (backticked spans that parse as keys, :kbd[…] and :try[…]) and,

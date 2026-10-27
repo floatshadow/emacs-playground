@@ -8,7 +8,7 @@ import styles from './Screen.module.css'
  * The line above the screen: what is running, at what size, and transient
  * states. One line of fixed height whatever it says (long text ends in an
  * ellipsis): if it grew, the screen below would shrink and the terminal
- * would resize (B7). The demo caption lives under the screen instead.
+ * would resize. The demo caption lives under the screen instead.
  */
 export function ScreenHeader() {
   const { t } = useTranslation()

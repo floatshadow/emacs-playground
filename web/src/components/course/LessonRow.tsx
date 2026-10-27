@@ -41,7 +41,7 @@ export function LessonRow({
   // every row is noise, so suggested rows read "not started" (dimmed) and
   // carry the suggestion in their tooltip only.
   let label = t(`course.state.${state === 'suggested' ? 'not-started' : state}`)
-  // Skipped and watched steps are not hidden behind "done" (contract c).
+  // Skipped and watched steps are not hidden behind "done".
   const skipped = counts?.skipped ?? 0
   const watched = counts?.demonstrated ?? 0
   if (state === 'finished') {

@@ -14,6 +14,7 @@ import { useUiStore } from '../../store/ui'
 import { hintKey, resumeStep, selectStepView, type StepView } from '../../store/selectors'
 import { switchFrame } from '../screen/frame'
 import { maxHintLevel } from './hintLevel'
+import { errorMessage } from '../../lib/errors'
 
 export interface ScenarioLoad {
   loading: boolean
@@ -45,7 +46,7 @@ export function useScenarioLoad(
   // The resume target is decided on fresh progress: after a progress reset
   // (the "dropped" event, maybe from another page) the cached progress
   // still has the old steps done, and loading at its resume target would
-  // fight the reset (X10).
+  // fight the reset.
   const needsLoad =
     ready &&
     !progress.isFetching &&
@@ -79,7 +80,7 @@ export function useScenarioLoad(
         const wantsGui = scenario.mode === 'gui' || (scenario.tags ?? []).includes('gui')
         if (wantsGui && useSessionStore.getState().mode !== 'gui') void switchFrame('gui')
       })
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e: unknown) => setError(errorMessage(e)))
       .finally(() => setLoading(false))
   }, [needsLoad, scenario, lessonId, stepId, attempt, progress.data, outcomes])
 
@@ -92,8 +93,8 @@ export function useScenarioLoad(
 
 /**
  * Tells the session store which keys this lesson mentions, so habit cards
- * and the "three windows" pattern stay quiet for keys the lesson teaches
- * (fix plan contract d). Cleared when the screen unmounts.
+ * and the "three windows" pattern stay quiet for keys the lesson teaches.
+ * Cleared when the screen unmounts.
  */
 export function useLessonMentions(
   lessonId: string,

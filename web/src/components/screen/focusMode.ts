@@ -1,5 +1,5 @@
 /**
- * Focus mode (frontend.md §5, B14). It is an in-page state first: the
+ * Focus mode (frontend.md §5). It is an in-page state first: the
  * stage takes the whole window (the lesson pane and the rail step aside)
  * and a one-line banner says what the mode does and how to leave it (the
  * button, or Shift+Esc). Then, where the browser allows, the page goes

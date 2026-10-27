@@ -37,7 +37,7 @@ const lp = (
 })
 const progress = (lessons: Record<string, LessonProgress>): Progress => ({ lessons, updatedAt: 1 })
 
-describe('course map progress (contract c)', () => {
+describe('course map progress', () => {
   it('a lesson whose steps are all done, watched or skipped is finished, not done', () => {
     const p = progress({
       a: lp('done', { done: 3 }),

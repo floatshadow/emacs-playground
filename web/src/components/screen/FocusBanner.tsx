@@ -5,7 +5,7 @@ import { exitFocusMode } from './focusMode'
 import styles from './Screen.module.css'
 
 /**
- * The focus-mode banner (B14): one line over the screen saying what focus
+ * The focus-mode banner: one line over the screen saying what focus
  * mode does, whether the keyboard lock is on, and how to leave it.
  */
 export function FocusBanner() {

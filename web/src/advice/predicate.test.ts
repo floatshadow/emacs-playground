@@ -69,7 +69,7 @@ describe('matchPredicate (port of TestPredicate)', () => {
   })
 })
 
-describe('RE2 patterns (B11)', () => {
+describe('RE2 patterns', () => {
   it('turns a leading flag group into RegExp flags', () => {
     expect(translateRe2('(?i)buffer')).toEqual({ source: 'buffer', flags: 'i' })
     expect(translateRe2('(?is)a.b')).toEqual({ source: 'a.b', flags: 'is' })
@@ -103,10 +103,9 @@ describe('RE2 patterns (B11)', () => {
     expect(validatePredicate({ x: { regex: '(?i)M-x|file' } })).toBeNull()
   })
 
-  // The prompt rows of curriculum/tables/exits.yaml, with the number row the
-  // fix plan adds (R7). Before the translation every (?i) row failed to
-  // compile in the browser: the file, buffer and replace rows never matched
-  // and the generic row matched every prompt.
+  // The prompt rows of curriculum/tables/exits.yaml: every (?i) row must
+  // compile in the browser, or the file, buffer and replace rows would never
+  // match and the generic row would match every prompt.
   const rows: Record<string, Predicate> = {
     mx: { 'minibuffer.kind': 'prompt', 'minibuffer.prompt': { regex: 'M-x' } },
     file: {

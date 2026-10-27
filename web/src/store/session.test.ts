@@ -236,7 +236,7 @@ describe('applyEvent reducer', () => {
     expect(s.outcomes['L/1']).toEqual({ open: 'skipped' })
     expect(s.activeStep?.stepId).toBe('save')
     // Start over: sessiond drops the active step, and the page forgets the
-    // lesson's outcomes, so it resumes at the first step (X10).
+    // lesson's outcomes, so it resumes at the first step.
     s = run(
       [{ t: 'step', lessonId: 'L/1', stepId: 'save', status: 'dropped', index: 1, count: 2 }],
       s,
@@ -255,7 +255,7 @@ describe('applyEvent reducer', () => {
     expect(s.watched).toEqual({ lessonId: 'L/1', stepId: 'open' })
   })
 
-  it('a stale prefix after the command that used its keys is ignored (B4)', () => {
+  it('a stale prefix after the command that used its keys is ignored', () => {
     const s = run([
       hello(),
       {
@@ -273,7 +273,7 @@ describe('applyEvent reducer', () => {
     expect(s.ticker.map((e) => e.kind)).toEqual(['quit'])
   })
 
-  it('the ticker, the prefix and the habit cards belong to the lesson (R9, decision 8)', () => {
+  it('the ticker, the prefix and the habit cards belong to the lesson', () => {
     let s = run([
       hello(),
       { t: 'step', lessonId: 'L/1', stepId: 'open', status: 'loaded', index: 0, count: 2 },
@@ -434,7 +434,7 @@ describe('step views', () => {
     ),
   })
 
-  it('the active step is active whatever progress says; later steps show no tick (X1)', () => {
+  it('the active step is active whatever progress says; later steps show no tick', () => {
     const progress = saved({ open: 'done', save: 'done', close: 'done' })
     expect(stepStatuses(THREE, 'save', {}, progress)).toEqual(['done', 'active', 'todo'])
   })

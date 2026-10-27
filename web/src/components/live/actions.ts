@@ -8,6 +8,7 @@ import { toast, useUiStore } from '../../store/ui'
 import i18n from '../../i18n'
 import { cancelDemo } from '../lesson/demoPlayer'
 import { focusTerminal } from '../screen/focus'
+import { errorMessage } from '../../lib/errors'
 
 export async function doRescue(): Promise<void> {
   try {
@@ -58,7 +59,7 @@ export async function doResetStep(): Promise<void> {
 }
 
 /**
- * "Skip this step" (S2, contract c): sessiond plays the step's demo itself
+ * "Skip this step" (api.md §3.4): sessiond plays the step's demo itself
  * and records the step skipped, then loads the next one. The screen is
  * covered while it runs (up to a minute) so the learner's keys cannot mix
  * with the demo's.
@@ -72,10 +73,7 @@ export async function doSkipStep(stepId: string, goal: string): Promise<void> {
     await rpc('skip', { stepId }, { silent: true })
     toast(i18n.t('stuck.skipped', { goal }))
   } catch (e) {
-    toast(
-      i18n.t('stuck.skipFailed', { error: e instanceof Error ? e.message : String(e) }),
-      'error',
-    )
+    toast(i18n.t('stuck.skipFailed', { error: errorMessage(e) }), 'error')
   } finally {
     useSessionStore.getState().setDemoPlaying(false)
     useUiStore.getState().setSkipping(null)

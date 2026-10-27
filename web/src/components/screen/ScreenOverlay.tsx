@@ -38,7 +38,7 @@ export function ScreenOverlay({ onReattach }: { onReattach(): void }) {
 
   let card: ReactNode = null
   if (skipping) {
-    // "Skip this step" (S2): Emacs plays the step; the learner watches
+    // "Skip this step": Emacs plays the step; the learner watches
     // through a light veil and their keys wait (the terminal swallows them).
     card = (
       <div className={styles.skipOverlay} role="status" aria-label={t('stuck.skipping')}>

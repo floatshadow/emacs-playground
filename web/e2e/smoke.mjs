@@ -27,7 +27,7 @@
 //   9  lesson 3.8: the Markdown preview pane shows a line saved from Emacs
 //   10 playctl curriculum play for every lesson of Parts 0-3 (PG_SMOKE_PLAY=0 skips)
 //   11 playctl curriculum play -watch for Part 0: every step as a Watch it
-//      demonstration, then Do it yourself (fix plan R1; PG_SMOKE_PLAY=0 skips)
+//      demonstration, then Do it yourself (PG_SMOKE_PLAY=0 skips)
 //
 // Scenario 6 runs after 9 because it and 10 both start from Part 0's module
 // set (base agent); the results are reported in scenario order.
@@ -384,8 +384,8 @@ try {
     await caption.waitFor({ timeout: 5000 })
     await page.waitForTimeout(300)
     await page.getByRole('heading', { level: 1 }).first().click()
-    // A demonstration, not a completion (fix plan contract b): sessiond
-    // records it "demonstrated" and the step stays active.
+    // A demonstration, not a completion: sessiond records it "demonstrated"
+    // and the step stays active.
     const ev = await waitEvent(
       t0,
       (e) => e.t === 'step' && e.stepId === 'open' && /demonstrated|complete/.test(e.status),
@@ -683,7 +683,7 @@ try {
   })
 } finally {
   // Start over: the scenarios and the replay recorded progress for the
-  // single local learner (fix plan contract a).
+  // single local learner.
   await api('/api/v1/progress/reset', { method: 'POST' }).catch(() => undefined)
   results.sort((a, b) => a.n - b.n)
   const table = results.map(

@@ -33,16 +33,6 @@ interface MdNode {
   }
 }
 
-export const PG_ELEMENTS = [
-  'pg-kbd',
-  'pg-try',
-  'pg-jargon',
-  'pg-vscode',
-  'pg-aside',
-  'pg-gui-only',
-  'pg-steps',
-] as const
-
 /** Plain text of a node's descendants. */
 export function textOf(n: MdNode): string {
   if (typeof n.value === 'string') return n.value

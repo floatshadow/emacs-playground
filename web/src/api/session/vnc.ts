@@ -2,7 +2,7 @@
  * VncClient (frontend.md §4, §8): a thin wrapper around noVNC's RFB over
  * /s/{id}/vnc. noVNC is imported lazily so it stays out of the main chunk.
  * The X screen follows the pane (resizeSession: noVNC asks Xvnc for the
- * pane's size, B13), so the GUI frame is drawn at scale 1 instead of a
+ * pane's size), so the GUI frame is drawn at scale 1 instead of a
  * fixed 1600×900 screen scaled into a letterbox; pane resizes are debounced
  * 200 ms and a hidden (zero-size) pane asks for nothing. scaleViewport stays
  * on as the fallback when the server refuses a size. clipViewport off, dot

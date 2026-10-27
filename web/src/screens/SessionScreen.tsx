@@ -18,6 +18,7 @@ import { clock, uptime } from '../lib/time'
 import { useSessionStore } from '../store/session'
 import { toast, useUiStore } from '../store/ui'
 import styles from './Screens.module.css'
+import { errorMessage } from '../lib/errors'
 
 /**
  * Configuration modules (emacs.md §3) in load order, with the part that
@@ -107,7 +108,7 @@ export default function SessionScreen() {
       toast(t('session.restarting'))
       setConfirmRestart(false)
     } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), 'error')
+      toast(errorMessage(e), 'error')
     } finally {
       setBusy(false)
     }
@@ -125,7 +126,7 @@ export default function SessionScreen() {
       setConfirmStop(false)
       void navigate('/')
     } catch (e) {
-      toast(e instanceof Error ? e.message : String(e), 'error')
+      toast(errorMessage(e), 'error')
     } finally {
       setBusy(false)
     }

@@ -1,8 +1,7 @@
-// Regression check for the demo player (review fix, 2026-10-27): "Watch it"
-// keeps playing when the terminal loses focus. tmux's focus-events make
-// xterm.js send a focus-out report (ESC [ O) on blur; that is not learner
-// input. A real keypress still stops the demo. Watch it is a demonstration
-// (fix plan contract b): the step ends up watched, not done.
+// Check for the demo player: "Watch it" keeps playing when the terminal loses
+// focus. tmux's focus-events make xterm.js send a focus-out report (ESC [ O)
+// on blur; that is not learner input. A real keypress still stops the demo.
+// Watch it is a demonstration: the step ends up watched, not done.
 //
 //   cd web && node e2e/demo-focus.mjs      (stack on :8080, Chrome on CDP :9222)
 import { chromium } from 'playwright-core'

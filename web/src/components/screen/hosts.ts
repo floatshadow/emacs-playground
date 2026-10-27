@@ -146,7 +146,7 @@ class TerminalHost {
       // No WebGL (headless, old GPU): the DOM renderer is used.
     }
     term.attachCustomKeyEventHandler((e) => {
-      // While "Skip this step" plays the step, the learner's keys wait (S2).
+      // While "Skip this step" plays the step, the learner's keys wait.
       if (useUiStore.getState().skipping) {
         e.preventDefault()
         return false
@@ -397,6 +397,14 @@ class VncHost {
 let terminalHost: TerminalHost | null = null
 let vncHost: VncHost | null = null
 
+/** Keeps a host on the store's session id. */
+function followSession(host: { setSession(id: string | null): void }) {
+  host.setSession(useSessionStore.getState().sessionId)
+  useSessionStore.subscribe((s, prev) => {
+    if (s.sessionId !== prev.sessionId) host.setSession(s.sessionId)
+  })
+}
+
 export function getTerminalHost(): TerminalHost {
   if (!terminalHost) {
     const host = new TerminalHost()
@@ -405,22 +413,15 @@ export function getTerminalHost(): TerminalHost {
     // (web/e2e/smoke.mjs); it exposes nothing the learner cannot see.
     ;(window as unknown as { __pgScreenText?: () => string[] }).__pgScreenText = () =>
       host.screenText()
-    host.setSession(useSessionStore.getState().sessionId)
-    useSessionStore.subscribe((s, prev) => {
-      if (s.sessionId !== prev.sessionId) host.setSession(s.sessionId)
-    })
+    followSession(host)
   }
   return terminalHost
 }
 
 export function getVncHost(): VncHost {
   if (!vncHost) {
-    const host = new VncHost()
-    vncHost = host
-    host.setSession(useSessionStore.getState().sessionId)
-    useSessionStore.subscribe((s, prev) => {
-      if (s.sessionId !== prev.sessionId) host.setSession(s.sessionId)
-    })
+    vncHost = new VncHost()
+    followSession(vncHost)
   }
   return vncHost
 }

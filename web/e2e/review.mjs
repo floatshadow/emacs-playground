@@ -1,8 +1,7 @@
-// Acceptance checks for docs/feedback/2026-10-27-fix-plan.md: one check per
-// item of the newcomer review (B1..B18, L1, X3, X11, S1..S5, R1, R9, R10). Each
-// check drives the running local stack (http://127.0.0.1:8080) through
-// headless Chrome on CDP :9222 and asserts the behaviour the plan asks for,
-// so before the fixes most checks fail; the plan records that baseline.
+// Acceptance checks for the newcomer-review fixes: one check per review item,
+// named by its id (B1..B18, L1, X3, X11, S1..S5, R1, R9, R10). Each check
+// drives the running local stack (http://127.0.0.1:8080) through headless
+// Chrome on CDP :9222 and asserts the expected behaviour.
 //
 //   cd web && node e2e/review.mjs                  all checks
 //   PG_REVIEW_ONLY=B1,B4 node e2e/review.mjs       a subset
@@ -77,14 +76,8 @@ const post = (path, body) =>
 const rpc = (op, body = {}) => post('/s/local/rpc/' + op, body)
 const resetLesson = (lessonId) => post('/api/v1/progress/reset', { lessonId })
 
-/** Start over; falls back to per-lesson resets while the reset-all contract is missing. */
-async function resetAll() {
-  const r = await post('/api/v1/progress/reset')
-  if (r.status === 204) return r.status
-  const p = await api('/api/v1/progress')
-  for (const id of Object.keys(p.body?.lessons ?? {})) await resetLesson(id)
-  return r.status
-}
+/** Start over: resets the progress of every lesson. */
+const resetAll = async () => (await post('/api/v1/progress/reset')).status
 
 const lessonCache = new Map()
 async function lesson(id) {
@@ -411,7 +404,7 @@ await check(
         throw new Error(`${e.message}; last check ${JSON.stringify(c?.conditions)}`)
       })
     note(`(a) Watch it from /work/hello/src/main.rs -> step ${dem.status}`)
-    assert(dem.status === 'demonstrated', 'the demo completed the step as done (contract b)')
+    assert(dem.status === 'demonstrated', 'the demo completed the step as done')
     t = Date.now()
     await h
       .active()
@@ -519,7 +512,7 @@ await check('B4', 'no stale ESC prefix after ESC ESC ESC', async (h, note) => {
 await check('B5', 'Start over and honest step ticks', async (h, note) => {
   const r = await post('/api/v1/progress/reset')
   note(`POST /progress/reset with no body -> ${r.status}`)
-  assert(r.status === 204, 'reset with no body is not 204 (contract a)')
+  assert(r.status === 204, 'reset with no body is not 204')
   let p = await api('/api/v1/progress')
   const started = Object.entries(p.body?.lessons ?? {}).filter(([, l]) =>
     Object.values(l.steps ?? {}).some((s) => s.status !== 'not-started'),

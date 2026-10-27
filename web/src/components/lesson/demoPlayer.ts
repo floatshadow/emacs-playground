@@ -1,13 +1,13 @@
 /**
- * The demo player engine (frontend.md §7, fix plan contract b). "Watch it"
- * is a demonstration, not a completion: the player calls rpc('demo', start)
- * first, so sessiond restores the step's checkpoint when the learner
- * already ran commands in it and latches the step (a completion while the
- * latch is set is recorded "demonstrated", not done). Then it sends the
- * demo through rpc('keys') one chord or one typed character at a time, at
- * human pace (600 ms per chord, 120 ms per character), while the caption
- * strip under the screen names every key; rpc('demo', end) follows in any
- * case. Any learner keypress in the terminal stops it.
+ * The demo player engine (frontend.md §7). "Watch it" is a demonstration,
+ * not a completion: the player calls rpc('demo', start) first, so sessiond
+ * restores the step's checkpoint when the learner already ran commands in
+ * it and latches the step (a completion while the latch is set is recorded
+ * "demonstrated", not done). Then it sends the demo through rpc('keys') one
+ * chord or one typed character at a time, at human pace (600 ms per chord,
+ * 120 ms per character), while the caption strip under the screen names
+ * every key; rpc('demo', end) follows in any case. Any learner keypress in
+ * the terminal stops it.
  */
 import { parseDemo, planDemo, WATCH_PACING, type DemoAction } from '../../lib/demo'
 import { sleep } from '../../lib/time'
@@ -17,6 +17,7 @@ import { useSessionStore } from '../../store/session'
 import { toast, useUiStore } from '../../store/ui'
 import i18n from '../../i18n'
 import { focusTerminal, onTerminalInput } from '../screen/focus'
+import { errorMessage } from '../../lib/errors'
 
 let current: AbortController | null = null
 
@@ -76,7 +77,7 @@ export async function playDemo(stepId: string, goal: string, demo: string): Prom
   try {
     actions = planDemo(parseDemo(demo), WATCH_PACING)
   } catch (e) {
-    toast(i18n.t('demo.bad', { error: e instanceof Error ? e.message : String(e) }), 'error')
+    toast(i18n.t('demo.bad', { error: errorMessage(e) }), 'error')
     return
   }
   const ctl = new AbortController()
@@ -116,8 +117,7 @@ export async function playDemo(stepId: string, goal: string, demo: string): Prom
       useUiStore.getState().setDemoSent(stepId, n),
     )
   } catch (e) {
-    if (!ctl.signal.aborted)
-      toast(i18n.t('demo.failed', { error: e instanceof Error ? e.message : String(e) }), 'error')
+    if (!ctl.signal.aborted) toast(i18n.t('demo.failed', { error: errorMessage(e) }), 'error')
   } finally {
     off()
     if (latched) void rpc('demo', { stepId, phase: 'end' }, { silent: true }).catch(() => undefined)

@@ -4,9 +4,8 @@
  * When a single-key command matches a row of tables.habits, one card is
  * created per key, once per session (the keys seen persist in localStorage
  * across reloads), unless the lesson mentions that key: a card must not
- * scold the learner for a key the lesson asked for (fix plan contract d).
- * Cards stay until dismissed or until another lesson loads; the panel shows
- * the newest three (B9).
+ * scold the learner for a key the lesson asked for. Cards stay until
+ * dismissed or until another lesson loads; the panel shows the newest three.
  */
 import type { HabitRow, NudgeKind } from '../protocol.gen'
 import { normalizeKeysLoose } from './keys'

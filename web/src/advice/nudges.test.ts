@@ -58,7 +58,7 @@ describe('habit cards (layer 2)', () => {
     expect(s.cards.map((c) => c.id)).toEqual(['habit:C-s'])
   })
 
-  it('cards stay until dismissed: no command TTL (B9)', () => {
+  it('cards stay until dismissed: no command TTL', () => {
     rec = record()
     rec.keys('C-s')
     let s = rec.replay()
@@ -99,7 +99,7 @@ describe('habit cards (layer 2)', () => {
     expect(ids(s, 2000)).toEqual(['habit:C-v', 'habit:C-b'])
   })
 
-  it('a key the lesson mentions raises no card and is not used up (contract d)', () => {
+  it('a key the lesson mentions raises no card and is not used up', () => {
     const cs: Event = {
       t: 'key',
       keys: 'C-s',
@@ -145,7 +145,7 @@ describe('habit cards (layer 2)', () => {
     expect(s.cards.map((c) => c.id)).toEqual(['habit:C-b'])
   })
 
-  it('each command of a mentioned span counts: C-a and C-k in 3.5 build (B8, R5)', () => {
+  it('each command of a mentioned span counts: C-a and C-k in 3.5 build', () => {
     const key = (keys: string, cmd: string): Event => ({
       t: 'key',
       keys,

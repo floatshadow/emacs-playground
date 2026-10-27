@@ -3,7 +3,6 @@ import { Link } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import type { LessonBundle, LessonRef } from '../../protocol.gen'
-import { ApiError } from '../../api/http'
 import { resetProgress, useMe } from '../../api/queries'
 import { rpc } from '../../api/session/rpc'
 import { toast, useUiStore } from '../../store/ui'
@@ -17,6 +16,7 @@ import { Steps } from './Steps'
 import { hasStepsMarker } from './directives'
 import type { LessonSteps, ScenarioLoad } from './useLesson'
 import styles from './Lesson.module.css'
+import { errorMessage } from '../../lib/errors'
 
 /** Drops a leading "# Title" when it repeats the front-matter title. */
 function stripTitle(markdown: string, title: string): string {
@@ -117,7 +117,7 @@ export function LessonPane({
       await rpc('scenario', { lessonId: bundle.id, reset: true }, { silent: true })
       toast(t('lesson.startLessonOverDone'))
     } catch (e) {
-      const msg = e instanceof ApiError || e instanceof Error ? e.message : String(e)
+      const msg = errorMessage(e)
       toast(t('startOver.failed', { error: msg }), 'error')
     } finally {
       setRestarting(false)

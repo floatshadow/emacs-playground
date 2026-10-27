@@ -45,7 +45,7 @@ export function Step({
   onGoTo?(view: StepView): void
   /** Author mode: show evaluator details next to conditions. */
   showDetails?: boolean
-  /** The step just ended: highlighted for a moment (L1). */
+  /** The step just ended: highlighted for a moment. */
   flash?: boolean
 }) {
   const { t } = useTranslation()

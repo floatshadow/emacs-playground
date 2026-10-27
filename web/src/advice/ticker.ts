@@ -6,7 +6,7 @@
  * an unbound sequence as cmd "undefined". Consecutive typing commands
  * (self-insert-command and friends) collapse into one entry, "typed N
  * characters" with the last twelve, so a word does not push the chords out
- * of view (B10, R6). Entries are kept oldest first (max 40); the view shows
+ * of view. Entries are kept oldest first (max 40); the view shows
  * the newest six, newest first.
  */
 import type { KeyEvent, PrefixEvent } from '../protocol.gen'

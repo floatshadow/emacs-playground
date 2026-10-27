@@ -432,7 +432,7 @@ export async function startFakeSession(opts: FakeOptions) {
     }
     if (r.complete && active.skipping) return ev
     if (r.complete && active.latched) {
-      // Watched, not done: no advance (contract b).
+      // Watched, not done: no advance.
       if (!active.demonstrated) {
         active.demonstrated = true
         setProgress(active.lessonId, step.id, { status: 'demonstrated' })

@@ -35,7 +35,7 @@ function useDescribe() {
 
 /**
  * The area under the screen, at a fixed height: the key ticker, or the
- * caption strip while a demo plays (B7: nothing in the stage changes size).
+ * caption strip while a demo plays (nothing in the stage changes size).
  */
 export function TickerArea() {
   const playing = useUiStore((s) => s.demo !== null)

@@ -85,7 +85,3 @@ export function disconnectSession(): void {
   events = null
   ensurePromise = null
 }
-
-export function eventsClient(): EventsClient | null {
-  return events
-}

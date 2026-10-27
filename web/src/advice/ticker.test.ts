@@ -96,7 +96,7 @@ describe('ticker reducer', () => {
     expect(selectTicker(t, DEFAULT_GLOSS, {})[0]?.gloss).toBe('Nothing is bound to this key here')
   })
 
-  it('collapses a run of typing into one entry with the last 12 characters (B10)', () => {
+  it('collapses a run of typing into one entry with the last 12 characters', () => {
     let t: TickerEntry[] = tickerOnKey([], key('C-e', 'move-end-of-line'), 1)
     for (const [i, ch] of [...'hello world!!'].entries())
       t = tickerOnKey(t, key(ch === ' ' ? 'SPC' : ch, 'self-insert-command'), 2 + i)

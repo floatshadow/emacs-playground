@@ -10,12 +10,13 @@ import { Button } from '../common/Button'
 import { ConfirmDialog, Dialog } from '../common/Dialog'
 import { doRescue, doResetStep, doSkipStep } from './actions'
 import styles from './RescueCard.module.css'
+import { errorMessage } from '../../lib/errors'
 
 /**
  * Rescue, Reset this step, and "I'm stuck" (frontend.md §6, api.md §2.5).
  * Rescue never touches files; Reset this step does, so it has its own line
- * and asks first (R10). After a stuck report the dialog offers "Skip this
- * step": Emacs does the step for the learner (S2, contract c).
+ * and asks first. After a stuck report the dialog offers "Skip this
+ * step": Emacs does the step for the learner.
  */
 export function RescueCard() {
   const { t, i18n } = useTranslation()
@@ -54,7 +55,7 @@ export function RescueCard() {
         closeStuck()
       }
     } catch (e) {
-      toast(t('stuck.failed', { error: e instanceof Error ? e.message : String(e) }), 'error')
+      toast(t('stuck.failed', { error: errorMessage(e) }), 'error')
     } finally {
       setSending(false)
     }

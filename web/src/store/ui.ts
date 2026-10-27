@@ -67,7 +67,7 @@ export interface UiStore extends Prefs {
   previewExtra: Record<string, string[]>
   focusMode: boolean
   focusLock: FocusLock
-  /** "Skip this step" is running: the screen is covered until it returns (S2). */
+  /** "Skip this step" is running: the screen is covered until it returns. */
   skipping: { stepId: string; goal: string } | null
   /** The browser-reserved-key toast is shown once per tab. */
   reservedKeyToastShown: boolean

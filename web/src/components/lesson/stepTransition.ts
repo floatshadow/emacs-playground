@@ -1,5 +1,5 @@
 /**
- * The completion transition (L1, frontend.md §7): when a step of this
+ * The completion transition (frontend.md §7): when a step of this
  * lesson ends, its tick pops and the step is highlighted for 600 ms, then
  * the next step scrolls into view; the live region announces it. Under
  * reduced motion there is no highlight and the scroll is instant.

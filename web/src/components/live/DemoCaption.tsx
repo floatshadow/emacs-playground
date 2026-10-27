@@ -8,10 +8,10 @@ import { cancelDemo } from '../lesson/demoPlayer'
 import styles from './Ticker.module.css'
 
 /**
- * The caption strip of a playing demo (frontend.md §7, contract b): in the
+ * The caption strip of a playing demo (frontend.md §7): in the
  * ticker's place and at its height, "Watching: <goal>", the keys sent so
  * far left to right with the current one highlighted, typed text growing
- * inside quotes, and Stop. The screen above does not change size (B7).
+ * inside quotes, and Stop. The screen above does not change size.
  */
 export function DemoCaption() {
   const { t } = useTranslation()

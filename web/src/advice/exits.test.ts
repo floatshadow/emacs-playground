@@ -126,7 +126,7 @@ describe('exits table over real states (the demo whereAmI as data)', () => {
     expect(minorLighter('which-key-mode')).toBe('Which-key')
   })
 
-  it('leaves housekeeping minor modes out of the Mode row (B16)', () => {
+  it('leaves housekeeping minor modes out of the Mode row', () => {
     const w = whereAmI(
       calmState({ minors: ['ws-butler-mode', 'flymake-mode', 'global-ws-butler-mode'] }),
       DEFAULT_EXITS,

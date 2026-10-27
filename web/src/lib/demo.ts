@@ -12,6 +12,7 @@
  */
 import type { DemoToken } from '../protocol.gen'
 import { formatKey, parseKey } from '../advice/keys.ts'
+import { errorMessage } from './errors.ts'
 
 /** Pacing from protocol.DemoChordDelayMs and DemoCharDelayMs (playctl, the fake session). */
 export const CHORD_DELAY_MS = 170
@@ -28,8 +29,8 @@ export const REPLAY_PACING: DemoPacing = { chordMs: CHORD_DELAY_MS, charMs: CHAR
 
 /**
  * "Watch it" plays at human speed so the learner can follow every key in
- * the caption: 600 ms per chord, 120 ms per typed character (fix plan,
- * contract b; frontend.md §7).
+ * the caption: 600 ms per chord, 120 ms per typed character
+ * (frontend.md §7).
  */
 export const WATCH_PACING: DemoPacing = { chordMs: 600, charMs: 120 }
 
@@ -93,7 +94,7 @@ export function parseDemo(s: string): DemoToken[] {
       try {
         out.push({ kind: 'key', key: formatKey(parseKey(tok)) })
       } catch (e) {
-        throw new DemoParseError('demo: ' + (e instanceof Error ? e.message : String(e)))
+        throw new DemoParseError('demo: ' + errorMessage(e))
       }
     }
     i = j

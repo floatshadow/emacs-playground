@@ -1,6 +1,6 @@
 /* The ticker area has a fixed height: whatever it shows (entries, the demo
    caption) the screen above keeps its size, so the terminal never resizes
-   because of it (B7). */
+   because of it. */
 .area {
   /* Room for the newest entry: large keycaps, the command and a two-line gloss. */
   height: 98px;

@@ -266,7 +266,7 @@ describe('LessonScreen against a fake events stream', () => {
       .filter((li) => li.parentElement === steps)
     expect(items[0]).toHaveTextContent(/^Done:/)
     expect(items[1]).toHaveAttribute('aria-current', 'step')
-    // L1: the finished step is highlighted for a moment and announced.
+    // The finished step is highlighted for a moment and announced.
     expect(items[0]).toHaveClass('justDone')
     expect(screen.getByText('Step done: Open src/main.rs')).toBeInTheDocument()
     await waitFor(() => expect(items[0]).not.toHaveClass('justDone'), { timeout: 2000 })
@@ -329,7 +329,7 @@ describe('LessonScreen against a fake events stream', () => {
     expect(screen.getByText('Emacs is busy.')).toBeInTheDocument()
   })
 
-  it('Watch it is a demonstration: demo start, a caption, Stop, demo end (B6)', async () => {
+  it('Watch it is a demonstration: demo start, a caption, Stop, demo end', async () => {
     const user = userEvent.setup()
     await openLesson()
     await user.click(screen.getByRole('button', { name: 'Watch it' }))
@@ -347,7 +347,7 @@ describe('LessonScreen against a fake events stream', () => {
     expect(screen.getByLabelText(/^Key ticker/)).toBeInTheDocument()
   })
 
-  it('a demonstrated step stays active and offers Do it yourself (contract b)', async () => {
+  it('a demonstrated step stays active and offers Do it yourself', async () => {
     const user = userEvent.setup()
     await openLesson()
     send({
@@ -379,7 +379,7 @@ describe('LessonScreen against a fake events stream', () => {
     expect(within(first).queryByText('You watched this step. Now do it yourself.')).toBeNull()
   })
 
-  it('Reset this step asks first (R10)', async () => {
+  it('Reset this step asks first', async () => {
     const user = userEvent.setup()
     await openLesson()
     await user.click(screen.getByRole('button', { name: 'Reset this step' }))
@@ -395,7 +395,7 @@ describe('LessonScreen against a fake events stream', () => {
     await waitFor(() => expect(rpcCalls).toContainEqual({ op: 'restore', body: {} }))
   })
 
-  it('a progress reset from another page reloads the lesson at its first step (X10)', async () => {
+  it('a progress reset from another page reloads the lesson at its first step', async () => {
     let openDone = false
     server.use(
       http.get('/api/v1/progress', () =>
@@ -458,7 +458,7 @@ describe('LessonScreen against a fake events stream', () => {
     ])
   })
 
-  it('after a stuck report the learner can skip the step (S2)', async () => {
+  it('after a stuck report the learner can skip the step', async () => {
     const user = userEvent.setup()
     server.use(
       http.post('/api/v1/stuck', () => HttpResponse.json({ id: '1' }, { status: 201 })),
@@ -502,7 +502,7 @@ describe('LessonScreen against a fake events stream', () => {
     expect(items[1]).toHaveAttribute('aria-current', 'step')
   })
 
-  it('a habit card stays quiet for a key the current step teaches (B8)', async () => {
+  it('a habit card stays quiet for a key the current step teaches', async () => {
     await openLesson()
     const cs = (seq: number): Event => ({
       t: 'key',

@@ -67,7 +67,7 @@ export function selectWhereAmI(
 /**
  * Pattern nudges, server nudges and habit cards merged, minus dismissed
  * ones: the live patterns first, then the newest server nudges and cards
- * first (the panel shows NUDGES_SHOWN of them, B9).
+ * first (the panel shows NUDGES_SHOWN of them).
  */
 export function selectNudges(
   s: Pick<
@@ -113,7 +113,7 @@ export interface StepView {
   step: Step
   index: number
   status: StepStatus
-  /** The active step was watched: it offers "Do it yourself" (contract b). */
+  /** The active step was watched: it offers "Do it yourself". */
   watched: boolean
   goal: string
   detail: string
@@ -153,11 +153,10 @@ function savedOutcome(s: ProgressStatus | undefined): StepOutcome | undefined {
 }
 
 /**
- * The status of each step (fix plan contract a, fixes X1): the engine's
- * active step is always active, whatever progress says; steps after it
- * show no tick (they are evaluated again when reached); other steps show
- * this visit's outcome, else their saved status when it is done,
- * demonstrated or skipped, else to do.
+ * The status of each step: the engine's active step is always active,
+ * whatever progress says; steps after it show no tick (they are evaluated
+ * again when reached); other steps show this visit's outcome, else their
+ * saved status when it is done, demonstrated or skipped, else to do.
  */
 export function stepStatuses(
   scenario: Scenario,

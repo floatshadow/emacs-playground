@@ -4,7 +4,7 @@
  * on step events (see useProgressInvalidation).
  */
 import { useEffect } from 'react'
-import { QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { QueryClient, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   APIPrefix,
   type AuthConfigInfo,
@@ -96,7 +96,7 @@ export function useProgress(enabled = true) {
 }
 
 /**
- * POST /progress/reset (api.md §2.4, fix plan contract a): with a lesson id
+ * POST /progress/reset (api.md §2.4): with a lesson id
  * that lesson's records, without one every record of the user ("Start
  * over", posted with no body). The page then forgets what it remembers of
  * that progress (outcomes, hint levels, habit cards and keys seen) and
@@ -109,13 +109,6 @@ export async function resetProgress(qc: QueryClient, lessonId?: string): Promise
   useSessionStore.getState().forgetProgress(lessonId)
   useUiStore.getState().clearHintLevels(lessonId)
   await qc.invalidateQueries({ queryKey: qk.progress })
-}
-
-export function useResetProgress() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (lessonId?: string) => resetProgress(qc, lessonId),
-  })
 }
 
 /** Ensures the session (POST /api/v1/sessions, idempotent) for screens that need Emacs. */

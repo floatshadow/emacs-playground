@@ -90,7 +90,7 @@ function LessonView({ lessonId }: { lessonId: string }) {
       <RailSection title={t('rail.where')}>
         <WhereAmI />
       </RailSection>
-      {/* Rescue before "Did you mean": cards never push it below the fold (B9). */}
+      {/* Rescue before "Did you mean": cards never push it below the fold. */}
       <RailSection title={t('rail.rescue')}>
         <RescueCard />
       </RailSection>

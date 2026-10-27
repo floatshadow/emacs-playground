@@ -157,7 +157,7 @@
   margin-left: 6px;
 }
 
-/* Focus mode (B14): the stage takes the whole width; the lesson pane and the
+/* Focus mode: the stage takes the whole width; the lesson pane and the
    rail step aside. The stage is always the second child. */
 .work.focus {
   grid-template-columns: minmax(0, 1fr) !important;
@@ -171,7 +171,7 @@
   display: none !important;
 }
 /* The rail collapses into a drawer at 1440 px and below, so the terminal
-   keeps its width (S5: at 1280 px it had shrunk to 76 columns). */
+   keeps its width. */
 @media (max-width: 1440px) {
   .railToggle {
     display: inline-flex !important;

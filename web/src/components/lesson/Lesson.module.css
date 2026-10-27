@@ -273,7 +273,7 @@
   font: italic 14px var(--serif);
   color: var(--ok);
 }
-/* L1: a step that just ended is highlighted for a moment before the next one scrolls in. */
+/* A step that just ended is highlighted for a moment before the next one scrolls in. */
 .justDone {
   background: var(--ok-soft);
   border-radius: 6px;

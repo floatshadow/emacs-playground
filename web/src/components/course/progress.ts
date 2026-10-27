@@ -9,8 +9,8 @@ export function lessonDone(progress: Progress | undefined, id: string): boolean 
 }
 
 /**
- * Every step is done, demonstrated or skipped, but not all are done
- * (contract c): the row reads "finished · N skipped · M watched".
+ * Every step is done, demonstrated or skipped, but not all are done:
+ * the row reads "finished · N skipped · M watched".
  */
 export function lessonFinished(progress: Progress | undefined, id: string): boolean {
   const lp = progress?.lessons?.[id]

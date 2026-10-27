@@ -7,6 +7,7 @@
  * stripping.
  */
 import type { Predicate, State } from '../protocol.gen'
+import { errorMessage } from '../lib/errors.ts'
 
 type Doc = unknown
 type Obj = Record<string, unknown>
@@ -47,7 +48,7 @@ function validateExpectation(want: unknown): string | null {
       try {
         compileRe2(arg)
       } catch (e) {
-        return 'regex: ' + (e instanceof Error ? e.message : String(e))
+        return 'regex: ' + errorMessage(e)
       }
       return null
     case 'not':
@@ -192,9 +193,9 @@ function equal(a: unknown, b: unknown): boolean {
  * The tables are written for Go's RE2 (internal/protocol/predicate.go), and
  * JavaScript's RegExp rejects RE2 syntax that authors use: the inline flag
  * group `(?i)` ("Invalid group"), scoped modifiers `(?i:…)` (only engines
- * from 2025 on have them) and named groups `(?P<name>…)`. A rejected pattern
- * used to count as "no match", so `{not: {regex: "(?i)…"}}` held for every
- * prompt (B11). translateRe2 rewrites those constructs:
+ * from 2025 on have them) and named groups `(?P<name>…)`. Counting a rejected
+ * pattern as "no match" would make `{not: {regex: "(?i)…"}}` hold for every
+ * prompt, so translateRe2 rewrites those constructs:
  *
  *   - a leading `(?flags)` with i, m, s becomes RegExp flags;
  *   - `(?i:…)` and `(?s:…)` (also `(?is:…)`) become `(?:…)` with letters

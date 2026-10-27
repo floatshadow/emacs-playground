@@ -89,12 +89,6 @@ cargo build
 Compilation finished at Mon Oct 26 18:04:41
 `
 
-/** The heading line of report.typ (for the fake PDF build). */
-export function typstTitle(src: string): string {
-  const m = /^=\s+(.+)$/m.exec(src)
-  return m?.[1]?.trim() ?? 'Untitled'
-}
-
 /** Text lines of report.typ for the fake PDF (headings, paragraphs, table rows). */
 export function typstLines(src: string): { text: string; size: number }[] {
   const out: { text: string; size: number }[] = []

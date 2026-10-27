@@ -38,7 +38,7 @@ function pane(w: number, h: number): HTMLElement {
   return el
 }
 
-describe('VncClient (B13: the X screen follows the pane)', () => {
+describe('VncClient: the X screen follows the pane', () => {
   beforeEach(() => {
     made.length = 0
     vi.useFakeTimers()

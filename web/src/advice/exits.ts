@@ -95,7 +95,7 @@ const MINOR_LIGHTERS: Record<string, string> = {
 /**
  * Minor modes that are housekeeping: they never ask anything of the
  * learner, so the Mode row does not list them (the configuration hides
- * their lighters in the mode line too; B16, R8).
+ * their lighters in the mode line too).
  */
 export const HOUSEKEEPING_MINORS: ReadonlySet<string> = new Set([
   'ws-butler-mode',
