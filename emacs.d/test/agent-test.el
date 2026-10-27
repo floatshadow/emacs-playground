@@ -1013,6 +1013,37 @@ Lesson 2.7: after Watch it and Do it yourself, the demonstration's
           (should (get-buffer-window shown))
           (dolist (b (list early shown)) (kill-buffer b)))))))
 
+(ert-deftest pg-agent/snapshot-with-propertized-buffer-names ()
+  "A buffer name with text properties still gives a readable window state.
+Lesson 3.5 after 2.7: uniquify gave main.rs its name back with the
+buffer in a text property, the state printed #<buffer main.rs> among
+a window's previous buffers, did not read back, and reset-step fell
+back to the layout pattern: the help side window came back as an
+ordinary window, and C-x w s then showed a second one."
+  (pg-test-with-agent
+    (let* ((a (find-file-noselect (pg-test-file "a.txt" "a\n")))
+           (b (find-file-noselect (pg-test-file "b.txt" "b\n")))
+           (side (get-buffer-create "*side*")))
+      (with-current-buffer a (rename-buffer (propertize "a.txt<x>" 'uniquify-orig-buffer a)))
+      (should (text-properties-at 0 (buffer-name a)))
+      (delete-other-windows)
+      (switch-to-buffer a)
+      (switch-to-buffer b)
+      (display-buffer-in-side-window side '((side . right)))
+      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+        (should-not (string-search "#<" (alist-get 'windowState snap)))
+        (should (car (read-from-string (alist-get 'windowState snap))))
+        ;; The step's demo hides the side window (C-x w s); Reset brings it back.
+        (window-toggle-side-windows)
+        (should-not (get-buffer-window side))
+        (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap)))))
+        (should (eq (window-parameter (get-buffer-window side) 'window-side) 'right)))
+      (kill-buffer side)))
+  ;; A state saved before the fix reads with the buffer object as nil.
+  (should (equal (playground--read-state
+                  "((buffer #(\"main.rs\" 0 1 (uniquify-orig-buffer #<buffer main.rs>)) (point . 1)) (prev-buffers (#(\"README.md<hello>\" 0 1 (x #<buffer README.md<hello>>)) 1 1)))")
+                 '((buffer "main.rs" (point . 1)) (prev-buffers ("README.md<hello>" 1 1))))))
+
 (ert-deftest pg-agent/op-setup-reset-starts-at-the-top ()
   "With reset, the files of a setup start on their first line, in their windows too."
   (pg-test-with-agent

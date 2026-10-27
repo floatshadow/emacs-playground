@@ -1464,17 +1464,42 @@ the absolute names of the spec's files, by its name."
       (layout . ,(playground--layout-string (playground--tree frame)))
       (windowState . ,(with-selected-frame frame
                         ;; Real buffer names, which the file names are
-                        ;; looked up by.
-                        (let ((window-state-normalize-buffer-name nil))
+                        ;; looked up by, without their text properties.
+                        (let ((window-state-normalize-buffer-name nil)
+                              (print-length nil) (print-level nil))
                           (prin1-to-string
-                           (playground--state-add-files
-                            (window-state-get (frame-root-window frame) t))))))
+                           (playground--plain
+                            (playground--state-add-files
+                             (window-state-get (frame-root-window frame) t)))))))
       (selected . ,(playground--leaf-name (window-buffer (playground--user-window))))
       (tab . ,(alist-get 'current (playground--tabs frame)))
       ,@(playground--tab-spec frame)
       (specialBuffers . ,(let ((print-length nil) (print-level nil))
                            (prin1-to-string (playground--special-buffers))))
       (takenAt . ,(playground--now-ms)))))
+
+(defun playground--plain (x)
+  "X with the text properties of its strings removed.
+A buffer name can carry properties: uniquify keeps the buffer itself
+in `uniquify-orig-buffer' on a name it gave back (main.rs after
+lesson 2.7 closed polyglot's main.rs), and a printed window state
+would then hold an unreadable #<buffer main.rs>."
+  (cond ((stringp x) (substring-no-properties x))
+        ((consp x) (cons (playground--plain (car x)) (playground--plain (cdr x))))
+        ((vectorp x) (vconcat (mapcar #'playground--plain x)))
+        (t x)))
+
+(defun playground--read-state (string)
+  "Read STRING, a printed window state, and return it.
+States saved before `playground--plain' was applied may hold
+unreadable objects (#<buffer main.rs> in a name's text properties):
+those read as nil, and the strings lose their properties."
+  (playground--plain
+   (condition-case nil
+       (car (read-from-string string))
+     (invalid-read-syntax
+      (car (read-from-string
+            (replace-regexp-in-string "#<[^<>]*\\(?:<[^<>]*>[^<>]*\\)*>" "nil" string t t)))))))
 
 (defun playground--help-buffer-p (b)
   "Non-nil when B is a help buffer the learner can see (not internal)."
@@ -1590,7 +1615,7 @@ From its window state, else from its layout pattern."
                          (push (symbol-name x) names))
                         ((proper-list-p x) (mapc #'leaves x)))))
       (when (and (stringp state) (not (string-empty-p state)))
-        (walk (ignore-errors (car (read-from-string state)))))
+        (walk (ignore-errors (playground--read-state state))))
       (when (and (null names) (stringp layout) (not (member layout '("" "single"))))
         (if (string-prefix-p "(" layout)
             (leaves (ignore-errors (car (read-from-string layout))))
@@ -1691,7 +1716,7 @@ found by that file, so a window shows the file it showed when the
 state was saved even if its buffer has been renamed since.  FILES,
 absolute file names, help with states saved without them."
   (let ((ignore-window-parameters t)
-        (state (playground--state-map-files (car (read-from-string state)) files)))
+        (state (playground--state-map-files (playground--read-state state) files)))
     (playground--in-user-window
       (playground--leave-side-window)
       (delete-other-windows)
