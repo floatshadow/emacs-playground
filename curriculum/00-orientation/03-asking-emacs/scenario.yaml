@@ -63,7 +63,7 @@ steps:
         any:
           - event: { command: describe-variable }
           - event: { command: helpful-variable }
-        hint: "C-h v, type fill-column, RET."
+        hint: "C-h, then a plain v: the bottom line asks Describe variable. Type fill-column (TAB completes it), then RET."
       - text: the help shows fill-column
         elisp: '(let ((b (get-buffer "*Help*"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (looking-at "fill-column")))))'
         hint: "Describe fill-column exactly; TAB helps with the spelling."
@@ -74,7 +74,7 @@ steps:
     conditions:
       - text: C-h m was used
         event: { command: describe-mode }
-        hint: "C-h m, in any window."
+        hint: "Control h, then a plain m. Holding Control on the m too (C-h C-m) opens a page about ordering manuals instead; q closes it."
       - text: the help lists the modes
         elisp: '(let ((b (get-buffer "*Help*"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "minor mode" nil t)))))'
         hint: "The *Help* buffer starts with the major mode and then lists the minor modes."
@@ -84,8 +84,12 @@ steps:
     demo: "C-h ? ~1500 b"
     conditions:
       - text: the help menu was opened
-        event: { command: help-for-help }
-        hint: "C-h, then ? (a question mark)."
+        # help-for-help reads the option key itself, so its command event
+        # arrives only after that key; the *Metahelp* window shows at once.
+        any:
+          - event: { command: help-for-help }
+          - state: { "windows.buf": " *Metahelp*" }
+        hint: "C-h, then ? (Shift and the / key). A window opens that lists every help command with its key; b is one of them."
       - text: b listed the bindings
         elisp: '(let ((b (get-buffer "*Help*"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "Global Bindings" nil t)))))'
         hint: "In the help menu, press b. C-h b does the same directly."
