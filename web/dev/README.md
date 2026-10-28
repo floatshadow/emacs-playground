@@ -6,7 +6,7 @@ port of the design demo's mock engine (`mock-emacs.ts`) drives it: typing in
 the terminal moves a fake Emacs that emits `key`, `prefix`, `state`, `echo`
 and `minibuffer` events; scenarios load, steps are checked, checkpoints
 restore, the GUI frame is a tiny RFB server, previews (Typst to PDF) rebuild
-on save. The step contracts of the newcomer-review fixes are there too:
+on save. The step contracts of api.md §4.1 are there too:
 `demo` latches a step so its completion is `demonstrated`, `skip` plays the
 demo and records `skipped`, `restore {}` resets the active step, and a
 progress reset with no body clears every lesson and drops the active step.

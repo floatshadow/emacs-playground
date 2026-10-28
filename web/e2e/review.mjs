@@ -1,5 +1,6 @@
-// Acceptance checks for the newcomer-review fixes: one check per review item,
-// named by its id (B1..B18, L1, X3, X11, S1..S5, R1, R9, R10). Each check
+// Acceptance checks for the UX contracts (frontend.md, api.md §4.1): one check
+// per contract, under a stable id (B1..B18, L1, X3, X11, S1..S5, R1, R9, R10;
+// `PG_REVIEW_ONLY` takes them). Each check
 // drives the running local stack (http://127.0.0.1:8080) through headless
 // Chrome on CDP :9222 and asserts the expected behaviour.
 //

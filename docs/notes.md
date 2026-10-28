@@ -1,57 +1,29 @@
 # Implementation notes
 
-Developer workflow, longer commands, the toolchain, the slice-1 scope and the known limitations. How the system behaves is specified in the other documents of `docs/` (§1 maps the topics that used to be collected here); the code is authoritative where they differ. The rules for contributors (ownership, environment, the main commands) are in `AGENTS.md`.
+Developer workflow, test tools, toolchain, slice-1 scope, known limitations and curriculum authoring pitfalls. Rules and main commands: `AGENTS.md`.
 
 ## 1. Where the details live
 
-| Topic | Document |
-|---|---|
-| Module path, package layout, interfaces | backend.md §1, §2.3 |
-| Lesson ids (one slash, literal in URLs), error codes, origins | api.md §1 |
-| Endpoints, RPC ops, events, step statuses, agent ops and replies | api.md §2 to §7 |
-| TypeScript generation from Go (`tsgen`) | api.md §8, DESIGN.md ADR-019 |
-| Condition and stuck-rule ids, condition kinds, layout patterns, demo strings | CURRICULUM.md B.3, api.md §6 |
-| Predicates, virtual roots (`otherWindows`, `selectedWindow`, `session`), exit-table regexes | CURRICULUM.md B.4, frontend.md §6 |
-| Configuration keys, precedence, `PG_*` names and aliases, Compose files | deployment.md §2, §3 |
-| Proxy secret, per-session networks, hardening, stores, curriculum serving, progress | backend.md §2, deployment.md §7, §9 |
-| Rate limits, stuck-report bounds | deployment.md §9, api.md §2.5 |
-| sessiond environment, supervisor, input tap, step engine, checkpoints, scenario loader ("Go to this step", `setup.reset`) | backend.md §3 |
-| playctl commands (`curriculum play` flags and output) | backend.md §4, CURRICULUM.md B.5 |
-| Session image, tmux, terminal keys, GUI frame, saving, module unlocking | emacs.md §1 to §7 |
-| Agent hooks, the learner's frame (the GUI frame while one exists), windows following the learner between the terminal and GUI frames, waiting loops (`waiting`) and Rescue, echo deduplication, `snapshot`, `open`, `reset-step`, `setup`, side windows, C-g during redisplay | emacs.md §10 |
-| Demo idle end and abandoned demos, the cold-start resume, checkpoint restores on a temporary index, the prefix list | api.md §4.1, backend.md §3.2, §3.6, §3.9 |
-| Go to this step (veil, quiet keys), finished and displaced lessons, offered locales, the top bar at narrow widths | frontend.md §7, §11, §12 |
-| Extended keys in the browser, demo player input, nudge suppression, progress resets from another tab | frontend.md §2, §5, §6 |
-| Authoring rules (modules only grow, demos from the checkpoint, builds, `C-g` after an edit) | CURRICULUM.md B.3 |
-| Every dependency, its pin and why | third-party.md |
+DESIGN.md maps topics to documents; third-party.md lists every dependency and pin.
 
 ## 2. Development workflow
 
-- **Config files:** `deploy/config.json` is the minimal local file (written by `make local`); `deploy/config.dev.json` is for `make dev` (listen `127.0.0.1:8080`, `publicUrl` `http://localhost:5173` so the Vite-proxied Origin passes, data and curriculum under `.dev/`, author mode on); `deploy/config.example.json` is the complete server example.
-- **sessiond on the host** (no Emacs needed to print its configuration): `PG_WORKSPACE=$HOME/pg-work PG_RUN_DIR=$HOME/pg-run go run ./cmd/sessiond config`; `sessiond -fake` runs the whole daemon with bash in place of Emacs, tmux and Xvnc.
-- **Emacs configuration changes:** the configuration is baked into the session image (`/opt/playground/emacs.d`; the agent loads from there) and copied to `./workspace/emacs.d` on first start only. After changing `emacs.d/`, rebuild the session image (about 15 s for a config-only change) and `make reset-workspace`. After editing the agent's docstrings, byte-compile it with `byte-compile-error-on-warn`.
-- **Fast iteration on the running stack without rebuilding images:** build `CGO_ENABLED=0` binaries into a directory the Docker daemon can see, add a Compose overlay that bind-mounts them over `/gateway` and `/usr/local/bin/sessiond` (and `web/dist` with `PG_WEB_DIR`, a built curriculum over `/srv/curriculum`), then `docker compose -f compose.yaml -f compose.local.yaml -f <overlay> up -d --force-recreate`.
-- **Web without the gateway:** `cd web && pnpm preview --port 8080 --host 127.0.0.1 --strictPort` serves a built bundle; `pnpm dev:fake` runs the fake session (`web/dev/README.md`) that `pnpm e2e:lesson` walks.
-- Validate Compose with `docker compose -f compose.yaml -f compose.local.yaml config -q`.
-- When a sandbox refuses `docker run`/`docker exec` with inline shell code, put the code in a script file.
+- **Config files:** `deploy/config.json` (minimal local); `deploy/config.dev.json` (`make dev`: `publicUrl` is Vite's `:5173` so proxied Origins pass, state under `.dev/`, author mode); `deploy/config.example.json` (full server example).
+- **sessiond without Emacs:** `sessiond config` prints its configuration; `sessiond -fake` substitutes bash for Emacs, tmux and Xvnc.
+- **Emacs configuration** changes need a session image rebuild (about 15 s when only the config changed) and `make reset-workspace` (emacs.md §3).
+- **Iterating without rebuilding images:** build `CGO_ENABLED=0` binaries where the daemon sees them and bind-mount them in a Compose overlay over `/gateway` and `/usr/local/bin/sessiond` (also `web/dist` with `PG_WEB_DIR`, a built curriculum over `/srv/curriculum`); `up -d --force-recreate`.
+- **Web without the gateway:** `pnpm preview --port 8080 --host 127.0.0.1 --strictPort`; `pnpm dev:fake` runs the fake session (`web/dev/README.md`).
 
 ## 3. Longer commands and test tools
 
 ```sh
-go run ./cmd/gateway config -config deploy/config.json                 # effective config, secrets redacted
-go run ./cmd/gateway -config deploy/config.json -set sessions.limits.memory=4g -listen :9000
-go run ./cmd/gateway -config deploy/config.dev.json -web web/dist -fonts .dev/fonts   # also PG_WEB_DIR, PG_FONTS_DIR
-go run ./cmd/playctl protocol typescript -o web/src/protocol.gen.ts [-check]
-go run ./cmd/playctl config check deploy/config.json
-go run ./cmd/playctl curriculum build curriculum -o artifacts/curriculum [-lenient]
-go run ./cmd/playctl fonts -o .dev/fonts
-go test -tags dockerintegration ./internal/docker/                     # docker backend against the real Engine
-images/gateway/test/server-mode.sh ghcr.io/floatshadow/emacs-playground/gateway:dev   # server mode, from the repo root
+go run ./cmd/gateway config -config deploy/config.json   # effective config, secrets redacted
+go run ./cmd/gateway -config deploy/config.dev.json -web web/dist -fonts .dev/fonts -set sessions.limits.memory=4g
+go test -tags dockerintegration ./internal/docker/       # docker backend against the real Engine
+images/gateway/test/server-mode.sh ghcr.io/floatshadow/emacs-playground/gateway:dev   # network isolation, proxy secret, gateway re-attach
 ```
 
-`server-mode.sh` checks network isolation (a session is unreachable from the shared network and answers 401 without the secret on its own network) and the re-attach after the gateway container is replaced.
-
-**sessiond against the real image** (host network):
+**sessiond against the real image:**
 
 ```sh
 docker run -d --name pg-it --network host --tmpfs /run:mode=1777 --tmpfs /tmp:mode=1777 --tmpfs /work:mode=1777,exec \
@@ -59,57 +31,46 @@ docker run -d --name pg-it --network host --tmpfs /run:mode=1777 --tmpfs /tmp:mo
   ghcr.io/floatshadow/emacs-playground/session:dev
 PG_SESSIOND_URL=http://127.0.0.1:17200 PG_TEST_FAKE_GATEWAY=127.0.0.1:17180 PG_TEST_GUI=1 \
   go test -tags integration ./internal/sessiond/ -run Integration -v
-docker rm -f pg-it
 ```
 
-Without `PG_SESSIOND_URL` the test starts `PG_SESSION_IMAGE` through testcontainers but skips the lesson and GUI parts (a bridge-networked container cannot reach the in-test gateway).
+Without `PG_SESSIOND_URL` the test uses testcontainers (`PG_SESSION_IMAGE`) and skips the lesson and GUI parts.
 
-**Emacs tests by hand** (what `make emacs-test` runs):
+**Browser scripts** (`web/e2e/`, environment `PG_CDP`, `PG_URL`, `PG_WORKSPACE`): `smoke.mjs` (`make e2e`; `PG_SMOKE_ONLY=3,4`, `PG_SMOKE_PLAY=0`), `review.mjs` (one check per UX contract; `PG_REVIEW_ONLY`), `lesson.mjs` (fake session), `shots.mjs`, `demo-focus.mjs`. Output goes to `artifacts/`; scripts reset the progress they touch. Page loads must stay under the gateway's ten session requests a minute per user. Exploratory scripts: `web/e2e/*.local.mjs` (git-ignored).
 
-```sh
-docker run --rm --entrypoint sh ghcr.io/floatshadow/emacs-playground/session:dev -c 'cd /opt/playground/emacs.d && emacs --batch -L lisp -l playground-agent -l test/agent-test.el -f ert-run-tests-batch-and-exit'
-docker run --rm --entrypoint sh ghcr.io/floatshadow/emacs-playground/session:dev -c 'cd /opt/playground/emacs.d && emacs --batch -l early-init.el -l test/config-test.el -f ert-run-tests-batch-and-exit'
-```
-
-**Browser scripts** (`web/e2e/`, playwright-core over CDP; environment `PG_CDP`, default `http://127.0.0.1:9222`, and `PG_URL`, default `http://127.0.0.1:8080`):
-
-- `smoke.mjs` (`make e2e`, `pnpm e2e:smoke`): eleven scenarios against the compose stack: services healthy, course map, lesson 2.3 with the ticker, Where am I, Watch it as a demonstration followed by the learner's own keys, Reset this step through its dialog, the GUI frame, the Markdown preview of lesson 3.8, `C-x C-b` and Rescue in lesson 0.2, `playctl curriculum play` for Parts 0-3 and `play -watch` for Part 0. Besides the DOM it checks the `/events` frames the page receives and the workspace files on disk (`PG_WORKSPACE`, default `./workspace`). Scenario 6 (`C-x C-b`) sets Part 0's modules (`base agent`) and runs after scenario 9, because from Part 2 on `C-x C-b` is ibuffer in the same window. It resets the progress of lessons 0.2, 2.3 and 3.8 first, so it can be re-run, and ends with Start over. Output: `artifacts/verify/<n>.png` and `results.json`. `PG_SMOKE_ONLY=3,4` runs a subset; `PG_SMOKE_PLAY=0` skips the replays.
-- `review.mjs`: one acceptance check per UX contract, each in a fresh browser context; about ten minutes for all. Checks are named by the ids of the review they came from (`docs/history/2026-10-27-fix-plan.md`), so `PG_REVIEW_ONLY=B1,B4` runs a subset. It writes `artifacts/review/<id>.png` and `results.json`, paces page loads to at most eight a minute (the gateway allows ten session requests a minute) and resets all progress at the end.
-- `lesson.mjs` (`pnpm e2e:lesson`): the same kind of walk against the fake session; `shots.mjs`: screenshots of every screen; `demo-focus.mjs`: the demo player keeps playing when the terminal loses focus.
+**Parallel QA.** A local stack has one session; browser agents sharing it corrupt each other's progress and Emacs state. Give each agent its own Compose project (`-p`, an overlay with its own port via `ports: !override` and its own world-writable workspace) and Chrome container (own CDP port), and point the scripts at it (`PG_URL`, `PG_CDP`, `PG_WORKSPACE`; `PG_PLAY_SESSION` for `make curriculum-play`). Drive with real keys; inspect Emacs with `emacsclient --eval` in the container. A change is accepted when `make check`, `make emacs-test`, `smoke.mjs` and `review.mjs` pass, and `playctl curriculum play all` then `play -watch all` pass on a fresh workspace.
 
 ## 4. Toolchain
 
-Fresh machine (Go into `~/.local/go`, pnpm through a corepack shim in `~/.local/bin`):
-
-```sh
-# Go 1.26.x (take the sha256 from https://go.dev/dl/?mode=json)
-mkdir -p ~/.cache/go-dl && cd ~/.cache/go-dl
-curl -sSLO https://go.dev/dl/go1.26.10.linux-amd64.tar.gz
-echo "ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5  go1.26.10.linux-amd64.tar.gz" | sha256sum -c -
-tar -C ~/.local -xzf go1.26.10.linux-amd64.tar.gz
-
-corepack enable --install-directory ~/.local/bin pnpm
-corepack install -g pnpm@11.28.8
-```
-
-pnpm 11 enforces a minimum release age for new versions; when it adds entries to `web/pnpm-workspace.yaml` (`minimumReleaseAgeExclude`), commit them with the lockfile. Builds need network access to GitHub, go.dev, npm, GNU and NonGNU ELPA, MELPA, Docker Hub and GHCR. Pinned versions and the reasons for them (TypeScript 5.9, ESLint 9, the xterm.js betas re-pinned together) are in third-party.md.
+Go 1.26.10 from go.dev into `~/.local/go`; pnpm through corepack: `corepack enable --install-directory ~/.local/bin pnpm && corepack install -g pnpm@11.28.8`. Commit the `minimumReleaseAgeExclude` entries pnpm adds to `web/pnpm-workspace.yaml` with the lockfile. Builds need GitHub, go.dev, npm, GNU/NonGNU ELPA, MELPA, Docker Hub and GHCR.
 
 ## 5. Slice 1 scope
 
-What the first slice builds; everything else is a `TODO` with its doc section (roadmap: DESIGN.md §10).
-
-- Session image: Emacs 31.1 from source, Rust and Python toolchains, ripgrep, fd, git, tmux 3.5, TigerVNC, xdotool, Iosevka Nerd Font, Noto CJK; modules base, agent, editing, completion, files, windows, ui, terminals (eat), lsp, lang-rust, lang-python, git (the others are stubs); under 4 GB.
-- sessiond: all of backend.md §3, including the VNC bridge and the GUI frame.
-- gateway: local mode complete; the server-mode docker backend (official client, unit-tested with a fake) experimental; OIDC returns 501.
-- playctl: curriculum validate, build, play; config schema and check; protocol typescript.
-- web: every screen and pane in frontend.md, including the GUI and preview panes.
-- curriculum: Parts 0 to 3 complete (lesson.md, scenario.yaml with self-solving demos, fixtures), the five tables, and `curriculum/index.yaml` listing all 15 parts (later parts `planned`).
+Session image with Emacs 31.1, Rust, Python and twelve modules (others stubs), under 4 GB; all of sessiond (backend.md §3); gateway local mode, docker backend experimental, OIDC 501; playctl; every web screen; curriculum Parts 0 to 3. Everything else is a `TODO` with its doc section (DESIGN.md §10).
 
 ## 6. Known limitations
 
-- Checkpoint restores leave the learner's git index alone, so a future Magit lesson that relies on staged changes needs its restore to put the staging area back (`TODO(sessiond, backend.md §3.9)`).
-- zh-CN UI strings cover about a fifth of `en.json`, so the locale is not offered; several advice strings (ticker labels, pattern nudges, habit titles) are still English literals in `web/src/advice`.
-- Plain Ctrl+/ reaches Emacs as `C-_` (tmux encodes it as that byte), so the ticker shows `C-_` for it.
+Open decisions and unscheduled work are in DESIGN.md §12; what a checkpoint restore does not put back is in backend.md §3.9.
 
-- `reset-step` does not switch off buffer-local minor modes a demonstration turned on; lessons that toggle a mode accept either direction or reset it in their setup.
-- "Go to this step" on lesson 3.5's `try` and `hide` starts without the learner's `*Help*` display rule (a checkpoint does not record `display-buffer-alist`), so the learner evaluates `popups.el` again, as the step's hint says. Watch it on 3.5 `rule` leaves the demonstration's rule active.
+- Lesson 3.5: "Go to this step" on `try`/`hide` lacks the learner's `*Help*` rule (the hint says to re-evaluate `popups.el`); Watch it on `rule` leaves the demo's rule active.
+- Lesson 3.1's `close` demo is relative to the selected window.
+- Fast-forwarded steps show as "Later"; Continue on an all-watched lesson stays on its last step.
+- A focus-in report once reached a file as `[I`; it was never reproduced (tmux `escape-time 10` keeps split sequences together).
+- The terminal's WebGL skip at a device pixel ratio above 1 was verified only under Chrome's emulated scale factor, not on HiDPI hardware.
+
+## 7. Curriculum authoring pitfalls
+
+The rules are CURRICULUM.md B.3 (demo strings, authoring rules) and B.4 (exit rows). Pitfalls beyond them:
+
+- **One action per step.** Several file opens across projects plus a new trick in one step is too much; split it.
+- **Every sentence true on the learner's screen**, in the shipped theme and with any later module set (`C-x C-b`: a second window or ibuffer). Name or hide every mode-line token the learner sees.
+- **Say how often and how to page.** `ESC ESC ESC` undoes one thing at a time ("twice" when two are needed); which-key's "(1 of 2)" pages with `C-h n`.
+- **Name the copy.** The workspace holds several copies of a project (`/work/hello` from 2.3, `/work/projects/hello`): text, hints and conditions name the absolute path. Opening the wrong copy renames buffers through uniquify (`main.rs<projects/hello>`), which breaks demos that type buffer names.
+- **Demos and hints start from the step's checkpoint**, never from where the previous demo left off: Watch it, Do it yourself, Skip and Go to this step restore or fast-forward first. Type absolute paths after the offered directory; never rely on the prompt's directory or point ("the prompt now starts in src/" is false after a reset).
+- **Pause `~1000` before a `C-g` that follows an edit** (emacs.md §10.4).
+- **More modules than listed:** also replay Part 3 first, then Parts 0-2 (emacs.md §4).
+- **Commands that read their own keys** (`help-for-help`, `query-replace`, which-key paging) send their `key` event only when they finish: check the screen state (`{"windows.buf": " *Metahelp*"}`) for "the menu opened".
+- **Session state:** a restore brings back `sessiond.GlobalVars` (add one when a lesson relies on more), not minor modes or `display-buffer-alist`. Demos never depend on history the learner made (2.2 finds its command with `M-r`; 1.6 sets the macro counter first).
+- **Setups never ask** (`inhibit-interaction`): bind `kill-buffer-query-functions` to nil when killing a buffer with a process. A window that pops up (build output) is not the learner's split.
+- **Write the keys out.** Keys in the lesson or step text silence habit cards; paraphrased ones do not. `:try` clicks count as the learner's own input.
+- **Command names:** the agent reports `real-this-command`; keep older names (`kill-region` for `C-k`) as alternatives, and `M-y` is `consult-yank-pop` only from lesson 4.2.
+- **Check:** `playctl curriculum play` and `play -watch`, `-repeat 2`, on a fresh workspace (`make curriculum-play`, `make curriculum-watch`).
