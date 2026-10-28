@@ -45,7 +45,7 @@ git-timemachine 4.13 melpa-stable git-timemachine-4.13.tar 960c6860505b18a67afeb
 eat 0.9.4 nongnu eat-0.9.4.tar 14971fc562f0820794eb6af78beebc7dc3ba898221e785c2d272a9f0fccfc54a
 eldoc-box 20260903.1246 melpa eldoc-box-20260903.1246.tar c965012dfe0629bae8953136d5029fc8dd2392be0b47b65c22b1fd83b01304b2
 apheleia 4.6.0 melpa-stable apheleia-4.6.0.tar c1391aa444712b39885e8dc08bf02768ed4117081ac2de0269326d6f8efa1b01
-dape 0.27.1 gnu dape-0.27.1.tar 67d5f1d4f5ad5abc66a65582f5ce2c5125f864ea5256afb423fc79f5000243d9
+dape 0.28.0 gnu dape-0.28.0.tar 51fec8cce4e67cbcc4256f98e6efe61dd55bff38dd969fa5f52b8ea555df7a1f
 consult-eglot 0.5.0 melpa-stable consult-eglot-0.5.0.tar f38f799e9810d55028180bd2c9e1843149c6789c34f38943bd7d426b47faca91
 s 1.13.1 melpa-stable s-1.13.1.tar 8730ac9005a8629a674fc882782211240c7dc7e95910ae42ad448abf1743234f
 dash 2.20.0 gnu dash-2.20.0.tar 28f84b0905f84520163f5dd2087e47cac042bd27b7ec34eeb293f1ada7d36cb2

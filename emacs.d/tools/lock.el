@@ -18,12 +18,12 @@
 ;; $OUT/packages.lock and $OUT/vendor/.  `playctl packages update' is
 ;; meant to wrap exactly this.
 ;;
-;; Vendoring: MELPA and MELPA Stable serve only their latest file, so
-;; a pinned MELPA tarball disappears as soon as the package changes.
-;; Every package locked from those two archives is therefore also
-;; copied to vendor/ next to the lock (they are small), and
-;; tools/install.el uses the vendored copy, checked against the same
-;; sha256.  GNU and NonGNU ELPA keep old releases and are downloaded.
+;; Vendoring: MELPA and MELPA Stable serve only their latest file, and
+;; GNU and NonGNU ELPA drop superseded releases too, so a pinned
+;; tarball can disappear whenever its package changes.  Every locked
+;; file is therefore also copied to vendor/ next to the lock (about
+;; 13 MB in all), and tools/install.el uses the vendored copy, checked
+;; against the same sha256.
 ;;
 ;; Resolution: archives are preferred in the order of
 ;; `playground-lock-archives' (GNU ELPA, NonGNU ELPA, MELPA Stable,
@@ -54,8 +54,9 @@
 (defvar playground-lock--snapshot nil "Packages that prefer MELPA over MELPA Stable.")
 (defvar playground-lock--pins nil "Alist name -> the only archive a package may come from.")
 
-(defconst playground-lock-vendored-archives '("melpa" "melpa-stable")
-  "Archives whose files are copied to vendor/.")
+(defconst playground-lock-vendored-archives '("gnu" "nongnu" "melpa-stable" "melpa")
+  "Archives whose files are copied to vendor/: all of them, since GNU ELPA
+and NonGNU ELPA drop superseded releases and MELPA keeps no old snapshots.")
 
 (defun playground-lock--archive-rank (desc)
   "Preference rank of DESC's archive (lower is better)."
