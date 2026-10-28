@@ -1,0 +1,86 @@
+id: 06-terminals/04-async-shell-commands
+title: Async shell commands and Dired integration
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals]
+vscode: run in terminal
+setup:
+  workspace: fixtures/terminals
+  root: terminals
+  reset: true
+  open: [terminals/images/credits.txt]
+  layout: single
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/terminals/" f)))
+            (kill-buffer b))))
+      (dolist (b (buffer-list))
+        (when (string-match-p "\\`\\*\\(Shell Command Output\\|Async Shell Command\\)\\*" (buffer-name b))
+          (let ((kill-buffer-query-functions nil)) (kill-buffer b)))))
+steps:
+  - id: count
+    goal: Count the names with M-!
+    detail: "`M-!` asks for a shell command. Type `wc -l credits.txt` and `RET`: the answer, *7 credits.txt*, appears in the echo area."
+    demo: 'M-! ~400 "wc -l credits.txt" ~300 RET ~800'
+    conditions:
+      - text: M-! was used
+        event: { command: shell-command }
+        hint: "Alt and the exclamation mark (Alt Shift 1 on most keyboards). The prompt says Shell command."
+      - text: wc counted credits.txt
+        buffer: { name: "*Shell Command Output*", contains: "credits.txt" }
+        hint: "The command runs in the folder of the current buffer, where credits.txt is. Spell the file name as it is: credits.txt."
+  - id: async
+    goal: Run report.sh in the background with M-&
+    detail: "`M-&`, type `sh report.sh`, `RET`. The script takes three seconds; you can keep moving in credits.txt meanwhile. Its output appears at the bottom in *Async Shell Command*, ending with *report done*."
+    demo: 'M-& ~400 "sh report.sh" ~300 RET ~800 C-n ~400 C-n ~4000'
+    conditions:
+      - text: M-& was used
+        event: { command: async-shell-command }
+        hint: "Alt and the ampersand (Alt Shift 7 on most keyboards)."
+      - text: the report finished
+        buffer: { name: "*Async Shell Command*", contains: "report done", process: none }
+        hint: "Give it three seconds. The output window opens once the first line arrives."
+  - id: mark
+    goal: Mark the three pictures in Dired
+    detail: "`C-x d RET` lists the images folder. `% m` marks by regexp: type `\\.png$` and `RET`. The three .png lines get a `*`."
+    demo: 'C-x d ~500 "/work/terminals/images/" RET ~800 % m ~400 "\\.png$" ~300 RET ~600'
+    conditions:
+      - text: the images folder is listed
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (derived-mode-p (quote dired-mode)) (equal (expand-file-name default-directory) "/work/terminals/images/")))'
+        hint: "C-x d offers the folder of credits.txt, which is the images folder: RET accepts it."
+      - text: exactly the three .png files are marked
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (derived-mode-p (quote dired-mode)) (let ((m (dired-get-marked-files nil nil nil t))) (and (consp m) (not (eq (car m) t)) (= (length m) 3) (seq-every-p (lambda (f) (string-suffix-p ".png" f)) m)))))'
+        hint: "% m reads a regexp: \\.png$ means names ending in .png. m on a line marks just that file; U unmarks everything."
+  - id: convert
+    goal: Convert them to JPEG with one command
+    detail: "`!` runs a shell command on the marked files. Type `mogrify -format jpg` and `RET`: Dired adds the three names at the end. `g` refreshes the listing to show the new .jpg files."
+    # Marks are not part of a checkpoint: mark again first (harmless when marked).
+    demo: 'C-x d ~500 "/work/terminals/images/" RET ~800 % m ~400 "\\.png$" ~300 RET ~600 ! ~500 "mogrify -format jpg" ~300 RET ~1500 g'
+    conditions:
+      - text: a command ran on the marked files
+        any:
+          - event: { command: dired-do-shell-command }
+          - event: { command: dired-do-async-shell-command }
+        hint: "Press ! in the Dired listing, with the three files still marked."
+      - text: three JPEG files exist
+        all:
+          - file: { path: terminals/images/forest.jpg, exists: true }
+          - file: { path: terminals/images/harbour.jpg, exists: true }
+          - file: { path: terminals/images/sunset.jpg, exists: true }
+        hint: "The command is mogrify -format jpg, without file names: Dired adds the marked ones. If only one file was converted, the marks were gone; mark the three again first."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "Type mogrify -format jpg and RET, without file names: Dired adds the marked files itself."
+  - id: sort
+    goal: Sort credits.txt through sort
+    detail: "Back in credits.txt (`C-x b credits.txt RET`), `C-x h` selects everything, then `C-u M-| sort RET` replaces the names with sort's output."
+    demo: 'C-x b ~400 "credits.txt" RET ~500 C-x h ~300 C-u ~200 M-| ~400 "sort" ~300 RET'
+    conditions:
+      - text: the region went through a command
+        event: { command: shell-command-on-region }
+        hint: "M-| is Alt and the vertical bar. Without C-u first, the output only appears in the echo area."
+      - text: credits.txt is sorted
+        elisp: '(let ((b (find-buffer-visiting "/work/terminals/images/credits.txt"))) (and b (with-current-buffer b (let ((l (split-string (buffer-string) "\n" t))) (and (= (length l) 7) (equal l (sort (copy-sequence l) (function string<))))))))'
+        hint: "C-x h selects the whole buffer, then C-u, then M-|. If the names vanished, C-/ undoes and you can try again."

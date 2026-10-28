@@ -1,0 +1,98 @@
+id: 06-terminals/03-eshell
+title: Eshell
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals]
+vscode: none
+setup:
+  workspace: fixtures/terminals
+  root: terminals
+  reset: true
+  open: [terminals/logs/mail.log]
+  layout: single
+  # Start without an Eshell (its history and folder would carry over)
+  # and without the buffer the redirection step makes.
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/terminals/" f)))
+            (kill-buffer b))))
+      (dolist (b (buffer-list))
+        (when (or (eq (buffer-local-value (quote major-mode) b) (quote eshell-mode)) (equal (buffer-name b) "top5"))
+          (let ((kill-buffer-query-functions nil)) (kill-buffer b)))))
+steps:
+  - id: open
+    goal: Open Eshell in the logs folder
+    detail: "`M-x eshell RET` opens Eshell in the folder of the current file, `/work/terminals/logs`, in this window. The prompt shows the folder."
+    demo: 'M-x ~300 "eshell" RET ~1000'
+    conditions:
+      - text: Eshell was started
+        any:
+          - event: { command: eshell }
+          - event: { command: project-eshell }
+        hint: "Alt x, then type eshell and RET. Do not confuse it with M-x shell, which runs bash in a plain buffer."
+      - text: Eshell is in /work/terminals/logs
+        elisp: '(let ((b (window-buffer (selected-window)))) (and (eq (buffer-local-value (quote major-mode) b) (quote eshell-mode)) (equal (expand-file-name (buffer-local-value (quote default-directory) b)) "/work/terminals/logs/")))'
+        hint: "The prompt should read /work/terminals/logs $. If it shows another folder, type cd /work/terminals/logs and RET."
+  - id: lisp
+    goal: Run a line of Lisp
+    detail: "Type `(+ 1 2)` and `RET`. A line that starts with a parenthesis is evaluated as Lisp, and Eshell prints the value."
+    demo: '"(+ 1 2)" ~300 RET ~600'
+    conditions:
+      - text: a command was entered
+        event: { command: eshell-send-input }
+        hint: "Type at the prompt and press RET, in the Eshell buffer."
+      - text: the last command was Lisp
+        elisp: '(let ((b (seq-find (lambda (b) (eq (buffer-local-value (quote major-mode) b) (quote eshell-mode))) (buffer-list)))) (and b (with-current-buffer b (and (not (ring-empty-p eshell-history-ring)) (string-prefix-p "(" (string-trim (ring-ref eshell-history-ring 0)))))))'
+        hint: "Start the line with an opening parenthesis: (+ 1 2) or any Lisp you like, such as (length (buffer-list))."
+  - id: largest
+    goal: List the five largest log files
+    detail: "`ls -S *.log | head -n 5`: Eshell's own `ls` sorts by size with `-S`, `*.log` is a glob, and the pipe goes to the real `head`. *debug.log* is first."
+    demo: '"ls -S *.log | head -n 5" ~300 RET ~800'
+    conditions:
+      - text: a command was entered
+        event: { command: eshell-send-input }
+        hint: "Type the whole line at the prompt and press RET."
+      - text: the last command listed by size
+        elisp: '(let ((b (seq-find (lambda (b) (eq (buffer-local-value (quote major-mode) b) (quote eshell-mode))) (buffer-list)))) (and b (with-current-buffer b (and (not (ring-empty-p eshell-history-ring)) (string-match-p "\\`ls\\b.*-S" (string-trim (ring-ref eshell-history-ring 0)))))))'
+        hint: "The command starts with ls -S: -S with a capital S sorts by size."
+  - id: redirect
+    goal: Recall the command with M-r and send its output to a buffer
+    detail: "`M-r`, type `ls -S` and `RET` puts that earlier command back on the line. `C-e`, then add ` > #<buffer top5>` and `RET`: the list goes into a new buffer *top5* instead of the screen."
+    demo: 'M-r ~400 "ls -S" ~400 RET ~400 C-e ~300 " > #<buffer top5>" ~300 RET ~800'
+    conditions:
+      - text: a command was entered
+        event: { command: eshell-send-input }
+        hint: "M-r only puts the old command back on the line; nothing runs until you press RET after adding the redirection."
+      - text: "*top5* holds the five largest files"
+        elisp: '(let ((b (get-buffer "top5"))) (and b (with-current-buffer b (string-match-p "\\`debug\\.log\naccess\\.log\nboot\\.log\nerror\\.log\ncron\\.log\n?\\''" (buffer-string)))))'
+        hint: "The buffer name goes inside #<buffer ...>: #<buffer top5>. Running it again replaces the buffer's text. C-x b top5 shows the result."
+    stuck:
+      - when: { step_seconds: 120 }
+        say: "M-r searches what you typed before: type ls -S, RET, then C-e to the end of the line and add  > #<buffer top5>  before RET."
+  - id: alias
+    goal: Make an alias and use it
+    detail: "Type `alias big 'ls -S $* | head -n 5'` and `RET`; then `big *.log` and `RET` runs it, with `*.log` in place of `$*`."
+    demo: '"alias big ''ls -S $* | head -n 5''" ~300 RET ~600 "big *.log" ~300 RET ~800'
+    conditions:
+      - text: the alias big exists
+        elisp: '(and (boundp (quote eshell-command-aliases-list)) (assoc "big" eshell-command-aliases-list))'
+        hint: "The definition goes in single quotes: alias big 'ls -S $* | head -n 5'."
+      - text: big was run
+        elisp: '(let ((b (seq-find (lambda (b) (eq (buffer-local-value (quote major-mode) b) (quote eshell-mode))) (buffer-list)))) (and b (with-current-buffer b (and (not (ring-empty-p eshell-history-ring)) (string-match-p "\\`big\\b" (string-trim (ring-ref eshell-history-ring 0)))))))'
+        hint: "After defining it, type big *.log and RET: the alias is now a command."
+      - text: a command was entered
+        event: { command: eshell-send-input, min: 2 }
+        hint: "Two commands: the alias line, then big *.log."
+  - id: biggest
+    goal: Open the biggest file with one command
+    detail: "`find-file ${ls -S | head -n 1}`: `${...}` is replaced by the command's output, *debug.log*, and `find-file` is the Emacs command that opens it, here in this window."
+    demo: '"find-file ${ls -S | head -n 1}" ~300 RET ~800'
+    conditions:
+      - text: a command was entered
+        event: { command: eshell-send-input }
+        hint: "Type the whole line at the Eshell prompt, then RET."
+      - text: debug.log is open in the selected window
+        state: { file: /work/terminals/logs/debug.log }
+        hint: "${ls -S | head -n 1} gives the name of the biggest file; find-file opens it. Curly braces, not parentheses: $(...) is Lisp."

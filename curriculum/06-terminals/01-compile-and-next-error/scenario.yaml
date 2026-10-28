@@ -1,0 +1,123 @@
+id: 06-terminals/01-compile-and-next-error
+title: compile and next-error
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals]
+vscode: "Tasks, Problems panel"
+setup:
+  workspace: fixtures/terminals
+  root: terminals
+  reset: true
+  open: [terminals/wordcount/src/main.rs]
+  layout: single
+  # The Python tests run in their own virtual environment (offline, from
+  # the image's prefetched wheels). Only this lesson's build output may
+  # satisfy the build steps.
+  run: "cd scores && uv sync -q"
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/terminals/" f)))
+            (kill-buffer b))))
+      (when (get-buffer "*compilation*")
+        (let ((kill-buffer-query-functions nil)) (kill-buffer "*compilation*"))))
+steps:
+  - id: build
+    goal: Build the crate with C-c C-c
+    detail: "In `main.rs`, `C-c C-c` runs `cargo build`. The output opens at the bottom and ends with *could not compile*: two errors."
+    demo: "C-c C-c ~4000"
+    conditions:
+      - text: a build ran
+        any:
+          - event: { command: playground-cargo-build }
+          - event: { command: compile }
+          - event: { command: project-compile }
+          - event: { command: recompile }
+        hint: "Control c, then Control c again, with the cursor in main.rs. M-x compile RET with cargo build does the same."
+      - text: the build failed with two errors
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (not (get-buffer-process b)) (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "due to 2 previous errors" nil t)))))'
+        hint: "Wait until the bottom window says could not compile; the mode line of *compilation* shows exit [101] when it is done."
+  - id: jump
+    goal: Jump to the first error with M-g M-n
+    detail: "`M-g M-n` opens the file of the first error at its line and column: `src/count.rs`, line 9. The error is also highlighted in the build output."
+    # A checkpoint keeps files, not build output: build again first.
+    demo: "C-c C-c ~5000 M-g M-n"
+    conditions:
+      - text: next-error was used
+        any:
+          - event: { command: next-error }
+          - event: { command: compile-goto-error }
+          - event: { command: compilation-next-error }
+        hint: "Alt g, then Alt n. In the *compilation* window, RET on the error line does the same. If it says there are no more errors, the build output is gone (after Reset): C-c C-c in main.rs first."
+      - text: the cursor is on line 9 of count.rs
+        state: { file: /work/terminals/wordcount/src/count.rs, line: 9 }
+        hint: "The first error is the one rustc printed first, in count.rs. If you went past it, M-g M-p goes back."
+  - id: fix
+    goal: Fix the first error
+    detail: "`or_insert(0)` returns a reference to the count, so it must be dereferenced to add to it: put `*` before `counts` on line 9, as the compiler's help says."
+    demo: 'C-x C-f ~400 "/work/terminals/wordcount/src/count.rs" RET ~400 M-g g ~300 "9" RET ~300 M-m ~300 "*"'
+    conditions:
+      - text: line 9 says *counts.entry(word)
+        elisp: '(let ((b (find-buffer-visiting "/work/terminals/wordcount/src/count.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "^ *\\*counts\\.entry(word)\\.or_insert(0) \\+= 1;" nil t)))))'
+        hint: "The line reads counts.entry(word).or_insert(0) += 1; type a * right before counts. Read the help lines under the error in *compilation*: they show the fix with a +."
+      - text: the fix is saved
+        file: { path: terminals/wordcount/src/count.rs, contains: "*counts.entry(word)" }
+        hint: "Files save themselves a few seconds after you stop typing; C-x C-s saves at once. The build reads the file on disk."
+  - id: next
+    goal: Jump to the second error and fix it
+    detail: "`M-g M-n` again goes to `src/main.rs`, line 9. The limit is written as the string `\"3\"`; make it the number `3` by deleting both quotes."
+    demo: 'M-g M-n ~600 C-x C-f ~400 "/work/terminals/wordcount/src/main.rs" RET ~400 M-g g ~300 "9" RET ~300 C-e C-b ~200 DEL ~200 C-b ~200 DEL'
+    conditions:
+      - text: next-error was used again
+        any:
+          - event: { command: next-error }
+          - event: { command: compile-goto-error }
+        hint: "M-g M-n, from count.rs or from anywhere: Emacs remembers which error was last."
+      - text: "main.rs says limit: usize = 3"
+        elisp: '(let ((b (find-buffer-visiting "/work/terminals/wordcount/src/main.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "let limit: usize = 3;" nil t)))))'
+        hint: "Only the two double quotes around 3 go; C-d deletes the character under the cursor."
+  - id: rebuild
+    goal: Build again with g in the compilation window
+    detail: "Move to the *compilation* window (`C-x o`) and press `g`: the same command runs again. `compile` saves both files first. This time it ends with *Finished*."
+    demo: 'C-x C-f ~400 "/work/terminals/wordcount/src/main.rs" RET ~400 C-x 1 ~300 C-c C-c ~3000 C-x o ~400 g ~4000'
+    conditions:
+      - text: the build ran again
+        any:
+          - event: { command: recompile }
+          - event: { command: playground-cargo-build }
+          - event: { command: compile }
+          - event: { command: project-compile }
+        hint: "g works only in the *compilation* window: C-x o until its mode line is the bright one. C-c C-c in main.rs builds too."
+      - text: the build finished without errors
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (not (get-buffer-process b)) (with-current-buffer b (save-excursion (goto-char (point-min)) (and (search-forward "Finished `dev` profile" nil t) (not (search-forward "error" nil t)))))))'
+        hint: "If an error is left, M-g M-n takes you to it. A build takes a few seconds; the mode line of *compilation* says exit [0] when it worked."
+  - id: pytest
+    goal: Run the Python tests with M-x compile
+    detail: "Open `/work/terminals/scores/test_scores.py`. Then `M-x compile`, clear the offered `make -k` with `C-a C-k`, type `uv run pytest -q`, `RET`. One test fails."
+    demo: 'C-x C-f ~400 "/work/terminals/scores/test_scores.py" RET ~600 M-x ~300 "compile" RET ~400 C-a ~200 C-k ~300 "uv run pytest -q" RET ~4000'
+    conditions:
+      - text: compile ran pytest
+        any:
+          - event: { command: compile }
+          - event: { command: project-compile }
+        hint: "M-x compile works in any buffer and runs in that buffer's folder, so start from test_scores.py."
+      - text: pytest reported one failure
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (not (get-buffer-process b)) (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "1 failed" nil t)))))'
+        hint: "In the prompt, C-a goes to the start of the offered command and C-k deletes it; then type uv run pytest -q. If it says no tests ran, the command ran in another folder: open test_scores.py first."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "The prompt offers make -k. C-a then C-k clears it; type uv run pytest -q and RET."
+  - id: failure
+    goal: Jump to the failing assertion
+    detail: "`M-g M-n` reads pytest's `test_scores.py:9: AssertionError` like a compiler error and opens line 9 of the test: `grade(60)` should be *C*. (The bug is in `scores.py`; you can fix it, or leave it.)"
+    demo: 'C-x C-f ~400 "/work/terminals/scores/test_scores.py" RET ~600 M-x ~300 "compile" RET ~400 C-a ~200 C-k ~300 "uv run pytest -q" RET ~5000 M-g M-n'
+    conditions:
+      - text: next-error was used
+        any:
+          - event: { command: next-error }
+          - event: { command: compile-goto-error }
+        hint: "Alt g, Alt n, as with cargo. The test output is the newest *compilation*, so next-error follows it; if it is gone (after Reset), run uv run pytest -q again from test_scores.py."
+      - text: the cursor is on line 9 of test_scores.py
+        state: { file: /work/terminals/scores/test_scores.py, line: 9 }
+        hint: "The failure line in the output reads test_scores.py:9: AssertionError. RET on it in the *compilation* window works too."

@@ -1,0 +1,71 @@
+2026-10-01 00:00:30 INFO  disk usage checked
+2026-10-01 00:00:33 WARN  timeout waiting for lock
+2026-10-01 00:01:11 ERROR timeout waiting for lock
+2026-10-01 00:01:33 ERROR retrying upstream
+2026-10-01 00:02:19 INFO  cache miss
+2026-10-01 00:02:49 ERROR disk usage checked
+2026-10-01 00:03:12 WARN  config reloaded
+2026-10-01 00:03:45 ERROR config reloaded
+2026-10-01 00:03:58 DEBUG retrying upstream
+2026-10-01 00:04:44 DEBUG config reloaded
+2026-10-01 00:05:29 ERROR cache miss
+2026-10-01 00:05:43 INFO  retrying upstream
+2026-10-01 00:06:14 WARN  retrying upstream
+2026-10-01 00:06:39 INFO  job finished
+2026-10-01 00:06:57 DEBUG request served
+2026-10-01 00:07:34 ERROR retrying upstream
+2026-10-01 00:07:54 DEBUG disk usage checked
+2026-10-01 00:08:40 INFO  job finished
+2026-10-01 00:08:54 ERROR cache miss
+2026-10-01 00:09:04 WARN  config reloaded
+2026-10-01 00:09:52 WARN  user signed in
+2026-10-01 00:10:36 INFO  request served
+2026-10-01 00:10:38 ERROR user signed in
+2026-10-01 00:10:58 ERROR job finished
+2026-10-01 00:10:59 DEBUG cache miss
+2026-10-01 00:11:10 INFO  timeout waiting for lock
+2026-10-01 00:11:40 INFO  user signed in
+2026-10-01 00:11:51 ERROR request served
+2026-10-01 00:12:24 ERROR user signed in
+2026-10-01 00:12:38 INFO  config reloaded
+2026-10-01 00:12:49 INFO  job finished
+2026-10-01 00:12:55 DEBUG timeout waiting for lock
+2026-10-01 00:13:39 WARN  retrying upstream
+2026-10-01 00:13:51 INFO  config reloaded
+2026-10-01 00:14:04 INFO  retrying upstream
+2026-10-01 00:14:33 INFO  cache miss
+2026-10-01 00:15:07 INFO  user signed in
+2026-10-01 00:15:34 INFO  timeout waiting for lock
+2026-10-01 00:15:55 WARN  disk usage checked
+2026-10-01 00:16:35 DEBUG retrying upstream
+2026-10-01 00:17:05 WARN  disk usage checked
+2026-10-01 00:17:10 DEBUG job finished
+2026-10-01 00:17:31 DEBUG cache miss
+2026-10-01 00:18:10 ERROR cache miss
+2026-10-01 00:18:42 DEBUG timeout waiting for lock
+2026-10-01 00:19:22 WARN  config reloaded
+2026-10-01 00:19:38 INFO  user signed in
+2026-10-01 00:20:15 ERROR retrying upstream
+2026-10-01 00:20:26 ERROR user signed in
+2026-10-01 00:20:28 ERROR request served
+2026-10-01 00:21:09 INFO  request served
+2026-10-01 00:21:55 ERROR disk usage checked
+2026-10-01 00:22:40 INFO  cache miss
+2026-10-01 00:22:49 INFO  cache miss
+2026-10-01 00:23:09 INFO  request served
+2026-10-01 00:23:51 WARN  disk usage checked
+2026-10-01 00:24:02 INFO  request served
+2026-10-01 00:24:46 WARN  timeout waiting for lock
+2026-10-01 00:25:08 INFO  job finished
+2026-10-01 00:25:24 WARN  request served
+2026-10-01 00:25:54 ERROR timeout waiting for lock
+2026-10-01 00:26:29 WARN  cache miss
+2026-10-01 00:26:52 INFO  cache miss
+2026-10-01 00:27:10 ERROR user signed in
+2026-10-01 00:27:29 DEBUG config reloaded
+2026-10-01 00:28:16 DEBUG disk usage checked
+2026-10-01 00:28:53 INFO  retrying upstream
+2026-10-01 00:29:09 DEBUG user signed in
+2026-10-01 00:29:43 INFO  config reloaded
+2026-10-01 00:30:15 DEBUG user signed in
+2026-10-01 00:30:38 INFO  request served

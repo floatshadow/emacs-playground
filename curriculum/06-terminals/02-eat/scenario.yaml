@@ -1,0 +1,84 @@
+id: 06-terminals/02-eat
+title: "eat: a terminal in a buffer"
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals]
+vscode: integrated terminal
+setup:
+  workspace: fixtures/terminals
+  root: terminals
+  reset: true
+  open: [terminals/tally/src/lib.rs]
+  layout: single
+  # A terminal from an earlier visit still shows the old test run: close
+  # every eat buffer (they have live shells, so nothing may ask).
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/terminals/" f)))
+            (kill-buffer b))))
+      (dolist (b (buffer-list))
+        (when (eq (buffer-local-value (quote major-mode) b) (quote eat-mode))
+          (let ((kill-buffer-query-functions nil)) (kill-buffer b)))))
+steps:
+  - id: open
+    goal: Open a terminal in the project with C-x p t
+    detail: "`C-x p t` starts eat in the crate's root, `/work/terminals/tally`, in this window. A shell prompt `$` appears; the mode line says *Eat[semi-char]*."
+    demo: "C-x p t ~1500"
+    conditions:
+      - text: a terminal is open
+        any:
+          - event: { command: eat-project }
+          - event: { command: eat }
+        hint: "Control x, p, then t. M-x eat works too: it opens in the folder of the current file."
+      - text: the terminal shows a running shell
+        elisp: '(let ((b (window-buffer (selected-window)))) (and (eq (buffer-local-value (quote major-mode) b) (quote eat-mode)) (process-live-p (get-buffer-process b))))'
+        hint: "The terminal buffer should be in the selected window. If you left it, C-x p t goes back to it."
+  - id: test
+    goal: Run cargo test in the terminal
+    detail: "Type `cargo test` and `RET`. The keys go to the shell, as in any terminal. Four tests pass and one fails: *test result: FAILED*."
+    demo: '"cargo test" ~300 RET ~5000'
+    conditions:
+      - text: you typed in the terminal
+        event: { command: eat-self-input }
+        hint: "Just type: in semi-char mode every letter goes to the shell prompt. If the letters land in a file instead, C-x p t first."
+      - text: the tests ran and one failed
+        elisp: '(seq-find (lambda (b) (and (eq (buffer-local-value (quote major-mode) b) (quote eat-mode)) (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "test result: FAILED" nil t))))) (buffer-list))'
+        hint: "The command is cargo test, then RET. The run takes a few seconds; the last lines say test result: FAILED."
+  - id: copy
+    goal: Copy the failing test's name with Emacs keys
+    detail: "`C-c C-e` switches the terminal to emacs mode. Search back with `C-r failures: RET`; the name is on the next line: `C-n`, `M-m`, then select to the end with `C-SPC C-e` and copy with `M-w`."
+    demo: 'C-c C-e ~600 C-r ~300 "failures:" ~300 RET ~400 C-n ~300 M-m ~300 C-SPC ~200 C-e ~400 M-w'
+    conditions:
+      - text: the terminal is in emacs mode
+        elisp: '(seq-find (lambda (b) (and (eq (buffer-local-value (quote major-mode) b) (quote eat-mode)) (not (buffer-local-value (quote eat--semi-char-mode) b)) (not (buffer-local-value (quote eat--char-mode) b)))) (buffer-list))'
+        hint: "C-c C-e. In semi-char mode C-r goes to the shell (its history search); in emacs mode it searches the output."
+      - text: the test name is copied
+        elisp: '(and kill-ring (string-match-p "median_of_even_count" (substring-no-properties (car kill-ring))))'
+        hint: "The failing test is listed under the last failures: line, as tests::median_of_even_count. Select it and press M-w; C-y will paste it later."
+    stuck:
+      - when: { step_seconds: 120 }
+        say: "C-c C-e first, so your keys move in the output. Then C-r failures: RET, C-n, M-m, C-SPC, C-e, M-w."
+  - id: back
+    goal: Give the keys back to the shell
+    detail: "`C-c C-j` returns to semi-char mode: typing goes to the shell again. Check with `clear` and `RET`."
+    demo: 'C-c C-j ~500 "clear" ~300 RET ~800'
+    conditions:
+      - text: the terminal is in semi-char mode
+        elisp: '(seq-find (lambda (b) (and (eq (buffer-local-value (quote major-mode) b) (quote eat-mode)) (buffer-local-value (quote eat--semi-char-mode) b))) (buffer-list))'
+        hint: "Control c, then Control j. The mode line says Eat[semi-char] again."
+      - text: the shell received a command
+        event: { command: eat-self-input }
+        hint: "Type clear and RET: the screen empties, which proves your keys reach the shell."
+  - id: paste
+    goal: Paste the name into the FIXME comment
+    detail: "`C-x b lib.rs RET` leaves the terminal running. On line 3, after *the failing test is*, paste the name with `C-y`."
+    demo: 'C-x b ~400 "lib.rs" RET ~500 M-< ~200 C-s ~300 "failing test is" RET ~300 C-e ~200 " " C-y'
+    conditions:
+      - text: lib.rs is shown
+        state: { file: /work/terminals/tally/src/lib.rs }
+        hint: "C-x b, type lib.rs, RET. The terminal keeps running in its own buffer."
+      - text: the FIXME names the failing test
+        elisp: '(let ((b (find-buffer-visiting "/work/terminals/tally/src/lib.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "FIXME: the failing test is +\\(tests::\\)?median_of_even_count" nil t)))))'
+        hint: "C-e goes to the end of the FIXME line; type a space, then C-y. If C-y pastes something else, M-y cycles through what you copied before."
