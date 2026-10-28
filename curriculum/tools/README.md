@@ -7,7 +7,7 @@ exist, and stay useful as a cross-check afterwards.
 
 | Tool | What it does |
 |---|---|
-| `validate.py` | Schema and content checks of Part B.2 to B.4: index, every scenario (all `protocol.Scenario` fields and nothing else), lesson.md directives and front matter, the five tables, fixture drift. Content rules from the newcomer review: no level-one hint that only repeats the step's keys; exit-row regexes that JavaScript reads like RE2 (compiled with node's `RegExp` when node is installed); every prompt in `EXIT_PROMPT_SAMPLES` matches exactly its own exit row. Exit status 1 on errors. `test_validate.py` tests these rules. |
+| `validate.py` | Schema and content checks of Part B.2 to B.4: index, every scenario (all `protocol.Scenario` fields and nothing else), lesson.md (project.md for projects) directives and front matter, the five tables, fixture drift. Content rules from the newcomer review: no level-one hint that only repeats the step's keys; exit-row regexes that JavaScript reads like RE2 (compiled with node's `RegExp` when node is installed); every prompt in `EXIT_PROMPT_SAMPLES` matches exactly its own exit row. Exit status 1 on errors. `test_validate.py` tests these rules. |
 | `pgcurriculum.py` | Python ports of `internal/protocol` (keys, demo strings, layout patterns, predicates, state paths), shared by the other tools. The Go code is the reference. |
 | `sync_fixtures.py` | Copies the shared fixture trees in `fixture-src/` into each lesson that uses them (`--check` reports drift). |
 | `play/play.py` | Replays every step's demo in a real Emacs 31.1 and checks the step's conditions after every command. |
@@ -34,6 +34,10 @@ per lesson), but lessons in a part share one small project:
 | `hello` | Part 0, lesson 2.3 | `/work/hello` |
 | `editing` | Part 1 | `/work/editing` |
 | `projects` (`hello`, `polyglot`, `notes`, `inbox`) | Part 2 except 2.3, Part 3 | `/work/projects` |
+| `bench` | Part 4 | `/work/bench` |
+| `ledger` (`.lesson/` builds each lesson's Git history: `setup.run`) | Part 5 | `/work/ledger` |
+| `terminals` (`wordcount`, `tally`, `scores`, `logs`, `images`) | Part 6 | `/work/terminals` |
+| `lsp` (`greeter`, `shapes`, `tidy`, `temps`, `wordfreq`, `tips`) | Part 7 | `/work/lsp` |
 
 Edit the tree in `fixture-src/`, then run `sync_fixtures.py`.
 `validate.py` fails when a lesson's copy has drifted.

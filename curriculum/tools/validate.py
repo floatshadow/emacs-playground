@@ -50,7 +50,7 @@ MODULES = [
 SCENARIO_KEYS = {"id", "title", "minutes", "mode", "tags", "modules", "vscode", "preview",
                  "remote", "setup", "steps", "project"}
 SETUP_KEYS = {"workspace", "root", "reset", "open", "layout", "eval", "compile", "repos", "run"}
-STEP_KEYS = {"id", "goal", "detail", "demo", "conditions", "stuck", "checkpoint"}
+STEP_KEYS = {"id", "goal", "detail", "demo", "conditions", "stuck", "checkpoint", "mode"}
 KIND_KEYS = ["event", "elisp", "file", "shell", "buffer", "layout", "state", "all", "any", "not"]
 COND_KEYS = set(KIND_KEYS) | {"id", "text", "hint"}
 EVENT_KEYS = {"command", "min", "since"}
@@ -534,7 +534,9 @@ def check_scenario(lesson_id: str, ldir: Path, rep: Report, commands: set) -> di
             rep.err(where, f"setup.open entries are workspace-relative paths, got {f!r}")
             continue
         if wsdir is not None:
-            if not f.startswith(root + "/"):
+            if f.startswith("emacs.d/"):
+                pass  # the learner's own configuration (Part 13)
+            elif not f.startswith(root + "/"):
                 rep.warn(where, f"setup.open {f!r} is outside the fixture root {root!r}")
             elif not (wsdir / f[len(root) + 1:]).is_file():
                 rep.err(where, f"setup.open {f!r} is not in the fixtures")
@@ -646,6 +648,8 @@ def check_scenario(lesson_id: str, ldir: Path, rep: Report, commands: set) -> di
                 rep.err(rw, "kind must be calm or ask")
         if "checkpoint" in st and not isinstance(st["checkpoint"], bool):
             rep.err(sw, "checkpoint must be a boolean")
+        if st.get("mode", "gui") != "gui":
+            rep.err(sw, "a step's mode may only be gui")
     return sc
 
 
@@ -665,9 +669,14 @@ def glossary_has(term: str, glossary: dict) -> bool:
     return t in keys or (t.endswith("s") and t[:-1] in keys) or (t.endswith("es") and t[:-2] in keys)
 
 
+def page_name(lesson_id: str) -> str:
+    """The prose file: project.md for projects (CURRICULUM.md B.1), else lesson.md."""
+    return "project.md" if lesson_id.startswith("projects/") else "lesson.md"
+
+
 def check_lesson_md(lesson_id: str, ldir: Path, sc: dict | None, glossary: dict, rep: Report) -> None:
-    where = f"{lesson_id}/lesson.md"
-    p = ldir / "lesson.md"
+    where = f"{lesson_id}/{page_name(lesson_id)}"
+    p = ldir / page_name(lesson_id)
     src = p.read_text(encoding="utf-8")
     m = FRONT.match(src)
     if not m:
@@ -944,7 +953,7 @@ def check_index(cur: Path, rep: Report) -> list[str]:
             statuses.add(st)
             ldir = cur / lid
             if st == "ready":
-                for f in ("lesson.md", "scenario.yaml"):
+                for f in (page_name(lid), "scenario.yaml"):
                     if not (ldir / f).is_file():
                         rep.err(w, f"ready lesson lacks {f}")
                 ready.append(lid)
@@ -978,7 +987,7 @@ def main() -> int:
         if not (ldir / "scenario.yaml").is_file():
             continue
         sc = check_scenario(lid, ldir, rep, commands)
-        if (ldir / "lesson.md").is_file():
+        if (ldir / page_name(lid)).is_file():
             check_lesson_md(lid, ldir, sc, tables.get("glossary") or {}, rep)
     gloss = tables.get("gloss") or {}
     for c in sorted(commands - set(gloss)):

@@ -172,5 +172,11 @@ class ConditionKindsTest(unittest.TestCase):
         self.assertFalse(v.uses_box({"any": [{"shell": {"run": "true"}}]}))
 
 
+class PageNameTest(unittest.TestCase):
+    def test_projects_use_project_md(self):
+        self.assertEqual(v.page_name("projects/p1-hello-cargo"), "project.md")
+        self.assertEqual(v.page_name("02-buffers-and-files/03-opening-files"), "lesson.md")
+
+
 if __name__ == "__main__":
     unittest.main()
