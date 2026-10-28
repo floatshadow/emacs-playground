@@ -15,6 +15,7 @@ import {
   type Me,
   type Progress,
   type SessionInfo,
+  type StatusResult,
 } from '../protocol.gen'
 import { useSessionStore } from '../store/session'
 import { useUiStore } from '../store/ui'
@@ -142,12 +143,17 @@ export function useSessionInfo(id: string | null, poll = false) {
   })
 }
 
-export function useStatus(id: string | null, poll = false) {
+/** rpc('status'); `poll` refetches every 5 s (a function: while it returns true). */
+export function useStatus(
+  id: string | null,
+  poll: boolean | ((s: StatusResult | undefined) => boolean) = false,
+) {
   return useQuery({
     queryKey: qk.status(id ?? ''),
     queryFn: () => rpc('status', {}, { silent: true }),
     enabled: !!id,
-    refetchInterval: poll ? 5000 : false,
+    refetchInterval: (q) =>
+      (typeof poll === 'function' ? poll(q.state.data) : poll) ? 5000 : false,
   })
 }
 

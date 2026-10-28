@@ -7,12 +7,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { Scenario } from '../../protocol.gen'
 import { lessonMentions } from '../../advice/mentions'
-import { useProgress } from '../../api/queries'
+import { useMe, useProgress } from '../../api/queries'
 import { rpc } from '../../api/session/rpc'
 import { useSessionStore } from '../../store/session'
 import { useUiStore } from '../../store/ui'
 import { hintKey, resumeStep, selectStepView, type StepView } from '../../store/selectors'
 import { switchFrame } from '../screen/frame'
+import { wantsGui } from './lessonTags'
 import { focusTerminal } from '../screen/focus'
 import { loadAtStep } from '../live/actions'
 import { maxHintLevel } from './hintLevel'
@@ -53,6 +54,7 @@ export function useScenarioLoad(
   const active = useSessionStore((s) => s.activeStep)
   const outcomes = useSessionStore((s) => s.outcomes)
   const progress = useProgress()
+  const guiOff = useMe().data?.features.gui === false
   const locale = useTranslation().i18n.language
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -101,13 +103,25 @@ export function useScenarioLoad(
     load
       .then(() => {
         setLoadedHere(true)
-        // GUI lessons (mode gui, or tagged gui) open in the GUI frame (frontend.md §8).
-        const wantsGui = scenario.mode === 'gui' || (scenario.tags ?? []).includes('gui')
-        if (wantsGui && useSessionStore.getState().mode !== 'gui') void switchFrame('gui')
+        // GUI lessons (mode gui, or tagged gui) open in the GUI frame
+        // (frontend.md §8), unless the server has it turned off.
+        if (wantsGui(scenario) && !guiOff && useSessionStore.getState().mode !== 'gui')
+          void switchFrame('gui')
       })
       .catch((e: unknown) => setError(errorMessage(e)))
       .finally(() => setLoading(false))
-  }, [needsLoad, displaced, scenario, lessonId, stepId, attempt, progress.data, outcomes, locale])
+  }, [
+    needsLoad,
+    displaced,
+    scenario,
+    lessonId,
+    stepId,
+    attempt,
+    progress.data,
+    outcomes,
+    locale,
+    guiOff,
+  ])
 
   return {
     loading: loading || (!ready && !!scenario),

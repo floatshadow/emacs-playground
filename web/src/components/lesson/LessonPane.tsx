@@ -10,6 +10,7 @@ import { useStepTransition } from './stepTransition'
 import { buttonClass } from '../common/buttonClass'
 import { Button } from '../common/Button'
 import { LESSON_PANE_ID } from '../screen/paneIds'
+import { LessonNotices } from './LessonNotices'
 import { Markdown } from './Markdown'
 import { StepsSlotContext } from './stepsSlot'
 import { Steps } from './Steps'
@@ -179,6 +180,7 @@ export function LessonPane({
     >
       <h1>{title}</h1>
       {bundle.front?.summary && <p className={styles.lede}>{bundle.front.summary}</p>}
+      <LessonNotices scenario={bundle.scenario} />
       {load.displaced && !load.loading && (
         <div className={styles.notice} role="status">
           <p>{t('lesson.displaced')}</p>

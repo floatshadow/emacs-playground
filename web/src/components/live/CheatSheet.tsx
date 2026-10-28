@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next'
-import { CheatsCommon } from '../../protocol.gen'
+import { cheatRows } from '../../advice/cheats'
 import { useSessionStore } from '../../store/session'
 import { Kbd } from '../common/Kbd'
 import styles from './CheatSheet.module.css'
@@ -19,13 +19,14 @@ function CheatKeys({ keys }: { keys: string }) {
   )
 }
 
-/** Keys for this buffer (frontend.md §6): rows for the major mode, then the common rows. */
+/** Keys for this buffer (frontend.md §6): rows for its minor and major modes, then the common rows. */
 export function CheatSheet({ heading }: { heading?: boolean }) {
   const { t } = useTranslation()
   const mode = useSessionStore((s) => s.state?.mode ?? '')
   const modeName = useSessionStore((s) => s.state?.modeName ?? '')
+  const minors = useSessionStore((s) => s.state?.minors)
   const cheats = useSessionStore((s) => s.tables.cheats)
-  const rows = [...(cheats[mode] ?? []), ...(cheats[CheatsCommon] ?? [])]
+  const rows = cheatRows(cheats, mode, minors ?? [], t('cheat.describeMode'))
   return (
     <section aria-labelledby="cheat-h">
       {heading !== false && (

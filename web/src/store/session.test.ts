@@ -538,3 +538,58 @@ describe('step views', () => {
     )
   })
 })
+
+describe('the "again, without hints" lap', () => {
+  const step = (over: Partial<Extract<Event, { t: 'step' }>>): Event => ({
+    t: 'step',
+    lessonId: 'projects/p1',
+    stepId: 'a',
+    status: 'loaded',
+    index: 0,
+    count: 2,
+    ...over,
+  })
+
+  it('starts with a lap step, finishes with lapMs on the completing event', () => {
+    const s = run([
+      hello({ step: null }),
+      step({ lap: true, ts: 5000 }),
+      step({ status: 'complete', lap: true }),
+      step({ stepId: 'b', index: 1, lap: true }),
+    ])
+    expect(s.lap).toEqual({ lessonId: 'projects/p1', startedAt: 5000 })
+    const done = reduce(
+      s,
+      step({
+        stepId: 'b',
+        index: 1,
+        status: 'complete',
+        lap: true,
+        lessonComplete: true,
+        lapMs: 61000,
+      }),
+      9000,
+    )
+    expect(done.lap).toBeNull()
+    expect(done.lapDone).toEqual({ lessonId: 'projects/p1', ms: 61000 })
+    expect(done.lessonsComplete).toContain('projects/p1')
+  })
+
+  it('a load without lap ends it; hello carries the running lap', () => {
+    let s = run([hello({ step: null }), step({ lap: true, ts: 5000 })])
+    s = reduce(s, step({ stepId: 'b', index: 1 }), 6000)
+    expect(s.lap).toBeNull()
+    s = reduce(s, hello({ lap: { lessonId: 'projects/p1', startedAt: 7 } }), 7000)
+    expect(s.lap).toEqual({ lessonId: 'projects/p1', startedAt: 7 })
+    s = reduce(s, hello({}), 8000)
+    expect(s.lap).toBeNull()
+  })
+
+  it('a reset inside the lap keeps the timer; dropping the lesson ends it', () => {
+    let s = run([hello({ step: null }), step({ lap: true, ts: 5000 })])
+    s = reduce(s, step({ status: 'reset', lap: true, ts: 6000 }), 6000)
+    expect(s.lap?.startedAt).toBe(5000)
+    s = reduce(s, step({ status: 'dropped' }), 7000)
+    expect(s.lap).toBeNull()
+  })
+})

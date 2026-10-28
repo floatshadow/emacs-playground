@@ -177,6 +177,19 @@ function truth(c: Condition, ctx: EvalContext): Truth {
   }
   if (c.state) return matchPredicate(c.state, stateDoc(ctx.state))
   if (c.shell) return 'unknown'
+  if (c.buffer) {
+    // A live buffer by name (a uniquify suffix also matches); no processes here.
+    const want = c.buffer
+    const b = Object.values(ctx.eng.buffers).find(
+      (x) => x.name === want.name || x.name.startsWith(want.name + '<'),
+    )
+    if (!b) return false
+    if (want.mode !== undefined && b.mode !== want.mode) return false
+    if (want.contains !== undefined && !b.text.includes(want.contains)) return false
+    if (want.modified !== undefined && b.modified !== want.modified) return false
+    if (want.process === 'running') return 'unknown'
+    return true
+  }
   if (c.all) {
     const rs = c.all.map((x) => truth(x, ctx))
     if (rs.some((r) => r === false)) return false

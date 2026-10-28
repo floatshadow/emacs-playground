@@ -90,6 +90,12 @@ const MINOR_LIGHTERS: Record<string, string> = {
   'follow-mode': 'Follow',
   'diff-hl-mode': 'diff-hl',
   'apheleia-mode': 'Apheleia',
+  'smerge-mode': 'SMerge',
+  'wdired-mode': 'Editable',
+  'magit-blame-mode': 'Blame',
+  'git-timemachine-mode': 'Timemachine',
+  'compilation-shell-minor-mode': 'Compilation',
+  'compilation-minor-mode': 'Compilation',
 }
 
 /**

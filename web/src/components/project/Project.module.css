@@ -158,3 +158,62 @@
     border-bottom: 1px solid var(--rule);
   }
 }
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 4px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+.progress progress {
+  flex: 0 0 90px;
+  height: 6px;
+  appearance: none;
+  border: 0;
+  border-radius: 3px;
+  background: var(--paper-3);
+  overflow: hidden;
+}
+.progress progress::-webkit-progress-bar {
+  background: var(--paper-3);
+}
+.progress progress::-webkit-progress-value {
+  background: var(--ok);
+}
+.progress progress::-moz-progress-bar {
+  background: var(--ok);
+}
+.lap {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  font-size: 14px;
+}
+.lap h3 {
+  margin: 0 0 4px;
+  font: 600 14.5px var(--serif);
+}
+.lap p {
+  margin: 0 0 8px;
+}
+.lapRunning {
+  background: var(--violet-soft);
+  border-color: transparent;
+}
+.lapClock {
+  font: 600 22px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.lapClock small {
+  font: 400 12.5px var(--serif);
+  color: var(--ink-3);
+}
+.lapOver {
+  color: var(--warn);
+}
+.lapStats {
+  color: var(--ink-3);
+  font-size: 13px;
+}

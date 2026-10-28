@@ -499,3 +499,18 @@
 .jumpLabel {
   opacity: 0.85;
 }
+.noticeWarn {
+  background: var(--warn-soft);
+}
+.boxDot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 7px;
+  background: var(--ink-3);
+  vertical-align: 1px;
+}
+.boxDotOn {
+  background: var(--ok);
+}

@@ -114,7 +114,8 @@
     "fewer": "Show fewer tips"
   },
   "cheat": {
-    "title": "Keys for this buffer"
+    "title": "Keys for this buffer",
+    "describeMode": "every key of this mode"
   },
   "rescue": {
     "button": "Rescue me",
@@ -251,7 +252,11 @@
     "pages_one": "{{count}} page",
     "pages_other": "{{count}} pages",
     "pdfPage": "Page {{n}} of {{total}} of {{name}}",
-    "pdfError": "Could not render the PDF: {{error}}"
+    "pdfError": "Could not render the PDF: {{error}}",
+    "missing": "{{name}} does not exist yet.",
+    "missingFollow": "It is built from {{source}}: save that file, or run the build the task describes. The preview appears as soon as the file does.",
+    "missingBody": "It appears here as soon as the file is written.",
+    "close": "Close the {{name}} preview"
   },
   "tree": {
     "label": "Project files",
@@ -278,7 +283,9 @@
     "willOverwrite_other": "This overwrites {{count}} files with the version from the checkpoint:",
     "nothingChanged": "No files differ from this checkpoint; the Emacs layout is restored.",
     "keeps": "Build folders (target, _build, .venv) are kept. Your Git staging area is reset to the checkpoint.",
-    "restored_zero": "Restored “{{label}}”; no files had changed."
+    "restored_zero": "Restored “{{label}}”; no files had changed.",
+    "task": "Start of task {{id}}",
+    "taskNamed": "Start of task {{n}}: {{goal}}"
   },
   "project": {
     "sideLabel": "Project files and tasks",
@@ -297,7 +304,28 @@
     "noSuchProjectBody": "The link may be mistyped or out of date. Every project is on the course map.",
     "cardTasks_one": "{{count}} task",
     "cardTasks_other": "{{count}} tasks",
-    "doneTasks": "{{done}} of {{total}} tasks done"
+    "doneTasks": "{{done}} of {{total}} tasks done",
+    "progress": "{{done}} of {{total}} tasks done",
+    "progressSkipped_one": "{{count}} skipped",
+    "progressSkipped_other": "{{count}} skipped",
+    "progressWatched_one": "{{count}} watched",
+    "progressWatched_other": "{{count}} watched",
+    "lapTitle": "Again, without hints",
+    "lapIntro": "Do every task once more from the start, with hints and demos turned off and a timer running, to see what stuck. Your files go back to how the project started.",
+    "lapTargetIntro": "Aim for {{minutes}} minutes.",
+    "lapStart": "Start the lap",
+    "lapAgain": "Another lap",
+    "lapStartTitle": "Restores the project's files and starts at task 1 without hints",
+    "lapRunning": "Lap without hints: hints, demos and skipping are off until the last task is done.",
+    "lapTarget": "target {{time}}",
+    "lapStop": "Stop the lap",
+    "lapStopTitle": "Hints come back; this task starts again from its checkpoint",
+    "lapFinished": "Lap finished in {{time}}.",
+    "lapUnderTarget": "Within the target.",
+    "lapOverTarget": "The target is {{time}}; another lap will be quicker.",
+    "lapStats_one": "{{count}} lap · best {{best}} · last {{last}}",
+    "lapStats_other": "{{count}} laps · best {{best}} · last {{last}}",
+    "bestLap": "best lap without hints {{time}}"
   },
   "course": {
     "crumb": "Course map",
@@ -408,5 +436,17 @@
   "emacs": {
     "restarted": "Emacs restarted; your files are safe.",
     "modulesLoaded": "Loaded the configuration modules for this part of the course."
+  },
+  "notices": {
+    "guiNeeded": "This lesson uses the GUI frame: the same Emacs drawn as a graphical window, with images, PDFs and mouse menus. It opens on its own; you went back to the terminal.",
+    "guiOpen": "Open the GUI frame",
+    "guiStarting": "Starting the GUI frame…",
+    "guiOn": "You are in the GUI frame: the same Emacs and buffers, drawn as a graphical window. Click it before typing. The Terminal half of the switch above the screen brings the terminal back.",
+    "guiOff": "This lesson needs the GUI frame, which this server has turned off. Read along; the steps that need images cannot be done here.",
+    "boxChecking": "Checking the SSH box…",
+    "boxReady": "SSH box ready: /ssh:box: opens its files from any prompt.",
+    "boxNotReady": "The SSH box is still being set up. The steps that use /ssh:box: work once it is ready.",
+    "boxUnknown": "This lesson uses the SSH box: /ssh:box: opens its files from any prompt.",
+    "boxOff": "This lesson uses an SSH box, which this server does not provide. Read along; the remote steps cannot be done here."
   }
 }

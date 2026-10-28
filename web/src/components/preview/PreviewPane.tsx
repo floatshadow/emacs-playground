@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect, useMemo, useRef } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, type KeyboardEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { PreviewSpec } from '../../protocol.gen'
 import { useSessionStore } from '../../store/session'
 import { useUiStore } from '../../store/ui'
+import { ArtefactGate } from './Artefact'
 import { HtmlView } from './HtmlView'
 import { ImageView } from './ImageView'
 import { MarkdownView, TextView } from './MarkdownView'
@@ -25,6 +26,7 @@ export function PreviewPane({ owner, spec }: { owner: string; spec: PreviewSpec 
   const chosen = useUiStore((s) => s.previewTab[owner])
   const setTab = useUiStore((s) => s.setPreviewTab)
   const addTab = useUiStore((s) => s.addPreviewTab)
+  const closeTab = useUiStore((s) => s.removePreviewTab)
   const file = useSessionStore((s) => workspaceRelative(s.state?.file))
   const tabs = useMemo(() => {
     const out: string[] = []
@@ -66,36 +68,66 @@ export function PreviewPane({ owner, spec }: { owner: string; spec: PreviewSpec 
   return (
     <div className={styles.preview}>
       <div className={styles.tabs} role="tablist" aria-label={t('preview.tabs')}>
-        {tabs.map((p) => (
-          <button
-            key={p}
-            id={tabId(p)}
-            type="button"
-            role="tab"
-            aria-selected={p === current}
-            className={`${styles.ptab} ${p === current ? styles.on : ''}`}
-            title={p}
-            onClick={() => setTab(owner, p)}
-          >
-            {baseName(p)}
-          </button>
-        ))}
+        {tabs.map((p) => {
+          // Tabs opened from the tree can be closed (× or Delete); the scenario's stay.
+          const closable = !spec?.tabs?.includes(p) && !!extra?.includes(p)
+          const close = t('preview.close', { name: baseName(p) })
+          return (
+            <button
+              key={p}
+              id={tabId(p)}
+              type="button"
+              role="tab"
+              aria-selected={p === current}
+              className={`${styles.ptab} ${p === current ? styles.on : ''}`}
+              title={closable ? `${p} · ${close}` : p}
+              onClick={() => setTab(owner, p)}
+              {...(closable
+                ? {
+                    'aria-keyshortcuts': 'Delete',
+                    onKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => {
+                      if (e.key === 'Delete') closeTab(owner, p)
+                    },
+                  }
+                : {})}
+            >
+              {baseName(p)}
+              {closable && (
+                <span
+                  className={styles.ptabClose}
+                  aria-hidden="true"
+                  data-testid={`close-${baseName(p)}`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    closeTab(owner, p)
+                  }}
+                >
+                  ×
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
       <div className={styles.body} role="tabpanel" aria-labelledby={tabId(current)}>
         {!sessionId ? (
           <p className={styles.dim}>{t('preview.noSession')}</p>
-        ) : kind === 'pdf' ? (
-          <Suspense fallback={<p className={styles.dim}>{t('common.loading')}</p>}>
-            <PdfView url={url} version={version} name={name} />
-          </Suspense>
-        ) : kind === 'html' ? (
-          <HtmlView url={url} version={version} name={name} />
-        ) : kind === 'markdown' ? (
-          <MarkdownView url={url} version={version} />
-        ) : kind === 'image' ? (
-          <ImageView url={url} version={version} name={name} />
         ) : (
-          <TextView url={url} version={version} />
+          <ArtefactGate url={url} version={version} path={current} source={source}>
+            {kind === 'pdf' ? (
+              <Suspense fallback={<p className={styles.dim}>{t('common.loading')}</p>}>
+                <PdfView url={url} version={version} name={name} />
+              </Suspense>
+            ) : kind === 'html' ? (
+              <HtmlView url={url} version={version} name={name} />
+            ) : kind === 'markdown' ? (
+              <MarkdownView url={url} version={version} />
+            ) : kind === 'image' ? (
+              <ImageView url={url} version={version} name={name} />
+            ) : (
+              <TextView url={url} version={version} />
+            )}
+          </ArtefactGate>
         )}
       </div>
       <PreviewStatus path={current} source={source} />

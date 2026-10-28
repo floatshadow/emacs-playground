@@ -11,6 +11,7 @@ export function Steps({
   showDetails,
   label,
   flash,
+  hintsOff,
 }: {
   views: StepView[]
   onHint(view: StepView): void
@@ -19,6 +20,8 @@ export function Steps({
   label?: string
   /** Id of the step that just ended (highlighted for a moment). */
   flash?: string | null
+  /** The project lap: hints and demos are hidden (sessiond refuses them). */
+  hintsOff?: boolean
 }) {
   const { t } = useTranslation()
   return (
@@ -31,6 +34,7 @@ export function Steps({
           flash={flash === v.step.id}
           {...(onGoTo ? { onGoTo } : {})}
           {...(showDetails ? { showDetails } : {})}
+          {...(hintsOff ? { hintsOff } : {})}
         />
       ))}
     </ol>

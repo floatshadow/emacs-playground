@@ -11,6 +11,7 @@ import type {
   Event,
   FrameKind,
   HelloEvent,
+  LapInfo,
   State,
   Tables,
 } from '../protocol.gen'
@@ -144,6 +145,10 @@ export interface SessionData {
    * save".
    */
   quietHabitsUntil: number
+  /** The running "again, without hints" lap (hello, step events with lap). */
+  lap: LapInfo | null
+  /** The lap that finished while this page listened, and its time. */
+  lapDone: { lessonId: string; ms: number } | null
 }
 
 export function initialSessionData(): SessionData {
@@ -183,6 +188,8 @@ export function initialSessionData(): SessionData {
     tables: DEFAULT_TABLES,
     described: {},
     quietHabitsUntil: 0,
+    lap: null,
+    lapDone: null,
   }
 }
 
@@ -229,6 +236,7 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
         modules: ev.modules ?? [],
         emacs: { ...base.emacs, overlay: null, busy: false },
         prefix: null,
+        lap: ev.lap ?? null,
       }
       const step = ev.step
       if (!step) next.activeStep = null
@@ -343,7 +351,7 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
     case 'check':
       return { ...base, checks: { ...base.checks, [ev.stepId]: ev } }
     case 'step':
-      return reduceStep(base, ev)
+      return reduceStep(base, ev, now)
     case 'nudge': {
       const n: Nudge = { id: ev.id, kind: ev.kind, title: ev.title, body: ev.body }
       return { ...base, serverNudges: [...base.serverNudges.filter((x) => x.id !== ev.id), n] }
@@ -365,7 +373,11 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
 }
 
 /** The step lifecycle (api.md §4.1). */
-function reduceStep(base: SessionData, ev: Extract<Event, { t: 'step' }>): SessionData {
+function reduceStep(
+  base: SessionData,
+  ev: Extract<Event, { t: 'step' }>,
+  now: number,
+): SessionData {
   const ref: ActiveStep = {
     lessonId: ev.lessonId,
     stepId: ev.stepId,
@@ -390,6 +402,13 @@ function reduceStep(base: SessionData, ev: Extract<Event, { t: 'step' }>): Sessi
         watched: keepWatched ? base.watched : null,
         startedHere: { lessonId: ev.lessonId, stepId: ev.stepId },
       }
+      // A lap's steps carry lap: true; any other load ends the lap.
+      if (ev.lap) {
+        if (base.lap?.lessonId !== ev.lessonId) {
+          next.lap = { lessonId: ev.lessonId, startedAt: ev.ts ?? now }
+          next.lapDone = null
+        }
+      } else if (ev.status === 'loaded' && base.lap) next.lap = null
       if (ev.status === 'loaded' && otherLesson) {
         // The ticker, the pending prefix and the habit cards belong to the lesson.
         next.ticker = []
@@ -418,7 +437,14 @@ function reduceStep(base: SessionData, ev: Extract<Event, { t: 'step' }>): Sessi
           : base.lessonsComplete
       const activeStep = ev.lessonComplete ? { ...ref } : base.activeStep
       const watched = sameStep(base.watched, ev.lessonId, ev.stepId) ? null : base.watched
-      return { ...base, outcomes, lessonsComplete, activeStep, watched }
+      const next: SessionData = { ...base, outcomes, lessonsComplete, activeStep, watched }
+      if (ev.lap && ev.lessonComplete) {
+        const started = base.lap?.lessonId === ev.lessonId ? base.lap.startedAt : null
+        const ms = ev.lapMs ?? (started !== null ? (ev.ts ?? now) - started : 0)
+        next.lap = null
+        next.lapDone = { lessonId: ev.lessonId, ms }
+      }
+      return next
     }
     case 'dropped': {
       // A progress reset of the lesson (here or from another page): what
@@ -434,6 +460,7 @@ function reduceStep(base: SessionData, ev: Extract<Event, { t: 'step' }>): Sessi
         outcomes,
         lessonsComplete: base.lessonsComplete.filter((x) => x !== ev.lessonId),
         watched: sameStep(base.watched, ev.lessonId, ev.stepId) ? null : base.watched,
+        lap: base.lap?.lessonId === ev.lessonId ? null : base.lap,
       }
     }
   }
@@ -469,6 +496,8 @@ export interface SessionStore extends SessionData {
    * clears when sessiond's "dropped" event arrives.
    */
   forgetProgress(lessonId?: string): void
+  /** The running lap as an rpc reported it (scenario, status), or none. */
+  setLap(lap: LapInfo | null): void
   /** A synthetic ticker entry (Rescue, Reset). */
   note(entry: { keys: string[]; cmd: string; gloss?: string; kind: TickerEntry['kind'] }): void
   /** Back to the initial state (tests, logout). */
@@ -514,6 +543,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
         dismissed: new Set<string>(),
       }
     }),
+  setLap: (lap) => set({ lap }),
   note: (entry) => set((s) => ({ ticker: tickerNote(s.ticker, entry, Date.now()) })),
   reset: () => set(initialSessionData()),
 }))

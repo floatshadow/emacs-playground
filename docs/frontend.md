@@ -61,13 +61,13 @@ Overlays mirror `emacs` events and connection state. Only the window changes the
 
 Views over the store and the index tables (CURRICULUM.md B.4).
 
-**Ticker** (`ticker.ts`): a `prefix` event adds or replaces the pending entry; a `key` event replaces it with the command. `cmd: "undefined"` is unbound; a prefix ended by `C-g` shows as "cancelled". Prefix arguments fold into their command (`C-u 4 0 =` is one entry); consecutive typing commands collapse into "typed N characters"; mouse-only events are neither shown nor counted; entries made while keys are quiet (demo, Skip, Go to this step) are `replayed` and ignored by stuck patterns. Glosses: `tables.gloss`, else `rpc('describe')`. A frame switch clears the pending prefix.
+**Ticker** (`ticker.ts`): a `prefix` event adds or replaces the pending entry; a `key` event replaces it with the command. `cmd: "undefined"` is unbound; a prefix ended by `C-g` shows as "cancelled". Prefix arguments fold into their command (`C-u 4 0 =` is one entry); consecutive typing commands collapse into "typed N characters"; mouse-only events are neither shown nor counted; in a terminal buffer (vterm, eat, term) only printable keys count as typing; entries made while keys are quiet (demo, Skip, Go to this step) are `replayed` and ignored by stuck patterns. Glosses: `tables.gloss`, else `rpc('describe')`. A frame switch clears the pending prefix.
 
-**Where am I** (`exits.ts`): `tables.exits` rows in order against `protocol.StateDoc` plus the browser-only root `session` (CURRICULUM.md B.4); each match shows `why` and one `how` with templates expanded. Built-in rows cover `session.prefix` and `session.emacs` unless the table has rows for them. The Mode row hides `HOUSEKEEPING_MINORS`. `regex` is RE2; `translateRe2` (`predicate.ts`) accepts a leading `(?i)`/`(?m)`/`(?s)`, scoped `(?i:…)`/`(?s:…)`, `(?P<name>…)` and `\p{…}`, and anything else is a validation error (`curriculum/tools/validate.py` agrees), never a row that silently fails.
+**Where am I** (`exits.ts`): `tables.exits` rows in order against `protocol.StateDoc` plus the browser-only root `session` (CURRICULUM.md B.4); each match shows `why` and one `how` with templates expanded. Built-in rows cover `session.prefix` and `session.emacs` unless the table has rows for them. The Mode row hides `HOUSEKEEPING_MINORS`. The cheat sheet (`cheats.ts`) adds rows for enabled minor modes (smerge, wdired) and points at `C-h m` for a mode without rows. Mode facts (terminal input commands, tool windows) live in `modes.ts`. `regex` is RE2; `translateRe2` (`predicate.ts`) accepts a leading `(?i)`/`(?m)`/`(?s)`, scoped `(?i:…)`/`(?s:…)`, `(?P<name>…)` and `\p{…}`, and anything else is a validation error (`curriculum/tools/validate.py` agrees), never a row that silently fails.
 
 **Nudges** ("Did you mean"): habit cards, fixed patterns and server `nudge` events.
-- Habit card: once per habit key per session (seen keys in localStorage `pg.habitsSeen.<sessionId>`, cleared by Start over), on a single-key event; quiet while keys are quiet.
-- Patterns (`patterns.ts`): three quits in 8 s; the same unbound key twice; typing into a read-only buffer; a prompt open 20 s; three or more windows after the learner split one (pop-ups do not count).
+- Habit card: never for keys a terminal buffer sends to its program; once per habit key per session (seen keys in localStorage `pg.habitsSeen.<sessionId>`, cleared by Start over), on a single-key event; quiet while keys are quiet.
+- Patterns (`patterns.ts`): three quits in 8 s; the same unbound key twice; typing into a read-only buffer; a prompt open 20 s; three or more windows after the learner split one (pop-ups, side windows, `*name*` buffers and tool modes such as Magit, ediff, dape, calc and the agenda do not count).
 - Suppression (`mentions.ts`): a key is mentioned when it starts a command of a key sequence in the lesson Markdown or the current step's goal, detail or hints; sequences are cut into commands after every key not in `PREFIX_KEYS`, so `C-a C-k` mentions both and `C-x C-s` does not mention `C-s`. Add new global prefixes to `PREFIX_KEYS`. Suppressed cards do not count as seen. Many-windows is quiet when `C-x 2` or `C-x 3` is mentioned.
 - Cards have no TTL: they stay until dismissed (that card only) or another lesson loads; three show, older ones behind "N earlier tips". Rescue sits above the panel so cards never push it off screen.
 - Limits: suppression sees only the current lesson and step, so a card can fire on a key taught in another lesson; habits match single keys only (VS Code's Ctrl+G gets no card although `C-g 35` just inserts "35").
@@ -99,9 +99,11 @@ The caption replaces the ticker while playing (`role="status"`, "Watching: <goal
 
 Shown when `mode === 'gui'`; the frame switch calls `rpc('mode')` and its GUI half has an explanatory tooltip. While the frame starts the terminal stays with a "Starting…" chip (20 s, then a toast). Both panes stay mounted, one visible.
 
+Lesson notices (`LessonNotices.tsx`, lesson panes and project screens): GUI lessons (mode or tag `gui`) explain the GUI frame and offer to reopen it, or say the server has it off (`features.gui`) without switching; remote lessons (tag `remote` or `remote.box`) show the box status from `status.remoteBox`, polled every 5 s while false, or say the server has no box (`features.remoteBox`).
+
 ## 9. Preview pane
 
-Tabs: `preview.tabs` plus files opened from the tree; `preview.follow` maps the current source buffer to its artefact. Views: PDF (lazy worker, keeps scale and scroll across reloads), HTML (iframe `sandbox="allow-scripts"`), Markdown (lesson pipeline without directives), image; they reload on `file` events. sessiond's `SandboxCSP` keeps `allow-same-origin`, an open question (deployment.md §9.3).
+Tabs: `preview.tabs` plus files opened from the tree; `preview.follow` maps the current source buffer to its artefact. Views: PDF (lazy worker, keeps scale and scroll across reloads), HTML (iframe `sandbox="allow-scripts"`), Markdown (lesson pipeline without directives), image; they reload on `file` events. A HEAD probe gates every view: a missing artefact says so and, under `preview.follow`, which source builds it; the `file` event that creates it shows the view. A PDF that fails to parse (still being written) is retried once after 800 ms. Tabs opened from the tree close with × or Delete. sessiond's `SandboxCSP` keeps `allow-same-origin`, an open question (deployment.md §9.3).
 
 ## 10. Course map and projects
 
@@ -109,7 +111,9 @@ A lesson row reads "done" when every step is done, "finished · N skipped · M w
 
 **Start over** (next to Continue once there is progress; always on the Session page) confirms ("This clears the progress of every lesson … Your files and Emacs stay as they are."), posts `/api/v1/progress/reset` with no body and calls `forgetProgress`. Open: an open lesson tab then reloads with `setup.reset`, which discards unsaved edits under the lesson root.
 
-Projects add the file tree (`GET /preview/<root>/`; a click calls `rpc('open', {path})`), the checkpoint list and Restore (`rpc('restore', {label})` after a dialog naming what is overwritten).
+Projects (`ProjectScreen.tsx`) show "Task N of M" with a progress bar (done, skipped, watched; a finished project stays finished after a reload, from saved progress), one file tree per `project.roots` (default `setup.root`; `GET /preview/<root>/`, a click calls `rpc('open', {path})`), and the checkpoint list: this project's task checkpoints ("Start of task N: goal", restored by `{ref}`) and manual ones, Restore after a dialog naming what is overwritten.
+
+Once every task is done or skipped the project offers **Again, without hints** (`lap.ts`): `rpc('scenario', {lessonId, lap: true})`; while `lap` is set (ScenarioResult, StatusResult, HelloEvent) hints, Watch it, Go to and Skip are hidden (sessiond answers 409) and a timer runs from `lap.startedAt` against `project.lapMinutes`. The result is `lapMs` on the completing step event; Stop the lap reloads the current task without it. Finished laps (count, best, last) come from `progress.laps` and show on the project card too.
 
 ## 11. Styling
 

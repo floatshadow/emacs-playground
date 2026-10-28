@@ -325,6 +325,7 @@ The preview on the right follows \`docs/report.typ\`: save it and \`report.pdf\`
     minutes: 75,
     tags: ['project', 'remote'],
     modules: ['base', 'agent', 'editing', 'files', 'windows', 'lsp', 'lang-rust', 'lang-python'],
+    project: { lapMinutes: 15 },
     preview: {
       tabs: ['polyglot/docs/report.pdf', 'polyglot/README.md', 'polyglot/site/index.html'],
       follow: { 'polyglot/docs/report.typ': 'polyglot/docs/report.pdf' },

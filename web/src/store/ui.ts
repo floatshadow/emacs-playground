@@ -89,6 +89,8 @@ export interface UiStore extends Prefs {
   togglePreview(): void
   setPreviewTab(owner: string, path: string): void
   addPreviewTab(owner: string, path: string): void
+  /** Closes a tab opened from the file tree. */
+  removePreviewTab(owner: string, path: string): void
   setFocusMode(on: boolean): void
   setFocusLock(lock: FocusLock): void
   setSkipping(s: { stepId: string; goal: string } | null): void
@@ -142,6 +144,17 @@ export const useUiStore = create<UiStore>()((set, get) => ({
           : { ...s.previewExtra, [owner]: [...cur, path] },
         previewTab: { ...s.previewTab, [owner]: path },
         previewHidden: false,
+      }
+    }),
+  removePreviewTab: (owner, path) =>
+    set((s) => {
+      const cur = s.previewExtra[owner] ?? []
+      if (!cur.includes(path)) return s
+      const previewTab = { ...s.previewTab }
+      if (previewTab[owner] === path) delete previewTab[owner]
+      return {
+        previewExtra: { ...s.previewExtra, [owner]: cur.filter((p) => p !== path) },
+        previewTab,
       }
     }),
   setFocusMode: (focusMode) => set({ focusMode }),

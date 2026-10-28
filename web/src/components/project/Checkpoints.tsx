@@ -10,10 +10,28 @@ import { ConfirmDialog, Dialog } from '../common/Dialog'
 import styles from './Project.module.css'
 
 /**
+ * The checkpoints a project lists: its own task checkpoints and the manual
+ * ones, newest first. Task checkpoints of other lessons are left out.
+ */
+function projectCheckpoints(
+  items: readonly CheckpointInfo[],
+  lessonId: string | undefined,
+): CheckpointInfo[] {
+  return items.filter((c) => !c.step || lessonId === undefined || c.step.lessonId === lessonId)
+}
+
+/**
  * Checkpoints (frontend.md §10): rpc('checkpoints'), Restore after a
  * confirmation that names what will be overwritten, and manual checkpoints.
+ * A task checkpoint is named after its task (taskName) and restored by ref.
  */
-export function Checkpoints() {
+export function Checkpoints({
+  lessonId,
+  taskName,
+}: {
+  lessonId?: string
+  taskName?: (stepId: string) => string | undefined
+} = {}) {
   const { t } = useTranslation()
   const q = useCheckpoints()
   const [confirm, setConfirm] = useState<CheckpointInfo | null>(null)
@@ -21,11 +39,14 @@ export function Checkpoints() {
   const [saveOpen, setSaveOpen] = useState(false)
   const [label, setLabel] = useState('')
 
+  const nameOf = (c: CheckpointInfo) =>
+    (c.step && taskName?.(c.step.stepId)) ||
+    (c.step ? t('checkpoints.task', { id: c.step.stepId }) : c.label)
   const restore = async (c: CheckpointInfo) => {
     setBusy(true)
     try {
-      const r = await rpc('restore', { label: c.label })
-      toast(t('checkpoints.restored', { label: c.label, count: r.restoredFiles ?? 0 }))
+      const r = await rpc('restore', c.step ? { ref: c.ref } : { label: c.label })
+      toast(t('checkpoints.restored', { label: nameOf(c), count: r.restoredFiles ?? 0 }))
       setConfirm(null)
     } catch {
       // toasted
@@ -49,7 +70,7 @@ export function Checkpoints() {
     }
   }
 
-  const items = q.data?.items ?? []
+  const items = projectCheckpoints(q.data?.items ?? [], lessonId)
   return (
     <div>
       {q.isLoading && <p className={styles.treeNote}>{t('common.loading')}</p>}
@@ -60,7 +81,7 @@ export function Checkpoints() {
         {items.map((c) => (
           <li key={c.ref}>
             <span>
-              {c.label}
+              {nameOf(c)}
               <span className={styles.when}>
                 {clock(c.createdAt)} · {t('checkpoints.files', { count: c.files?.length ?? 0 })}
               </span>
@@ -76,7 +97,7 @@ export function Checkpoints() {
       </Button>
       <ConfirmDialog
         open={!!confirm}
-        title={t('checkpoints.confirmTitle', { label: confirm?.label ?? '' })}
+        title={t('checkpoints.confirmTitle', { label: confirm ? nameOf(confirm) : '' })}
         confirmLabel={t('checkpoints.restore')}
         busy={busy}
         onClose={() => setConfirm(null)}

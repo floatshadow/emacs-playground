@@ -195,3 +195,21 @@
   background: #fff;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
 }
+.missing {
+  padding: 16px;
+  font-size: 14px;
+}
+.missing p {
+  margin: 0 0 6px;
+  padding: 0;
+}
+.ptabClose {
+  color: var(--ink-3);
+  margin-left: 6px;
+  padding: 0 3px;
+  border-radius: 3px;
+}
+.ptabClose:hover {
+  color: var(--ink);
+  background: var(--paper-3);
+}

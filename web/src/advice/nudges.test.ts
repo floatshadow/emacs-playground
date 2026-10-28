@@ -53,6 +53,24 @@ describe('habit cards (layer 2)', () => {
     expect(s.cards[0]?.title).toBe('Coming from VS Code? C-/ is not toggle comment.')
   })
 
+  it('keys sent to a program in a terminal buffer get no habit card', () => {
+    const ev = (keys: string, cmd: string, mode: string): Event => ({
+      t: 'key',
+      keys,
+      cmd,
+      buf: '*vterm*',
+      mode,
+      frame: 'terminal',
+    })
+    let s = reduce(initialSessionData(), ev('C-z', 'vterm--self-insert', 'vterm-mode'), 1000)
+    s = reduce(s, ev('C-a', 'eat-self-input', 'eat-mode'), 1001)
+    s = reduce(s, ev('C-r', 'term-send-raw', 'term-mode'), 1002)
+    expect(s.cards).toEqual([])
+    // The same key in a file buffer still gets its card.
+    s = reduce(s, ev('C-z', 'suspend-frame', 'rust-ts-mode'), 1003)
+    expect(s.cards.map((c) => c.id)).toEqual(['habit:C-z'])
+  })
+
   it('demo playback raises no habit cards and does not use them up', () => {
     const key: Event = {
       t: 'key',
@@ -326,12 +344,54 @@ describe('stuck patterns', () => {
     expect(
       patternNudges({ ticker, state: three, minibufferSince: null, now: at }).map((n) => n.id),
     ).not.toContain('many-windows')
+    // Nor after a split: the pop-ups still do not count towards three.
     const split = [entry(['C-x', '2'], 'split-window-below'), ...ticker]
     expect(
       patternNudges({ ticker: split, state: three, minibufferSince: null, now: at }).map(
         (n) => n.id,
       ),
+    ).not.toContain('many-windows')
+    const win = (id: number, buf: string, mode: string, side: string | null = null) => ({
+      id,
+      buf,
+      mode,
+      selected: id === 1,
+      dedicated: false,
+      side,
+    })
+    const nudgeIds = (windows: ReturnType<typeof win>[]) =>
+      patternNudges({
+        ticker: split,
+        state: calmState({ windows }),
+        minibufferSince: null,
+        now: at,
+      }).map((n) => n.id)
+    // Three windows on files after a split: the card.
+    expect(
+      nudgeIds([
+        win(1, 'a.rs', 'rust-ts-mode'),
+        win(2, 'a.rs', 'rust-ts-mode'),
+        win(3, 'b.rs', 'rust-ts-mode'),
+      ]),
     ).toContain('many-windows')
+    // Tools open windows of their own: Magit's commit message and diff,
+    // ediff's control window, dape's info windows, side windows.
+    expect(
+      nudgeIds([
+        win(1, 'a.rs', 'rust-ts-mode'),
+        win(2, 'COMMIT_EDITMSG', 'text-mode'),
+        win(3, 'magit-diff: hello', 'magit-diff-mode'),
+      ]),
+    ).not.toContain('many-windows')
+    expect(
+      nudgeIds([
+        win(1, 'a.rs', 'rust-ts-mode'),
+        win(2, 'b.rs', 'rust-ts-mode'),
+        win(3, 'Ediff', 'ediff-mode'),
+        win(4, 'dape-info', 'dape-info-scope-mode'),
+        win(5, 'tree', 'dired-mode', 'left'),
+      ]),
+    ).not.toContain('many-windows')
   })
 
   it('a calm state yields nothing', () => {

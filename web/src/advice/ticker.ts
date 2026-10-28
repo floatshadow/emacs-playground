@@ -13,6 +13,7 @@
  * first.
  */
 import type { KeyEvent, PrefixEvent } from '../protocol.gen'
+import { isPrintableKey, TERMINAL_INPUT_COMMANDS } from './modes'
 
 export type TickerKind = 'ok' | 'prefix' | 'unbound' | 'quit' | 'gap'
 
@@ -43,8 +44,17 @@ export const TYPING_COMMANDS: ReadonlySet<string> = new Set([
   'self-insert-command',
   'isearch-printing-char',
   'org-self-insert-command',
-  'term-send-raw',
+  'calcDigit-start',
 ])
+
+/**
+ * True for a key event that types a character: a typing command, or a
+ * printable key sent to a terminal (vterm, eat, term). C-a sent to a shell
+ * stays an entry of its own.
+ */
+export function isTyping(cmd: string, keys: string): boolean {
+  return TYPING_COMMANDS.has(cmd) || (TERMINAL_INPUT_COMMANDS.has(cmd) && isPrintableKey(keys))
+}
 
 /** Characters of a typing run the ticker shows. */
 export const TYPED_SHOWN = 12
@@ -165,7 +175,7 @@ export function tickerOnKey(
     base = base.slice(0, i)
   }
   const mark = replayed ? { replayed: true } : {}
-  if (!ev.mx && TYPING_COMMANDS.has(ev.cmd) && argKeys.length === 0) {
+  if (!ev.mx && isTyping(ev.cmd, ev.keys) && argKeys.length === 0) {
     const ch = typedChar(ev.keys)
     const last = base[base.length - 1]
     if (last && last.typed !== undefined && last.cmd === ev.cmd && !!last.replayed === replayed) {

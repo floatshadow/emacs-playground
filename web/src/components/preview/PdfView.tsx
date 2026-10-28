@@ -8,6 +8,7 @@ import { errorMessage } from '../../lib/errors'
 
 const MIN_SCALE = 0.4
 const MAX_SCALE = 3
+const RETRY_MS = 800
 
 /**
  * PDF preview with PDF.js (frontend.md §9): the worker is a separate asset
@@ -32,11 +33,14 @@ export default function PdfView({
   const [scale, setScale] = useState<number | 'fit'>('fit')
   const [effective, setEffective] = useState(1)
   const saved = useRef<{ top: number; left: number } | null>(null)
+  // A PDF read while the compiler still writes it fails to parse: one retry.
+  const [retry, setRetry] = useState(0)
 
   // Load (and reload on version change) keeping scroll position.
   useEffect(() => {
     let cancelled = false
     let loaded: PDFDocumentProxy | null = null
+    let timer: ReturnType<typeof setTimeout> | undefined
     if (scroller.current)
       saved.current = { top: scroller.current.scrollTop, left: scroller.current.scrollLeft }
     void (async () => {
@@ -57,13 +61,23 @@ export default function PdfView({
           return loaded
         })
       } catch (e) {
-        if (!cancelled) setError(errorMessage(e))
+        if (cancelled) return
+        if (retry === 0) timer = setTimeout(() => setRetry(1), RETRY_MS)
+        else setError(errorMessage(e))
       }
     })()
     return () => {
       cancelled = true
+      clearTimeout(timer)
     }
-  }, [url, version])
+  }, [url, version, retry])
+
+  // A new version gets its own retry.
+  const [seen, setSeen] = useState(version)
+  if (seen !== version) {
+    setSeen(version)
+    setRetry(0)
+  }
 
   useEffect(() => () => void doc?.loadingTask.destroy(), [doc])
 

@@ -8,7 +8,9 @@ import { Rail, RailSection } from '../components/layout/Rail'
 import { ScreenActions } from '../components/layout/ScreenActions'
 import { TopBar, type Crumb } from '../components/layout/TopBar'
 import { Workspace } from '../components/layout/Workspace'
+import { LessonNotices } from '../components/lesson/LessonNotices'
 import { useLessonMentions, useLessonSteps, useScenarioLoad } from '../components/lesson/useLesson'
+import { CheatSheet } from '../components/live/CheatSheet'
 import { Nudges } from '../components/live/Nudges'
 import { RescueCard } from '../components/live/RescueCard'
 import { WhereAmI } from '../components/live/WhereAmI'
@@ -41,6 +43,7 @@ function ProjectView({ projectId, taskId }: { projectId: string; taskId: string 
   useLessonMentions(lessonId, bundle.data?.markdown, scenario)
   const active = useSessionStore((s) => s.activeStep)
   const previewHidden = useUiStore((s) => s.previewHidden)
+  const modeName = useSessionStore((s) => s.state?.modeName)
   const project = curriculum.data?.projects.find((p) => p.id === lessonId)
   const title = project ? `${project.n} ${project.title}` : (bundle.data?.title ?? projectId)
 
@@ -100,7 +103,15 @@ function ProjectView({ projectId, taskId }: { projectId: string; taskId: string 
       </aside>
     )
   } else {
-    const root = scenario?.setup?.root || projectId
+    const roots = scenario?.project?.roots?.length
+      ? scenario.project.roots
+      : [scenario?.setup?.root || projectId]
+    const generated = Object.values(scenario?.preview?.follow ?? {})
+    const taskName = (stepId: string) => {
+      const i = steps.views.findIndex((v) => v.step.id === stepId)
+      const v = steps.views[i]
+      return v ? t('checkpoints.taskNamed', { n: i + 1, goal: v.goal }) : undefined
+    }
     left = (
       <aside
         className={projectStyles.side}
@@ -108,15 +119,14 @@ function ProjectView({ projectId, taskId }: { projectId: string; taskId: string 
         tabIndex={-1}
         aria-label={t('project.sideLabel')}
       >
+        <LessonNotices scenario={scenario} />
         <section>
           <h2>
             {t('project.files')} <small>{t('project.filesNote')}</small>
           </h2>
-          <FileTree
-            root={root}
-            owner={lessonId}
-            generated={Object.values(scenario?.preview?.follow ?? {})}
-          />
+          {roots.map((root) => (
+            <FileTree key={root} root={root} owner={lessonId} generated={generated} />
+          ))}
         </section>
         <section>
           <TaskPanel bundle={bundle.data} steps={steps} load={load} />
@@ -125,7 +135,7 @@ function ProjectView({ projectId, taskId }: { projectId: string; taskId: string 
           <h2>
             {t('project.checkpoints')} <small>{t('project.checkpointsNote')}</small>
           </h2>
-          <Checkpoints />
+          <Checkpoints lessonId={lessonId} taskName={taskName} />
         </section>
       </aside>
     )
@@ -156,6 +166,10 @@ function ProjectView({ projectId, taskId }: { projectId: string; taskId: string 
             </RailSection>
             <RailSection title={t('rail.nudges')}>
               <Nudges />
+            </RailSection>
+            {/* Projects open Magit, Eshell, compilation and more: their keys. */}
+            <RailSection title={t('cheat.title')} small={modeName}>
+              <CheatSheet heading={false} />
             </RailSection>
           </Rail>
         }

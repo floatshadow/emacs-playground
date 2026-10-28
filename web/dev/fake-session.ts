@@ -324,6 +324,21 @@ export async function startFakeSession(opts: FakeOptions) {
   const progress: Record<string, LessonProgress> = {}
   let progressAt = Date.now()
   const checkpoints: Checkpoint[] = []
+  /** The running "again, without hints" lap (scenario {lap: true}). */
+  let lap: { lessonId: string; startedAt: number } | null = null
+  const inLap = () => !!lap && !!active && lap.lessonId === active.lessonId
+  /** Marks a step event of the running lap. */
+  const lapMark = (ev: Event) => {
+    if (inLap() && ev.t === 'step') ev.lap = true
+    return ev
+  }
+  function conflictInLap(op: string) {
+    if (inLap())
+      throw Object.assign(new Error(`${op} is off during the lap without hints`), {
+        status: 409,
+        code: 'conflict',
+      })
+  }
 
   function setProgress(
     lessonId: string,
@@ -392,14 +407,17 @@ export async function startFakeSession(opts: FakeOptions) {
     active.demonstrated = false
     snapshot(`${active.lessonId}/${step.id}`, { lessonId: active.lessonId, stepId: step.id })
     setProgress(active.lessonId, step.id, { status: 'in-progress' })
-    publish({
-      t: 'step',
-      lessonId: active.lessonId,
-      stepId: step.id,
-      status: 'loaded',
-      index,
-      count: active.scenario.steps.length,
-    })
+    if (lap && lap.lessonId === active.lessonId && lap.startedAt === 0) lap.startedAt = Date.now()
+    publish(
+      lapMark({
+        t: 'step',
+        lessonId: active.lessonId,
+        stepId: step.id,
+        status: 'loaded',
+        index,
+        count: active.scenario.steps.length,
+      }),
+    )
     schedule()
   }
 
@@ -459,6 +477,22 @@ export async function startFakeSession(opts: FakeOptions) {
         count: active.scenario.steps.length,
       }
       if (last) done.lessonComplete = true
+      lapMark(done)
+      if (last && lap && done.lap) {
+        const ms = Date.now() - lap.startedAt
+        done.lapMs = ms
+        const lp = progress[active.lessonId]
+        if (lp) {
+          const prev = lp.laps
+          lp.laps = {
+            count: (prev?.count ?? 0) + 1,
+            bestMs: prev ? Math.min(prev.bestMs, ms) : ms,
+            lastMs: ms,
+            lastAt: Date.now(),
+          }
+        }
+        lap = null
+      }
       publish(done)
       if (!last) startStep(active.index + 1)
       else active.lastCheck = 'complete'
@@ -483,7 +517,7 @@ export async function startFakeSession(opts: FakeOptions) {
       publish({ t: 'emacs', event: 'daemon-restarted', reason: 'module set changed' })
       publish({ t: 'modules', enabled: modules, restarting: false })
     }
-    if (!same) {
+    if (!same || reset) {
       const root = scenario.setup?.root
       const fixtures = root === 'polyglot' ? POLY : HELLO
       for (const [p, t] of Object.entries(fixtures))
@@ -602,14 +636,16 @@ export async function startFakeSession(opts: FakeOptions) {
           const resets = (progress[active.lessonId]?.steps[cp.step.stepId]?.resets ?? 0) + 1
           setProgress(active.lessonId, cp.step.stepId, { resets })
         }
-        publish({
-          t: 'step',
-          lessonId: active.lessonId,
-          stepId: cp.step.stepId,
-          status: 'reset',
-          index: idx,
-          count: active.scenario.steps.length,
-        })
+        publish(
+          lapMark({
+            t: 'step',
+            lessonId: active.lessonId,
+            stepId: cp.step.stepId,
+            status: 'reset',
+            index: idx,
+            count: active.scenario.steps.length,
+          }),
+        )
       }
     }
     afterInput()
@@ -622,6 +658,7 @@ export async function startFakeSession(opts: FakeOptions) {
     else for (const k of Object.keys(progress)) delete progress[k]
     progressAt = Date.now()
     if (active && (!lessonId || active.lessonId === lessonId)) {
+      lap = null
       const step = active.scenario.steps[active.index]
       publish({
         t: 'step',
@@ -677,12 +714,17 @@ export async function startFakeSession(opts: FakeOptions) {
         afterInput()
         return { did }
       }
-      case 'scenario':
-        return loadScenario(
-          String(b['lessonId'] ?? ''),
-          b['stepId'] ? String(b['stepId']) : undefined,
-          b['reset'] === true,
+      case 'scenario': {
+        // A lap reloads from the first step with the fixtures restored; any other load ends it.
+        const lessonId = String(b['lessonId'] ?? '')
+        lap = b['lap'] === true ? { lessonId, startedAt: 0 } : null
+        const r = await loadScenario(
+          lessonId,
+          b['lap'] === true ? undefined : b['stepId'] ? String(b['stepId']) : undefined,
+          b['reset'] === true || b['lap'] === true,
         )
+        return lap ? { ...r, lap: { ...lap } } : r
+      }
       case 'check': {
         if (!active)
           throw Object.assign(new Error('no active step'), { status: 409, code: 'conflict' })
@@ -699,6 +741,7 @@ export async function startFakeSession(opts: FakeOptions) {
           : {}
       }
       case 'hint': {
+        conflictInLap('hint')
         if (active) {
           const stepId = String(b['stepId'] ?? '')
           const cur = progress[active.lessonId]?.steps[stepId]?.hintsUsed ?? 0
@@ -739,6 +782,7 @@ export async function startFakeSession(opts: FakeOptions) {
       }
       case 'demo': {
         // "Watch it" (api.md §3.4): restore when commands ran, then latch.
+        conflictInLap('demo')
         const step = activeStepOr409(String(b['stepId'] ?? ''))
         let restored = false
         if (b['phase'] === 'start' && active) {
@@ -755,6 +799,7 @@ export async function startFakeSession(opts: FakeOptions) {
       }
       case 'skip': {
         // "Skip this step" (api.md §3.4): play the demo here, record skipped, advance.
+        conflictInLap('skip')
         const step = activeStepOr409(String(b['stepId'] ?? ''))
         const a = active as Active
         const cp = activeCheckpoint()
@@ -875,6 +920,8 @@ export async function startFakeSession(opts: FakeOptions) {
         tmux: '3.5a',
       },
       activeWebSockets: subscribers.size + (pty ? 1 : 0) + rfbs.size,
+      ...(lap && lap.startedAt > 0 ? { lap: { ...lap } } : {}),
+      remoteBox: true,
     }
   }
 
@@ -985,7 +1032,7 @@ export async function startFakeSession(opts: FakeOptions) {
               authMode: opts.auth,
               features: {
                 gui: true,
-                remoteBox: false,
+                remoteBox: true,
                 stuckReports: true,
                 authorMode: opts.author,
               },
@@ -1094,6 +1141,7 @@ export async function startFakeSession(opts: FakeOptions) {
       step,
       modules,
       replayed,
+      ...(lap && lap.startedAt > 0 ? { lap: { ...lap } } : {}),
     }
   }
 

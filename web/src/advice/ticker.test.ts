@@ -119,6 +119,20 @@ describe('ticker reducer', () => {
     expect(t).toHaveLength(5)
   })
 
+  it('keys sent to a terminal: printable ones type, chords stay commands', () => {
+    const term = { mode: 'vterm-mode', buf: '*vterm*' }
+    let t: TickerEntry[] = []
+    for (const ch of ['l', 's', 'SPC', '-', 'l'])
+      t = tickerOnKey(t, key(ch, 'vterm--self-insert', term), 1)
+    t = tickerOnKey(t, key('C-a', 'vterm--self-insert', term), 2)
+    t = tickerOnKey(t, key('e', 'eat-self-input', { mode: 'eat-mode' }), 3)
+    expect(t.map((e) => [e.keys.join(' '), e.typed ?? null])).toEqual([
+      ['l', 'ls -l'],
+      ['C-a', null],
+      ['e', 'e'],
+    ])
+  })
+
   it('a C-g that cancels a prefix shows as cancelled, not unbound', () => {
     const t = tickerOnKey([], key('C-x C-g', 'undefined'), 1)
     expect(t[0]?.kind).toBe('quit')

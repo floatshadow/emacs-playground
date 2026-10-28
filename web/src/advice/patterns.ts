@@ -3,13 +3,14 @@
  * three C-g within 8 s, the same unbound key twice in a row, typing into a
  * read-only buffer, a prompt open for 20 s, three or more windows after the
  * learner split one (unless the lesson teaches splitting: C-x 2 or C-x 3 is
- * mentioned; windows that pop up, such as a build's output, are no
- * accident). Pure functions of the ticker, the latest state, the clock and
+ * mentioned; windows that pop up or that a tool opens, such as a build's
+ * output, Magit's diff or ediff's control window, are not counted). Pure functions of the ticker, the latest state, the clock and
  * the keys the lesson mentions.
  */
 import type { State } from '../protocol.gen'
 import type { Nudge } from './habits'
 import { isMentioned } from './mentions'
+import { isToolWindow } from './modes'
 import type { TickerEntry } from './ticker'
 
 export const PANIC_WINDOW_MS = 8000
@@ -106,7 +107,8 @@ export function patternNudges({
 
   const splitsTaught = isMentioned('C-x 2', mentioned) || isMentioned('C-x 3', mentioned)
   const learnerSplit = done.some((e) => e.cmd !== undefined && SPLIT_COMMANDS.has(e.cmd))
-  if (state && (state.windows?.length ?? 0) >= MANY_WINDOWS && learnerSplit && !splitsTaught) {
+  const ownWindows = (state?.windows ?? []).filter((w) => !isToolWindow(w)).length
+  if (ownWindows >= MANY_WINDOWS && learnerSplit && !splitsTaught) {
     out.push({
       id: 'many-windows',
       kind: 'ask',

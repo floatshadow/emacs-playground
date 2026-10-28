@@ -39,6 +39,7 @@ export function Step({
   onGoTo,
   showDetails,
   flash,
+  hintsOff,
 }: {
   view: StepView
   onHint(view: StepView): void
@@ -47,6 +48,8 @@ export function Step({
   showDetails?: boolean
   /** The step just ended: highlighted for a moment. */
   flash?: boolean
+  /** No hints, no demo (the project lap). */
+  hintsOff?: boolean
 }) {
   const { t } = useTranslation()
   const playing = useUiStore((s) => s.demo?.stepId === view.step.id)
@@ -90,7 +93,7 @@ export function Step({
             </li>
           ))}
         </ul>
-        {view.hint && (
+        {view.hint && !hintsOff && (
           <Hint
             forText={view.hint.forText}
             text={view.hint.text || t('steps.noHint')}
@@ -115,12 +118,12 @@ export function Step({
                 {t('demo.doItYourself')}
               </Button>
             )}
-            {view.hintLevel < maxLevel && view.firstUnmet >= 0 && (
+            {!hintsOff && view.hintLevel < maxLevel && view.firstUnmet >= 0 && (
               <Button size="small" onClick={() => onHint(view)}>
                 {view.hintLevel === 0 ? t('steps.showHint') : t('steps.showKeys')}
               </Button>
             )}
-            {view.step.demo && (
+            {view.step.demo && !hintsOff && (
               <DemoPlayer stepId={view.step.id} goal={view.goal} demo={view.step.demo} />
             )}
           </div>

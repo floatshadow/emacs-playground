@@ -1,7 +1,7 @@
 import { Link } from 'react-router'
 import { useTranslation } from 'react-i18next'
 import type { Progress, ProjectRef } from '../../protocol.gen'
-import { minutes } from '../../lib/time'
+import { formatLap, minutes } from '../../lib/time'
 import styles from './Course.module.css'
 
 function projectDir(id: string): string {
@@ -49,6 +49,9 @@ export function ProjectCard({
       {doneTasks > 0 && (
         <p className={styles.projectProgress}>
           {t('project.doneTasks', { done: doneTasks, total: project.tasks.length })}
+          {lp?.laps &&
+            lp.laps.count > 0 &&
+            ` · ${t('project.bestLap', { time: formatLap(lp.laps.bestMs) })}`}
         </p>
       )}
       <div className={styles.langs}>{project.languages.join(' · ')}</div>

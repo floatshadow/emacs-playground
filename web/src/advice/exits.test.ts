@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { DEFAULT_EXITS, DEFAULT_TABLES, withDefaultTables } from './defaults'
 import { evaluateExits, liveExits, minorLighter, whereAmI } from './exits'
 import { apiState, calmState } from './fixtures'
+import type { State } from '../protocol.gen'
 import { record, type Recorder } from '../test/recorder'
 
 let rec: Recorder | null = null
@@ -183,5 +184,38 @@ describe('the virtual root session (protocol.ExitSession)', () => {
     ]
     const w = whereAmI(calmState(), busyRows, { prefix: null, overlay: null, busy: true })
     expect(w.exits.map((e) => e.id)).toEqual(['busy'])
+  })
+})
+
+describe('built-in rows for the special modes of the later parts', () => {
+  const ids = (over: Parameters<typeof calmState>[0]) =>
+    evaluateExits(calmState(over), DEFAULT_EXITS).map((r) => r.id)
+
+  it.each([
+    [{ buf: 'COMMIT_EDITMSG', mode: 'text-mode' }, 'commit-message'],
+    [{ buf: 'CAPTURE-notes.org', mode: 'org-mode' }, 'org-capture'],
+    [{ buf: '*Org Src notes.org[ rust ]*', mode: 'rust-ts-mode' }, 'org-src'],
+    [{ minors: ['wdired-mode'], mode: 'dired-mode' }, 'wdired'],
+    [{ minors: ['smerge-mode'] }, 'smerge'],
+    [{ buf: '*Ediff Control Panel*', mode: 'ediff-mode' }, 'ediff'],
+    [{ buf: 'magit: hello', mode: 'magit-status-mode', modeName: 'Magit' }, 'magit'],
+    [{ buf: '*Org Agenda*', mode: 'org-agenda-mode' }, 'org-agenda'],
+    [{ buf: '*eat*', mode: 'eat-mode' }, 'terminal'],
+    [{ buf: '*vterm*', mode: 'vterm-mode' }, 'terminal'],
+    [{ buf: '*eshell*', mode: 'eshell-mode', modeName: 'Eshell' }, 'repl'],
+    [{ buf: '*ielm*', mode: 'inferior-emacs-lisp-mode', modeName: 'IELM' }, 'repl'],
+    [{ buf: '*Calculator*', mode: 'calc-mode' }, 'calc'],
+    [{ buf: 'paper.pdf', mode: 'pdf-view-mode' }, 'pdf-view'],
+    [{ buf: '*dape-repl*', mode: 'dape-repl-mode' }, 'dape'],
+  ] as [Partial<State>, string][])('%o shows %s', (over, id) => {
+    expect(ids({ minors: [], ...over, file: null })).toContain(id)
+  })
+
+  it('expands the buffer and mode names', () => {
+    const rows = evaluateExits(
+      calmState({ buf: '*vterm*', mode: 'vterm-mode', file: null }),
+      DEFAULT_EXITS,
+    )
+    expect(rows.find((r) => r.id === 'terminal')?.why).toMatch(/terminal \(\*vterm\*\)/)
   })
 })

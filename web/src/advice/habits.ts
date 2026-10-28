@@ -10,6 +10,7 @@
 import type { HabitRow, NudgeKind } from '../protocol.gen'
 import { normalizeKeysLoose } from './keys'
 import { isMentioned } from './mentions'
+import { TERMINAL_INPUT_COMMANDS } from './modes'
 import type { TickerEntry } from './ticker'
 
 export interface Nudge {
@@ -45,7 +46,9 @@ const terminalKeyName = (key: string) => TERMINAL_KEY_NAMES[key] ?? key
  * The card for a ticker entry, or null when the entry is not a single-key
  * command, matches no habit, the habit was already shown this session, or
  * the lesson mentions the key (mentioned: normalised sequences; a card for
- * K is suppressed when K starts a command of one of them, isMentioned).
+ * K is suppressed when K starts a command of one of them, isMentioned), or
+ * the key went to a program in a terminal buffer (vterm, eat, term), where
+ * it means what the shell makes of it.
  */
 export function habitCardFor(
   entry: TickerEntry,
@@ -56,6 +59,7 @@ export function habitCardFor(
 ): HabitCard | null {
   if (entry.kind === 'prefix' || entry.kind === 'gap' || entry.mx) return null
   if (entry.typed !== undefined) return null
+  if (entry.cmd !== undefined && TERMINAL_INPUT_COMMANDS.has(entry.cmd)) return null
   if (entry.keys.length !== 1) return null
   const key = terminalKeyName(normalizeKeysLoose(entry.keys[0] ?? ''))
   if (seen.has(key)) return null
