@@ -1,0 +1,98 @@
+id: 13-making-it-yours/02-packages
+title: "Packages: install, update, pin, remove"
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui]
+vscode: Extensions
+setup:
+  workspace: fixtures/mine
+  root: mine
+  reset: true
+  repos: [packages/forge/cheer]
+  open: [emacs.d/user-lisp/my-packages.el]
+  layout: single
+  run: sh seed.sh my-packages.el
+  # The playground has no network: the archive named melpa is a local
+  # copy, and git clones of github.com/playground-course/ come from local
+  # repositories. The lesson starts with neither package installed.
+  eval: >-
+    (progn
+      (require 'package)
+      (setq package-archives '(("melpa" . "/work/mine/packages/melpa/"))
+            package-archive-contents nil)
+      (setenv "GIT_CONFIG_COUNT" "1")
+      (setenv "GIT_CONFIG_KEY_0" "url.file:///work/mine/packages/forge/.insteadOf")
+      (setenv "GIT_CONFIG_VALUE_0" "https://github.com/playground-course/")
+      (remove-hook 'text-mode-hook 'wc-lite-mode)
+      (dolist (p '(cheer wc-lite))
+        (let ((d (cadr (assq p package-alist))))
+          (when d (ignore-errors (package-delete d t))))))
+steps:
+  - id: browse
+    goal: List the packages
+    detail: "`M-x list-packages`. The list shows what the archives offer and what is installed. `wc-lite`, a word count for the mode line, is near the top."
+    demo: 'M-x ~400 "list-packages" ~300 RET ~3000'
+    conditions:
+      - text: list-packages ran
+        any:
+          - event: { command: list-packages }
+          - event: { command: package-list-packages }
+        hint: "M-x list-packages, RET. It reads the archives first; the bottom line says when it is done."
+      - text: the list offers wc-lite
+        buffer: { name: "*Packages*", contains: "wc-lite" }
+        hint: "The list is long: most entries are the packages the course installed. C-s wc-lite finds the new one; its status is available."
+  - id: install
+    goal: Install wc-lite
+    detail: "`M-x package-install RET wc-lite RET`. (In the list, `i` on its line and then `x` do the same.)"
+    demo: 'M-x ~400 "package-install" ~300 RET ~800 "wc-lite" ~400 RET ~4000'
+    conditions:
+      - text: a package was installed
+        any:
+          - event: { command: package-install }
+          - event: { command: package-menu-execute }
+        hint: "In the list, i marks the line under the cursor and x installs what is marked, after a y or n question."
+      - text: wc-lite is installed
+        elisp: "(package-installed-p 'wc-lite)"
+        hint: "The bottom line says Package wc-lite installed. If package-install does not offer wc-lite, refresh the archive with M-x package-refresh-contents."
+  - id: vc
+    goal: Install cheer from its git repository
+    detail: "`M-x package-vc-install RET https://github.com/playground-course/cheer RET`. It clones the repository into emacs.d/elpa/ and installs from the clone."
+    demo: 'M-x ~400 "package-vc-install" ~300 RET ~800 "https://github.com/playground-course/cheer" ~400 RET ~5000'
+    conditions:
+      - text: package-vc-install ran
+        event: { command: package-vc-install }
+        hint: "The prompt offers package names; type the whole URL instead and RET."
+      - text: cheer is installed
+        elisp: "(package-installed-p 'cheer)"
+        hint: "The bottom line says VC package cheer installed. Check the URL: https://github.com/playground-course/cheer, no trailing slash."
+  - id: configure
+    goal: Configure both with use-package
+    detail: "In my-packages.el (`C-x C-f /work/emacs.d/user-lisp/my-packages.el`), under `;; More packages:`, add `(use-package cheer :vc (:url \"https://github.com/playground-course/cheer\") :bind (\"C-c y\" . cheer))`. `C-x C-s`, `M-x eval-buffer`, then try `C-c y`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-packages.el" ~400 RET ~800 M-< ~300 C-s ~300 ";; More packages:" ~300 RET RET "(use-package cheer :vc (:url \"https://github.com/playground-course/cheer\")\n:bind (\"C-c y\" . cheer))" ~600 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1500 C-c y ~1500'
+    conditions:
+      - text: my-packages.el has a use-package form for cheer
+        file: { path: emacs.d/user-lisp/my-packages.el, contains: "(use-package cheer" }
+        hint: "The form goes under ;; More packages:, above (provide 'my-packages). C-x C-s writes it."
+      - text: C-c y runs cheer
+        elisp: "(eq (keymap-lookup global-map \"C-c y\") 'cheer)"
+        hint: "Saving does not apply the file: M-x eval-buffer does. :bind wants a string and a command: (\"C-c y\" . cheer)."
+      - text: wc-lite is on in text buffers
+        elisp: "(memq 'wc-lite-mode text-mode-hook)"
+        hint: "eval-buffer also runs the wc-lite form above, whose :hook adds wc-lite-mode to text-mode-hook. Open any .md file to see the count."
+      - text: you pressed C-c y
+        event: { command: cheer }
+        hint: "Press C-c y: a word of encouragement appears at the bottom."
+  - id: remove
+    goal: Remove cheer
+    detail: "Delete the cheer form (cursor at its first parenthesis, `C-M-k`), `C-x C-s`, then `M-x package-delete RET cheer RET`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-packages.el" ~400 RET ~800 M-< ~300 C-s ~300 "(use-package cheer" ~300 RET C-a ~300 C-M-k ~500 C-x C-s ~600 M-x ~400 "package-delete" ~300 RET ~800 "cheer" ~400 RET ~2500'
+    conditions:
+      - text: the cheer form is gone from my-packages.el
+        file: { path: emacs.d/user-lisp/my-packages.el, not_contains: "(use-package cheer" }
+        hint: "C-M-k kills the whole parenthesised form after the cursor. Remove the form first: with :vc in it, the next start would install cheer again."
+      - text: package-delete ran
+        event: { command: package-delete }
+        hint: "M-x package-delete asks for an installed package; TAB lists them."
+      - text: cheer is no longer installed
+        elisp: "(not (package-installed-p 'cheer))"
+        hint: "In the package list, d on cheer's line and x delete it too. C-c y keeps pointing at the removed command until Emacs restarts."

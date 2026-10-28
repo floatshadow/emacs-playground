@@ -1,0 +1,72 @@
+id: 13-making-it-yours/06-take-it-home
+title: Take it home
+minutes: 12
+mode: terminal
+tags: [remote]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui]
+vscode: Settings Sync
+remote: { box: true }
+setup:
+  workspace: fixtures/mine
+  root: mine
+  reset: true
+  open: [emacs.d/init.el]
+  layout: single
+  run: sh take-home.sh
+  # Terminals from an earlier visit still show emacs -nw and the box's
+  # prompt, which would complete the last step at once.
+  eval: >-
+    (dolist (b (buffer-list))
+      (when (and (buffer-live-p b) (eq (buffer-local-value (quote major-mode) b) (quote eat-mode)))
+        (let ((kill-buffer-query-functions nil)) (kill-buffer b))))
+steps:
+  - id: log
+    goal: Look at your configuration's history in Magit
+    detail: "In init.el, `C-x g` opens Magit for /work/emacs.d. Then `l l` shows its log."
+    demo: 'C-x g ~3000 l ~800 l ~2500'
+    conditions:
+      - text: Magit opened on /work/emacs.d
+        event: { command: magit-status }
+        hint: "Press C-x g in a buffer of your configuration, such as init.el: Magit shows the repository that buffer belongs to."
+      - text: the log of /work/emacs.d is shown
+        elisp: "(seq-some (lambda (b) (with-current-buffer b (and (derived-mode-p 'magit-log-mode) (string-prefix-p \"/work/emacs.d/\" default-directory)))) (buffer-list))"
+        hint: "In Magit, l opens the log menu and l again the log of the current branch. The first commit is My Emacs configuration."
+  - id: push
+    goal: Add the box as a remote and push
+    detail: "In Magit (`C-x g`): `M a`, name `box`, URL `box:emacs.d.git`; answer `y` to make it the push default. Then `P p` pushes main to it."
+    demo: 'C-x g ~3000 M ~800 a ~800 "box" ~300 RET ~800 "box:emacs.d.git" ~300 RET ~1500 y ~3000 P ~800 p ~5000'
+    conditions:
+      - text: the repository has a remote called box
+        file: { path: emacs.d/.git/config, contains: "[remote \"box\"]" }
+        hint: "M opens Magit's remote menu, a adds one. The URL box:emacs.d.git means the folder emacs.d.git in deploy's home on the box."
+      - text: the box has your main branch
+        shell: { run: "test \"$(git -C /work/emacs.d rev-parse HEAD)\" = \"$(ssh box git -C emacs.d.git rev-parse main 2>/dev/null)\"", timeout: 20 }
+        hint: "P p pushes to the push default. If Magit asks where to push, choose box/main. Commit first if Magit shows uncommitted changes you want to take along."
+  - id: clone
+    goal: Clone it on the box
+    detail: "`C-u M-x eat` opens a terminal here; `ssh box` logs in to the box; there `git clone emacs.d.git .emacs.d`."
+    demo: 'C-u M-x ~400 "eat" ~300 RET ~2500 "ssh box" RET ~3000 "git clone emacs.d.git .emacs.d" RET ~3000'
+    conditions:
+      - text: a terminal was started
+        event: { command: eat }
+        hint: "C-u M-x eat starts a new terminal even if you have one already."
+      - text: the box's ~/.emacs.d is a clone of your configuration
+        shell: { host: box, run: "test \"$(git -C .emacs.d rev-parse HEAD 2>/dev/null)\" = \"$(git -C emacs.d.git rev-parse main)\"", timeout: 15 }
+        hint: "Run git clone on the box, after ssh box: the prompt then reads deploy@... The target is .emacs.d, with the dot, in deploy's home."
+  - id: start
+    goal: Start Emacs on the box with your configuration, then quit it
+    detail: "In the same terminal: `TERM=xterm-256color PLAYGROUND=0 emacs -nw`. Look around: your theme, your keys. Quit with `C-q C-x C-q C-c`."
+    demo: '"TERM=xterm-256color PLAYGROUND=0 emacs -nw" RET ~6000 C-q C-x ~400 C-q C-c ~2500'
+    conditions:
+      - text: you ran emacs -nw in the terminal
+        elisp: "(seq-some (lambda (b) (with-current-buffer b (and (derived-mode-p 'eat-mode) (save-excursion (goto-char (point-min)) (search-forward \"emacs -nw\" nil t))))) (buffer-list))"
+        hint: "Type the whole line in the terminal where ssh box is logged in, then RET."
+      - text: your configuration starts on the box without errors
+        shell: { host: box, run: "test -f .emacs.d/init.el && PLAYGROUND=0 emacs --batch -l .emacs.d/init.el --eval '(kill-emacs (if playground-module-errors 1 0))'", timeout: 120 }
+        hint: "If a module failed, the inner Emacs shows a Warnings window naming it. Fix the file here, commit, push, and git pull on the box."
+      - text: you quit it and are back at the box's prompt
+        elisp: "(seq-some (lambda (b) (with-current-buffer b (and (derived-mode-p 'eat-mode) (save-excursion (goto-char (point-min)) (search-forward \"emacs -nw\" nil t)) (save-excursion (goto-char (point-max)) (skip-chars-backward \" \\n\") (looking-back \"deploy@[^\\n]*\\\\$\" (line-beginning-position)))))) (buffer-list))"
+        hint: "In eat, C-x goes to this Emacs, not to the one inside. C-q sends the next key to the terminal: C-q C-x, then C-q C-c, quits the inner Emacs."
+    stuck:
+      - when: { step_seconds: 180 }
+        say: "Inside the box's Emacs, keys with C-x or C-c still reach this Emacs first. C-q sends the next key on to the terminal: C-q C-x, then C-q C-c, quits the inner one."

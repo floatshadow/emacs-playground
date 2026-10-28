@@ -1,0 +1,98 @@
+id: 13-making-it-yours/04-first-command
+title: "Your first command, hooks and advice"
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui]
+setup:
+  workspace: fixtures/mine
+  root: mine
+  reset: true
+  open: [emacs.d/user-lisp/my-commands.el]
+  layout: single
+  run: sh seed.sh my-commands.el my-keys.el
+  # my-map, the prefix map of lesson 13.3, must exist for the bind step.
+  eval: "(ignore-errors (require 'my-keys))"
+steps:
+  - id: try
+    goal: "Try the date expression with M-:"
+    detail: "`M-:` then `(format-time-string \"# %Y-%m-%d\")` and `RET`: today's heading appears at the bottom."
+    demo: 'M-: ~500 "(format-time-string \"# %Y-%m-%d\")" RET ~2000'
+    conditions:
+      - text: "M-: ran"
+        event: { command: eval-expression }
+        hint: "M-: is Meta and colon. It asks for one expression, in parentheses."
+      - text: you evaluated format-time-string
+        elisp: "(seq-some (lambda (s) (string-match-p \"format-time-string\" s)) read-expression-history)"
+        hint: "%Y is the year, %m the month, %d the day. The result is a string, shown in quotes."
+  - id: defun
+    goal: Write my-dated-header and read its help
+    detail: "In my-commands.el, above `(provide 'my-commands)`, type the command from the lesson. `C-M-x` inside it defines it; then `C-h f my-dated-header RET`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-commands.el" ~400 RET ~800 M-< ~300 C-s ~300 "(provide ''my-commands)" ~300 RET C-a ";;;###autoload \n(defun my-dated-header ()\n\"Insert a Markdown heading with today''s date.\"\n(interactive)\n(insert (format-time-string \"# %Y-%m-%d\\n\\n\")))\n\n" C-p C-p ~300 C-M-x ~800 C-x C-s ~600 C-h f ~500 "my-dated-header" ~400 RET ~2000'
+    conditions:
+      - text: my-commands.el defines my-dated-header
+        file: { path: emacs.d/user-lisp/my-commands.el, contains: "(defun my-dated-header" }
+        hint: "The form goes above (provide 'my-commands). C-x C-s writes the file."
+      - text: my-dated-header is a command
+        elisp: "(commandp 'my-dated-header)"
+        hint: "C-M-x with the cursor inside the defun defines it. Without (interactive) it is a function but not a command, and M-x does not offer it."
+      - text: C-h f showed its help
+        any:
+          - event: { command: helpful-callable }
+          - event: { command: describe-function }
+        hint: "C-h f, the name, RET. The help shows your docstring and the file the command comes from."
+  - id: bind
+    goal: Bind it to C-c u h and use it in notes.md
+    detail: "`C-x C-f /work/emacs.d/user-lisp/my-keys.el RET`; under `;; More keys in my map:` add `(keymap-set my-map \"h\" #'my-dated-header)` and `C-x C-e` right after it. Then open /work/mine/journal/notes.md and press `C-c u h`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-keys.el" ~400 RET ~1000 M-< ~300 C-s ~300 ";; More keys in my map:" ~300 RET RET "(keymap-set my-map \"h\" #''my-dated-header)" ~400 C-x C-e ~600 C-x C-s ~600 C-x C-f ~500 "/work/mine/journal/notes.md" ~400 RET ~800 M-> ~300 C-c u h ~1500'
+    conditions:
+      - text: C-c u h runs my-dated-header
+        elisp: "(eq (keymap-lookup global-map \"C-c u h\") 'my-dated-header)"
+        hint: "C-x C-e evaluates the expression just before the cursor, so put the cursor right after the closing parenthesis. If my-map is unknown, M-x eval-buffer in my-keys.el defines it first."
+      - text: my-keys.el keeps the binding
+        file: { path: emacs.d/user-lisp/my-keys.el, contains: "my-dated-header" }
+        hint: "C-x C-s in my-keys.el, so the binding comes back at the next start."
+      - text: you inserted a heading with C-c u h
+        event: { command: my-dated-header }
+        hint: "Press C-c u h in notes.md: the heading goes in at the cursor."
+  - id: hook
+    goal: Run it from markdown-mode-hook in new journal files
+    detail: "Back in my-commands.el (`C-x b my-commands.el`), above `(provide 'my-commands)`, add `my-journal-header`, which calls `my-dated-header` in an empty buffer whose file is under a journal folder, and `(add-hook 'markdown-mode-hook #'my-journal-header)`. `C-x C-s`, `M-x eval-buffer`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-commands.el" ~400 RET ~800 M-< ~300 C-s ~300 "(provide ''my-commands)" ~300 RET C-a ";;;###autoload \n(defun my-journal-header ()\n\"Insert a dated heading in a new, empty file under journal/.\"\n(when (and (= (buffer-size) 0)\n(string-match-p \"/journal/\" (or buffer-file-name \"\")))\n(my-dated-header)))\n\n;;;###autoload \n(add-hook ''markdown-mode-hook #''my-journal-header)\n\n" C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000'
+    conditions:
+      - text: my-commands.el adds the hook
+        file: { path: emacs.d/user-lisp/my-commands.el, contains: "markdown-mode-hook" }
+        hint: "(add-hook 'markdown-mode-hook #'my-journal-header) goes after the function it names, above (provide 'my-commands)."
+      - text: the file was evaluated
+        any:
+          - event: { command: eval-buffer }
+          - event: { command: eval-defun }
+          - event: { command: eval-last-sexp }
+        hint: "Saving does not run the add-hook form: M-x eval-buffer does."
+      - text: markdown-mode-hook runs your function
+        elisp: "(memq 'my-journal-header markdown-mode-hook)"
+        hint: "Check the names: the function is my-journal-header, the hook markdown-mode-hook. C-h v markdown-mode-hook lists what it runs."
+  - id: new-file
+    goal: Open a new Markdown file and watch the heading appear
+    detail: "`C-x C-f /work/mine/journal/today.md RET`. The file is new, empty and under journal/, so the hook inserts today's heading."
+    demo: 'C-x C-f ~500 "/work/mine/journal/today.md" ~400 RET ~2000'
+    conditions:
+      - text: a Markdown file under journal is open
+        elisp: "(with-current-buffer (window-buffer (selected-window)) (and buffer-file-name (string-match-p \"\\\\`/work/mine/journal/.*\\\\.md\\\\'\" buffer-file-name) (derived-mode-p 'markdown-mode)))"
+        hint: "Any new name ending in .md under /work/mine/journal/ works. An existing file is not empty, and a file elsewhere is not a journal, so the hook leaves those alone."
+      - text: it starts with today's heading
+        elisp: "(with-current-buffer (window-buffer (selected-window)) (save-excursion (goto-char (point-min)) (looking-at (regexp-quote (format-time-string \"# %Y-%m-%d\")))))"
+        hint: "If the buffer stays empty, the hook did not run: evaluate my-commands.el again, then kill the buffer (C-x k) and open the file anew."
+  - id: advice
+    goal: "Advise it: the heading always goes at the top"
+    detail: "In my-commands.el add `my-at-top` and `(advice-add 'my-dated-header :around #'my-at-top)` from the lesson, `C-x C-s`, `M-x eval-buffer`. In notes.md go to the end (`M->`) and press `C-c u h`: the heading lands on the first line."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-commands.el" ~400 RET ~800 M-< ~300 C-s ~300 "(provide ''my-commands)" ~300 RET C-a ";;;###autoload \n(defun my-at-top (orig &rest args)\n\"Call ORIG with ARGS at the top of the buffer.\"\n(save-excursion (goto-char (point-min))\n(apply orig args)))\n\n;;;###autoload \n(advice-add ''my-dated-header :around #''my-at-top)\n\n" C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~800 C-x C-f ~500 "/work/mine/journal/notes.md" ~400 RET ~800 M-> ~300 C-c u h ~1500'
+    conditions:
+      - text: my-dated-header has the my-at-top advice
+        elisp: "(advice-member-p 'my-at-top 'my-dated-header)"
+        hint: "advice-add takes the function to wrap, :around, and the wrapper. Evaluate the file after saving it."
+      - text: you ran C-c u h again
+        event: { command: my-dated-header }
+        hint: "Press it in notes.md with the cursor at the end, to see the advice move the heading."
+      - text: notes.md starts with today's heading
+        elisp: "(let ((b (find-buffer-visiting \"/work/mine/journal/notes.md\"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (looking-at (regexp-quote (format-time-string \"# %Y-%m-%d\")))))))"
+        hint: "With the advice, the heading goes to the first line whatever the cursor position. Without it, it went where the cursor was."

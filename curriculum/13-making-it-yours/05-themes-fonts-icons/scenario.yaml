@@ -1,0 +1,83 @@
+id: 13-making-it-yours/05-themes-fonts-icons
+title: "Themes, fonts, icons and the mode line"
+minutes: 12
+mode: gui
+tags: [gui]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui]
+vscode: "colour theme, file icon theme, font settings"
+setup:
+  workspace: fixtures/mine
+  root: mine
+  reset: true
+  open: [mine/journal/draft.md]
+  layout: single
+  run: sh seed.sh my-settings.el
+  # Start from the course's look whatever an earlier visit left on: the
+  # course theme, icons in completion lists, the built-in mode line.
+  eval: >-
+    (progn
+      (unless (equal custom-enabled-themes '(modus-vivendi-tinted))
+        (mapc #'disable-theme custom-enabled-themes)
+        (load-theme 'modus-vivendi-tinted t))
+      (when (bound-and-true-p doom-modeline-mode) (doom-modeline-mode -1))
+      (when (fboundp 'nerd-icons-completion-mode) (nerd-icons-completion-mode 1))
+      (with-current-buffer (window-buffer (selected-window)) (text-scale-set 0)))
+steps:
+  - id: ef
+    goal: Try a theme from the ef-themes family
+    detail: "`M-x ef-themes-select`, type `ef-dream` (or pick another with `TAB`), `RET`."
+    demo: '~1500 M-x ~400 "ef-themes-select" ~300 RET ~800 "ef-dream" ~400 RET ~2000'
+    conditions:
+      - text: ef-themes-select ran
+        event: { command: ef-themes-select }
+        hint: "The prompt lists every ef theme; the ones with day or light in the name are light."
+      - text: an ef theme is on
+        elisp: "(seq-some (lambda (th) (string-prefix-p \"ef-\" (symbol-name th))) custom-enabled-themes)"
+        hint: "If nothing changed, the prompt was cancelled. RET accepts the theme shown."
+  - id: pair
+    goal: Set a light and dark pair and toggle back to dark
+    detail: "`C-x C-f /work/emacs.d/user-lisp/my-settings.el RET`. Under `;;; Settings` add `(setq modus-themes-to-toggle '(modus-operandi-tinted modus-vivendi-tinted))`, `C-x C-s`, `M-x eval-buffer`. Then `M-x modus-themes-toggle` until the dark one is back (twice)."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-settings.el" ~400 RET ~1000 M-< ~300 C-s ~300 ";;; Settings" ~300 RET RET "(setq modus-themes-to-toggle ''(modus-operandi-tinted modus-vivendi-tinted))" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000 M-x ~400 "modus-themes-toggle" ~300 RET ~2500 M-x ~400 "modus-themes-toggle" ~300 RET ~2500'
+    conditions:
+      - text: the pair is the two tinted Modus themes
+        elisp: "(equal modus-themes-to-toggle '(modus-operandi-tinted modus-vivendi-tinted))"
+        hint: "Evaluate my-settings.el after saving it. The quote before the list matters: '(a b) is the list itself."
+      - text: modus-themes-toggle ran twice
+        event: { command: modus-themes-toggle, min: 2 }
+        hint: "The first toggle leaves ef-dream for the first theme of the pair, the light one; the second goes to the dark one."
+      - text: the course's dark theme is on
+        elisp: "(equal custom-enabled-themes '(modus-vivendi-tinted))"
+        hint: "Toggle once more: modus-vivendi-tinted is the course theme, with the violet mode line."
+  - id: font
+    goal: Make the text bigger in draft.md
+    detail: "Back in draft.md (`C-x b draft.md`), press `C-x C-+` twice. Only this buffer changes; `C-x C-0` would reset it."
+    demo: 'C-x b ~400 "draft.md" ~300 RET ~800 C-x C-+ ~800 C-x C-+ ~1500'
+    conditions:
+      - text: text-scale-adjust ran
+        event: { command: text-scale-adjust }
+        hint: "C-x then C-+ (Control and plus). After the first one, + alone repeats it."
+      - text: draft.md is two steps bigger
+        elisp: "(let ((b (get-buffer \"draft.md\"))) (and b (>= (buffer-local-value 'text-scale-mode-amount b) 2)))"
+        hint: "Do it in draft.md: the size belongs to the buffer. The mode line shows +2 when it is two steps up."
+  - id: icons
+    goal: Turn completion icons off, look, and on again
+    detail: "`M-x nerd-icons-completion-mode` turns them off; `C-x b` shows the buffer list without icons, `C-g` closes it; `M-x nerd-icons-completion-mode` again turns them back on."
+    demo: 'M-x ~400 "nerd-icons-completion-mode" ~300 RET ~1000 C-x b ~2000 C-g ~800 M-x ~400 "nerd-icons-completion-mode" ~300 RET ~1500'
+    conditions:
+      - text: nerd-icons-completion-mode was toggled twice
+        event: { command: nerd-icons-completion-mode, min: 2 }
+        hint: "Run it once to turn the icons off and once to turn them on; the bottom line says which."
+      - text: the icons are on again
+        elisp: "(bound-and-true-p nerd-icons-completion-mode)"
+        hint: "Once more: it is a toggle, and it was left off."
+  - id: modeline
+    goal: Try doom-modeline, then go back
+    detail: "`M-x doom-modeline-mode` replaces the mode line; look at it, then run it again to bring back the built-in one."
+    demo: 'M-x ~400 "doom-modeline-mode" ~300 RET ~2500 M-x ~400 "doom-modeline-mode" ~300 RET ~1500'
+    conditions:
+      - text: doom-modeline-mode was toggled twice
+        event: { command: doom-modeline-mode, min: 2 }
+        hint: "Once on, once off: the lessons describe the built-in mode line."
+      - text: the built-in mode line is back
+        elisp: "(not (bound-and-true-p doom-modeline-mode))"
+        hint: "Run it once more: it is a toggle, and doom-modeline is still on."

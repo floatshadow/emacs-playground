@@ -1,0 +1,85 @@
+id: 13-making-it-yours/01-how-init-is-organised
+title: How init.el is organised
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui]
+vscode: "settings.json, settings UI"
+setup:
+  workspace: fixtures/mine
+  root: mine
+  reset: true
+  open: [emacs.d/init.el]
+  layout: single
+  run: sh seed.sh my-settings.el
+steps:
+  - id: ask
+    goal: Ask Emacs about fill-column
+    detail: "`C-h v fill-column RET`. The help shows the value here, the original value and that it is buffer-local."
+    demo: 'C-h v ~500 "fill-column" ~400 RET ~2500'
+    conditions:
+      - text: C-h v ran
+        any:
+          - event: { command: helpful-variable }
+          - event: { command: describe-variable }
+        hint: "C-h v asks for a variable name; TAB completes it. The answer opens in a second window."
+      - text: the help for fill-column is on screen
+        elisp: '(seq-some (lambda (w) (with-current-buffer (window-buffer w) (and (derived-mode-p (quote helpful-mode) (quote help-mode)) (save-excursion (goto-char (point-min)) (search-forward "fill-column" nil t))))) (window-list))'
+        hint: "The help names the variable at the top. Its value differs from the original one: a module changed it."
+  - id: modules
+    goal: Open modules.el, the list of modules
+    detail: "`C-x C-f /work/emacs.d/modules.el RET`. The playground writes this list when a part unlocks modules; `init.el` loads them in this order."
+    demo: 'C-x C-f ~500 "/work/emacs.d/modules.el" ~400 RET ~1500'
+    conditions:
+      - text: modules.el is the current buffer
+        state: { file: /work/emacs.d/modules.el }
+        hint: "Type the path after the offered folder; the first / starts a fresh path."
+      - text: it lists the modules
+        buffer: { name: modules.el, contains: "playground-modules" }
+        hint: "The one setq in it names every module, from base to ui. Do not edit it here; the playground rewrites it."
+  - id: customize
+    goal: "Customize: auto-save after 2 seconds, like VS Code's files.autoSaveDelay"
+    detail: "`M-x customize-variable RET auto-save-visited-interval RET`. Replace the number after *Number:* (5 seconds) with `2`, then `C-x C-s` applies it and saves it to custom.el."
+    demo: 'M-x ~400 "customize-variable" RET ~500 "auto-save-visited-interval" ~400 RET ~1500 M-< ~300 C-s ~300 "Number: " ~300 RET C-k ~400 "2" ~800 C-x C-s ~1500'
+    conditions:
+      - text: the Customize buffer was opened
+        any:
+          - event: { command: customize-variable }
+          - event: { command: customize-option }
+        hint: "M-x customize-variable, then the variable's name; TAB completes it."
+      - text: the interval is 2 seconds
+        elisp: "(eql auto-save-visited-interval 2)"
+        hint: "The number after Number: is an editable field: put the cursor on its first digit, C-k empties the field, type 2. Typing alone changes nothing until you apply."
+      - text: custom.el keeps it
+        file: { path: emacs.d/custom.el, regex: "auto-save-visited-interval 2" }
+        hint: "C-x C-s in the Customize buffer applies every edited field and saves it to custom.el; the State line then says SAVED and set."
+  - id: user-lisp
+    goal: "Your own file: keep three lines of context when scrolling"
+    detail: "`C-x C-f /work/emacs.d/user-lisp/my-settings.el RET`. Under `;;; Settings` add `(setq scroll-margin 3)`, `C-x C-s`, then `M-x eval-buffer`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-settings.el" ~400 RET ~1000 M-< ~300 C-s ~300 ";;; Settings" ~300 RET RET "(setq scroll-margin 3)" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000'
+    conditions:
+      - text: my-settings.el sets scroll-margin
+        file: { path: emacs.d/user-lisp/my-settings.el, regex: "\\(setq scroll-margin 3\\)" }
+        hint: "The line goes below ;;; Settings and above (provide 'my-settings). C-x C-s writes it."
+      - text: the file was evaluated
+        any:
+          - event: { command: eval-buffer }
+          - event: { command: eval-defun }
+          - event: { command: eval-last-sexp }
+        hint: "Saving does not apply Lisp. M-x eval-buffer runs the whole file now; at the next start the cookie at its top loads it."
+      - text: scroll-margin is 3
+        elisp: "(eql scroll-margin 3)"
+        hint: "Check the spelling: scroll-margin, then 3. C-h v scroll-margin shows the value Emacs has now."
+  - id: module
+    goal: "A module: turn off the breadcrumb header line"
+    detail: "`C-x C-f /work/emacs.d/modules/ui.el RET`. Find `(breadcrumb-mode 1)`, make it `(breadcrumb-mode -1)`, `C-x C-s`, then `M-x eval-buffer`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/modules/ui.el" ~400 RET ~1000 M-< ~300 C-s ~300 "(breadcrumb-mode " ~400 RET C-k ~300 "-1))" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1500'
+    conditions:
+      - text: ui.el turns breadcrumbs off
+        file: { path: emacs.d/modules/ui.el, contains: "(breadcrumb-mode -1)" }
+        hint: "The line is in the Where you are section: (breadcrumb-mode 1) inside playground-with-package. Keep both closing parentheses."
+      - text: ui.el was evaluated
+        event: { command: eval-buffer }
+        hint: "M-x eval-buffer in ui.el runs the module again with your change."
+      - text: the breadcrumb header line is gone
+        elisp: "(not (bound-and-true-p breadcrumb-mode))"
+        hint: "If the header line is still there, the file was not saved or not evaluated. M-x breadcrumb-mode toggles it by hand, any time."

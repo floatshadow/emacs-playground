@@ -1,0 +1,80 @@
+id: 13-making-it-yours/03-keybindings
+title: Keybindings
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui]
+vscode: keybindings.json
+setup:
+  workspace: fixtures/mine
+  root: mine
+  reset: true
+  open: [mine/journal/notes.md]
+  layout: single
+  run: sh seed.sh my-keys.el
+steps:
+  - id: global
+    goal: Bind C-c d to duplicate-line
+    detail: "`M-x keymap-global-set`, press `C-c d` when it asks for a key, then type `duplicate-line` and `RET`."
+    demo: 'M-x ~400 "keymap-global-set" ~300 RET ~800 C-c d ~800 "duplicate-line" ~400 RET ~1000'
+    conditions:
+      - text: keymap-global-set ran
+        event: { command: keymap-global-set }
+        hint: "At Set key globally, press the keys themselves (Control c, then d), not their names."
+      - text: C-c d runs duplicate-line
+        elisp: "(eq (keymap-lookup global-map \"C-c d\") 'duplicate-line)"
+        hint: "The second prompt wants a command name; TAB completes duplicate-line."
+  - id: ask
+    goal: Try C-c d, then ask Emacs what it runs
+    detail: "Press `C-c d` in notes.md: the line is duplicated. Then `C-h k C-c d`."
+    demo: 'C-c d ~800 C-h k ~600 C-c d ~2000'
+    conditions:
+      - text: C-c d duplicated a line
+        event: { command: duplicate-line }
+        hint: "Press it in notes.md, where duplicating a line is harmless."
+      - text: C-h k described it
+        any:
+          - event: { command: helpful-key }
+          - event: { command: describe-key }
+        hint: "C-h k, then the key itself. The help names duplicate-line and says it is bound in the global map."
+  - id: prefix
+    goal: Add two keys to your prefix map
+    detail: "`C-x C-f /work/emacs.d/user-lisp/my-keys.el RET`. Under `;; More keys in my map:` add `(keymap-set my-map \"c\" #'count-words)` and `(keymap-set my-map \"t\" #'toggle-truncate-lines)`, `C-x C-s`, then `M-x eval-buffer`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-keys.el" ~400 RET ~1000 M-< ~300 C-s ~300 ";; More keys in my map:" ~300 RET RET "(keymap-set my-map \"c\" #''count-words)\n(keymap-set my-map \"t\" #''toggle-truncate-lines)" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000'
+    conditions:
+      - text: my-keys.el adds keys to my-map
+        file: { path: emacs.d/user-lisp/my-keys.el, contains: "(keymap-set my-map" }
+        hint: "Each line is (keymap-set my-map \"KEY\" #'COMMAND), below ;; More keys in my map: and above (provide 'my-keys)."
+      - text: the file was evaluated
+        any:
+          - event: { command: eval-buffer }
+          - event: { command: eval-last-sexp }
+          - event: { command: eval-defun }
+        hint: "Saving does not apply Lisp: M-x eval-buffer runs the file now."
+      - text: C-c u holds five commands
+        elisp: "(let ((m (keymap-lookup global-map \"C-c u\")) (n 0)) (and (keymapp m) (progn (map-keymap (lambda (_k _v) (setq n (1+ n))) m) (>= n 5))))"
+        hint: "The map starts with three keys (d, w, l); two more make five. If C-c u is not a prefix yet, eval-buffer defines it from the top of the file."
+  - id: try
+    goal: Use the prefix with which-key
+    detail: "Press `C-c u` and wait: which-key shows *my commands*. Press `c` to count the words in the buffer."
+    demo: 'C-c u ~2000 c ~1500'
+    conditions:
+      - text: C-c u c runs count-words
+        elisp: "(eq (keymap-lookup global-map \"C-c u c\") 'count-words)"
+        hint: "The prefix step binds c to count-words; check that line in my-keys.el."
+      - text: you counted the words
+        event: { command: count-words }
+        hint: "C-c u, then c: the count appears at the bottom of the screen."
+  - id: repeat
+    goal: "Make d repeat: C-c u d d d"
+    detail: "In my-keys.el, under `;; More keys in my map:`, add `(defvar-keymap my-repeat-map :repeat t \"d\" #'duplicate-line)`, `C-x C-s`, `M-x eval-buffer`. Then in notes.md press `C-c u d d d`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-keys.el" ~400 RET ~1000 M-< ~300 C-s ~300 ";; More keys in my map:" ~300 RET RET "(defvar-keymap my-repeat-map :repeat t\n\"d\" #''duplicate-line)" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~800 C-x C-f ~500 "/work/mine/journal/notes.md" ~400 RET ~800 C-c u d ~500 d ~500 d ~1000'
+    conditions:
+      - text: duplicate-line repeats through my-repeat-map
+        elisp: "(eq (get 'duplicate-line 'repeat-map) 'my-repeat-map)"
+        hint: ":repeat t is what makes it a repeat map. Evaluate the file after saving it."
+      - text: repeat-mode is on
+        elisp: "(bound-and-true-p repeat-mode)"
+        hint: "M-x repeat-mode turns it on; the base module turns it on at every start."
+      - text: duplicate-line ran three times
+        event: { command: duplicate-line, min: 3 }
+        hint: "C-c u d once, then d alone, twice. Any other key ends the repeating."
