@@ -1,0 +1,71 @@
+id: 04-completion/03-embark
+title: Embark
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion]
+vscode: right-click context menu
+setup:
+  workspace: fixtures/bench
+  root: bench
+  reset: true
+  open: [bench/notes/runs.md, bench/src/config.rs, bench/README.md]
+  layout: bench/README.md
+  # Results exported and the URL copied in an earlier visit go, so the
+  # steps need new ones.
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (string-prefix-p "*Embark Export" (buffer-name b))
+          (kill-buffer b)))
+      (setq kill-ring (seq-remove (lambda (k) (string-match-p "wikipedia" k)) kill-ring)))
+steps:
+  - id: file
+    goal: Delete notes/scratch.tmp from the open-file prompt, without opening it
+    detail: "`C-x C-f` and type `/work/bench/notes/scratch`: the list highlights `scratch.tmp`. Press `C-.` (Control and the full stop): the prompt starts with *Act*. Press `d` for delete, and `y` to confirm."
+    demo: 'C-x C-f ~800 "/work/bench/notes/scratch" ~1200 C-. ~1200 d ~1000 y'
+    conditions:
+      - text: C-. was used
+        event: { command: embark-act }
+        hint: "Control and the full-stop key, while scratch.tmp is highlighted in the list. Act appears at the start of the prompt."
+      - text: notes/scratch.tmp is gone
+        file: { path: bench/notes/scratch.tmp, exists: false }
+        hint: "After C-., d deletes the file and asks to confirm with y. C-h after C-. lists every action if you want to look first."
+    stuck:
+      - when: { minibuffer_seconds: 45 }
+        say: "With scratch.tmp highlighted, press C-. then d, then y. C-g at any point leaves without deleting."
+  - id: url
+    goal: Copy the URL in the README with C-.
+    detail: "In README.md, put the cursor anywhere on the Wikipedia link under *Further reading* (`C-s https RET` gets there). `C-.` sees a URL; `w` copies it to the kill ring."
+    demo: 'M-< ~300 C-s ~400 "https" ~400 RET ~800 C-. ~1200 w'
+    conditions:
+      - text: C-. was used
+        event: { command: embark-act }
+        hint: "The cursor must be on the link itself; on plain words C-. acts on the word instead and the prompt names that."
+      - text: the URL is the latest kill
+        elisp: '(and kill-ring (string= (substring-no-properties (car kill-ring)) "https://en.wikipedia.org/wiki/Percentile"))'
+        hint: "Check the Act prompt: it should say url. Then w. C-y would now paste the link."
+  - id: buffer
+    goal: Kill the runs.md buffer from the C-x b list
+    detail: "`C-x b` and type `runs`: the list highlights the `runs.md` buffer and previews it. `C-.` then `k` kills it after a `y`, and you stay in README.md."
+    demo: 'C-x b ~800 "runs" ~1200 C-. ~1200 k ~1000 y'
+    conditions:
+      - text: C-. was used
+        event: { command: embark-act }
+        hint: "C-. while runs.md is highlighted in the C-x b list, then k (kill) and y to confirm."
+      - text: no buffer visits runs.md
+        elisp: '(not (find-buffer-visiting "/work/bench/notes/runs.md"))'
+        hint: "Killing a buffer closes it, not the file: runs.md is still on disk. If the list showed only files, DEL the f SPC narrowing."
+      - text: README.md is still shown
+        state: { file: /work/bench/README.md }
+        hint: "The action ran from inside the prompt, so the window goes back to README.md when it closes. If you switched away, C-x b README.md RET."
+  - id: export
+    goal: Export a project search for TODO to a buffer
+    detail: "`M-s r` and type `TODO`: three matches. Instead of picking one, press `C-.` and then `E`. The matches move into a grep buffer at the bottom, where `RET` visits one and the list stays when you leave."
+    demo: 'M-s r ~800 "TODO" ~1500 C-. ~1200 E ~1200'
+    conditions:
+      - text: C-. was used
+        event: { command: embark-act }
+        hint: "C-. in the ripgrep list, then E (a capital: Shift and e)."
+      - text: an exported grep buffer is shown
+        elisp: '(seq-find (lambda (w) (let ((b (window-buffer w))) (and (string-prefix-p "*Embark Export" (buffer-name b)) (eq (buffer-local-value (quote major-mode) b) (quote grep-mode))))) (window-list))'
+        hint: "The list must have candidates when you press C-. E: wait for ripgrep to fill it. The new buffer appears below, its name starting with *Embark Export*."

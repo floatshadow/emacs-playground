@@ -1,0 +1,78 @@
+id: 04-completion/02-consult
+title: Consult
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion]
+vscode: "Go to symbol, search across files, Go to line with preview"
+setup:
+  workspace: fixtures/bench
+  root: bench
+  reset: true
+  open: [bench/src/report.rs]
+  layout: single
+  # config.rs is a recent file but not open, for the C-x b step; the kill
+  # ring holds the line the M-y step brings back, under two newer kills.
+  eval: >-
+    (progn
+      (require 'recentf)
+      (recentf-add-file "/work/bench/src/config.rs")
+      (kill-new "        \"login\" => 40.0,\n")
+      (kill-new "percentile(samples, 90.0)")
+      (kill-new "// TODO: plot the p99 per day"))
+steps:
+  - id: line
+    goal: Jump to the line that says budget exceeded
+    detail: "`M-s l` lists the lines of report.rs. Type `exceeded`: the list shrinks to one line and the window previews it. `RET` jumps there."
+    demo: 'M-s l ~800 "exceeded" ~1200 RET'
+    conditions:
+      - text: M-s l was used
+        event: { command: consult-line }
+        hint: "Alt s, then l. The prompt says Search lines."
+      - text: the cursor is on the budget exceeded line of report.rs
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and buffer-file-name (string-suffix-p "/bench/src/report.rs" buffer-file-name) (string-match-p "budget exceeded" (thing-at-point (quote line) t))))'
+        hint: "RET goes to the highlighted line; C-g would put you back where you started."
+  - id: buffer
+    goal: Open config.rs from the recent files, through C-x b
+    detail: "`C-x b` lists buffers first and recent files below them. Type `f` and a space: the list narrows to recent files. Then type `config` and `RET`."
+    demo: 'C-x b ~800 "f " ~800 "config" ~1200 RET'
+    conditions:
+      - text: C-x b was used
+        event: { command: consult-buffer }
+        hint: "f and a space must be the first two characters you type; the prompt then shows the group name. DEL on an empty input widens the list again."
+      - text: config.rs is open
+        state: { file: /work/bench/src/config.rs }
+        hint: "Recent files are listed by path relative to your home or as full paths: config matches /work/bench/src/config.rs."
+  - id: ripgrep
+    goal: Find where p99 is defined, anywhere in the project
+    detail: "`M-s r` searches the whole bench project with ripgrep as you type. `p99` alone matches a dozen lines; add the terms `pub fn` and only the public definition is left, in `src/stats.rs`. Move through the matches to preview them, and `RET` on that one."
+    demo: 'M-s r ~800 "p99" ~2000 " pub fn" ~2500 RET'
+    conditions:
+      - text: M-s r was used
+        event: { command: consult-ripgrep }
+        hint: "Alt s, then r. The prompt names the project: Ripgrep (Project bench)."
+      - text: the cursor is on the definition of p99 in stats.rs
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and buffer-file-name (string-suffix-p "/bench/src/stats.rs" buffer-file-name) (string-match-p "fn p99(" (thing-at-point (quote line) t))))'
+        hint: "With p99 fn alone, a test in tests/stats.rs matches too, and either may come first. The file name heads each group: RET on the line under src/stats.rs."
+  - id: imenu
+    goal: Jump to the percentile function by name
+    detail: "`M-g i` lists the definitions in stats.rs. Type `percentile` and `RET`."
+    demo: 'M-g i ~800 "percentile" ~1200 RET'
+    conditions:
+      - text: M-g i was used
+        event: { command: consult-imenu }
+        hint: "Alt g, then i. Definitions are grouped by kind; the words you type filter all groups at once."
+      # With a language server (Part 7) imenu jumps to the doc comment.
+      - text: the cursor is at fn percentile
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and buffer-file-name (string-suffix-p "/bench/src/stats.rs" buffer-file-name) (save-excursion (beginning-of-line) (while (and (not (eobp)) (looking-at "[ \t]*\\(///\\|#\\[\\)")) (forward-line 1)) (looking-at ".*fn percentile("))))'
+        hint: "Stay in stats.rs: M-g i lists the definitions of the current file only."
+  - id: yank
+    goal: "Put the login budget back into config.rs from the kill ring"
+    detail: "Earlier someone killed the line `\"login\" => 40.0,` from `budget_for`. In config.rs, put the cursor at the start of the `\"checkout\"` line, then press `M-y` alone: the kill ring opens as a list. Type `login` and `RET` to insert that entry."
+    demo: 'C-x b ~600 "config.rs" ~600 RET ~600 M-< ~300 C-s ~300 "\"checkout\"" ~300 RET ~300 C-a ~600 M-y ~1000 "login" ~1200 RET'
+    conditions:
+      - text: M-y opened the kill ring
+        event: { command: consult-yank-pop }
+        hint: "M-y on its own, not after C-y, opens the list. The entries are what was killed, newest first."
+      - text: budget_for has a login budget
+        elisp: '(let ((b (find-buffer-visiting "/work/bench/src/config.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "match endpoint {[^}]*\"login\" => 40\\.0," nil t)))))'
+        hint: "Insert it inside the match of budget_for, at the start of a line. C-/ undoes an insertion in the wrong place."

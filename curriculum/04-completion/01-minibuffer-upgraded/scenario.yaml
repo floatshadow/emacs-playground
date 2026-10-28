@@ -1,0 +1,49 @@
+id: 04-completion/01-minibuffer-upgraded
+title: "The minibuffer, upgraded"
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion]
+vscode: fuzzy palette
+setup:
+  workspace: fixtures/bench
+  root: bench
+  reset: true
+  open: [bench/notes/ideas.md]
+  layout: single
+steps:
+  - id: words
+    goal: Clean up ideas.md by describing the command in two words
+    detail: "Three lines of `notes/ideas.md` end in invisible spaces or tabs. Press `M-x`, type `trailing white`, and watch the list keep only the commands that contain both words. The highlighted one, `delete-trailing-whitespace`, is what `RET` runs."
+    demo: 'M-x ~800 "trailing" ~600 " white" ~1500 RET'
+    conditions:
+      - text: delete-trailing-whitespace ran
+        event: { command: delete-trailing-whitespace }
+        hint: "The words can come in either order. Look at the first line of the list: the highlighted candidate is what RET runs, and C-n moves the highlight if another one is on top."
+      - text: no line of ideas.md ends in spaces
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/bench/notes/ideas.md") (save-excursion (goto-char (point-min)) (not (re-search-forward "[ \t]+$" nil t))))'
+        hint: "Run it in the ideas.md buffer, with no region highlighted (C-g removes one first): without a region it cleans the whole buffer."
+  - id: exclude
+    goal: Count the words twice, by name and by the key the list shows
+    detail: "`M-x count words` lists two commands. Add a third term, `!region`: a term that starts with `!` removes the candidates that match it, so only `count-words` is left; `RET` runs it and the echo area reports the lines, words and characters. In that list, marginalia wrote `(M-=)` beside `count-words-region`: its key. Press `M-=` too."
+    demo: 'M-x ~800 "count words" ~1200 " !region" ~1500 RET ~1500 M-='
+    conditions:
+      - text: count-words ran
+        event: { command: count-words }
+        hint: "Put a space before !region: it is a term of its own. When only one candidate is left, RET runs it."
+      - text: count-words-region ran
+        event: { command: count-words-region }
+        hint: "Hold Alt and press the = key once. With no region it counts the whole buffer. M-x count words shows the key again in parentheses."
+  - id: as-typed
+    goal: "Create notes/idea.md, a name RET cannot reach"
+    detail: "`C-x C-f` and type `/work/bench/notes/idea.md`. The list highlights the existing `ideas.md`, so `RET` would open that file. Press `M-RET` (Alt and Enter) to accept your input as typed: a new, empty buffer for `idea.md`."
+    demo: 'C-x C-f ~800 "/work/bench/notes/idea.md" ~1200 M-RET'
+    conditions:
+      - text: M-RET accepted the input
+        event: { command: vertico-exit-input }
+        hint: "Alt and Enter together, while the prompt still shows /work/bench/notes/idea.md."
+      - text: a buffer visits notes/idea.md
+        state: { file: /work/bench/notes/idea.md }
+        hint: "If ideas.md opened, RET took the highlighted candidate. C-x C-f again, type the path, and finish with M-RET instead."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "Type the whole path, /work/bench/notes/idea.md, then M-RET: Alt held while you press Enter. RET alone opens the highlighted ideas.md."

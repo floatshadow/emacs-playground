@@ -1,0 +1,59 @@
+id: 04-completion/04-corfu-cape-tempel
+title: "Corfu, cape and tempel"
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion]
+vscode: "IntelliSense popup, snippets"
+setup:
+  workspace: fixtures/bench
+  root: bench
+  reset: true
+  open: [bench/src/stats.rs]
+  layout: single
+  eval: "(goto-char (point-max))"
+steps:
+  - id: snippet
+    goal: Start a p90 function from the fn snippet
+    detail: "At the end of stats.rs (`M->`), press `RET` for a new line, then `M-+` and pick `fn`. Fill the fields: `p90`, `TAB`, `samples: &[f64]`, `TAB`, `f64`, `TAB`. The last `TAB` leaves the cursor in the empty body."
+    demo: 'M-> ~400 RET ~400 M-+ ~1000 "fn" ~600 RET ~800 "p90" ~500 TAB ~500 "samples: &[f64]" ~500 TAB ~500 "f64" ~500 TAB'
+    conditions:
+      - text: M-+ inserted a snippet
+        event: { command: tempel-insert }
+        hint: "Alt and +, which needs Shift on most keyboards. The list shows the Rust snippets; type fn and RET."
+      - text: "the signature reads fn p90(samples: &[f64]) -> f64"
+        elisp: '(let ((b (find-buffer-visiting "/work/bench/src/stats.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "fn p90(samples: &[f64]) -> f64 {" nil t)))))'
+        hint: "Each field takes what you type until TAB. If a part landed in the wrong field, C-/ undoes back to the empty snippet; or fix the text by hand."
+      - text: the cursor is in the body of p90
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (save-excursion (forward-line -1) (looking-at ".*fn p90(")))'
+        hint: "After the return type, one more TAB leaves the snippet with the cursor on the empty line inside the braces."
+  - id: complete
+    goal: "Write the body with the popup: percentile(samples, 90.0)"
+    detail: "Type `percenti` and pause: the popup lists words from your Rust buffers. `TAB` completes to `percentile` (or highlight it with `C-n` and press `RET`). Then type `(samples, 90.0)`."
+    demo: '"percenti" ~1500 TAB ~600 "(samples, 90.0)"'
+    conditions:
+      - text: a candidate came from the popup or C-M-i
+        any:
+          - event: { command: corfu-insert }
+          - event: { command: corfu-complete }
+          - event: { command: completion-at-point }
+        hint: "Wait a moment after typing: the popup opens 0.2 seconds after you stop. C-M-i opens it at once."
+      - text: p90 returns percentile(samples, 90.0)
+        elisp: '(let ((b (find-buffer-visiting "/work/bench/src/stats.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "fn p90(samples: &\\[f64\\]) -> f64 {[ \t\n]*percentile(samples, 90\\.0)[ \t\n]*}" nil t)))))'
+        hint: "If an extra ) appeared, a bracket was paired for you: delete it with C-d. The body is exactly percentile(samples, 90.0), with no semicolon, so the value is returned."
+    stuck:
+      - when: { step_seconds: 120 }
+        say: "Type percenti and stop for a moment. When the popup shows percentile, press TAB, then type (samples, 90.0)."
+  - id: path
+    goal: Point p90's doc comment at the runs, completing the path
+    detail: "On a new line above `fn p90` (`C-a` then `C-o` opens one), type `/// Compare with ../notes/r`. After the `/` the popup offers files: `RET` takes `runs.md`."
+    demo: 'M-< ~300 C-s ~400 "fn p90" ~400 RET ~400 C-a ~400 C-o ~400 "/// Compare with ../notes/r" ~1500 RET'
+    conditions:
+      - text: a path was completed
+        any:
+          - event: { command: corfu-insert }
+          - event: { command: corfu-complete }
+          - event: { command: completion-at-point }
+        hint: "Paths are relative to src/, where stats.rs is: ../notes/ is the notes folder. The popup marks file candidates with File."
+      - text: the comment above fn p90 names ../notes/runs.md
+        elisp: '(let ((b (find-buffer-visiting "/work/bench/src/stats.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "///.*\\.\\./notes/runs\\.md\n\\(///.*\n\\)*fn p90(" nil t)))))'
+        hint: "The comment line must sit right above fn p90 and start with ///. C-/ undoes a line in the wrong place."
