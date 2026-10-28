@@ -1,0 +1,101 @@
+id: 05-git-with-magit/04-merge-conflicts
+title: Merge conflicts with smerge
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git]
+vscode: merge editor
+setup:
+  workspace: fixtures/ledger
+  root: ledger
+  reset: true
+  # main is merging the categories branch; src/lib.rs (two conflicts),
+  # README.md and data/expenses.csv (one each) are unmerged.
+  run: 'sh -c "$(cat .lesson/conflict.sh)"'
+  open: [ledger/Cargo.toml]
+  layout: single
+  # Magit and timemachine buffers from an earlier visit go, and so does
+  # Magit's memory of which sections were open. The setup re-created .git under
+  # file buffers that may be open: refresh their version control state
+  # (diff-hl, smerge).
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (with-current-buffer b
+          (cond ((or (derived-mode-p 'magit-mode) (bound-and-true-p git-timemachine-mode))
+                 (let ((kill-buffer-query-functions nil)) (kill-buffer b)))
+                ((and buffer-file-name (string-prefix-p "/work/ledger/" buffer-file-name))
+                 (vc-file-clearprops buffer-file-name)
+                 (vc-refresh-state)
+                 (when (bound-and-true-p diff-hl-mode) (diff-hl-update))))))
+      (when (boundp 'magit-repository-local-cache)
+        (setq magit-repository-local-cache nil)))
+steps:
+  - id: open
+    goal: Open the first conflicted file from Magit
+    detail: "`C-x g`: the status says *Merging categories* and lists three files under *Unmerged*. Put the cursor on `src/lib.rs` and press `RET`. The file opens with smerge on and the cursor in the first conflict: each conflict is marked `<<<<<<<`, `=======`, `>>>>>>>`."
+    demo: 'C-x g ~1200 M-< ~300 C-s ~300 "src/lib.rs" ~300 RET ~500 RET ~1200'
+    conditions:
+      - text: src/lib.rs is open
+        state: { file: /work/ledger/src/lib.rs }
+        hint: "RET on the file name visits it. C-x C-f /work/ledger/src/lib.rs works too."
+      - text: smerge is on
+        state: { minors: { contains: smerge-mode } }
+        hint: "smerge turns on by itself in a file with conflict markers. If it is off, M-x smerge-mode turns it on."
+  - id: upper
+    goal: Keep main's currency in the first conflict
+    detail: "The cursor is already in the first conflict: smerge put it there when the file opened. The upper side is main's (`HEAD`): `EUR`. The lower is the categories branch: `GBP`. `C-c ^ u` keeps the upper version and removes the markers. (`C-c ^ n` and `C-c ^ p` move to the next and previous conflict.)"
+    demo: 'C-x b ~600 "lib.rs" ~400 RET ~600 M-< ~300 C-c ^ n ~800 C-c ^ u ~800'
+    conditions:
+      - text: CURRENCY is EUR
+        elisp: '(let ((b (find-buffer-visiting "/work/ledger/src/lib.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "CURRENCY: &str = \"EUR\";" nil t)))))'
+        hint: "C-c ^ u acts on the conflict the cursor is in. If C-c ^ n took you on to the second conflict (the comment above total), C-c ^ p comes back; C-/ undoes a resolution made in the wrong one."
+      - text: GBP is gone
+        elisp: '(let ((b (find-buffer-visiting "/work/ledger/src/lib.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (not (search-forward "GBP" nil t))))))'
+        hint: "Keeping both or the lower side leaves GBP in. C-/ undoes the resolution, markers and all."
+  - id: lower
+    goal: Keep the categories branch's comment in the second conflict
+    detail: "The second conflict is the comment above `total`. This time keep the lower version, *Every expense added up*: `C-c ^ n`, then `C-c ^ l`."
+    demo: 'C-x b ~600 "lib.rs" ~400 RET ~600 M-< ~300 C-c ^ n ~800 C-c ^ l ~800'
+    conditions:
+      - text: the comment is the lower one
+        elisp: '(let ((b (find-buffer-visiting "/work/ledger/src/lib.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (and (search-forward "/// Every expense added up, in cents." nil t) (progn (goto-char (point-min)) (not (search-forward "Sum of all expenses" nil t))))))))'
+        hint: "C-c ^ l keeps the lower side, the one below =======. With the cursor before the conflict, C-c ^ n moves onto it first."
+      - text: no markers are left in lib.rs
+        elisp: '(let ((b (find-buffer-visiting "/work/ledger/src/lib.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (not (re-search-forward "^\\(<<<<<<<\\|=======\\|>>>>>>>\\)" nil t))))))'
+        hint: "A marker line left over? Resolve the conflict it belongs to, or delete the line by hand with C-a C-k C-k."
+  - id: both
+    goal: Keep both sections in README.md
+    detail: "Open `/work/ledger/README.md`: the cursor lands in its only conflict. main added *Rounding*, the branch added *Categories*, at the same place. Both are wanted: `C-c ^ a` keeps all versions, one after the other."
+    demo: 'C-x C-f ~600 "/work/ledger/README.md" ~400 RET ~800 M-< ~300 C-c ^ n ~800 C-c ^ a ~800'
+    conditions:
+      - text: README.md has both sections
+        elisp: '(let ((b (find-buffer-visiting "/work/ledger/README.md"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (and (search-forward "## Rounding" nil t) (progn (goto-char (point-min)) (search-forward "## Categories" nil t)))))))'
+        hint: "C-c ^ a is keep all: both sides, one after the other. C-c ^ u or C-c ^ l would drop one section."
+      - text: no markers are left in README.md
+        elisp: '(let ((b (find-buffer-visiting "/work/ledger/README.md"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (not (re-search-forward "^\\(<<<<<<<\\|=======\\|>>>>>>>\\)" nil t))))))'
+        hint: "The cursor must be inside the conflict for C-c ^ a. If it moved away, C-c ^ p or C-c ^ n brings it back (No next conflict means it is past the last one)."
+  - id: third
+    goal: Keep the branch's category in data/expenses.csv
+    detail: "Open `/work/ledger/data/expenses.csv`. The last line is *travel* on main and *transport* on the branch; the categories branch wins: `C-c ^ l`."
+    demo: 'C-x C-f ~600 "/work/ledger/data/expenses.csv" ~400 RET ~800 M-< ~300 C-c ^ n ~800 C-c ^ l ~800'
+    conditions:
+      - text: the last expense is transport
+        elisp: '(let ((b (find-buffer-visiting "/work/ledger/data/expenses.csv"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (and (search-forward "61.00, transport" nil t) (progn (goto-char (point-min)) (not (search-forward "travel" nil t))))))))'
+        hint: "transport is below the ======= line: the lower version, C-c ^ l."
+      - text: no markers are left in expenses.csv
+        elisp: '(let ((b (find-buffer-visiting "/work/ledger/data/expenses.csv"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (not (re-search-forward "^\\(<<<<<<<\\|=======\\|>>>>>>>\\)" nil t))))))'
+        hint: "The keys act on the conflict the cursor is in: opening the file put it there. If you moved away, C-c ^ p goes back to it."
+  - id: commit
+    goal: Conclude the merge
+    detail: "Emacs marks a file resolved (stages it) when it is saved with no markers left, so `C-x g` shows all three under *Staged changes* (`s` stages one that is not). Then `c c`: the message *Merge branch 'categories'* is already written, so `C-c C-c` commits."
+    demo: 'C-x 1 ~400 C-x g ~1500 c ~800 c ~2000 C-c C-c ~2500'
+    conditions:
+      - text: the merge is concluded
+        shell: { run: "test ! -f .git/MERGE_HEAD && test $(git rev-list --parents -n1 HEAD | wc -w) -eq 3" }
+        hint: "Git refuses the commit while a file is still unmerged: the status marks it unmerged. Resolve it, save, and stage it with s."
+      - text: no markers were committed
+        shell: { run: "! git grep -q -e '^<<<<<<<' -e '^>>>>>>>' HEAD -- ." }
+        hint: "A file was staged with markers still in it. Fix it, stage it, and amend the merge with c a."
+    stuck:
+      - when: { step_seconds: 120 }
+        say: "In the status, every resolved file should be under Staged changes (s stages one that is not). Then c c, and C-c C-c to accept the prepared merge message."

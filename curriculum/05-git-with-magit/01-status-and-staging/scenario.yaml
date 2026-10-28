@@ -1,0 +1,92 @@
+id: 05-git-with-magit/01-status-and-staging
+title: Status and staging hunks
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git]
+vscode: Source Control view
+setup:
+  workspace: fixtures/ledger
+  root: ledger
+  reset: true
+  # A repository with one commit; src/lib.rs has three unstaged hunks.
+  run: 'sh -c "$(cat .lesson/status.sh)"'
+  open: [ledger/src/lib.rs]
+  layout: single
+  # Magit and timemachine buffers from an earlier visit go, and so does
+  # Magit's memory of which sections were open. The setup re-created .git under
+  # file buffers that may be open: refresh their version control state
+  # (diff-hl, smerge).
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (with-current-buffer b
+          (cond ((or (derived-mode-p 'magit-mode) (bound-and-true-p git-timemachine-mode))
+                 (let ((kill-buffer-query-functions nil)) (kill-buffer b)))
+                ((and buffer-file-name (string-prefix-p "/work/ledger/" buffer-file-name))
+                 (vc-file-clearprops buffer-file-name)
+                 (vc-refresh-state)
+                 (when (bound-and-true-p diff-hl-mode) (diff-hl-update))))))
+      (when (boundp 'magit-repository-local-cache)
+        (setq magit-repository-local-cache nil)))
+steps:
+  - id: status
+    goal: Open Magit's status of the ledger repository
+    detail: "`C-x g` shows the status of the repository the current file belongs to: the branch, then *Unstaged changes* with `src/lib.rs` in it."
+    demo: "C-x g ~1500"
+    conditions:
+      - text: C-x g was used
+        event: { command: magit-status }
+        hint: "Control x, then g on its own. The status replaces lib.rs in this window; q brings lib.rs back."
+      - text: the status buffer is shown
+        state: { mode: magit-status-mode }
+        hint: "If another buffer took the window, C-x g again: it reuses the status buffer."
+  - id: expand
+    goal: Show the changes in src/lib.rs
+    detail: "Put the cursor on the line `modified src/lib.rs` and press `TAB`: the file opens up into its hunks, each headed by a line starting with `@@`. `TAB` again would fold it. (`M-2` folds the whole buffer down to file names first, which the demonstration does in case the file is already open.)"
+    demo: 'C-x g ~800 M-2 ~600 M-< ~300 C-s ~300 "src/lib.rs" ~300 RET ~500 TAB ~800'
+    conditions:
+      - text: TAB toggled a section
+        event: { command: magit-section-toggle }
+        hint: "TAB in the status buffer, with the cursor on a section's first line."
+      - text: the diff of src/lib.rs is expanded
+        elisp: '(let ((b (seq-find (lambda (b) (with-current-buffer b (and (derived-mode-p (quote magit-status-mode)) (string-suffix-p "/ledger/" default-directory)))) (buffer-list)))) (and b (with-current-buffer b (let ((s (magit-get-section (quote ((file . "src/lib.rs") (unstaged) (status)))))) (and s (not (oref s hidden)))))))'
+        hint: "TAB toggles the section the cursor is on: on the file's line (n and p move from section to section), not on the Unstaged changes heading. If the diff vanished, it was already open: TAB once more."
+  - id: stage
+    goal: Stage the doc comment and the bug fix, not the debug line
+    detail: "Three hunks: a doc comment on `Expense`, the fix `10.0` to `100.0`, and a debug `eprintln!`. Put the cursor anywhere in the first hunk and press `s`: it moves to *Staged changes*. Do the same in the hunk with the fix."
+    demo: 'C-x g ~800 M-4 ~600 M-< ~300 C-s ~300 "One line" ~300 RET ~500 s ~1000 M-< ~300 C-s ~300 "100.0" ~300 RET ~500 s ~1000'
+    conditions:
+      - text: the doc comment is staged
+        shell: { run: "git diff --cached | grep -q 'One line of the ledger'" }
+        hint: "s stages the hunk the cursor is in. If you pressed s on the file's line, the whole file was staged: u on the same line unstages it."
+      - text: the fix is staged
+        shell: { run: "git diff --cached | grep -q 'amount \\* 100\\.0'" }
+        hint: "The fix is the hunk whose + line says amount * 100.0. Its - line above shows the old 10.0."
+      - text: the debug line is not staged
+        shell: { run: "! git diff --cached | grep -q DEBUG" }
+        hint: "Staged the debug line too? Put the cursor in that hunk under Staged changes and press u."
+  - id: discard
+    goal: Discard the debug line
+    detail: "The `eprintln!` hunk is left under *Unstaged changes*. Put the cursor in it and press `k`, then `y`: the change is gone from the file, for good."
+    demo: 'C-x g ~800 M-4 ~600 M-< ~300 C-s ~300 "DEBUG" ~300 RET ~500 k ~800 y ~1000'
+    conditions:
+      - text: lib.rs has no debug line
+        file: { path: ledger/src/lib.rs, not_contains: DEBUG }
+        hint: "k asks Discard hunk? and needs y. On a staged hunk k asks to discard it from the staging area too."
+      - text: the staged changes are still staged
+        shell: { run: "git diff --cached | grep -q 'amount \\* 100\\.0' && git diff --quiet" }
+        hint: "Only the debug hunk should go. If you discarded a staged hunk, Reset this step brings it back."
+  - id: commit
+    goal: Commit the staged changes
+    detail: "`c` opens the commit menu and `c` again starts a commit. A buffer for the message opens: type a summary such as `Fix cents and document Expense`, then `C-c C-c` to commit (`C-c C-k` would cancel)."
+    demo: 'C-x g ~800 c ~1000 c ~2000 "Fix cents and document Expense" ~800 C-c C-c ~2000'
+    conditions:
+      - text: C-c C-c finished the commit
+        event: { command: with-editor-finish }
+        hint: "The message buffer is COMMIT_EDITMSG. Write on its first line, then Control c twice."
+      - text: the fix and the comment are committed, nothing is left over
+        shell: { run: "test $(git rev-list --count HEAD) -ge 2 && git show HEAD | grep -q 'amount \\* 100\\.0' && git show HEAD | grep -q 'One line of the ledger' && git diff --quiet HEAD" }
+        hint: "c c commits what is staged. If Magit asks whether to commit all changes, nothing was staged: answer n, stage with s, then c c again."
+    stuck:
+      - when: { step_seconds: 150 }
+        say: "In the status buffer press c, then c again. Type a message on the first line of the new buffer and press C-c C-c."

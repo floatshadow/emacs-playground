@@ -1,0 +1,129 @@
+id: 05-git-with-magit/03-branches-rebase-stash
+title: "Branches, rebase and stash"
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git]
+vscode: branch picker
+setup:
+  workspace: fixtures/ledger
+  root: ledger
+  reset: true
+  # Two commits on main; an unfinished average() at the end of
+  # src/lib.rs, not staged.
+  run: 'sh -c "$(cat .lesson/branches.sh)"'
+  open: [ledger/src/lib.rs]
+  layout: single
+  # Magit and timemachine buffers from an earlier visit go, and so does
+  # Magit's memory of which sections were open. The setup re-created .git under
+  # file buffers that may be open: refresh their version control state
+  # (diff-hl, smerge).
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (with-current-buffer b
+          (cond ((or (derived-mode-p 'magit-mode) (bound-and-true-p git-timemachine-mode))
+                 (let ((kill-buffer-query-functions nil)) (kill-buffer b)))
+                ((and buffer-file-name (string-prefix-p "/work/ledger/" buffer-file-name))
+                 (vc-file-clearprops buffer-file-name)
+                 (vc-refresh-state)
+                 (when (bound-and-true-p diff-hl-mode) (diff-hl-update))))))
+      (when (boundp 'magit-repository-local-cache)
+        (setq magit-repository-local-cache nil)))
+steps:
+  - id: stash
+    goal: Put the unfinished average function aside
+    detail: "The `average` function at the end of src/lib.rs is half done, and you need a clean tree to start other work. In the status (`C-x g`), `z` opens the stash menu and `z` again stashes every change. `RET` accepts the offered message."
+    demo: "C-x g ~1000 z ~800 z ~1200 RET ~1500"
+    conditions:
+      - text: a stash exists
+        shell: { run: "test -n \"$(git stash list)\"" }
+        hint: "z z stashes staged and unstaged changes alike; the status then shows a Stashes section."
+      - text: the tree is clean
+        shell: { run: "git diff --quiet HEAD" }
+        hint: "z z, not z i (index only) or z w (worktree only): every change must go into the stash."
+  - id: branch
+    goal: Create a branch called usage and switch to it
+    detail: "`b c` creates a branch and checks it out. It asks where to start: type `main` and `RET`. Then the name: `usage`, `RET`. The status header now says *Head: usage*."
+    demo: 'C-x g ~1000 b ~800 c ~1200 "main" ~600 RET ~1200 "usage" ~600 RET ~1500'
+    conditions:
+      - text: a branch called usage exists
+        shell: { run: "git rev-parse -q --verify refs/heads/usage" }
+        hint: "The first prompt is the starting point, the second the new name. A branch made with another name can be renamed with b m."
+      - text: usage is checked out
+        shell: { run: "test \"$(git symbolic-ref --short HEAD)\" = usage" }
+        hint: "b c checks the new branch out; b n would only create it. b b usage switches to it."
+  - id: commits
+    goal: Make two commits on usage, both in the README
+    detail: "Add a `## Testing` heading at the end of README.md and commit it (`C-x g`, `S` stages everything, `c c`, a message, `C-c C-c`). Then add a line under it, such as *`cargo test` checks the parser.*, and commit again."
+    demo: 'C-x 1 ~400 C-x C-f ~600 "/work/ledger/README.md" ~400 RET ~600 M-> ~300 RET ~200 "## Testing" ~300 RET ~300 C-x C-s ~800 C-x g ~1000 S ~1000 c ~800 c ~2000 "Add a Testing section" ~600 C-c C-c ~2000 C-x b ~600 "README.md" ~400 RET ~600 M-> ~300 "`cargo test` checks the parser." ~300 RET ~300 C-x C-s ~800 C-x g ~1000 S ~1000 c ~800 c ~2000 "Explain cargo test" ~600 C-c C-c ~2000'
+    conditions:
+      - text: usage is checked out
+        shell: { run: "test \"$(git symbolic-ref --short HEAD)\" = usage" }
+        hint: "Commit on usage: the status header shows the branch. b b usage switches back to it."
+      - text: usage is two or more commits ahead of main
+        shell: { run: "test $(git rev-list --count main..usage) -ge 2" }
+        hint: "Each commit needs a change, staged: S in the status stages every change, then c c, a message on the first line, C-c C-c. Recent commits in the status lists what you made."
+      - text: nothing is left uncommitted
+        shell: { run: "git diff --quiet HEAD" }
+        hint: "Changes still under Unstaged or Staged changes need one more S and c c."
+    stuck:
+      - when: { step_seconds: 240 }
+        say: "One commit at a time: edit README.md, C-x g, S, c c, type a message, C-c C-c. Then a second edit and the same keys."
+  - id: squash
+    goal: Squash the two commits into one
+    detail: "`r i` rebases interactively. Magit lists the commits: put the cursor on the older of your two (the one just above *main*) and press `C-c C-c`. In the list of commits that opens, move to the second line and press `s` (squash), then `C-c C-c`. Git asks for the combined message: `C-c C-c` keeps it."
+    demo: 'C-x 1 ~400 C-x g ~1000 r ~800 i ~2000 M-< ~300 C-s ~300 " main " ~300 RET ~300 C-p ~800 C-c C-c ~2000 M-< ~300 n ~600 s ~1000 C-c C-c ~3000 C-c C-c ~2000'
+    conditions:
+      - text: no rebase is in progress
+        shell: { run: "test ! -d .git/rebase-merge" }
+        hint: "A rebase waits while its list or a message buffer is open: C-c C-c in it goes on. The status header shows Rebasing usage until it ends; r a aborts."
+      - text: usage is one commit ahead of main, with the README change
+        shell: { run: "test $(git rev-list --count main..usage) -eq 1 && ! git diff --quiet main usage -- README.md" }
+        hint: "In the rebase list the first line stays pick; s on the second line melds it into the first. Picked the wrong starting commit? r i again from the oldest of yours."
+    stuck:
+      - when: { step_seconds: 180 }
+        say: "Three C-c C-c in a row finish this: one to pick the starting commit, one after marking the second line with s, one to accept the message."
+  - id: pop
+    goal: Go back to main and bring the stashed work back
+    detail: "`b b` checks out another branch: `main`, `RET`. Then `z p` pops the stash (`RET` takes the offered one): `average` is back in src/lib.rs and the stash is gone."
+    demo: 'C-x 1 ~400 C-x g ~1000 b ~800 b ~1200 "main" ~600 RET ~1500 z ~800 p ~1200 RET ~1500'
+    conditions:
+      - text: main is checked out
+        shell: { run: "test \"$(git symbolic-ref --short HEAD)\" = main" }
+        hint: "b b, then main and RET. Magit refuses to check out with conflicting changes; the tree is clean here."
+      - text: the stash is popped
+        shell: { run: "test -z \"$(git stash list)\" && grep -q 'pub fn average' src/lib.rs" }
+        hint: "z p pops: it applies the stash and drops it. z a would apply and keep it."
+  - id: commit-main
+    goal: Commit the average function on main
+    detail: "Finish what you stashed: stage it (`S`) and commit it (`c c`, a message such as `Add average`, `C-c C-c`). main has now moved on since usage branched off."
+    demo: 'C-x 1 ~400 C-x g ~1000 S ~1000 c ~800 c ~2000 "Add average" ~600 C-c C-c ~2000'
+    conditions:
+      - text: main is checked out
+        shell: { run: "test \"$(git symbolic-ref --short HEAD)\" = main" }
+        hint: "Commit on main, not on usage: the status header says which branch you are on."
+      - text: average is committed, nothing left over
+        shell: { run: "git show HEAD -- src/lib.rs | grep -q 'pub fn average' && git diff --quiet HEAD" }
+        hint: "S stages the whole change to src/lib.rs, then c c, a message, C-c C-c."
+  - id: rebase
+    goal: Rebase usage onto main
+    detail: "usage still starts from the old main. Check it out (`b b`, `usage`, `RET`), then `r e` rebases it elsewhere: type `main`, `RET`. Its commit is replayed on top of main's newest one."
+    demo: 'C-x 1 ~400 C-x g ~1000 b ~800 b ~1200 "usage" ~600 RET ~1500 r ~800 e ~1200 "main" ~600 RET ~2500'
+    conditions:
+      - text: usage is checked out
+        shell: { run: "test \"$(git symbolic-ref --short HEAD)\" = usage" }
+        hint: "Run it on usage: r e rebases the current branch onto the one you name."
+      - text: usage is one commit on top of main
+        shell: { run: "git merge-base --is-ancestor main usage && test $(git rev-list --count main..usage) -eq 1" }
+        hint: "Name main at the Rebase onto prompt. l a shows every branch as a graph to check the result."
+  - id: merge
+    goal: Merge usage into main
+    detail: "Back on main (`b b`, `main`), `m m` merges a branch: `usage`, `RET`. Since main is behind usage, Git simply moves main forward: a fast-forward, no merge commit."
+    demo: 'C-x 1 ~400 C-x g ~1000 b ~800 b ~1200 "main" ~600 RET ~1500 m ~800 m ~1200 "usage" ~600 RET ~2500'
+    conditions:
+      - text: main is checked out
+        shell: { run: "test \"$(git symbolic-ref --short HEAD)\" = main" }
+        hint: "Merge from main: m m merges the branch you name into the one you are on."
+      - text: main has caught up with usage
+        shell: { run: "test \"$(git rev-parse main)\" = \"$(git rev-parse usage)\"" }
+        hint: "Name usage at the Merge prompt. A merge commit instead of a fast-forward means main had moved: Reset this step."

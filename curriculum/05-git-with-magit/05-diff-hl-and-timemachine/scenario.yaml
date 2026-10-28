@@ -1,0 +1,79 @@
+id: 05-git-with-magit/05-diff-hl-and-timemachine
+title: diff-hl and git-timemachine
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git]
+vscode: "gutter indicators, file timeline"
+setup:
+  workspace: fixtures/ledger
+  root: ledger
+  reset: true
+  run: 'sh -c "$(cat .lesson/timemachine.sh)"'
+  open: [ledger/README.md]
+  layout: single
+  # Magit and timemachine buffers from an earlier visit go, and so does
+  # Magit's memory of which sections were open. The setup re-created .git under
+  # file buffers that may be open: refresh their version control state
+  # (diff-hl, smerge).
+  # The kill ring loses the paragraph copied in an earlier visit.
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (with-current-buffer b
+          (cond ((or (derived-mode-p 'magit-mode) (bound-and-true-p git-timemachine-mode))
+                 (let ((kill-buffer-query-functions nil)) (kill-buffer b)))
+                ((and buffer-file-name (string-prefix-p "/work/ledger/" buffer-file-name))
+                 (vc-file-clearprops buffer-file-name)
+                 (vc-refresh-state)
+                 (when (bound-and-true-p diff-hl-mode) (diff-hl-update))))))
+      (when (boundp 'magit-repository-local-cache)
+        (setq magit-repository-local-cache nil))
+      (setq kill-ring (seq-remove (lambda (k) (string-match-p "rounded half away" k)) kill-ring)))
+steps:
+  - id: next
+    goal: Jump to the second change with C-x v n
+    detail: "The margin marks lines changed since the last commit: `!` changed, `+` added. From the top (`M-<`), `C-x v n` jumps to the first changed hunk and again to the next: a line of Vim keys someone typed by mistake."
+    demo: "M-< ~400 C-x v n ~1000 C-x v n ~1000"
+    conditions:
+      - text: C-x v n was used
+        event: { command: diff-hl-next-hunk }
+        hint: "Control x, v, then n. After the first one, n alone repeats it; p goes back."
+      - text: the cursor is on the stray line
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (not (bound-and-true-p git-timemachine-mode)) (string-match-p ":wq" (thing-at-point (quote line) t))))'
+        hint: "The stray line is jjjjkkkk:wq, under Input, marked + in the margin. C-x v p goes back one hunk."
+  - id: revert
+    goal: Revert that hunk, keeping the other change
+    detail: "With the cursor in the stray hunk, `C-x v r` reverts just that hunk to the last commit. It shows the hunk and asks; `y` confirms. The first change, *in euros*, stays."
+    demo: "M-< ~400 C-x v n ~800 C-x v n ~1000 C-x v r ~1500 y ~1000"
+    conditions:
+      - text: the stray line is gone
+        elisp: '(let ((b (get-buffer "README.md"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (not (search-forward ":wq" nil t))))))'
+        hint: "C-x v r acts on the hunk at the cursor and asks first: y confirms."
+      - text: the euros change stays
+        elisp: '(let ((b (get-buffer "README.md"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "total in euros." nil t)))))'
+        hint: "Reverted the euros line by mistake? C-/ undoes the revert."
+  - id: recover
+    goal: Copy the lost Rounding section from an old version
+    detail: "An older README had a *Rounding* section that a later commit removed. `C-x v t` opens the file's latest commit in git-timemachine; `p` steps to the previous version, `n` forward; the echo area names each commit. Step back to *Explain rounding*, select the section from `## Rounding` to the end of its paragraph and copy it with `M-w`. Then `q` leaves the time machine."
+    demo: 'C-x v t ~2000 p ~1500 p ~1500 M-< ~300 C-s ~300 "## Rounding" ~300 RET ~300 C-a ~400 C-SPC ~300 C-s ~300 "numbers do." ~300 RET ~600 M-w ~800 q ~1000'
+    conditions:
+      - text: the Rounding paragraph is the latest kill
+        elisp: '(and kill-ring (string-match-p "rounded half away from zero" (substring-no-properties (car kill-ring))))'
+        hint: "The section appears two versions back (2/4 in the mode line). C-SPC at ## Rounding, move to the end of the paragraph, M-w."
+      - text: the time machine is closed
+        elisp: '(not (seq-find (lambda (b) (buffer-local-value (quote git-timemachine-mode) b)) (buffer-list)))'
+        hint: "q in the timemachine buffer closes it and goes back to README.md, which never changed."
+    stuck:
+      - when: { step_seconds: 150 }
+        say: "C-x v t, then p twice: the mode line says 2/4 and the echo area Explain rounding. Copy the section with C-SPC, moving, M-w, then q."
+  - id: paste
+    goal: Paste the Rounding section back into README.md
+    detail: "In README.md, `M->` goes to the end; `RET` for a blank line, then `C-y` pastes the section."
+    demo: 'C-x C-f ~600 "/work/ledger/README.md" ~400 RET ~600 M-> ~300 RET ~300 C-y ~800'
+    conditions:
+      - text: the Rounding heading is back
+        elisp: '(let ((b (get-buffer "README.md"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "## Rounding" nil t)))))'
+        hint: "C-y pastes the latest kill. If something else comes out, M-y right after it lists older kills to choose from."
+      - text: its paragraph is back too
+        elisp: '(let ((b (get-buffer "README.md"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (and (search-forward "## Rounding" nil t) (search-forward "rounded half away from zero" nil t))))))'
+        hint: "The copy must run from the heading to the end of the paragraph. Copy it again from the time machine if only the heading came along."
