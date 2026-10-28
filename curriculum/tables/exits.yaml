@@ -225,13 +225,13 @@
   flag: View
 
 - id: read-only-file
-  when: { readonly: true, file: { regex: "." }, minors: { not: { contains: view-mode } } }
+  when: { readOnlyReason: { in: [read-only-mode, "file is write-protected"] }, file: { regex: "^[^:]+$" } }
   why: "{buf} is read-only (%% in the mode line), so typing does nothing."
   how: "C-x C-q makes it writable, if you really mean to edit it."
   flag: "%%"
 
 - id: wdired
-  when: { minors: { contains: wdired-mode } }
+  when: { mode: wdired-mode }
   why: "You are editing file names in the listing (wdired). Nothing is renamed yet."
   how: "C-c C-c renames the files as edited. C-c ESC throws the edits away."
 
@@ -389,3 +389,277 @@
   when: { "diagAtPoint.severity": { in: [error, warning] } }
   why: "There is a {diagAtPoint.severity} here: {diagAtPoint.message}"
   how: "C-h . shows it in full. M-g n and M-g p move between problems."
+
+# --- p8 ---
+
+- id: eww
+  when: { mode: eww-mode }
+  why: "This is eww, the web browser inside Emacs, showing {buf}."
+  how: "g reloads the page, l goes back, q closes the window. C-x o returns to the source."
+
+- id: pdf-view
+  when: { mode: pdf-view-mode }
+  why: "This is a PDF drawn by Emacs (pdf-tools)."
+  how: "n and p turn pages, + and - zoom, o shows the outline, C-s searches. q closes the window."
+
+- id: pdf-outline
+  when: { mode: pdf-outline-buffer-mode }
+  why: "This is the outline of a PDF, its table of contents."
+  how: "RET goes to the heading, M-RET goes there and closes the outline, q closes it without moving."
+
+- id: pdf-text
+  when: { mode: doc-view--text-view-mode }
+  why: "This is the text of a PDF: the terminal frame cannot draw its pages."
+  how: "The graphical frame shows the pages. q closes the text."
+
+- id: image
+  when: { mode: image-mode }
+  why: "This is an image file, {buf}, drawn by Emacs."
+  how: "i + and i - zoom, i r rotates, n and p show the folder's next and previous images. C-c C-c shows an SVG's text. q closes."
+
+- id: image-dired
+  when: { mode: image-dired-thumbnail-mode }
+  why: "These are thumbnails of a folder's images (image-dired)."
+  how: "The arrow keys move, RET shows the image full size, q closes the thumbnails."
+
+- id: reftex-select
+  when: { mode: { in: [reftex-select-label-mode, reftex-select-bib-mode] } }
+  why: "RefTeX is asking which label to refer to."
+  how: "n and p move between labels, RET inserts the reference, q gives up."
+
+- id: tex-output
+  when: { mode: TeX-output-mode }
+  why: "This is the output of a LaTeX build."
+  how: "C-c ` jumps to the next error in the source. q closes the window."
+
+- id: tex-help
+  when: { "otherWindows.buf": "*TeX Help*" }
+  why: "*TeX Help* explains the LaTeX error the cursor is on."
+  how: "Fix the line and build again with C-c C-c. C-c ` goes to the next error; C-x 1 closes the help."
+
+- id: typst-output
+  when: { mode: typst-ts-compilation-mode }
+  why: "This is Typst's build output ({buf})."
+  how: "RET on an error jumps to it in the source. q closes the window; C-x o goes back."
+
+# --- p9 ---
+
+- id: org-select
+  when: { buf: "*Org Select*" }
+  why: "Org is asking which template or block you want: one key from the list."
+  how: "Press the key in brackets ([t] for a Task). q or C-g cancels."
+
+- id: org-export-dispatcher
+  when: { buf: "*Org Export Dispatcher*" }
+  why: "This is the export menu: a letter picks the format, a second letter what to make."
+  how: "h o makes HTML and opens it, l p a PDF, m m Markdown. q or C-g closes the menu."
+
+- id: org-agenda-dispatcher
+  when: { buf: " *Agenda Commands*" }
+  why: "This is the agenda menu: one key picks the view."
+  how: "a shows the week, t every open TODO, m the headings with a tag you name. q closes the menu."
+
+- id: org-date-prompt
+  when: { "minibuffer.kind": prompt, "windows.buf": "*Calendar*" }
+  why: "Org is asking for a date; the calendar shows the day you are picking."
+  how: "Type +1 for tomorrow, fri for the next Friday, or move the day with S-<right> and S-<left>, then RET. C-g cancels."
+
+- id: org-capture
+  when: { minors: { contains: org-capture-mode } }
+  why: "You are writing a captured note; it is not filed yet."
+  how: "C-c C-c files it and takes you back, C-c C-k throws it away, C-c C-w files it under another heading."
+
+- id: org-src
+  when: { minors: { contains: org-src-mode } }
+  why: "You are editing a code block of an Org file in a buffer of its own."
+  how: "C-c ' puts it back into the Org file, C-c C-k throws the edits away."
+
+- id: org-agenda
+  when: { mode: org-agenda-mode }
+  why: "This is the Org agenda, collected from your Org files. It is a view, not a file."
+  how: "RET visits the item, t changes its state, q closes the agenda and puts the windows back."
+
+- id: org-roam-backlinks
+  when: { "otherWindows.mode": org-roam-mode }
+  why: "The side window lists the notes that link to this one (org-roam)."
+  how: "RET on a backlink visits it. C-c n l closes the window."
+
+- id: org-babel-error
+  when: { "otherWindows.buf": "*Org-Babel Error Output*" }
+  why: "A code block failed; {otherWindows.buf} shows what the program printed."
+  how: "Fix the block (C-c ' edits it) and run it again with C-c C-c. C-x 1 closes the error window."
+
+# --- p11 ---
+
+- id: wgrep
+  when: { mode: grep-mode, readonly: false }
+  why: "You are editing the search results (wgrep). The files change only when you finish."
+  how: "C-c C-c writes every changed line into its file and saves it. C-c C-k throws the edits away."
+
+- id: archive
+  when: { mode: { in: [tar-mode, archive-mode] } }
+  why: "This is the list of files inside the archive {buf}. Nothing has been extracted."
+  how: "RET opens a member as a buffer. After saving members, C-x C-s here writes the archive. q closes the list."
+
+- id: archive-member
+  when: { buf: { regex: " \\([^()]+\\.(tar|tgz|zip|jar|tar\\.gz)\\)(<[^>]*>)?$" } }
+  why: "{buf} is a file inside an archive, opened without extracting it."
+  how: "C-x C-s saves it back into the archive's buffer; then save the archive itself with C-x C-s in its list."
+
+- id: edit-indirect
+  when: { buf: { regex: "^\\*edit-indirect " } }
+  why: "You are editing a code block of a document in a buffer of its own ({buf})."
+  how: "C-c C-c puts it back into the document, C-c C-k throws the edits away."
+
+# --- p10 ---
+- id: ediff
+  when: { mode: ediff-mode }
+  why: "This is ediff's control window: two versions side by side, walked one difference at a time."
+  how: "n and p walk the differences, a and b copy one side over the other, ? lists every key, q quits (it asks first)."
+
+- id: ediff-elsewhere
+  when: { mode: { not: ediff-mode }, "otherWindows.buf": { regex: "^\\*Ediff Control Panel" } }
+  why: "An ediff comparison is open; its keys work only in the control window, the strip at the bottom."
+  how: "C-x o until the cursor is in the control window, then n, p, a, b or q."
+
+- id: calc
+  when: { mode: { in: [calc-mode, calc-trail-mode] } }
+  why: "This is Calc, a stack calculator: 2 RET 3 + adds. Letters are commands here, not text."
+  how: "U undoes, ' types a formula, C-x * c or q closes Calc."
+
+- id: ielm
+  when: { mode: inferior-emacs-lisp-mode }
+  why: "This is ielm, a Lisp prompt for this Emacs: RET evaluates the expression at the ELISP> prompt."
+  how: "M-p brings back earlier input. C-x b goes back to your files."
+
+- id: occur-edit
+  when: { mode: occur-edit-mode }
+  why: "You are editing the matching lines (occur-edit): each change goes straight into the buffer the line came from."
+  how: "C-c C-c goes back to the read-only list. The changed files save themselves a few seconds later."
+
+- id: re-builder
+  when: { mode: reb-mode }
+  why: "This is re-builder: the regexp you type here lights up its matches in the buffer above."
+  how: "C-c C-w copies the regexp, C-c C-q quits re-builder."
+
+- id: edit-macro
+  when: { mode: edmacro-mode }
+  why: "You are editing a keyboard macro as text: one key per line, the command after ;; is only a comment."
+  how: "C-c C-c keeps the edited macro, C-x k RET throws the edit away."
+
+- id: proced
+  when: { mode: proced-mode }
+  why: "This is proced, the list of processes on this machine, like top."
+  how: "g refreshes, k sends a signal to the process on the line, q closes the list."
+
+- id: timer-list
+  when: { mode: timer-list-mode }
+  why: "This is the list of timers: Lisp that Emacs will run later or repeatedly."
+  how: "c cancels the timer on the line, q closes the list."
+
+# --- p4-5 ---
+
+- id: smerge
+  when: { minors: { contains: smerge-mode } }
+  why: "This file has merge conflicts (smerge): <<<<<<< marks where each one starts, ======= separates the two versions."
+  how: "C-c ^ n goes to the next conflict; C-c ^ u keeps the upper version, C-c ^ l the lower, C-c ^ a both."
+
+- id: magit-log-select
+  when: { mode: magit-log-select-mode }
+  why: "Magit wants you to pick a commit from this list."
+  how: "Move to the commit and press C-c C-c. C-c C-k cancels."
+
+- id: git-rebase
+  when: { mode: git-rebase-mode }
+  why: "This is the plan of an interactive rebase: the commits to replay, oldest first, one action per line."
+  how: "s squashes a commit into the one above, f fixes it up, d drops it, M-p and M-n move it. C-c C-c runs the rebase, C-c C-k abandons it."
+
+- id: magit-blame
+  when: { minors: { contains: magit-blame-mode } }
+  why: "Blame is on: each heading names the commit that last changed the lines below it. The buffer is read-only meanwhile."
+  how: "RET shows that commit, n and p move between headings, q turns blame off (one level at a time)."
+
+- id: git-timemachine
+  when: { minors: { contains: git-timemachine-mode } }
+  why: "This is an old version of {buf} (git-timemachine). The file itself has not changed."
+  how: "p and n step through the versions, M-w copies, q closes the time machine."
+
+- id: magit-process
+  when: { mode: magit-process-mode }
+  why: "This is the log of the Git commands Magit ran."
+  how: "An error from Git is shown here in full. q closes it."
+
+- id: with-editor
+  when: { minors: { contains: with-editor-mode }, buf: { not: { regex: "COMMIT_EDITMSG|git-rebase-todo" } } }
+  why: "Git is waiting for you to finish editing {buf}."
+  how: "C-c C-c finishes, C-c C-k cancels."
+
+# embark-act reads its action key with the target named in the echo area.
+- id: embark-act
+  when: { "session.echo": { regex: "^Act on " } }
+  why: "Embark waits for one key: the action for the target named at the bottom."
+  how: "Press an action key (d deletes a file, k kills a buffer, w copies). C-h lists every action for this target; C-g cancels."
+
+- id: embark-collect
+  when: { mode: embark-collect-mode }
+  why: "This is a list collected by embark (C-. S)."
+  how: "RET runs the default action on a candidate, C-. acts on it with any action. q closes the list."
+
+# --- p6-7 ---
+
+- id: vterm
+  when: { mode: vterm-mode }
+  why: "This is a terminal (vterm): most keys go to the program running in it."
+  how: "C-c C-t switches to copy mode, where Emacs keys move and copy; C-c C-t again goes back. C-x b leaves the terminal running."
+
+- id: python-repl
+  when: { mode: inferior-python-mode }
+  why: "This is a Python REPL ({buf})."
+  how: "Type Python and RET. M-p brings back earlier input. C-c C-z in your Python file comes back here; C-x b goes back to it."
+
+- id: utop
+  when: { mode: utop-mode }
+  why: "This is utop, the OCaml toplevel."
+  how: "End a phrase with ;; and press RET. M-p brings back earlier input. C-c C-z goes back to the source file."
+
+- id: dape
+  when: { mode: { regex: "^dape-" } }
+  why: "This window belongs to the debugger (dape)."
+  how: "C-x C-a n steps, C-x C-a s steps in, C-x C-a o out, C-x C-a c continues, C-x C-a q ends the session."
+
+- id: flymake-list
+  when: { mode: { in: [flymake-diagnostics-buffer-mode, flymake-project-diagnostics-mode] } }
+  why: "This is the list of problems the checkers found (Flymake)."
+  how: "RET goes to a problem. The list updates as you fix them; q closes it."
+
+- id: eldoc-buffer
+  when: { buf: "*eldoc*" }
+  why: "This is *eldoc*: what is known about the thing at point in your code, problems first."
+  how: "q closes it. It follows the cursor in your code; C-h . opens it again."
+
+- id: shell-command-output
+  when: { buf: { regex: "^\\*(Async Shell Command|Shell Command Output)\\*" } }
+  why: "This is the output of a shell command (M-! or M-&)."
+  how: "C-x 0 closes this window, C-x b goes back to your file. In an async one, C-c C-c interrupts the command if it still runs."
+
+# --- p12-13 ---
+
+- id: remote-unsaved
+  when: { file: { regex: "^/[a-z]+:" }, modified: true }
+  why: "{buf} lives on another machine (TRAMP), and the playground saves only local files for you."
+  how: "C-x C-s saves it over the connection; the bottom line then says Wrote /ssh:..."
+
+- id: remote-read-only
+  when: { readonly: true, file: { regex: "^/ssh:[^|]+:/" } }
+  why: "{buf} belongs to another user on the remote machine, often root, so you may read it but not write it."
+  how: "M-x tramp-revert-buffer-with-sudo reopens it as root (/ssh:host|sudo::/path). C-x C-q would let you type, not save."
+
+- id: customize
+  when: { mode: Custom-mode }
+  why: "This is Customize, a form for options: edit a field or press a button, then apply."
+  how: "TAB moves between buttons and fields, RET presses one. C-x C-s applies what you changed and saves it to custom.el; q closes."
+
+- id: package-menu
+  when: { mode: package-menu-mode }
+  why: "This is the package list: what the archives offer and what is installed."
+  how: "RET describes the package on the line; i marks it for installation, d for deletion, U every upgrade; x does what is marked. q closes."

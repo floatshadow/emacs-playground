@@ -365,3 +365,447 @@ next-line-or-history-element: Down a line, or forward through the history
 previous-matching-history-element: Search what you typed before
 minibuffer-previous-completion: Highlight the previous completion
 minibuffer-next-completion: Highlight the next completion
+
+# --- p8 ---
+markdown-insert-bold: Make the word or region bold (Markdown)
+markdown-insert-link: Insert a Markdown link (asks for the URL and text)
+markdown-insert-list-item: Start a new list item like this one
+markdown-cycle: Fold a heading, or align the table and go to the next cell
+markdown-preview: Render the Markdown with pandoc and show it in eww
+markdown-edit-code-block: Edit this code block in its own language's buffer
+typst-ts-compile: Compile this Typst file to PDF
+typst-ts-watch-mode: Rebuild the PDF on every save (typst watch)
+typst-ts-preview: Open the Typst file's PDF
+LaTeX-section: Insert a section, with its title and label
+LaTeX-environment: Insert an environment (\begin and \end)
+cdlatex-math-symbol: Insert a maths symbol (` then a key)
+cdlatex-math-modify: Put an accent or font on the character before (')
+reftex-reference: Insert a reference to a label, picked from a list
+reftex-label: Insert a label for this section or environment
+TeX-command-master: Build or view this LaTeX file (asks which command)
+TeX-next-error: Jump to the next LaTeX error and explain it
+TeX-view: Show the PDF at the line the cursor is on (SyncTeX)
+pdf-view-next-page-command: Next page of the PDF
+pdf-view-previous-page-command: Previous page of the PDF
+pdf-view-scroll-up-or-next-page: Scroll the PDF, turning the page at its end
+pdf-view-scroll-down-or-previous-page: Scroll the PDF back, turning the page at its top
+pdf-view-first-page: First page of the PDF
+pdf-view-last-page: Last page of the PDF
+pdf-view-goto-page: Go to a page of the PDF by number
+pdf-outline: Show the PDF's table of contents
+pdf-outline-follow-link-and-quit: Go to this heading and close the outline
+pdf-outline-follow-link: Go to this heading, keeping the outline
+pdf-outline-display-link: Show this heading's page, keeping the outline
+pdf-outline-mouse-display-link: Show the heading you clicked
+pdf-isearch-sync-backward: Jump to the source of the current match (SyncTeX)
+pdf-sync-backward-search-mouse: Jump to the source of the place you clicked (SyncTeX)
+image-increase-size: Zoom in on the image
+image-decrease-size: Zoom out of the image
+image-mouse-increase-size: Zoom in on the image (mouse wheel)
+image-mouse-decrease-size: Zoom out of the image (mouse wheel)
+image-rotate: Rotate the image a quarter turn
+image-flip-horizontally: Mirror the image left to right
+image-flip-vertically: Mirror the image top to bottom
+image-toggle-display: Switch between the picture and the file's text
+image-dired: Show the images of a folder as thumbnails
+org-link-preview: Show or hide the images of this section's links (Org)
+org-latex-preview: Show or hide this section's formulas typeset (Org)
+bibtex-clean-entry: Tidy this BibTeX entry
+citar-insert-citation: Cite references picked from the bibliography
+citar-open: Open a reference's files, links or notes
+insert-char: Insert a character by its Unicode name or code
+toggle-input-method: Turn the input method on or off
+set-input-method: Choose and turn on an input method
+what-cursor-position: Describe the character at point (C-u for everything)
+jinx-correct: Correct the nearest misspelling (with C-u, all of them)
+jinx-languages: Switch the spelling dictionaries
+visual-line-mode: Wrap long lines at word boundaries on screen
+set-fill-column: Set the line width M-q fills to
+fill-paragraph: Refill the paragraph to the fill column
+count-words-region: "Count lines, words and characters from the mark to the cursor (C-u: the whole buffer)"
+
+# --- p9 ---
+org-shifttab: Fold or unfold the whole Org file (overview, contents, everything)
+org-cycle: Fold or unfold this heading; in a table, align and go to the next cell
+org-next-visible-heading: Go to the next heading
+org-previous-visible-heading: Go to the previous heading
+org-metaright: Demote this heading (one more star); in a table, move the column right
+org-metaleft: Promote this heading (one star fewer); in a table, move the column left
+org-metaup: Move this subtree above the one before it
+org-metadown: Move this subtree below the one after it
+org-do-demote: Demote this heading (one more star)
+org-demote-subtree: Demote this heading and everything under it
+org-move-subtree-up: Move this subtree above the one before it
+org-move-subtree-down: Move this subtree below the one after it
+org-meta-return: New heading or list item at this level
+org-cut-special: Cut this subtree (or table region)
+org-cut-subtree: Cut this subtree
+org-paste-special: Paste a cut subtree here, at this level
+org-refile: Move this subtree under another heading (picked by name)
+org-narrow-to-subtree: Show only this subtree (C-x n w shows everything again)
+org-toggle-narrow-to-subtree: Narrow to this subtree, or widen again
+widen: Show the whole buffer again after narrowing
+org-todo: Change the TODO state of this heading
+org-shiftright: Next TODO state or day; elsewhere, the window to the right
+org-shiftleft: Previous TODO state or day; elsewhere, the window to the left
+org-set-tags-command: Set the tags of this heading
+org-schedule: Schedule this task for a day
+org-deadline: Give this task a deadline
+org-agenda: Show the agenda from your Org files
+org-agenda-todo: Change the state of this agenda item, in its file
+org-agenda-quit: Close the agenda and put the windows back
+org-agenda-switch-to: Go to this agenda item in its file
+org-capture: Write a quick note or task into an Org file
+org-capture-finalize: File the captured note and go back
+org-capture-kill: Throw the captured note away
+org-ctrl-c-ctrl-c: "Act on what is at the cursor (run a block, refresh a #+ line, set tags)"
+org-return: New line; in a table, the cell below
+org-table-next-field: Align the table and go to the next cell
+org-table-next-row: Go to the cell below; a new row before a rule
+org-table-align: Line up the table's columns
+org-table-toggle-coordinate-overlays: Show or hide the table's row and column numbers
+org-table-eval-formula: Install a formula for this column (with C-u, this cell)
+org-table-edit-formulas: Edit the table's formulas in a buffer of their own
+org-ctrl-c-star: Recalculate this table row (with C-u, the whole table)
+org-table-recalculate: Recalculate the table's formulas
+org-babel-execute-src-block: Run this code block and insert its result
+org-edit-special: Edit this code block in a buffer in its language's mode
+org-edit-src-exit: Put the edited code back into the Org file
+org-edit-src-abort: Throw away the edits to this code block
+org-insert-structure-template: Insert a block (source, quote, example) from a menu
+org-babel-tangle: Write the code blocks to their :tangle files
+org-export-dispatch: Export this file (HTML, PDF, Beamer, Markdown...)
+org-present: Present this Org file as slides, one top heading each
+org-present-next: Next slide
+org-present-prev: Previous slide
+org-present-quit: Stop presenting
+org-open-at-point: Follow the link at the cursor
+org-roam-node-find: Find an org-roam note by title, or make it
+org-roam-node-insert: Insert a link to an org-roam note, making it if needed
+org-roam-buffer-toggle: Show or hide the backlinks of this note
+org-roam-dailies-goto-today: Open today's daily note
+org-roam-capture: Write into an org-roam note without leaving this buffer
+load-file: Run a file of Emacs Lisp now
+eww-open-file: Show an HTML file in eww
+
+# --- p11 ---
+dired-toggle-read-only: "Make the listing editable (wdired), or read-only again"
+wdired-finish-edit: Rename the files as edited in the listing
+wgrep-change-to-wgrep-mode: Make the search results editable (wgrep)
+wgrep-finish-edit: Write the edited matches back into their files
+edit-indirect-commit: Put the edited code block back into the document
+narrow-to-defun: Show only the function around the cursor
+add-dir-local-variable: Set a variable for every file in this folder (.dir-locals.el)
+tar-extract: Open the archive member on this line
+dired-copy-filename-as-kill: Copy the file name on this line
+embark-dired-jump: Open the folder of the target in Dired, on its line
+
+# --- p10 ---
+shell-command-on-region: "Run a shell command on the region (C-u: replace the region with its output)"
+shell-command: "Run a shell command (C-u: insert its output at point)"
+number-to-register: Store a number (the prefix argument) in a register
+increment-register: Add to the number in a register
+kmacro-set-format: Set how the macro counter is written (%02d pads to two digits)
+kmacro-edit-macro-repeat: Edit the last macro as text
+edit-kbd-macro: Edit a keyboard macro as text
+edmacro-finish-edit: Keep the edited macro
+ediff-files: Compare two files side by side (ediff)
+ediff-buffers: Compare two buffers side by side (ediff)
+ediff-directories: Compare two folders, then any pair of files in them
+ediff-merge-files-with-ancestor: Merge two versions of a file against the one they started from
+ediff-next-difference: Go to the next difference
+ediff-previous-difference: Go to the previous difference
+ediff-jump-to-difference: Go to the difference with this number
+ediff-toggle-split: Show the versions side by side, or one above the other
+ediff-copy-A-to-B: Copy A's version of this difference into B
+ediff-copy-B-to-A: Copy B's version of this difference into A
+ediff-copy-A-to-C: Put A's version of this difference into the merge result
+ediff-copy-B-to-C: Put B's version of this difference into the merge result
+ediff-restore-diff: Put back this difference as it was before a copy
+ediff-quit: Leave ediff
+calc-dispatch: Calc command (C-x * then a letter)
+calc-plus: Add the top two numbers on the stack
+calc-algebraic-entry: Type a formula onto the stack
+calc-convert-units: Convert the top of the stack to other units
+calc-simplify-units: Simplify the units of the top of the stack
+calc-simplify: Simplify the formula on top of the stack
+calc-reduce: Combine all entries of a vector with an operator (V R + adds them)
+calc-copy-to-buffer: Insert the top of the stack into the buffer
+eval-expression: Evaluate a Lisp expression typed in the minibuffer
+ielm: Open a Lisp prompt (ielm)
+ielm-return: Evaluate the expression at the ielm prompt
+load-library: Load a Lisp library by name
+re-builder: Build a regexp and see its matches as you type
+reb-quit: Leave re-builder
+list-timers: List the timers that will run Lisp later
+proced: List the processes on this machine
+keep-lines: Keep only the lines that match a regexp
+flush-lines: Delete the lines that match a regexp
+delete-duplicate-lines: Delete repeated lines, keeping the first
+sort-lines: Sort the lines of the region
+reverse-region: Reverse the order of the lines in the region
+align-regexp: Line up the region's lines on a regexp
+dabbrev-expand: Complete the word from text in your buffers
+dabbrev-completion: List completions for the word from your buffers
+multi-occur: List matching lines in the buffers you pick
+multi-occur-in-matching-buffers: List matching lines in every buffer whose name matches
+occur-edit-mode: Edit the matching lines; changes go to their buffers
+occur-cease-edit: Stop editing the matches
+org-table-create-or-convert-from-region: Turn the region into an Org table (or make an empty one)
+eshell: Open Eshell, a shell written in Emacs Lisp
+eshell-send-input: Run the command at the Eshell prompt
+ediff-merge-files: Merge two versions of a file, deciding every difference yourself
+ediff-update-diffs: Compare the versions again after they changed
+calc-grab-region: Put the numbers in the region on the Calc stack
+calc-grab-rectangle: "Put a rectangle of numbers on the Calc stack (C-u: one formula per line)"
+calc-embedded: Turn the formula at point into a live Calc entry, or back into text
+calc-embedded-update-formula: Recompute the embedded formula at point
+calc-undo: Undo the last Calc operation
+calc-pop: Drop the top entry of the Calc stack
+
+# --- p4-5 ---
+vertico-exit: Accept the highlighted candidate
+vertico-exit-input: Accept what you typed, not the highlighted candidate
+vertico-insert: Copy the highlighted candidate into the prompt
+vertico-next: Highlight the next candidate
+vertico-previous: Highlight the previous candidate
+delete-trailing-whitespace: Delete spaces and tabs at the ends of lines
+consult-line: Search the lines of this buffer, with preview
+consult-goto-line: Go to a line number, with preview
+consult-mark: Jump to a place you marked, with preview
+consult-register: Jump to or insert a register, showing its contents
+consult-history: Pick an earlier input of this prompt
+consult-fd: Find a file in the project by name
+consult-grep: Search the project with grep, with preview
+consult-line-multi: Search the lines of every buffer
+consult-bookmark: Jump to a bookmark, with preview
+embark-act: Act on the thing at point or the highlighted candidate
+embark-dwim: Run the default action on the candidate
+embark-export: Turn the list into a buffer of its kind (grep, Dired)
+embark-collect: Collect the candidates into a list buffer
+embark-bindings: List every key binding, searchable
+embark-copy-as-kill: Copy the target to the kill ring
+corfu-insert: Insert the highlighted completion
+corfu-complete: Complete as far as the candidates agree
+corfu-next: Highlight the next completion
+corfu-previous: Highlight the previous completion
+corfu-insert-separator: Add a space to filter the popup by another word
+corfu-quit: Close the completion popup
+tempel-insert: Insert a snippet, chosen by name
+tempel-complete: Expand the snippet name before the cursor
+tempel-next: Go to the snippet's next field
+tempel-previous: Go to the snippet's previous field
+magit-status: Show the Git status of this repository
+magit-dispatch: Magit's menu of every command
+magit-file-dispatch: Magit's menu for the current file
+magit-section-toggle: Show or hide the section at point
+magit-section-forward: Go to the next section
+magit-section-backward: Go to the previous section
+magit-section-show-level-2-all: Fold every section down to file names
+magit-stage: Stage the change at point
+magit-stage-files: Stage the change or file at point
+magit-stage-modified: Stage every change
+magit-unstage: Unstage the change at point
+magit-unstage-files: Unstage the change or file at point
+magit-unstage-all: Unstage everything
+magit-discard: Throw away the change at point (asks first)
+magit-delete-thing: Throw away the change at point (asks first)
+magit-commit: "Commit menu: choose how, then write the message"
+magit-commit-create: Commit what is staged
+magit-commit-amend: Add what is staged to the last commit, edit its message
+magit-commit-extend: Add what is staged to the last commit
+magit-commit-reword: Edit the last commit's message
+with-editor-finish: "Finish: commit (or rebase) with this text"
+with-editor-cancel: "Cancel: no commit"
+magit-log: "Log menu: choose which history to show"
+magit-log-current: Show the history of the current branch
+magit-log-all: Show the history of every branch
+magit-show-commit: Show the commit at point
+magit-diff-show-or-scroll-up: Show the commit at point, or scroll it
+magit-visit-thing: Visit what is at point
+magit-diff-visit-file: Visit this place in the file
+magit-blame-addition: Show who last changed each line, and when
+magit-blame-quit: Turn blame off (one level)
+magit-branch: "Branch menu: check out, create, rename"
+magit-branch-and-checkout: Create a branch and check it out
+magit-checkout: Check out a branch
+magit-rebase: "Rebase menu: onto what, or interactively"
+magit-rebase-interactive: Rewrite commits from a list, one line each
+magit-rebase-branch: Replay this branch on top of another
+magit-rebase-continue: Continue a stopped rebase
+magit-rebase-abort: Abandon a stopped rebase
+magit-log-select-pick: Pick the commit at point
+magit-log-select-quit: Cancel picking a commit
+git-rebase-squash: Meld this commit into the one above, with both messages
+git-rebase-fixup: Meld this commit into the one above, keeping its message
+magit-stash: "Stash menu: set changes aside, bring them back"
+magit-stash-both: Stash every change, staged or not
+magit-stash-pop: Apply a stash and drop it
+magit-stash-apply: Apply a stash and keep it
+magit-merge: "Merge menu: merge a branch into this one"
+magit-merge-plain: Merge a branch into the current one
+magit-merge-abort: Abort the merge and put everything back
+magit-refresh: Refresh the Magit buffer
+magit-mode-bury-buffer: Put the Magit buffer away
+smerge-next: Go to the next conflict
+smerge-prev: Go to the previous conflict
+smerge-keep-upper: Keep the upper version of this conflict
+smerge-keep-lower: Keep the lower version of this conflict
+smerge-keep-all: Keep both versions of this conflict
+smerge-keep-current: Keep the version the cursor is in
+smerge-ediff: Resolve this file's conflicts in ediff
+vc-diff: Show this file's changes since the last commit
+diff-hl-next-hunk: Go to the next changed hunk
+diff-hl-previous-hunk: Go to the previous changed hunk
+diff-hl-revert-hunk: Revert the changed hunk at point (asks first)
+git-timemachine: Step through this file's history
+git-timemachine-show-previous-revision: Show the previous version of the file
+git-timemachine-show-next-revision: Show the next version of the file
+git-timemachine-quit: Leave the time machine
+
+# --- p6-7 ---
+playground-cargo-build: Build the Rust crate (cargo build)
+playground-cargo-run: Run the Rust program (cargo run)
+playground-cargo-test: Run the crate's tests (cargo test)
+playground-cargo-clippy: Check the crate with clippy, Rust's linter
+compilation-next-error: Move to the next error in the build output
+compilation-previous-error: Move to the previous error in the build output
+eat: Open a terminal (eat) in this folder
+eat-project: Open a terminal (eat) in the project root
+eat-self-input: Sent to the program in the terminal
+eat-emacs-mode: "Terminal: Emacs keys, to move, search and copy in the output"
+eat-semi-char-mode: "Terminal: keys go to the program again"
+eat-char-mode: "Terminal: every key goes to the program"
+eat-kill-process: Stop the program running in the terminal
+vterm: Open a terminal (vterm)
+vterm--self-insert: Sent to the program in the terminal
+vterm-copy-mode: "Terminal: move and copy in the output, or back"
+eshell-isearch-backward-regexp: Search the commands you typed before
+eshell-previous-matching-input-from-input: Bring back an earlier command
+eshell-next-matching-input-from-input: Forward through earlier commands
+eshell-interrupt-process: Interrupt the running command
+async-shell-command: Run a shell command in the background
+playground-doc-at-point: Show the documentation of the thing here
+eldoc: Show the documentation of the thing here
+eldoc-doc-buffer: "Open *eldoc*: messages and documentation for the thing here"
+xref-find-definitions: Go to the definition
+xref-go-back: Go back to where you were before the jump
+xref-pop-marker-stack: Go back to where you were before the jump
+xref-find-references: List every use of this name
+eglot: Start the language server for this project
+eglot-rename: Rename this symbol everywhere it is used
+eglot-code-actions: Fixes and refactorings the server offers here
+eglot-code-action-quickfix: Apply the server's quick fix here
+eglot-code-action-organize-imports: Sort and clean up the imports
+eglot-format-buffer: Let the language server format the buffer
+eglot-inlay-hints-mode: Show or hide inlay hints
+eglot-reconnect: Restart the language server
+consult-eglot-symbols: Search every symbol of the project by name
+flymake-show-buffer-diagnostics: List this buffer's problems
+flymake-show-project-diagnostics: List the problems of every project file
+flymake-goto-next-error: Go to the next problem in this buffer
+flymake-goto-prev-error: Go to the previous problem in this buffer
+playground-format-buffer: Format the buffer now
+apheleia-format-buffer: Format the buffer with its formatter
+apheleia-mode: Format on save in this buffer, on or off
+apheleia-global-mode: Format on save everywhere, on or off
+ocaml-eglot-type-enclosing: "Show the type of the expression here (then C-<up> for the enclosing one)"
+ocaml-eglot-type-enclosing-grow: Show the type of the enclosing expression
+ocaml-eglot-type-enclosing-shrink: Show the type of the inner expression again
+ocaml-eglot-type-expression: Show the type of an expression you type
+ocaml-eglot-destruct: Fill in a match with every case
+ocaml-eglot-find-definition: Go to the definition
+ocaml-eglot-alternate-file: Switch between the .ml and the .mli
+utop: Start utop, the OCaml toplevel
+utop-eval-phrase: Send the phrase here to utop
+utop-eval-region: Send the region to utop
+utop-eval-buffer: Send the whole buffer to utop
+utop-eval-input-or-newline: Evaluate the phrase if it ends with ;;, else a new line
+utop-eval-input: Evaluate the phrase in utop
+utop-switch-to-repl: Go to utop
+utop-switch-to-recent-buffer: Back to the source buffer
+playground-dune-build: Build the OCaml project (dune build)
+playground-dune-test: Run the project's tests (dune runtest)
+playground-dune-promote: Accept the output the expect tests printed (dune promote)
+pet-verify-setup: Show which Python environment pet found
+run-python: Start a Python REPL for the project
+python-shell-send-buffer: Send the buffer to the Python REPL
+python-shell-send-region: Send the region to the Python REPL
+python-shell-send-file: Send a file to the Python REPL
+python-shell-switch-to-shell: Go to the Python REPL
+comint-send-input: Run the line at the prompt
+comint-previous-input: Bring back the previous input
+dape: Start a debugging session
+dape-breakpoint-toggle: Add or remove a breakpoint on this line
+dape-breakpoint-remove-all: Remove every breakpoint
+dape-next: "Debugger: next line, stepping over calls"
+dape-step-in: "Debugger: step into the call on this line"
+dape-step-out: "Debugger: run to the end of this function and return"
+dape-continue: "Debugger: run to the next breakpoint or the end"
+dape-quit: End the debugging session and close its windows
+dape-disconnect-quit: Disconnect from the debugged program and quit
+dape-kill: Stop the debugged program
+dape-watch-dwim: Watch this expression, or stop watching it
+dape-repl: Open the debugger's REPL
+dape-info: Show the debugger's windows
+
+# --- proj-5-8 ---
+markdown-live-preview-mode: Preview this Markdown in a window that follows every save
+markdown-other-window: Render this Markdown into a buffer beside it
+vc-ediff: Compare this file with its committed version in ediff
+ediff-save-buffer: Save buffer A or B of the ediff session (w a / w b)
+magit-section-show-level-4-all: Expand every section, down to the lines of each hunk
+magit-stage-untracked: Stage untracked files
+kmacro-end-and-call-macro: Stop recording, or replay the macro
+org-table-hline-and-move: Add a rule below this table row and move under it
+org-return-and-maybe-indent: New line (C-j); in a table, the next row
+jinx-correct-nearest: Correct the misspelling nearest the cursor
+
+# --- p12-13 ---
+tramp-cleanup-all-connections: Close every remote connection; remote buffers stay open and reconnect when used
+tramp-cleanup-this-connection: Close the remote connection of this buffer only
+tramp-revert-buffer-with-sudo: Reopen this file as root, through sudo
+eglot-shutdown: Stop the language server of this project
+customize: Browse every option in Customize
+customize-variable: Open a Customize form for one option
+customize-option: Open a Customize form for one option
+Custom-save: Save the options set in Customize to custom.el
+list-packages: List the packages the archives offer
+package-list-packages: List the packages the archives offer
+package-refresh-contents: Download the archives' package lists again
+package-install: Install a package from an archive
+package-menu-execute: Install, delete or upgrade the packages marked in the list
+package-upgrade-all: Upgrade every package that has a newer version
+package-delete: Remove an installed package
+package-vc-install: Install a package by cloning its git repository
+package-vc-upgrade: Pull new commits into a package installed from git
+cheer: Show a word of encouragement (lesson 13.2's package)
+keymap-global-set: Bind a key to a command everywhere, for this session
+duplicate-line: Copy the current line below itself
+toggle-truncate-lines: Cut long lines off at the window edge, or wrap them
+my-dated-header: "Your command: insert a Markdown heading with today's date"
+load-theme: Turn on a colour theme
+ef-themes-select: Pick one of the ef themes and turn it on
+modus-themes-toggle: Switch between the two themes in modus-themes-to-toggle
+nerd-icons-completion-mode: Show or hide icons in completion lists
+doom-modeline-mode: Switch between doom-modeline and the built-in mode line
+breadcrumb-mode: Show or hide the header line with the file's path and the function at point
+describe-package: Describe a package by name, installed or not
+global-ligature-mode: Draw or stop drawing ligatures such as -> as one glyph (GUI frame)
+nerd-icons-dired-mode: Show or hide icons in Dired listings
+ef-themes-toggle: Switch between the two themes in ef-themes-to-toggle
+repeat-mode: Let keys of a repeat map repeat without their prefix
+text-scale-set: Set this buffer's text size, in steps from the default
+
+# --- proj-1-4 ---
+consult-flymake: List the buffer's diagnostics in the completion list and jump to one
+python-shell-send-defun: Send the function at point to the Python shell
+python-shell-send-statement: Send the statement at point to the Python shell
+insert-file: Insert the contents of a file at point
+image-dired-forward-image: Move to the next thumbnail
+image-dired-backward-image: Move to the previous thumbnail
+image-dired-display-this: Show the image of the thumbnail at point full size
+image-dired-copy-filename-as-kill: Copy the file name of the thumbnail at point, ready for C-y
+magit-tag: Magit's tag menu (t t create, t r release, t k delete)
+magit-tag-create: Create a git tag on a commit (HEAD by default)
+magit-tag-release: Create a release tag such as v1.0 on HEAD (annotated with -a)

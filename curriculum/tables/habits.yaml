@@ -95,3 +95,45 @@
 - key: C-t
   vscode: go to symbol
   say: "C-t swapped the two characters around the cursor (C-/ undoes it). Jump to a definition by name with M-g i."
+
+# --- p8 ---
+- key: "C-\\"
+  vscode: split editor
+  say: "C-\\ turned on the input method (\\ at the start of the mode line): \\alpha now types α. C-\\ again turns it off. Split the window with C-x 3."
+
+# --- p9 ---
+- key: M-<up>
+  vscode: move line up
+  say: "M-<up> moves a line in VS Code. Here it does nothing outside Org; in an Org file it moves the heading with everything under it, or a table row. C-x C-t swaps a line with the one above."
+
+# --- p4-5 ---
+- key: C-.
+  vscode: quick fix
+  say: "C-. here is embark: it offers actions for the thing at point (a file name, a URL, a symbol) or for the highlighted candidate in a list. C-g leaves it. Language-server fixes arrive in Part 7."
+
+# --- p6-7 ---
+
+- key: <f5>
+  vscode: start debugging
+  say: "F5 does nothing here. Debugging starts with M-x dape; C-x C-a c continues."
+
+- key: <f9>
+  vscode: toggle breakpoint
+  say: "F9 does nothing here. A breakpoint is C-x C-a b (lesson 7.7)."
+
+- key: <f10>
+  vscode: step over
+  say: "F10 opens the menu bar along the top (C-g closes it). Stepping over a line in the debugger is C-x C-a n."
+
+- key: <f12>
+  vscode: go to definition
+  say: "F12 does nothing here. Go to definition is M-., and M-, comes back."
+
+- key: <f8>
+  vscode: next problem
+  say: "F8 does nothing here. M-g n goes to the next problem Flymake reports, M-g M-n to the next build error."
+
+# --- proj-5-8 ---
+- key: <f2>
+  vscode: rename symbol
+  say: "F2 is a prefix here (two-column editing): Emacs waits for the next key, and C-g cancels it. Renaming a symbol is C-c l r in a language server buffer; across files, M-s r and edit the exported matches (wgrep)."

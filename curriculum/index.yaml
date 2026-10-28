@@ -93,13 +93,13 @@ parts:
     minutes: 60
     outcome: Find any command, buffer, file or line by a few typed words, act on candidates, and complete code with snippets.
     modules: [completion]
-    status: planned
+    status: ready
     suggestedAfter: 3
     lessons:
-      - { id: 04-completion/01-minibuffer-upgraded, n: "4.1", title: "The minibuffer, upgraded", minutes: 10, vscode: fuzzy palette, status: planned }
-      - { id: 04-completion/02-consult, n: "4.2", title: Consult, minutes: 12, vscode: "Go to symbol, search across files, Go to line with preview", status: planned }
-      - { id: 04-completion/03-embark, n: "4.3", title: Embark, minutes: 10, vscode: right-click context menu, status: planned }
-      - { id: 04-completion/04-corfu-cape-tempel, n: "4.4", title: "Corfu, cape and tempel", minutes: 10, vscode: "IntelliSense popup, snippets", status: planned }
+      - { id: 04-completion/01-minibuffer-upgraded, n: "4.1", title: "The minibuffer, upgraded", minutes: 10, vscode: fuzzy palette, status: ready }
+      - { id: 04-completion/02-consult, n: "4.2", title: Consult, minutes: 12, vscode: "Go to symbol, search across files, Go to line with preview", status: ready }
+      - { id: 04-completion/03-embark, n: "4.3", title: Embark, minutes: 10, vscode: right-click context menu, status: ready }
+      - { id: 04-completion/04-corfu-cape-tempel, n: "4.4", title: "Corfu, cape and tempel", minutes: 10, vscode: "IntelliSense popup, snippets", status: ready }
 
   - n: 5
     id: 05-git-with-magit
@@ -107,14 +107,14 @@ parts:
     minutes: 90
     outcome: Stage hunks, commit, read history and blame, branch, rebase and resolve conflicts from Magit.
     modules: [git]
-    status: planned
+    status: ready
     suggestedAfter: 4
     lessons:
-      - { id: 05-git-with-magit/01-status-and-staging, n: "5.1", title: Status and staging hunks, minutes: 15, vscode: Source Control view, status: planned }
-      - { id: 05-git-with-magit/02-commits-log-blame, n: "5.2", title: "Commits, log and blame", minutes: 15, vscode: GitLens, status: planned }
-      - { id: 05-git-with-magit/03-branches-rebase-stash, n: "5.3", title: "Branches, rebase and stash", minutes: 15, vscode: branch picker, status: planned }
-      - { id: 05-git-with-magit/04-merge-conflicts, n: "5.4", title: Merge conflicts with smerge, minutes: 15, vscode: merge editor, status: planned }
-      - { id: 05-git-with-magit/05-diff-hl-and-timemachine, n: "5.5", title: diff-hl and git-timemachine, minutes: 10, vscode: "gutter indicators, file timeline", status: planned }
+      - { id: 05-git-with-magit/01-status-and-staging, n: "5.1", title: Status and staging hunks, minutes: 15, vscode: Source Control view, status: ready }
+      - { id: 05-git-with-magit/02-commits-log-blame, n: "5.2", title: "Commits, log and blame", minutes: 15, vscode: GitLens, status: ready }
+      - { id: 05-git-with-magit/03-branches-rebase-stash, n: "5.3", title: "Branches, rebase and stash", minutes: 15, vscode: branch picker, status: ready }
+      - { id: 05-git-with-magit/04-merge-conflicts, n: "5.4", title: Merge conflicts with smerge, minutes: 15, vscode: merge editor, status: ready }
+      - { id: 05-git-with-magit/05-diff-hl-and-timemachine, n: "5.5", title: diff-hl and git-timemachine, minutes: 10, vscode: "gutter indicators, file timeline", status: ready }
 
   - n: 6
     id: 06-terminals
@@ -122,13 +122,13 @@ parts:
     minutes: 60
     outcome: Build and jump to errors, run a terminal and Eshell inside Emacs, and run shell commands on files and regions.
     modules: [terminals]
-    status: planned
+    status: ready
     suggestedAfter: 5
     lessons:
-      - { id: 06-terminals/01-compile-and-next-error, n: "6.1", title: compile and next-error, minutes: 12, vscode: "Tasks, Problems panel", status: planned }
-      - { id: 06-terminals/02-eat, n: "6.2", title: "eat: a terminal in a buffer", minutes: 12, vscode: integrated terminal, status: planned }
-      - { id: 06-terminals/03-eshell, n: "6.3", title: Eshell, minutes: 15, vscode: none, status: planned }
-      - { id: 06-terminals/04-async-shell-commands, n: "6.4", title: Async shell commands and Dired integration, minutes: 10, vscode: run in terminal, status: planned }
+      - { id: 06-terminals/01-compile-and-next-error, n: "6.1", title: compile and next-error, minutes: 12, vscode: "Tasks, Problems panel", status: ready }
+      - { id: 06-terminals/02-eat, n: "6.2", title: "eat: a terminal in a buffer", minutes: 12, vscode: integrated terminal, status: ready }
+      - { id: 06-terminals/03-eshell, n: "6.3", title: Eshell, minutes: 15, vscode: none, status: ready }
+      - { id: 06-terminals/04-async-shell-commands, n: "6.4", title: Async shell commands and Dired integration, minutes: 10, vscode: run in terminal, status: ready }
 
   - n: 7
     id: 07-lsp-and-debugging
@@ -136,16 +136,16 @@ parts:
     minutes: 120
     outcome: Navigate, rename, fix and format Rust, OCaml and Python code with language servers, and step through a program with a debugger.
     modules: [lsp, lang-rust, lang-ocaml, lang-python]
-    status: planned
+    status: ready
     suggestedAfter: 6
     lessons:
-      - { id: 07-lsp-and-debugging/01-eglot, n: "7.1", title: Eglot, minutes: 15, vscode: "IntelliSense, F12, Shift+F12, F2", status: planned }
-      - { id: 07-lsp-and-debugging/02-flymake, n: "7.2", title: Flymake and diagnostics, minutes: 12, vscode: "Problems, lightbulb", status: planned }
-      - { id: 07-lsp-and-debugging/03-format-on-save, n: "7.3", title: Format on save with apheleia, minutes: 8, vscode: format on save, status: planned }
-      - { id: 07-lsp-and-debugging/04-rust, n: "7.4", title: Rust, minutes: 15, vscode: rust-analyzer, status: planned }
-      - { id: 07-lsp-and-debugging/05-ocaml, n: "7.5", title: OCaml, minutes: 15, vscode: OCaml Platform, status: planned }
-      - { id: 07-lsp-and-debugging/06-python, n: "7.6", title: Python, minutes: 15, vscode: Python extension, status: planned }
-      - { id: 07-lsp-and-debugging/07-debugging-with-dape, n: "7.7", title: Debugging with dape, minutes: 15, vscode: Run and Debug, status: planned }
+      - { id: 07-lsp-and-debugging/01-eglot, n: "7.1", title: Eglot, minutes: 15, vscode: "IntelliSense, F12, Shift+F12, F2", status: ready }
+      - { id: 07-lsp-and-debugging/02-flymake, n: "7.2", title: Flymake and diagnostics, minutes: 12, vscode: "Problems, lightbulb", status: ready }
+      - { id: 07-lsp-and-debugging/03-format-on-save, n: "7.3", title: Format on save with apheleia, minutes: 8, vscode: format on save, status: ready }
+      - { id: 07-lsp-and-debugging/04-rust, n: "7.4", title: Rust, minutes: 15, vscode: rust-analyzer, status: ready }
+      - { id: 07-lsp-and-debugging/05-ocaml, n: "7.5", title: OCaml, minutes: 15, vscode: OCaml Platform, status: ready }
+      - { id: 07-lsp-and-debugging/06-python, n: "7.6", title: Python, minutes: 15, vscode: Python extension, status: ready }
+      - { id: 07-lsp-and-debugging/07-debugging-with-dape, n: "7.7", title: Debugging with dape, minutes: 15, vscode: Run and Debug, status: ready }
 
   - n: 8
     id: 08-writing
@@ -153,17 +153,17 @@ parts:
     minutes: 120
     outcome: Write Markdown, Typst and LaTeX with live previews, citations, PDFs and images, spell checking and any script you need.
     modules: [writing, input]
-    status: planned
+    status: ready
     suggestedAfter: 7
     lessons:
-      - { id: 08-writing/01-markdown, n: "8.1", title: Markdown with live preview, minutes: 12, vscode: Markdown preview, status: planned }
-      - { id: 08-writing/02-typst, n: "8.2", title: Typst with tinymist, minutes: 15, vscode: Tinymist, status: planned }
-      - { id: 08-writing/03-latex, n: "8.3", title: LaTeX with AUCTeX, minutes: 15, vscode: LaTeX Workshop, status: planned }
-      - { id: 08-writing/04-pdf-tools-and-synctex, n: "8.4", title: pdf-tools and SyncTeX, minutes: 10, vscode: PDF viewer, tags: [gui], status: planned }
-      - { id: 08-writing/05-images-and-inline-previews, n: "8.5", title: "Images, SVG and inline previews", minutes: 10, vscode: image preview, tags: [gui], status: planned }
-      - { id: 08-writing/06-citations, n: "8.6", title: Citations with citar, minutes: 10, vscode: citation picker, status: planned }
-      - { id: 08-writing/07-unicode-and-input-methods, n: "8.7", title: Unicode and input methods, minutes: 12, vscode: "unicode input, IME", status: planned }
-      - { id: 08-writing/08-focused-writing, n: "8.8", title: Focused writing, minutes: 8, vscode: "zen mode, spell check, word count", status: planned }
+      - { id: 08-writing/01-markdown, n: "8.1", title: Markdown with live preview, minutes: 12, vscode: Markdown preview, status: ready }
+      - { id: 08-writing/02-typst, n: "8.2", title: Typst with tinymist, minutes: 15, vscode: Tinymist, status: ready }
+      - { id: 08-writing/03-latex, n: "8.3", title: LaTeX with AUCTeX, minutes: 15, vscode: LaTeX Workshop, status: ready }
+      - { id: 08-writing/04-pdf-tools-and-synctex, n: "8.4", title: pdf-tools and SyncTeX, minutes: 10, vscode: PDF viewer, tags: [gui], status: ready }
+      - { id: 08-writing/05-images-and-inline-previews, n: "8.5", title: "Images, SVG and inline previews", minutes: 10, vscode: image preview, tags: [gui], status: ready }
+      - { id: 08-writing/06-citations, n: "8.6", title: Citations with citar, minutes: 10, vscode: citation picker, status: ready }
+      - { id: 08-writing/07-unicode-and-input-methods, n: "8.7", title: Unicode and input methods, minutes: 12, vscode: "unicode input, IME", status: ready }
+      - { id: 08-writing/08-focused-writing, n: "8.8", title: Focused writing, minutes: 8, vscode: "zen mode, spell check, word count", status: ready }
 
   - n: 9
     id: 09-org-mode
@@ -171,17 +171,17 @@ parts:
     minutes: 120
     outcome: Outline, plan and schedule in Org, compute with tables, run code in four languages from one document, and export it.
     modules: [org]
-    status: planned
+    status: ready
     suggestedAfter: 8
     lessons:
-      - { id: 09-org-mode/01-outlining, n: "9.1", title: Outlining and structure editing, minutes: 12, status: planned }
-      - { id: 09-org-mode/02-todos-agenda-capture, n: "9.2", title: "TODOs, scheduling, the agenda and capture", minutes: 15, vscode: Todo Tree, status: planned }
-      - { id: 09-org-mode/03-tables-and-formulas, n: "9.3", title: Tables and spreadsheet formulas, minutes: 12, status: planned }
-      - { id: 09-org-mode/04-babel, n: "9.4", title: "Babel: run code, pass results between languages", minutes: 15, vscode: Jupyter, status: planned }
-      - { id: 09-org-mode/05-babel-remote, n: "9.5", title: Babel on a remote host, minutes: 10, tags: [remote], status: planned }
-      - { id: 09-org-mode/06-export, n: "9.6", title: Export, minutes: 12, status: planned }
-      - { id: 09-org-mode/07-org-roam, n: "9.7", title: Notes with org-roam, minutes: 10, vscode: Foam, status: planned }
-      - { id: 09-org-mode/08-literate-init, n: "9.8", title: A literate init.org, minutes: 10, status: planned }
+      - { id: 09-org-mode/01-outlining, n: "9.1", title: Outlining and structure editing, minutes: 12, vscode: "Markdown outline, folding", status: ready }
+      - { id: 09-org-mode/02-todos-agenda-capture, n: "9.2", title: "TODOs, scheduling, the agenda and capture", minutes: 15, vscode: Todo Tree, status: ready }
+      - { id: 09-org-mode/03-tables-and-formulas, n: "9.3", title: Tables and spreadsheet formulas, minutes: 12, vscode: "Markdown tables, a spreadsheet", status: ready }
+      - { id: 09-org-mode/04-babel, n: "9.4", title: "Babel: run code, pass results between languages", minutes: 15, vscode: Jupyter, status: ready }
+      - { id: 09-org-mode/05-babel-remote, n: "9.5", title: Babel on a remote host, minutes: 10, vscode: "Remote - SSH, a notebook on a remote kernel", tags: [remote], status: ready }
+      - { id: 09-org-mode/06-export, n: "9.6", title: Export, minutes: 12, vscode: "Markdown PDF, Marp", status: ready }
+      - { id: 09-org-mode/07-org-roam, n: "9.7", title: Notes with org-roam, minutes: 10, vscode: Foam, status: ready }
+      - { id: 09-org-mode/08-literate-init, n: "9.8", title: A literate init.org, minutes: 10, vscode: "settings.json with comments", status: ready }
 
   - n: 10
     id: 10-text-is-the-interface
@@ -189,17 +189,17 @@ parts:
     minutes: 90
     outcome: "Treat any text as material for tools: pipe regions through programs, compute in Calc, merge with ediff and edit many matches at once."
     modules: [power]
-    status: planned
+    status: ready
     suggestedAfter: 9
     lessons:
-      - { id: 10-text-is-the-interface/01-pipe-a-region, n: "10.1", title: Pipe a region through any tool, minutes: 10, status: planned }
-      - { id: 10-text-is-the-interface/02-registers-and-macros, n: "10.2", title: "Registers and macros, advanced", minutes: 10, status: planned }
-      - { id: 10-text-is-the-interface/03-ediff, n: "10.3", title: ediff, minutes: 12, vscode: diff editor, status: planned }
-      - { id: 10-text-is-the-interface/04-calc, n: "10.4", title: Calc, minutes: 12, status: planned }
-      - { id: 10-text-is-the-interface/05-eshell-meets-tramp, n: "10.5", title: Eshell meets TRAMP, minutes: 10, tags: [remote], status: planned }
-      - { id: 10-text-is-the-interface/06-change-emacs-live, n: "10.6", title: Change Emacs while it runs, minutes: 12, status: planned }
-      - { id: 10-text-is-the-interface/07-line-tools, n: "10.7", title: Line tools and dynamic abbreviations, minutes: 8, vscode: Sort Lines extension, status: planned }
-      - { id: 10-text-is-the-interface/08-occur-edit, n: "10.8", title: occur and occur-edit, minutes: 8, status: planned }
+      - { id: 10-text-is-the-interface/01-pipe-a-region, n: "10.1", title: Pipe a region through any tool, minutes: 10, status: ready }
+      - { id: 10-text-is-the-interface/02-registers-and-macros, n: "10.2", title: "Registers and macros, advanced", minutes: 10, status: ready }
+      - { id: 10-text-is-the-interface/03-ediff, n: "10.3", title: ediff, minutes: 12, vscode: diff editor, status: ready }
+      - { id: 10-text-is-the-interface/04-calc, n: "10.4", title: Calc, minutes: 12, status: ready }
+      - { id: 10-text-is-the-interface/05-eshell-meets-tramp, n: "10.5", title: Eshell meets TRAMP, minutes: 10, tags: [remote], status: ready }
+      - { id: 10-text-is-the-interface/06-change-emacs-live, n: "10.6", title: Change Emacs while it runs, minutes: 12, status: ready }
+      - { id: 10-text-is-the-interface/07-line-tools, n: "10.7", title: Line tools and dynamic abbreviations, minutes: 8, vscode: Sort Lines extension, status: ready }
+      - { id: 10-text-is-the-interface/08-occur-edit, n: "10.8", title: occur and occur-edit, minutes: 8, status: ready }
 
   - n: 11
     id: 11-everything-is-a-buffer
@@ -207,18 +207,18 @@ parts:
     minutes: 90
     outcome: Combine packages that were never designed together, because each one produces or consumes a buffer.
     modules: []
-    status: planned
+    status: ready
     suggestedAfter: 10
     lessons:
-      - { id: 11-everything-is-a-buffer/01-the-one-abstraction, n: "11.1", title: The one abstraction, minutes: 10, status: planned }
-      - { id: 11-everything-is-a-buffer/02-edit-the-read-only-view, n: "11.2", title: "C-x C-q: edit the read-only view", minutes: 12, status: planned }
-      - { id: 11-everything-is-a-buffer/03-one-list-of-locations, n: "11.3", title: One list of locations, minutes: 10, status: planned }
-      - { id: 11-everything-is-a-buffer/04-search-to-edit-pipeline, n: "11.4", title: The search-to-edit pipeline, minutes: 15, status: planned }
-      - { id: 11-everything-is-a-buffer/05-shell-output-is-a-buffer, n: "11.5", title: Shell output is a buffer, minutes: 10, status: planned }
-      - { id: 11-everything-is-a-buffer/06-narrow-and-indirect, n: "11.6", title: Narrow and indirect buffers, minutes: 10, status: planned }
-      - { id: 11-everything-is-a-buffer/07-act-on-thing-at-point, n: "11.7", title: Act on the thing at point, minutes: 10, status: planned }
-      - { id: 11-everything-is-a-buffer/08-hooks-and-advice, n: "11.8", title: Hooks and advice as glue, minutes: 12, status: planned }
-      - { id: 11-everything-is-a-buffer/09-capstone, n: "11.9", title: "Capstone: a pipeline with no new package", minutes: 15, status: planned }
+      - { id: 11-everything-is-a-buffer/01-the-one-abstraction, n: "11.1", title: The one abstraction, minutes: 10, status: ready }
+      - { id: 11-everything-is-a-buffer/02-edit-the-read-only-view, n: "11.2", title: "C-x C-q: edit the read-only view", minutes: 12, status: ready }
+      - { id: 11-everything-is-a-buffer/03-one-list-of-locations, n: "11.3", title: One list of locations, minutes: 10, status: ready }
+      - { id: 11-everything-is-a-buffer/04-search-to-edit-pipeline, n: "11.4", title: The search-to-edit pipeline, minutes: 15, status: ready }
+      - { id: 11-everything-is-a-buffer/05-shell-output-is-a-buffer, n: "11.5", title: Shell output is a buffer, minutes: 10, status: ready }
+      - { id: 11-everything-is-a-buffer/06-narrow-and-indirect, n: "11.6", title: Narrow and indirect buffers, minutes: 10, status: ready }
+      - { id: 11-everything-is-a-buffer/07-act-on-thing-at-point, n: "11.7", title: Act on the thing at point, minutes: 10, status: ready }
+      - { id: 11-everything-is-a-buffer/08-hooks-and-advice, n: "11.8", title: Hooks and advice as glue, minutes: 12, status: ready }
+      - { id: 11-everything-is-a-buffer/09-capstone, n: "11.9", title: "Capstone: a pipeline with no new package", minutes: 15, status: ready }
 
   - n: 12
     id: 12-remote-editing
@@ -226,13 +226,13 @@ parts:
     minutes: 60
     outcome: Edit, build, debug and commit on a remote machine or container from your local Emacs.
     modules: [remote]
-    status: planned
+    status: ready
     suggestedAfter: 11
     lessons:
-      - { id: 12-remote-editing/01-tramp-basics, n: "12.1", title: TRAMP basics, minutes: 12, vscode: Remote-SSH, tags: [remote], status: planned }
-      - { id: 12-remote-editing/02-remote-compile-and-lsp, n: "12.2", title: "Remote compile, Eshell and LSP", minutes: 15, vscode: remote terminal and extensions, tags: [remote], status: planned }
-      - { id: 12-remote-editing/03-magit-over-tramp, n: "12.3", title: Magit over TRAMP and sudo, minutes: 12, vscode: remote source control, tags: [remote], status: planned }
-      - { id: 12-remote-editing/04-containers, n: "12.4", title: Containers, minutes: 10, vscode: Dev Containers, tags: [remote], status: planned }
+      - { id: 12-remote-editing/01-tramp-basics, n: "12.1", title: TRAMP basics, minutes: 12, vscode: Remote-SSH, tags: [remote], status: ready }
+      - { id: 12-remote-editing/02-remote-compile-and-lsp, n: "12.2", title: "Remote compile, Eshell and LSP", minutes: 15, vscode: remote terminal and extensions, tags: [remote], status: ready }
+      - { id: 12-remote-editing/03-magit-over-tramp, n: "12.3", title: Magit over TRAMP and sudo, minutes: 12, vscode: remote source control, tags: [remote], status: ready }
+      - { id: 12-remote-editing/04-containers, n: "12.4", title: Containers and other hops, minutes: 10, vscode: Dev Containers, tags: [remote], status: ready }
 
   - n: 13
     id: 13-making-it-yours
@@ -241,15 +241,15 @@ parts:
     outcome: Read and change your configuration, manage packages, bind keys, write commands and take the whole setup home.
     # All modules are on from here; ui is the one not unlocked earlier.
     modules: [ui]
-    status: planned
+    status: ready
     suggestedAfter: 12
     lessons:
-      - { id: 13-making-it-yours/01-how-init-is-organised, n: "13.1", title: How init.el is organised, minutes: 12, vscode: "settings.json, settings UI", status: planned }
-      - { id: 13-making-it-yours/02-packages, n: "13.2", title: "Packages: install, update, pin, remove", minutes: 15, vscode: Extensions, status: planned }
-      - { id: 13-making-it-yours/03-keybindings, n: "13.3", title: Keybindings, minutes: 15, vscode: keybindings.json, status: planned }
-      - { id: 13-making-it-yours/04-first-command, n: "13.4", title: "Your first command, hooks and advice", minutes: 15, status: planned }
-      - { id: 13-making-it-yours/05-themes-fonts-icons, n: "13.5", title: "Themes, fonts, icons and the mode line", minutes: 12, vscode: "colour theme, file icon theme, font settings", status: planned }
-      - { id: 13-making-it-yours/06-take-it-home, n: "13.6", title: Take it home, minutes: 12, vscode: Settings Sync, tags: [remote], status: planned }
+      - { id: 13-making-it-yours/01-how-init-is-organised, n: "13.1", title: How init.el is organised, minutes: 12, vscode: "settings.json, settings UI", status: ready }
+      - { id: 13-making-it-yours/02-packages, n: "13.2", title: "Packages: install, update, pin, remove", minutes: 15, vscode: Extensions, status: ready }
+      - { id: 13-making-it-yours/03-keybindings, n: "13.3", title: Keybindings, minutes: 15, vscode: keybindings.json, status: ready }
+      - { id: 13-making-it-yours/04-first-command, n: "13.4", title: "Your first command, hooks and advice", minutes: 15, status: ready }
+      - { id: 13-making-it-yours/05-themes-fonts-icons, n: "13.5", title: "Themes, fonts, icons and the mode line", minutes: 12, vscode: "colour theme, file icon theme, font settings", status: ready }
+      - { id: 13-making-it-yours/06-take-it-home, n: "13.6", title: Take it home, minutes: 12, vscode: Settings Sync, tags: [remote], status: ready }
 
   - n: 14
     id: 14-projects
@@ -257,18 +257,18 @@ parts:
     minutes: 600
     outcome: Do real work end to end in Rust, OCaml, Python, Typst, LaTeX, Markdown and Org, mixing languages, then repeat each project without hints.
     modules: []
-    status: planned
+    status: ready
     suggestedAfter: 13
     # Each lesson here is a project; details and tasks are under projects below.
     lessons:
-      - { id: projects/p1-hello-cargo, n: P1, title: "Hello, cargo", minutes: 75, tags: [project], status: planned }
-      - { id: projects/p2-dune-library, n: P2, title: A dune library, minutes: 75, tags: [project], status: planned }
-      - { id: projects/p3-data-script, n: P3, title: Data script, minutes: 75, tags: [project], status: planned }
-      - { id: projects/p4-paper, n: P4, title: Paper with citations, minutes: 75, tags: [project, gui], status: planned }
-      - { id: projects/p5-docs-site, n: P5, title: Docs site, minutes: 75, tags: [project, remote], status: planned }
-      - { id: projects/p6-polyglot, n: P6, title: Polyglot service, minutes: 75, tags: [project, remote], status: planned }
-      - { id: projects/p7-notebook, n: P7, title: Literate experiment notebook, minutes: 75, tags: [project, remote], status: planned }
-      - { id: projects/p8-refactor, n: P8, title: Repository-wide refactor, minutes: 75, tags: [project], status: planned }
+      - { id: projects/p1-hello-cargo, n: P1, title: "Hello, cargo", minutes: 75, tags: [project], status: ready }
+      - { id: projects/p2-dune-library, n: P2, title: A dune library, minutes: 75, tags: [project], status: ready }
+      - { id: projects/p3-data-script, n: P3, title: Data script, minutes: 75, tags: [project], status: ready }
+      - { id: projects/p4-paper, n: P4, title: Paper with citations, minutes: 75, tags: [project], status: ready }
+      - { id: projects/p5-docs-site, n: P5, title: Docs site, minutes: 75, tags: [project, remote], status: ready }
+      - { id: projects/p6-polyglot, n: P6, title: Polyglot service, minutes: 75, tags: [project, remote], status: ready }
+      - { id: projects/p7-notebook, n: P7, title: Literate experiment notebook, minutes: 75, tags: [project, remote], status: ready }
+      - { id: projects/p8-refactor, n: P8, title: Repository-wide refactor, minutes: 75, tags: [project], status: ready }
 
 projects:
   - id: projects/p1-hello-cargo
@@ -278,7 +278,7 @@ projects:
     languages: [Rust]
     vscode: "rust-analyzer, Tasks, Source Control"
     tags: [project]
-    status: planned
+    status: ready
     tasks:
       - { id: scaffold, n: 1, title: Scaffold with cargo new from Eshell }
       - { id: layout, n: 2, title: "Layout: code above, compile below" }
@@ -294,7 +294,7 @@ projects:
     languages: [OCaml]
     vscode: OCaml Platform
     tags: [project]
-    status: planned
+    status: ready
     tasks:
       - { id: init, n: 1, title: dune init }
       - { id: utop, n: 2, title: utop beside the source }
@@ -310,7 +310,7 @@ projects:
     languages: [Python]
     vscode: "Python extension, Run and Debug"
     tags: [project]
-    status: planned
+    status: ready
     tasks:
       - { id: init, n: 1, title: uv init and the venv via pet }
       - { id: write, n: 2, title: Write with basedpyright }
@@ -325,8 +325,8 @@ projects:
     minutes: 75
     languages: [Typst, LaTeX]
     vscode: "Tinymist, LaTeX Workshop"
-    tags: [project, gui]
-    status: planned
+    tags: [project]
+    status: ready
     tasks:
       - { id: skeleton, n: 1, title: Typst skeleton with preview }
       - { id: figures, n: 2, title: Figures from image-dired }
@@ -341,7 +341,7 @@ projects:
     languages: [Markdown]
     vscode: "Markdown preview, multi-file replace"
     tags: [project, remote]
-    status: planned
+    status: ready
     tasks:
       - { id: pages, n: 1, title: Markdown pages with preview }
       - { id: build, n: 2, title: Static build in compile }
@@ -357,7 +357,7 @@ projects:
     languages: [Rust, Python, OCaml, Typst]
     vscode: "multi-root workspace, Remote-SSH"
     tags: [project, remote]
-    status: planned
+    status: ready
     tasks:
       - { id: tabs, n: 1, title: Multi-root project and a tab per language }
       - { id: rust-build, n: 2, title: Fix the Rust build }
@@ -374,7 +374,7 @@ projects:
     languages: [Org, Rust, Python, OCaml]
     vscode: "Jupyter, loosely"
     tags: [project, remote]
-    status: planned
+    status: ready
     tasks:
       - { id: skeleton, n: 1, title: Org skeleton }
       - { id: benchmark, n: 2, title: A shell block runs the Rust benchmark }
@@ -390,7 +390,7 @@ projects:
     languages: [Rust, Python]
     vscode: "multi-file replace, refactor preview"
     tags: [project]
-    status: planned
+    status: ready
     tasks:
       - { id: find, n: 1, title: Find every use with consult-ripgrep }
       - { id: wgrep, n: 2, title: Export and wgrep rename }

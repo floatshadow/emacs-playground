@@ -52,7 +52,7 @@ rust-mode:
 emacs-lisp-mode:
   - [C-M-x, evaluate the form around the cursor]
   - [C-x C-e, evaluate the expression before the cursor]
-  - [M-x eval-buffer, evaluate the whole file]
+  - [C-c C-e, evaluate the region or the whole file]
   - [C-h f, describe the function under the cursor]
   - [M-., go to definition]
 
@@ -141,6 +141,7 @@ compilation-mode:
 grep-mode:
   - [RET, visit this match]
   - [n / p, next / previous match]
+  - [C-x C-q, edit the matches (wgrep)]
   - [g, search again]
   - [q, close]
 
@@ -177,3 +178,282 @@ completion-list-mode:
 special-mode:
   - [q, close]
   - [g, refresh]
+
+# --- p8 ---
+typst-ts-mode:
+  - [C-c C-c, compile to PDF]
+  - [C-c C-w, "watch: rebuild on save"]
+  - [C-c C-p, open the PDF]
+  - [M-n / M-p, next / previous problem]
+  - [C-c C-x @, cite a reference]
+
+LaTeX-mode:
+  - [C-c C-c, build (LaTeXMk) or view]
+  - [C-c C-e, insert an environment]
+  - [C-c C-s, insert a section]
+  - [C-c ), reference a label]
+  - ["C-c `", next error]
+  - [C-c C-v, show this line in the PDF]
+
+bibtex-mode:
+  - [C-c C-c, tidy this entry]
+  - [C-c C-b, new entry (asks the type)]
+  - [C-M-e / C-M-a, next / previous entry]
+
+pdf-view-mode:
+  - [n / p, next / previous page]
+  - [+ / -, zoom]
+  - [o, outline]
+  - [C-s, search the PDF]
+  - [M-s s, source of the match]
+  - [q, close]
+
+pdf-outline-buffer-mode:
+  - [RET, go there]
+  - [M-RET, go there and close]
+  - [q, close the outline]
+
+image-mode:
+  - [i + / i -, zoom in / out]
+  - [i r, rotate]
+  - [n / p, next / previous image]
+  - [C-c C-c, picture or text]
+  - [q, close]
+
+image-dired-thumbnail-mode:
+  - [RET, show full size]
+  - [q, close]
+
+eww-mode:
+  - [g, reload]
+  - [l, back]
+  - [q, close]
+
+TeX-output-mode:
+  - ["C-c `", next error]
+  - [q, close]
+
+# --- p9 ---
+org-mode:
+  - [TAB / S-TAB, fold this heading / the whole file]
+  - [C-c C-n / C-c C-p, next / previous heading]
+  - [M-<left> / M-<right>, promote / demote]
+  - [M-<up> / M-<down>, move the subtree]
+  - [M-RET, new heading or item]
+  - [C-c C-t, TODO state]
+  - [C-c C-s / C-c C-d, schedule / deadline]
+  - [C-c C-c, act at point (run a block)]
+  - ["C-c '", edit the block]
+  - [C-c C-e, export]
+
+org-agenda-mode:
+  - [n / p, next / previous line]
+  - [RET, visit the item]
+  - [t, change state]
+  - [S-<right> / S-<left>, a day later / earlier]
+  - [q, close]
+
+org-capture-mode:
+  - [C-c C-c, file it]
+  - [C-c C-w, file under another heading]
+  - [C-c C-k, throw it away]
+
+org-src-mode:
+  - ["C-c '", put it back]
+  - [C-c C-k, throw the edits away]
+
+org-roam-mode:
+  - [RET, visit the note]
+  - [TAB, fold a section]
+  - [g, refresh]
+  - [q, close]
+
+# --- p11 ---
+tar-mode:
+  - [RET, open the member]
+  - [n / p, next / previous member]
+  - [C-x C-s, write the archive]
+  - [q, close]
+
+archive-mode:
+  - [RET, open the member]
+  - [n / p, next / previous member]
+  - [C-x C-s, write the archive]
+  - [q, close]
+
+# --- p10 ---
+ediff-mode:
+  - [n / p, next / previous difference]
+  - [a / b, copy A into B / B into A]
+  - [w a / w b, save A / save B]
+  - ["|", side by side or stacked]
+  - ["?", every key]
+  - [q, quit]
+
+calc-mode:
+  - [RET, enter the number]
+  - ["'", type a formula]
+  - [u c / u s, convert / simplify units]
+  - [a s, simplify]
+  - [U, undo]
+  - [q, quit]
+
+inferior-emacs-lisp-mode:
+  - [RET, evaluate]
+  - [M-p / M-n, earlier / later input]
+  - [C-c C-b, choose the buffer expressions run in]
+
+occur-edit-mode:
+  - [M-%, replace in every listed line]
+  - [C-c C-c, back to the list]
+
+reb-mode:
+  - [C-c C-s / C-c C-r, next / previous match]
+  - [C-c C-w, copy the regexp]
+  - [C-c TAB, change the syntax]
+  - [C-c C-q, quit]
+
+edmacro-mode:
+  - [C-c C-c, keep the edited macro]
+  - [C-x k RET, throw the edit away]
+
+proced-mode:
+  - [g, refresh]
+  - [k, send a signal]
+  - [s c, sort by CPU]
+  - [q, quit]
+
+timer-list-mode:
+  - [c, cancel this timer]
+  - [q, quit]
+
+# --- p4-5 ---
+magit-status-mode:
+  - [TAB, show or hide the section]
+  - [M-2 / M-4, fold to files / open every hunk]
+  - [s / u, stage / unstage at point]
+  - [k, discard at point]
+  - [c c, commit]
+  - [l l, log]
+  - [b b / b c, check out / create a branch]
+  - [z z / z p, stash / pop]
+  - ["?", every menu]
+
+magit-log-mode:
+  - [n / p, next / previous commit]
+  - [RET, show the commit]
+  - [SPC, scroll the commit]
+  - [q, close]
+
+magit-revision-mode:
+  - [TAB, show or hide a file's diff]
+  - [RET, visit the change in the file]
+  - [q, close]
+
+magit-log-select-mode:
+  - [C-c C-c, pick the commit at point]
+  - [C-c C-k, cancel]
+
+git-rebase-mode:
+  - [n / p, next / previous line]
+  - [s / f, squash / fix up into the commit above]
+  - [w / d, reword / drop]
+  - [M-p / M-n, move the commit up / down]
+  - [C-c C-c, run the rebase]
+  - [C-c C-k, abandon it]
+
+magit-blame-mode:
+  - [RET, show the commit of this line]
+  - [n / p, next / previous heading]
+  - [q, stop blaming]
+
+smerge-mode:
+  - [C-c ^ n / C-c ^ p, next / previous conflict]
+  - [C-c ^ u / C-c ^ l, keep upper / lower]
+  - [C-c ^ a, keep both]
+  - [C-c ^ RET, keep the version at the cursor]
+  - [C-c ^ E, resolve in ediff]
+
+git-timemachine-mode:
+  - [p / n, previous / next version]
+  - [g, version number N]
+  - [w, copy the short hash]
+  - [b, blame this version]
+  - [q, close]
+
+embark-collect-mode:
+  - [RET, default action]
+  - [C-., act on the candidate]
+  - [q, close]
+
+# --- p6-7 ---
+eat-mode:
+  - ["C-c C-e", "Emacs keys: move, search, copy"]
+  - ["C-c C-j", "keys to the program again"]
+  - ["C-c M-d", "char mode: every key to the program"]
+  - ["C-c C-k", "kill the program (Emacs keys)"]
+  - ["C-x b", "leave it running"]
+vterm-mode:
+  - ["C-c C-t", "copy mode: Emacs keys"]
+  - ["C-q", "send the next key as is"]
+  - ["C-x b", "leave it running"]
+eshell-mode:
+  - ["M-r", "search earlier commands"]
+  - ["M-p / M-n", "earlier / later command"]
+  - ["C-c C-c", "interrupt the command"]
+  - ["TAB", "complete"]
+  - ["C-c C-p", "previous output"]
+inferior-python-mode:
+  - ["RET", "run the line"]
+  - ["M-p / M-n", "earlier / later input"]
+  - ["C-c C-c", "interrupt"]
+  - ["C-c C-z", "back to your file"]
+utop-mode:
+  - ["RET", "evaluate (end the phrase with ;;)"]
+  - ["M-p / M-n", "earlier / later input"]
+  - ["TAB", "complete"]
+  - ["C-c C-z", "back to the source"]
+tuareg-mode:
+  - ["C-c C-t", "type at point"]
+  - ["C-c C-e", "send the phrase to utop"]
+  - ["C-c C-c", "dune build"]
+  - ["C-c C-r", "dune runtest"]
+  - ["C-c C-p", "dune promote"]
+  - ["M-.", "go to definition"]
+python-ts-mode:
+  - ["C-c C-p", "start a Python REPL"]
+  - ["C-c C-c", "send the buffer"]
+  - ["C-c C-r", "send the region"]
+  - ["C-c C-z", "go to the REPL"]
+  - ["C-c l a", "code actions"]
+  - ["M-.", "go to definition"]
+flymake-diagnostics-buffer-mode:
+  - ["RET", "go to the problem"]
+  - ["SPC", "show it, stay here"]
+  - ["g", "refresh"]
+  - ["q", "close"]
+flymake-project-diagnostics-mode:
+  - ["RET", "go to the problem"]
+  - ["g", "refresh"]
+  - ["q", "close"]
+dape-repl-mode:
+  - ["n RET", "next line"]
+  - ["s RET", "step in"]
+  - ["o RET", "step out"]
+  - ["c RET", "continue"]
+  - ["C-x C-a q", "end the session"]
+
+# --- p12-13 ---
+Custom-mode:
+  - [TAB, next button or field]
+  - [RET, press the button under the cursor]
+  - [C-x C-s, save to custom.el]
+  - [q, close]
+
+package-menu-mode:
+  - [RET, describe the package]
+  - [i, mark for installation]
+  - [d, mark for deletion]
+  - [U, mark every upgrade]
+  - [x, do what is marked]
+  - [q, close the list]

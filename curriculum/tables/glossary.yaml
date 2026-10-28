@@ -71,3 +71,80 @@ ESC: "The Escape key. Esc then a key is the same as Meta with that key."
 checkpoint: "A snapshot the playground takes of your files and windows when a step starts. Reset this step goes back to it."
 Rescue: "The Rescue me button: leaves prompts, searches and macros, widens, and closes extra windows. It never touches your files."
 ticker: "The strip under the screen that names every command your keys ran, with a short explanation."
+
+# --- p9 ---
+Org: "Org mode: plain-text files with headings, TODO items, tables and runnable code blocks, and the tools that work on them (agenda, export)."
+subtree: "An Org heading together with its body and every heading below it. Org folds, moves, cuts and narrows subtrees as one piece."
+agenda: "The Org agenda: a view built from the TODO items, schedules and deadlines of all your Org files. It is a buffer, not a file."
+capture: "Org capture: write a note or task from wherever you are and file it into an Org file without leaving what you were doing."
+timestamp: "A date in angle brackets, like <2026-11-02 Mon>. After SCHEDULED: or DEADLINE: it puts the heading on the agenda on that day."
+tag: "A word between colons at the end of an Org heading, like :writing:. The agenda can collect everything with one tag."
+Babel: "The part of Org that runs code blocks and puts their results into the file, passing results from one block to the next."
+code block: "Lines between #+begin_src LANGUAGE and #+end_src in an Org file. C-c C-c runs it; its output appears under #+RESULTS:."
+tangle: "Write the code blocks of an Org file out to source files (C-c C-v t), so prose and code live in one document."
+export: "Turn an Org file into another format, such as HTML, PDF through LaTeX, Beamer slides or Markdown (C-c C-e)."
+org-roam: "A package that keeps a network of small Org notes linked by id, with a list of backlinks for each note."
+backlink: "A link to the note you are reading from another note. org-roam lists them in its side buffer."
+literate configuration: "A configuration written as an Org document: prose that explains each setting, with the code in blocks tangled to .el files."
+
+# --- p11 ---
+hook: "A list of functions Emacs runs at a known moment: when a mode starts, after a save, when a build finishes. Packages connect by adding functions to each other's hooks."
+wdired: "Writable Dired: C-x C-q in a listing makes the file names editable text; C-c C-c renames the files as edited."
+indirect buffer: "A second buffer that shares its text with another (C-x 4 c). Edits show in both, but each has its own cursor, narrowing and mode."
+user-lisp: "The folder emacs.d/user-lisp/ for your own Emacs Lisp. Emacs 31 compiles it at startup and loads only what its ;;;###autoload lines name."
+
+# --- p8 ---
+label: "A name such as eq:1 or sec:model attached to a numbered thing in LaTeX with \\label{...}, so the text can refer to it with \\ref{...} and the number follows when things move."
+input method: "A way of typing characters that are not on the keyboard: while it is on, what you type is converted, such as \\alpha to α (TeX) or pinyin to Chinese (pyim). C-\\ turns it on and off."
+
+# --- p10 ---
+ediff: "Emacs's tool for comparing two or three versions of a file, one difference at a time, and merging them."
+RPN: "Reverse Polish notation: numbers first, then the operation. 2 RET 3 + is 2 + 3. Calc works this way unless you type a formula after '."
+TRAMP: "The part of Emacs that opens files and runs commands on other machines through paths such as /ssh:box:/var/log."
+REPL: "Read-eval-print loop: a prompt where you type an expression, it is evaluated, and the value is printed. ielm is Emacs's own."
+
+# --- p4-5 ---
+candidate: "One entry in a completion list: a command, file, buffer or line you can pick with RET."
+vertico: "The vertical completion list in every prompt (Part 4): C-n and C-p move, RET picks, M-RET takes what you typed."
+orderless: "The matching rule of the completion list: space-separated words in any order, ! to exclude a word, = to match it literally."
+marginalia: "The notes beside each candidate in a list: a command's key and documentation, a file's size and age."
+consult: "Searching commands built on the completion list, with a live preview: M-s l lines, M-s r the project, M-g i definitions."
+embark: "Acting on things: C-. offers actions for the thing at point or the highlighted candidate, like a right-click menu."
+corfu: "The completion popup in buffers: candidates appear under the cursor as you type; RET or TAB takes one."
+cape: "Extra completion sources for the popup: words from your buffers (Dabbrev) and file names (File)."
+tempel: "The snippet engine: M-+ inserts a template whose fields you fill in, moving between them with TAB."
+snippet: "A template of code with fields to fill in, such as a function's name, parameters and body."
+Magit: "A Git client inside Emacs. C-x g opens the status of the current repository; single letters stage, commit, branch and more."
+hunk: "One block of changed lines in a diff, with a few unchanged lines around it. Magit stages and discards hunk by hunk."
+staging area: "Git's list of changes for the next commit (also called the index). s in Magit adds the change at point to it, u takes it out."
+smerge: "The minor mode for files with merge conflicts: C-c ^ keys keep one version or both, conflict by conflict."
+diff-hl: "Marks in the margin for lines changed since the last commit, with keys to jump between those changes and revert one."
+git-timemachine: "A read-only view of a file as it was at any commit: p and n step through its history, q leaves (C-x v t)."
+
+# --- p6-7 ---
+next-error: "The command behind M-g M-n: it walks any list of locations (build errors, search matches, references), opening each at its line."
+terminal emulator: "A program that behaves like a terminal, so shells and full-screen programs run in it. eat and vterm do this inside an Emacs buffer."
+Eshell: "A shell written in Emacs Lisp: shell commands, Lisp and Emacs commands on one command line. M-x eshell."
+language server: "A program that understands one language for any editor: completion, definitions, references, errors. rust-analyzer, ocaml-lsp, basedpyright."
+Eglot: "Emacs's built-in client for language servers. It starts the right server for a project and turns its answers into Emacs features."
+eldoc: "Shows what is known about the thing at point (signature, type, problems) in the echo area; C-h . opens it in full."
+inlay hint: "Grey text a language server adds in the code, such as a variable's type. It is not in the file."
+diagnostic: "An error, warning or note a checker reports at a place in the code. Flymake shows them."
+formatter: "A program that rewrites code into its standard layout: rustfmt, ocamlformat, ruff."
+virtual environment: "A project's own Python and packages, usually in .venv. uv creates it; pet finds it."
+breakpoint: "A line where the debugger stops the program, so you can look at its values. C-x C-a b."
+expect test: "A test that prints something and states what it should print; dune shows the difference and can accept the new output."
+
+# --- proj-5-8 ---
+directory-local variables: "Settings in a .dir-locals.el file that apply to every file under its directory, such as the compile command of one project root."
+
+# --- p12-13 ---
+default directory: "The folder a buffer belongs to (default-directory). Programs started from the buffer run there, so in a remote buffer they run on the remote machine."
+multi-hop: "A TRAMP path that chains connections with |, such as /ssh:box|sudo::/etc/hosts: ssh to box, then sudo there."
+package archives: "Servers that offer Emacs packages to package.el: GNU ELPA, NonGNU ELPA and MELPA."
+theme: "A named set of colours and styles for every face. M-x load-theme turns one on."
+face: "A named text style: font, size, colour, weight. Themes set faces; M-x describe-face shows the one under the cursor."
+
+# --- proj-1-4 ---
+SyncTeX: "A map between a LaTeX source and its PDF, written during the build, so the editor can jump from a line to its place in the PDF and back."
+annotated tag: "A git tag with its own message, author and date, the usual kind for releases. A plain tag is only a name for a commit."
