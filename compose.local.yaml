@@ -41,9 +41,9 @@ services:
       start_period: 60s
     stop_grace_period: 20s
   # The shared remote box (deployment.md §6). It starts with the stack so
-  # the TRAMP and deploy lessons find it; logins need the per-session key
-  # sessiond writes to ./workspace/.playground/ssh, which is milestone M6
-  # (TODO(sessiond, deployment.md §6)). Until then sshd runs with no keys.
+  # the TRAMP and deploy lessons find it; it authorises the key pair
+  # sessiond generates in ./workspace/.playground/ssh (authorized_keys, read
+  # at every login), and the session's ~/.ssh/config names it "box".
   remote-box:
     image: ${IMAGE_BASE:-ghcr.io/floatshadow/emacs-playground}/remote-box:${TAG:-latest}
     build:

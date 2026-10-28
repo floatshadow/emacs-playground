@@ -13,7 +13,7 @@ flowchart TB
   subgraph net_abc [network: pg-net-abc, internal]
     G2[gateway]
     S1[pg-session-abc :7000]
-    R1[remote box :22, M6]
+    R1[remote box :22]
   end
   subgraph net_def [network: pg-net-def, internal]
     G4[gateway]
@@ -28,7 +28,7 @@ flowchart TB
   C --> G
 ```
 
-Server mode. The gateway is the only component on more than one network. Every session has its own internal network `pg-net-<id>` (deployment.md §7) that only the gateway and that session (later also its remote box) join: a session reaches the gateway (fixtures, progress, stuck reports) and nothing else of the playground. sessiond also refuses every request but `GET /healthz` that lacks its session's proxy secret, which the gateway adds (deployment.md §9.3), so reaching another session's port is not enough to drive it.
+Server mode. The gateway is the only component on more than one network. Every session has its own internal network `pg-net-<id>` (deployment.md §7) that only the gateway, that session and its remote box join: a session reaches the gateway (fixtures, progress, stuck reports) and nothing else of the playground. sessiond also refuses every request but `GET /healthz` that lacks its session's proxy secret, which the gateway adds (deployment.md §9.3), so reaching another session's port is not enough to drive it.
 
 Local mode. One session container and one remote box (alias `box`) started by Compose on the shared internal `sessions` network, no proxy secret, no socket proxy or Caddy. `make dev` runs the session on the host network and the gateway from source.
 

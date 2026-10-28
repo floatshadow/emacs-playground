@@ -103,9 +103,15 @@ func withBody[Req, Res any](w http.ResponseWriter, r *http.Request, f func(conte
 // errNotActiveStep answers ops naming a step that is not the active one.
 func errNotActiveStep() error { return httpx.Conflict("that step is not the active step") }
 
+// errLap answers hint, demo start and skip during a lap.
+func errLap() error { return httpx.Conflict("hints, demonstrations and skips are off during the lap") }
+
 func (s *Server) rpcHint(_ context.Context, req protocol.HintRequest) (any, error) {
 	if req.StepID == "" || req.Level < 1 {
 		return nil, httpx.BadRequest("stepId and a level of at least 1 are required")
+	}
+	if s.engine.Lap() != nil {
+		return nil, errLap()
 	}
 	if !s.engine.Hint(req.StepID, req.Level) {
 		return nil, httpx.Conflict("that step is not part of the active lesson")
@@ -467,6 +473,9 @@ func (s *Server) rpcDemo(ctx context.Context, req protocol.DemoRequest) (any, er
 		}
 		return protocol.DemoResult{}, nil
 	}
+	if s.engine.Lap() != nil {
+		return nil, errLap()
+	}
 	restored := s.restartIfDirty(ctx, *act)
 	if !s.engine.StartDemo(req.StepID) {
 		return nil, errNotActiveStep()
@@ -490,6 +499,9 @@ func (s *Server) rpcSkip(ctx context.Context, req protocol.SkipRequest) (any, er
 	act := s.engine.Active()
 	if act == nil || req.StepID == "" || act.StepID != req.StepID {
 		return nil, errNotActiveStep()
+	}
+	if s.engine.Lap() != nil {
+		return nil, errLap()
 	}
 	if !s.skipMu.TryLock() {
 		return nil, httpx.Conflict("a skip is already running")

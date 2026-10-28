@@ -358,6 +358,13 @@ func TestServerFakeMode(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(ws, ".git")); err != nil {
 		t.Fatal("workspace not a git repository")
 	}
+	// The remote box key pair, where the local box reads authorized_keys;
+	// fake mode leaves ~/.ssh alone, so no alias and no box.
+	for _, f := range []string{"id_ed25519", "id_ed25519.pub", "authorized_keys"} {
+		if _, err := os.Stat(filepath.Join(ws, ".playground", "ssh", f)); err != nil {
+			t.Fatalf("box key file %s: %v", f, err)
+		}
+	}
 
 	// Health and status.
 	if code, body := ts.get("/healthz"); code != 200 || !strings.Contains(string(body), `"ok":true`) {
@@ -365,7 +372,7 @@ func TestServerFakeMode(t *testing.T) {
 	}
 	var st protocol.StatusResult
 	if ts.rpc("status", nil, &st) != 200 || st.Emacs.Version != "fake" || !st.Emacs.Agent || st.Mode != protocol.FrameTerminal ||
-		st.Versions["EMACS_VERSION"] != "31.1" || st.SessionID != "s1" {
+		st.Versions["EMACS_VERSION"] != "31.1" || st.SessionID != "s1" || st.RemoteBox || st.Lap != nil {
 		t.Fatalf("status %+v", st)
 	}
 	if code, body := ts.get("/status"); code != 200 || !strings.Contains(string(body), `"sessionId":"s1"`) {

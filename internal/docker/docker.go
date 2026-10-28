@@ -95,6 +95,7 @@ type ContainerSpec struct {
 	Tmpfs          map[string]string
 	ReadOnlyRootfs bool
 	CapDrop        []string
+	CapAdd         []string
 	SecurityOpt    []string
 	Runtime        string
 	Init           bool
@@ -172,6 +173,8 @@ func Harden(spec *ContainerSpec) {
 	// Builds need exec in /tmp; sessiond creates /run/playground as learner.
 	spec.Tmpfs["/tmp"] = "rw,exec,nosuid,nodev,size=1g,mode=1777"
 	spec.Tmpfs["/run"] = "rw,noexec,nosuid,nodev,size=64m,mode=1777"
+	// ~/.ssh (the remote box alias and key) is a link into ~/.cache/ssh,
+	// which pg-entrypoint creates.
 	spec.Tmpfs["/home/learner/.cache"] = "rw,exec,nosuid,nodev,size=2g,uid=1000,gid=1000,mode=0755"
 	spec.CapDrop = []string{"ALL"}
 	spec.SecurityOpt = []string{"no-new-privileges:true"}
@@ -186,6 +189,42 @@ func Harden(spec *ContainerSpec) {
 	spec.Ulimits = []Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}}
 	if spec.StopTimeout == 0 {
 		spec.StopTimeout = 20
+	}
+}
+
+// BoxCaps are the only capabilities of a remote box: sshd generates host
+// keys, chroots its privilege-separated child and switches to the learner's
+// account; sudo (TRAMP's /ssh:box|sudo::) needs the same, nginx (P5's
+// site on port 80) binds a low port and drops to its worker user.
+var BoxCaps = []string{"CHOWN", "DAC_OVERRIDE", "FOWNER", "SETUID", "SETGID", "SYS_CHROOT", "AUDIT_WRITE", "KILL", "NET_BIND_SERVICE"}
+
+// HardenBox applies the remote box profile (deployment.md §6, §9.6): all
+// capabilities dropped but BoxCaps, an init, bounded processes and memory,
+// no restart. sshd runs as root, so the root filesystem stays writable
+// (host keys, the deploy user's home); nothing persists.
+func HardenBox(spec *ContainerSpec) {
+	if spec.Tmpfs == nil {
+		spec.Tmpfs = map[string]string{}
+	}
+	spec.Tmpfs["/tmp"] = "rw,exec,nosuid,nodev,size=512m,mode=1777"
+	spec.CapDrop = []string{"ALL"}
+	spec.CapAdd = append([]string(nil), BoxCaps...)
+	spec.Init = true
+	if spec.Memory == 0 {
+		spec.Memory = 2 << 30 // remote builds and rust-analyzer (12.2)
+	}
+	if spec.MemorySwap == 0 {
+		spec.MemorySwap = spec.Memory
+	}
+	if spec.PidsLimit == 0 {
+		spec.PidsLimit = 1024
+	}
+	if spec.NanoCPUs == 0 {
+		spec.NanoCPUs = 1e9
+	}
+	spec.Ulimits = []Ulimit{{Name: "nofile", Soft: 65536, Hard: 65536}}
+	if spec.StopTimeout == 0 {
+		spec.StopTimeout = 5
 	}
 }
 
@@ -212,6 +251,7 @@ func CreateOptions(spec ContainerSpec) client.ContainerCreateOptions {
 		NetworkMode:    container.NetworkMode(spec.Network),
 		ReadonlyRootfs: spec.ReadOnlyRootfs,
 		CapDrop:        spec.CapDrop,
+		CapAdd:         spec.CapAdd,
 		SecurityOpt:    spec.SecurityOpt,
 		Tmpfs:          spec.Tmpfs,
 		Runtime:        spec.Runtime,

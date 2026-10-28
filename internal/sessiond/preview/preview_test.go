@@ -330,3 +330,58 @@ func TestMerge(t *testing.T) {
 		}
 	}
 }
+
+func TestWatcherNestedGit(t *testing.T) {
+	ws := t.TempDir()
+	mk(t, ws, "projects/hello/.git/HEAD", "ref: refs/heads/main\n")
+	mk(t, ws, ".git/HEAD", "ref: refs/heads/main\n")
+	c := &collector{}
+	w, err := NewWatcher(ws, c.emit, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.SetWindow(50 * time.Millisecond)
+	var mu sync.Mutex
+	gits := 0
+	w.OnGit = func() { mu.Lock(); gits++; mu.Unlock() }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go w.Run(ctx)
+	defer w.Close()
+	count := func() int { mu.Lock(); defer mu.Unlock(); return gits }
+
+	// A commit rewrites files at the top of the nested .git: one OnGit, no
+	// file events.
+	mk(t, ws, "projects/hello/.git/index", "x")
+	mk(t, ws, "projects/hello/.git/COMMIT_EDITMSG", "msg")
+	time.Sleep(250 * time.Millisecond)
+	if count() != 1 || len(c.get()) != 0 {
+		t.Fatalf("commit: %d OnGit, events %v", count(), c.get())
+	}
+	// The workspace's own .git stays ignored.
+	mk(t, ws, ".git/index", "x")
+	time.Sleep(250 * time.Millisecond)
+	if count() != 1 {
+		t.Fatalf("workspace .git: %d", count())
+	}
+	// git init in a new directory is noticed, and then its commits.
+	mk(t, ws, "other/README", "r")
+	time.Sleep(250 * time.Millisecond)
+	if err := os.Mkdir(filepath.Join(ws, "other/.git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(250 * time.Millisecond)
+	if count() != 2 {
+		t.Fatalf("git init: %d", count())
+	}
+	mk(t, ws, "other/.git/index", "x")
+	time.Sleep(250 * time.Millisecond)
+	if count() != 3 {
+		t.Fatalf("commit in the new repository: %d", count())
+	}
+	for _, e := range c.get() {
+		if strings.Contains(e, ".git") {
+			t.Fatalf("file event for .git: %v", c.get())
+		}
+	}
+}

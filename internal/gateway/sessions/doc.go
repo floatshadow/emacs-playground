@@ -32,9 +32,12 @@
 // PG_SESSION_TOKEN; only their SHA-256 is stored. Authenticate maps a bearer
 // token back to its session for /internal.
 //
-// TODO(gateway, deployment.md §6): the per-learner remote box (needs the
-// learner's public key from the workspace) and TODO(gateway,
-// deployment.md §9.2): the registries egress proxy and HTTP(S)_PROXY, with
+// The docker backend gives each session a remote box (deployment.md §6):
+// pg-box-<id> on the session network with a fresh ed25519 key pair, the
+// private half for sessiond as PG_BOX_KEY.
+//
+// TODO(gateway, deployment.md §9.2): the registries egress proxy and
+// HTTP(S)_PROXY, with
 // NO_PROXY=gateway (the gateway refuses /internal requests that carry
 // X-Forwarded-For in server mode).
 package sessions

@@ -30,6 +30,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/sessiond/preview"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/pty"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/sshbox"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/supervisor"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/vnc"
@@ -82,8 +83,10 @@ type Server struct {
 	eventsH  *events.Handler
 
 	wsCount atomic.Int64
-	done    chan struct{}
-	stateMu sync.Mutex
+	// boxReady: the box alias is set up (sshbox.Setup succeeded).
+	boxReady atomic.Bool
+	done     chan struct{}
+	stateMu  sync.Mutex
 	// skipMu serialises rpc skip.
 	skipMu sync.Mutex
 	bg     sync.WaitGroup
@@ -166,6 +169,7 @@ func (s *Server) Run(ctx context.Context) error {
 		s.log.Warn("file watcher unavailable", "err", err)
 	} else {
 		s.watcher = w
+		w.OnGit = s.engine.Invalidate
 		defer w.Close()
 	}
 
@@ -301,7 +305,7 @@ func (s *Server) wire() {
 		Root:      s.preview.Root(),
 		Workspace: cfg.Workspace,
 		Checker:   checker{s.agent},
-		Shell:     steps.ExecShell{Env: append([]string{"PG_SESSION_TOKEN=", "PG_PROXY_SECRET="}, checkpoint.SafeDirectoryEnv...)},
+		Shell:     s.shell(),
 		Log:       log.With("component", "steps"),
 		Hooks: steps.Hooks{
 			Emit: func(ev protocol.Event) { s.bus.Publish(ev) },
@@ -327,6 +331,7 @@ func (s *Server) wire() {
 	s.loader = &scenario.Loader{
 		Workspace: cfg.Workspace, Root: s.preview.Root(), CacheDir: filepath.Join(s.playgroundDir(), "cache"),
 		Fetch: fetch, Agent: s.agent, Restart: s.sup, Modules: s.modules, Engine: s.engine,
+		Git: checkpoint.ExecRunner{Bin: cfg.GitBin}, Shell: s.shell(),
 		Checkpoint:  s.stepCheckpoint,
 		RestoreStep: s.restoreStep,
 		PlayDemo:    s.playDemo,
@@ -431,6 +436,7 @@ func (s *Server) hello(replayed bool) *protocol.HelloEvent {
 		Step:      s.engine.Active(),
 		Modules:   s.modules.Current(),
 		Replayed:  replayed,
+		Lap:       s.engine.Lap(),
 	}
 }
 
@@ -444,6 +450,8 @@ func (s *Server) status() protocol.StatusResult {
 		Modules:          s.modules.Current(),
 		Versions:         readVersions(s.cfg.VersionsFile),
 		ActiveWebSockets: int(s.wsCount.Load()),
+		Lap:              s.engine.Lap(),
+		RemoteBox:        s.boxReady.Load(),
 	}
 }
 
@@ -632,10 +640,44 @@ func (s *Server) initWorkspace(ctx context.Context) error {
 			errs = append(errs, err)
 		}
 	}
-	// TODO(sessiond, deployment.md §6): generate the per-session SSH key pair
-	// under /work/.playground/ssh and write the "box" Host alias to
-	// ~/.ssh/config once the remote box exists (milestone M6).
+	if err := s.setupBox(); err != nil {
+		errs = append(errs, err)
+	}
 	return errors.Join(errs...)
+}
+
+// shell runs shell conditions and setup.run as the learner, without
+// sessiond's secrets.
+func (s *Server) shell() steps.ExecShell {
+	return steps.ExecShell{Env: append([]string{"PG_SESSION_TOKEN=", "PG_PROXY_SECRET=", "PG_BOX_KEY="}, checkpoint.SafeDirectoryEnv...)}
+}
+
+// setupBox writes the remote box's key pair and the "box" alias
+// (deployment.md §6). Fake mode keeps the developer's ~/.ssh untouched.
+func (s *Server) setupBox() error {
+	if s.cfg.BoxHost == "" {
+		return nil
+	}
+	sshDir := s.cfg.SSHDir
+	if sshDir == "" && !s.opt.Fake {
+		if home, err := os.UserHomeDir(); err == nil {
+			sshDir = filepath.Join(home, ".ssh")
+		}
+	}
+	res, err := sshbox.Setup(sshbox.Config{
+		KeyDir: filepath.Join(s.playgroundDir(), "ssh"), SSHDir: sshDir,
+		Host: s.cfg.BoxHost, Port: s.cfg.BoxPort, User: s.cfg.BoxUser,
+		PrivateKey: s.cfg.BoxKey, Comment: "playground-" + s.cfg.SessionID,
+	})
+	if err != nil {
+		return fmt.Errorf("remote box key: %w", err)
+	}
+	if !res.ConfigWritten && sshDir != "" {
+		s.log.Warn("~/.ssh/config is the learner's own; the box alias was not written", "dir", sshDir)
+	}
+	s.boxReady.Store(res.ConfigWritten)
+	s.log.Info("remote box alias ready", "host", s.cfg.BoxHost, "generated", res.Generated, "config", res.ConfigWritten)
+	return nil
 }
 
 // copyTree copies a directory tree (files, directories, symlinks),

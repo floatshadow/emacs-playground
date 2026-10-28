@@ -48,15 +48,17 @@ MODULES = [
     "remote", "ui", "input",
 ]
 SCENARIO_KEYS = {"id", "title", "minutes", "mode", "tags", "modules", "vscode", "preview",
-                 "remote", "setup", "steps"}
-SETUP_KEYS = {"workspace", "root", "reset", "open", "layout", "eval", "compile"}
+                 "remote", "setup", "steps", "project"}
+SETUP_KEYS = {"workspace", "root", "reset", "open", "layout", "eval", "compile", "repos", "run"}
 STEP_KEYS = {"id", "goal", "detail", "demo", "conditions", "stuck", "checkpoint"}
-KIND_KEYS = ["event", "elisp", "file", "shell", "layout", "state", "all", "any", "not"]
+KIND_KEYS = ["event", "elisp", "file", "shell", "buffer", "layout", "state", "all", "any", "not"]
 COND_KEYS = set(KIND_KEYS) | {"id", "text", "hint"}
 EVENT_KEYS = {"command", "min", "since"}
-FILE_KEYS = {"path", "exists", "contains", "not_contains", "regex", "json_path", "equals"}
+FILE_KEYS = {"path", "exists", "contains", "not_contains", "regex", "json_path", "equals", "host"}
 FILE_PREDS = ["exists", "contains", "not_contains", "regex", "json_path"]
-SHELL_KEYS = {"run", "cwd", "timeout"}
+SHELL_KEYS = {"run", "cwd", "timeout", "host"}
+BUFFER_KEYS = {"name", "mode", "contains", "process", "modified"}
+MAX_SHELL_TIMEOUT = 300  # protocol.MaxShellTimeout
 STUCK_KEYS = {"id", "when", "say", "title", "kind"}
 STUCK_WHEN = {"minibuffer_seconds", "idle_seconds", "step_seconds", "quits_in_window",
               "unbound_repeats"}
@@ -303,6 +305,18 @@ def check_predicate(where: str, pred, rep: Report, allow_session: bool = False) 
         check_regex(where, rx, rep)
 
 
+def uses_box(c) -> bool:
+    """Whether condition c or a nested one names host box."""
+    if not isinstance(c, dict):
+        return False
+    for k in ("file", "shell"):
+        if isinstance(c.get(k), dict) and "host" in c[k]:
+            return True
+    if uses_box(c.get("not")):
+        return True
+    return any(uses_box(x) for k in ("all", "any") for x in (c.get(k) or []) if isinstance(c.get(k), list))
+
+
 def check_condition(where: str, c, rep: Report, top: bool, ids: set, commands: set) -> None:
     if not isinstance(c, dict):
         rep.err(where, "condition must be a mapping")
@@ -350,7 +364,12 @@ def check_condition(where: str, c, rep: Report, top: bool, ids: set, commands: s
             rep.err(where, f"file wants {sorted(FILE_KEYS)}, got {v!r}")
             return
         p = v.get("path")
-        if not isinstance(p, str) or not p or p.startswith("/") or ".." in p.split("/"):
+        if "host" in v:
+            if v["host"] != "box":
+                rep.err(where, f"file.host must be box, got {v['host']!r}")
+            if not isinstance(p, str) or not p.strip():
+                rep.err(where, "file.path is required")
+        elif not isinstance(p, str) or not p or p.startswith("/") or ".." in p.split("/"):
             rep.err(where, f"file.path must be workspace-relative, got {p!r}")
         preds = [k for k in FILE_PREDS if k in v]
         if len(preds) != 1:
@@ -363,7 +382,23 @@ def check_condition(where: str, c, rep: Report, top: bool, ids: set, commands: s
             check_regex(where, v["regex"], rep)
     elif kind == "shell":
         if not isinstance(v, dict) or set(v) - SHELL_KEYS or not v.get("run"):
-            rep.err(where, f"shell wants {{run, cwd?, timeout?}}, got {v!r}")
+            rep.err(where, f"shell wants {{run, cwd?, timeout?, host?}}, got {v!r}")
+            return
+        if "host" in v and v["host"] != "box":
+            rep.err(where, f"shell.host must be box, got {v['host']!r}")
+        t = v.get("timeout", 0)
+        if not isinstance(t, int) or isinstance(t, bool) or t < 0 or t > MAX_SHELL_TIMEOUT:
+            rep.err(where, f"shell.timeout must be between 1 and {MAX_SHELL_TIMEOUT} seconds")
+    elif kind == "buffer":
+        if not isinstance(v, dict) or set(v) - BUFFER_KEYS or not isinstance(v.get("name"), str) or not v["name"]:
+            rep.err(where, f"buffer wants {{name, mode?, contains?, process?, modified?}}, got {v!r}")
+            return
+        if "mode" in v and (not isinstance(v["mode"], str) or not re.fullmatch(r"[^\s()\"';]+", v["mode"])):
+            rep.err(where, f"buffer.mode must be a mode name, got {v['mode']!r}")
+        if "process" in v and v["process"] not in ("running", "none"):
+            rep.err(where, "buffer.process must be running or none")
+        if "modified" in v and not isinstance(v["modified"], bool):
+            rep.err(where, "buffer.modified must be true or false")
     elif kind == "layout":
         if not isinstance(v, str):
             rep.err(where, "layout must be a string")
@@ -458,6 +493,24 @@ def check_scenario(lesson_id: str, ldir: Path, rep: Report, commands: set) -> di
         rv = sc["remote"]
         if not isinstance(rv, dict) or set(rv) != {"box"} or not isinstance(rv["box"], bool):
             rep.err(where, "remote wants {box: bool}")
+    if "project" in sc:
+        pj = sc["project"]
+        if not lesson_id.startswith("projects/"):
+            rep.err(where, "only projects (projects/<dir>) have a project section")
+        if not isinstance(pj, dict) or set(pj) - {"roots", "lapMinutes"}:
+            rep.err(where, "project wants {roots?, lapMinutes?}")
+        else:
+            for r in pj.get("roots") or []:
+                if not isinstance(r, str) or not r or r.startswith("/") or ".." in r.split("/"):
+                    rep.err(where, f"project.roots entries are workspace-relative paths, got {r!r}")
+            lm = pj.get("lapMinutes", 0)
+            if not isinstance(lm, int) or isinstance(lm, bool) or lm < 0:
+                rep.err(where, "project.lapMinutes must be a non-negative integer")
+    box = isinstance(sc.get("remote"), dict) and sc["remote"].get("box") is True
+    for st in sc.get("steps") or []:
+        for c in (st.get("conditions") or []) if isinstance(st, dict) else []:
+            if uses_box(c) and not box:
+                rep.err(where, f"step {st.get('id')!r}: a condition on host box needs remote: {{box: true}}")
 
     setup = sc.get("setup") or {}
     if not isinstance(setup, dict):
@@ -513,6 +566,17 @@ def check_scenario(lesson_id: str, ldir: Path, rep: Report, commands: set) -> di
                 rep.err(where, f"setup.{k}: {e}")
     if "reset" in setup and not isinstance(setup["reset"], bool):
         rep.err(where, "setup.reset must be a boolean")
+    repos = setup.get("repos") or []
+    if not isinstance(repos, list):
+        rep.err(where, "setup.repos must be a list")
+        repos = []
+    for d in repos:
+        if not isinstance(d, str) or not d or d.startswith("/") or ".." in d.split("/"):
+            rep.err(where, f"setup.repos entries are directories under setup.root, got {d!r}")
+        elif d == "." and not root:
+            rep.err(where, "setup.repos: the workspace itself cannot be a nested repository; set setup.root")
+    if "run" in setup and (not isinstance(setup["run"], str) or not setup["run"].strip()):
+        rep.err(where, "setup.run must be a non-empty shell script")
 
     steps = sc.get("steps")
     if not isinstance(steps, list) or not steps:

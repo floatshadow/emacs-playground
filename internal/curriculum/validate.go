@@ -235,7 +235,26 @@ func validateScenario(l *Lesson, r reporter) {
 	if s.Remote != nil && s.Remote.Box && !slices.Contains(s.Tags, protocol.TagRemote) {
 		r.warnf("remote", "lessons that use the box should carry the remote tag")
 	}
+	if s.Project != nil {
+		if !l.Project {
+			r.errorf("project", "only projects (projects/<dir>) have a project section")
+		}
+		for i, root := range s.Project.Roots {
+			checkRelPath(root, "project.roots["+itoa(i)+"]", r)
+		}
+		if s.Project.LapMinutes < 0 {
+			r.errorf("project.lapMinutes", "must not be negative")
+		}
+	}
 	validateSetup(l, r)
+	box := s.Remote != nil && s.Remote.Box
+	for i := range s.Steps {
+		for j := range s.Steps[i].Conditions {
+			if usesBox(&s.Steps[i].Conditions[j]) && !box {
+				r.errorf("steps["+itoa(i)+"].conditions["+itoa(j)+"]", "a condition on host box needs remote: {box: true}")
+			}
+		}
+	}
 
 	if len(s.Steps) == 0 {
 		r.errorf("steps", "at least one step is required")
@@ -335,6 +354,36 @@ func validateSetup(l *Lesson, r reporter) {
 			r.errorf("setup.eval", "%v", err)
 		}
 	}
+	for i, d := range su.Repos {
+		w := "setup.repos[" + itoa(i) + "]"
+		if d != "." && !checkRelPath(d, w, r) {
+			continue
+		}
+		if su.Root == "" && d == "." {
+			r.errorf(w, "the workspace itself cannot be a nested repository; set setup.root")
+		}
+	}
+	if su.Run != "" && strings.TrimSpace(su.Run) == "" {
+		r.errorf("setup.run", "empty script")
+	}
+}
+
+// usesBox reports whether c or a nested condition names host box.
+func usesBox(c *protocol.Condition) bool {
+	switch {
+	case c.File != nil && c.File.Host != "", c.Shell != nil && c.Shell.Host != "":
+		return true
+	case c.Not != nil:
+		return usesBox(c.Not)
+	}
+	for _, list := range [][]protocol.Condition{c.All, c.Any} {
+		for i := range list {
+			if usesBox(&list[i]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // validateFixtures allows only regular files and directories.
@@ -383,7 +432,7 @@ func validateCondition(c *protocol.Condition, w string, top bool, r reporter) {
 	kinds := c.Kinds()
 	switch len(kinds) {
 	case 0:
-		r.errorf(w, "no condition kind (event, elisp, file, shell, layout, state, all, any, not)")
+		r.errorf(w, "no condition kind (event, elisp, file, shell, buffer, layout, state, all, any, not)")
 		return
 	case 1:
 	default:
@@ -413,7 +462,16 @@ func validateCondition(c *protocol.Condition, w string, top bool, r reporter) {
 		}
 	case protocol.CondFile:
 		f := c.File
-		checkRelPath(f.Path, w+".file.path", r)
+		switch f.Host {
+		case "":
+			checkRelPath(f.Path, w+".file.path", r)
+		case protocol.BoxHost:
+			if strings.TrimSpace(f.Path) == "" {
+				r.errorf(w+".file.path", "required")
+			}
+		default:
+			r.errorf(w+".file.host", "must be %q or absent, got %q", protocol.BoxHost, f.Host)
+		}
 		n := 0
 		if f.Exists != nil {
 			n++
@@ -446,11 +504,30 @@ func validateCondition(c *protocol.Condition, w string, top bool, r reporter) {
 		if strings.TrimSpace(sh.Run) == "" {
 			r.errorf(w+".shell.run", "required")
 		}
-		if sh.Cwd != "" {
-			checkRelPath(sh.Cwd, w+".shell.cwd", r)
+		switch sh.Host {
+		case "":
+			if sh.Cwd != "" {
+				checkRelPath(sh.Cwd, w+".shell.cwd", r)
+			}
+		case protocol.BoxHost:
+		default:
+			r.errorf(w+".shell.host", "must be %q or absent, got %q", protocol.BoxHost, sh.Host)
 		}
-		if sh.Timeout < 0 || sh.Timeout > 60 {
-			r.errorf(w+".shell.timeout", "must be between 1 and 60 seconds")
+		if sh.Timeout < 0 || sh.Timeout > protocol.MaxShellTimeout {
+			r.errorf(w+".shell.timeout", "must be between 1 and %d seconds", protocol.MaxShellTimeout)
+		}
+	case protocol.CondBuffer:
+		b := c.Buffer
+		if b.Name == "" {
+			r.errorf(w+".buffer.name", "required")
+		}
+		if b.Mode != "" && !commandRe.MatchString(b.Mode) {
+			r.errorf(w+".buffer.mode", "%q is not a mode name", b.Mode)
+		}
+		switch b.Process {
+		case "", protocol.ProcessRunning, protocol.ProcessNone:
+		default:
+			r.errorf(w+".buffer.process", "must be running or none, got %q", b.Process)
 		}
 	case protocol.CondLayout:
 		if _, err := protocol.ParseLayoutPattern(c.Layout); err != nil {

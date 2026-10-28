@@ -32,10 +32,12 @@ type jsonData struct {
 	Invites  map[string]*Invite  `json:"invites,omitempty"`
 	Sessions map[string]*Session `json:"sessions"`
 	// Progress is user → lesson → step → record.
-	Progress    map[string]map[string]map[string]*StepRecord `json:"progress"`
-	Stuck       []StuckReport                                `json:"stuck,omitempty"`
-	NextStuckID int64                                        `json:"nextStuckId,omitempty"`
-	Audit       []AuditEvent                                 `json:"audit,omitempty"`
+	Progress map[string]map[string]map[string]*StepRecord `json:"progress"`
+	// Laps is user → lesson → lap summary.
+	Laps        map[string]map[string]*LapRecord `json:"laps,omitempty"`
+	Stuck       []StuckReport                    `json:"stuck,omitempty"`
+	NextStuckID int64                            `json:"nextStuckId,omitempty"`
+	Audit       []AuditEvent                     `json:"audit,omitempty"`
 }
 
 // jsonStore keeps everything in memory and rewrites the file on change.
@@ -73,6 +75,9 @@ func OpenJSON(dir string) (Store, error) {
 	}
 	if s.d.Progress == nil {
 		s.d.Progress = map[string]map[string]map[string]*StepRecord{}
+	}
+	if s.d.Laps == nil {
+		s.d.Laps = map[string]map[string]*LapRecord{}
 	}
 	return s, nil
 }
@@ -332,6 +337,9 @@ func (r jsonProgress) DeleteLesson(_ context.Context, userID, lessonID string) e
 	if lessons := r.s.d.Progress[userID]; lessons != nil {
 		delete(lessons, lessonID)
 	}
+	if laps := r.s.d.Laps[userID]; laps != nil {
+		delete(laps, lessonID)
+	}
 	return r.s.save()
 }
 
@@ -339,6 +347,33 @@ func (r jsonProgress) DeleteAll(_ context.Context, userID string) error {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
 	delete(r.s.d.Progress, userID)
+	delete(r.s.d.Laps, userID)
+	return r.s.save()
+}
+
+func (r jsonProgress) Laps(_ context.Context, userID string) ([]LapRecord, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	var out []LapRecord
+	for lesson, rec := range r.s.d.Laps[userID] {
+		c := *rec
+		c.UserID, c.LessonID = userID, lesson
+		out = append(out, c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LessonID < out[j].LessonID })
+	return out, nil
+}
+
+func (r jsonProgress) PutLap(_ context.Context, rec LapRecord) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	laps := r.s.d.Laps[rec.UserID]
+	if laps == nil {
+		laps = map[string]*LapRecord{}
+		r.s.d.Laps[rec.UserID] = laps
+	}
+	c := rec
+	laps[rec.LessonID] = &c
 	return r.s.save()
 }
 

@@ -87,9 +87,9 @@ image-session: ## build only the session image
 # ---- development --------------------------------------------------------------
 
 .PHONY: dev
-dev: web/node_modules ## session container (host network) + gateway from source + Vite on :5173
-	@mkdir -p workspace .dev/data && chmod 777 workspace
-	$(COMPOSE) $(LOCAL_FILES) -f compose.dev.yaml up -d session
+dev: web/node_modules ## session container (host network) and remote box + gateway from source + Vite on :5173
+	@mkdir -p workspace/.playground/ssh .dev/data && chmod 777 workspace workspace/.playground workspace/.playground/ssh
+	$(COMPOSE) $(LOCAL_FILES) -f compose.dev.yaml up -d session remote-box
 	$(GO) run ./cmd/playctl curriculum build curriculum -o .dev/curriculum
 	@trap 'kill 0' EXIT INT TERM; \
 	  $(GO) run ./cmd/gateway -config deploy/config.dev.json & \

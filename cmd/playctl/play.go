@@ -46,6 +46,12 @@ import (
 // with the step still active; then it resets the step (rpc restore {}) and
 // plays the same keys as the learner, requiring the step to complete.
 // -repeat N plays every lesson N times in a row, to expose flaky demos.
+//
+// A selector may name a starting step: "P1@test", "P1@5" (the fifth task),
+// "2.3@save"; the lesson then loads at that step ("Go to this step":
+// its checkpoint, else a fast-forward) and plays from there. -lap plays
+// projects as the "again, without hints" lap (rpc scenario {lap: true}):
+// hints must be refused and the last step must report the lap's time.
 func curriculumPlay(args []string) int {
 	fs := flag.NewFlagSet("curriculum play", flag.ExitOnError)
 	session := fs.String("session", envOr("PG_PLAY_SESSION", "http://127.0.0.1:7000"), "session URL: sessiond or <gateway>/s/<id>")
@@ -56,12 +62,17 @@ func curriculumPlay(args []string) int {
 	watch := fs.Bool("watch", false, "play each step as a Watch it demonstration (expect demonstrated), then as the learner (expect complete)")
 	resetProgress := fs.Bool("reset-progress", false, "reset each played lesson's progress afterwards (default: on for a gateway session URL …/s/<id>)")
 	repeat := fs.Int("repeat", 1, "play every lesson this many times in a row")
+	lap := fs.Bool("lap", false, "play each lesson as the \"again, without hints\" lap (projects)")
 	sel, err := parseInterleaved(fs, args)
 	if err != nil {
 		return 2
 	}
 	if len(sel) == 0 {
-		fmt.Fprintln(os.Stderr, "usage: playctl curriculum play <lesson id | part dir | 2.3 | all>... [-session URL] [-watch] [-repeat N] [-reset-progress=false]")
+		fmt.Fprintln(os.Stderr, "usage: playctl curriculum play <lesson id | part dir | 2.3 | P1 | all>[@step]... [-session URL] [-watch | -lap] [-repeat N] [-reset-progress=false]")
+		return 2
+	}
+	if *lap && *watch {
+		fmt.Fprintln(os.Stderr, "-lap and -watch exclude each other: a lap has no demonstrations")
 		return 2
 	}
 	resetSet := false
@@ -97,20 +108,21 @@ func curriculumPlay(args []string) int {
 		fmt.Fprintf(os.Stderr, "session %s is not reachable: %v\n", *session, err)
 		return 1
 	}
-	p := &player{c: c, timeout: *timeout, speed: *speed, keepGoing: *keepGoing, log: os.Stderr}
-	if *watch {
+	p := &player{c: c, timeout: *timeout, speed: *speed, keepGoing: *keepGoing, log: os.Stderr, lap: *lap}
+	if *watch || *lap {
 		ev, err := c.subscribe(ctx)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "-watch needs the session's events: %v\n", err)
+			fmt.Fprintf(os.Stderr, "-watch and -lap need the session's events: %v\n", err)
 			return 1
 		}
 		defer ev.close()
 		p.events = ev
 	}
 	var results []stepResult
-	for _, l := range lessons {
+	for _, sel := range lessons {
+		l := sel.l
 		for n := 0; n < *repeat && ctx.Err() == nil; n++ {
-			results = append(results, p.playLesson(ctx, l)...)
+			results = append(results, p.playLesson(ctx, l, sel.from)...)
 		}
 		if *resetProgress {
 			// Also after an interrupt: the replay is not the learner's.
@@ -145,46 +157,60 @@ func envOr(k, def string) string {
 	return def
 }
 
+// selection is a lesson to play and the index of the step to start at.
+type selection struct {
+	l    *curriculum.Lesson
+	from int
+}
+
 // selectLessons resolves selectors: "all", a lesson id, a part directory or
-// number ("02-buffers-and-files", "part:2"), or a display number ("2.3").
-func selectLessons(src *curriculum.Source, sel []string) ([]*curriculum.Lesson, error) {
-	var out []*curriculum.Lesson
+// number ("02-buffers-and-files", "part:2"), or a display number ("2.3",
+// "P1"), each optionally followed by "@<step id or 1-based number>".
+func selectLessons(src *curriculum.Source, sel []string) ([]selection, error) {
+	var out []selection
 	seen := map[string]bool{}
-	matched := false
-	add := func(id string) {
-		l := src.Lessons[id]
-		if l == nil {
-			return
-		}
-		matched = true
-		if !seen[id] {
-			seen[id] = true
-			out = append(out, l)
-		}
-	}
 	for _, s := range sel {
-		matched = false
+		s, step, hasStep := strings.Cut(s, "@")
+		var ids []string
 		if s == "all" {
-			for _, id := range src.Order {
-				add(id)
-			}
+			ids = append(ids, src.Order...)
 		} else {
 			for _, p := range src.Index.Parts {
 				if s == p.ID || s == fmt.Sprintf("part:%d", p.N) {
 					for _, ref := range p.Lessons {
-						add(ref.ID)
+						ids = append(ids, ref.ID)
 					}
 				}
 				for _, ref := range p.Lessons {
 					if s == ref.ID || s == ref.N {
-						add(ref.ID)
+						ids = append(ids, ref.ID)
 					}
 				}
 			}
 			for _, pr := range src.Index.Projects {
 				if s == pr.ID || s == pr.N {
-					add(pr.ID)
+					ids = append(ids, pr.ID)
 				}
+			}
+		}
+		matched := false
+		for _, id := range ids {
+			l := src.Lessons[id]
+			if l == nil {
+				continue
+			}
+			matched = true
+			from := 0
+			if hasStep {
+				from = stepIndex(l, step)
+				if from < 0 {
+					return nil, fmt.Errorf("%s has no step %q", id, step)
+				}
+			}
+			key := fmt.Sprintf("%s@%d", id, from)
+			if !seen[key] {
+				seen[key] = true
+				out = append(out, selection{l: l, from: from})
 			}
 		}
 		if !matched {
@@ -192,6 +218,18 @@ func selectLessons(src *curriculum.Source, sel []string) ([]*curriculum.Lesson, 
 		}
 	}
 	return out, nil
+}
+
+// stepIndex resolves a step id or a 1-based step (task) number.
+func stepIndex(l *curriculum.Lesson, step string) int {
+	if i := l.Scenario.StepIndex(step); i >= 0 {
+		return i
+	}
+	var n int
+	if _, err := fmt.Sscanf(step, "%d", &n); err == nil && fmt.Sprint(n) == step && n >= 1 && n <= len(l.Scenario.Steps) {
+		return n - 1
+	}
+	return -1
 }
 
 // sessionClient calls a session's RPC endpoints.
@@ -391,12 +429,14 @@ type player struct {
 	speed     float64
 	keepGoing bool
 	log       io.Writer
-	// events is set with -watch: each step is first played as a "Watch it"
-	// demonstration.
+	// events is set with -watch (each step is first played as a "Watch
+	// it" demonstration) and -lap.
 	events *eventLog
+	// lap plays the lesson as the "again, without hints" lap.
+	lap bool
 }
 
-func (p *player) playLesson(ctx context.Context, l *curriculum.Lesson) []stepResult {
+func (p *player) playLesson(ctx context.Context, l *curriculum.Lesson, from int) []stepResult {
 	steps := l.Scenario.Steps
 	var out []stepResult
 	fail := func(from int, msg string) []stepResult {
@@ -405,14 +445,28 @@ func (p *player) playLesson(ctx context.Context, l *curriculum.Lesson) []stepRes
 		}
 		return out
 	}
-	fmt.Fprintf(p.log, "▶ %s (%d steps)\n", l.ID, len(steps))
-	if err := p.load(ctx, l.ID, steps[0].ID, true); err != nil {
-		return fail(0, "load: "+err.Error())
+	fmt.Fprintf(p.log, "▶ %s (%d steps)\n", l.ID, len(steps)-from)
+	var lapMark int
+	switch {
+	case p.lap:
+		lapMark = p.events.mark()
+		if err := p.loadLap(ctx, l.ID, steps[0].ID); err != nil {
+			return fail(0, "lap: "+err.Error())
+		}
+	case from > 0:
+		// "Go to this step": its checkpoint, else a fast-forward.
+		if err := p.load(ctx, l.ID, steps[from].ID, false); err != nil {
+			return fail(from, "load: "+err.Error())
+		}
+	default:
+		if err := p.load(ctx, l.ID, steps[0].ID, true); err != nil {
+			return fail(0, "load: "+err.Error())
+		}
 	}
-	for i := range steps {
+	for i := from; i < len(steps); i++ {
 		st := &steps[i]
 		start := time.Now()
-		if i > 0 {
+		if i > from {
 			// The engine advances by itself after a completion; jump when it
 			// did not (after a failed step).
 			if err := p.waitStep(ctx, l.ID, st.ID, 5*time.Second); err != nil {
@@ -423,7 +477,7 @@ func (p *player) playLesson(ctx context.Context, l *curriculum.Lesson) []stepRes
 			}
 		}
 		time.Sleep(300 * time.Millisecond)
-		if p.events != nil {
+		if p.events != nil && !p.lap {
 			if detail := p.watch(ctx, l.ID, st); detail != "" {
 				r := stepResult{Lesson: l.ID, Step: st.ID, Took: time.Since(start), Detail: "watch: " + detail}
 				out = append(out, r)
@@ -457,7 +511,44 @@ func (p *player) playLesson(ctx context.Context, l *curriculum.Lesson) []stepRes
 			return out
 		}
 	}
+	if p.lap {
+		last := steps[len(steps)-1].ID
+		r := stepResult{Lesson: l.ID, Step: "(lap)", OK: true}
+		ev, err := p.events.wait(ctx, lapMark, l.ID, last, 10*time.Second, protocol.StepComplete)
+		switch {
+		case err != nil:
+			r.OK, r.Detail = false, err.Error()
+		case !ev.Lap || ev.LapMs <= 0:
+			r.OK, r.Detail = false, fmt.Sprintf("the last step did not report the lap (lap %v, lapMs %d)", ev.Lap, ev.LapMs)
+		default:
+			r.Took = time.Duration(ev.LapMs) * time.Millisecond
+		}
+		out = append(out, r)
+	}
 	return out
+}
+
+// loadLap starts the lesson's lap and checks that hints are refused.
+func (p *player) loadLap(ctx context.Context, lessonID, first string) error {
+	var res protocol.ScenarioResult
+	if err := p.c.rpc(ctx, protocol.OpScenario, protocol.ScenarioRequest{LessonID: lessonID, Lap: true}, &res); err != nil {
+		return err
+	}
+	if res.Lap == nil {
+		return errors.New("rpc scenario did not start a lap")
+	}
+	wait := 20 * time.Second
+	if res.Restarting {
+		wait = 120 * time.Second
+	}
+	if err := p.waitStep(ctx, lessonID, first, wait); err != nil {
+		return err
+	}
+	var he *httpx.Error
+	if err := p.c.rpc(ctx, protocol.OpHint, protocol.HintRequest{StepID: first, Level: 1}, nil); !errors.As(err, &he) || he.Code != protocol.ErrConflict {
+		return fmt.Errorf("a hint during the lap answered %v, want 409", err)
+	}
+	return nil
 }
 
 // load sends rpc scenario and waits until the step is active.

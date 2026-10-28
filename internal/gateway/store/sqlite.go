@@ -378,11 +378,41 @@ ON CONFLICT(user_id, lesson_id, step_id) DO UPDATE SET status = excluded.status,
 }
 
 func (r sqlProgress) DeleteLesson(ctx context.Context, userID, lessonID string) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM laps WHERE user_id = ? AND lesson_id = ?`, userID, lessonID); err != nil {
+		return err
+	}
 	_, err := r.db.ExecContext(ctx, `DELETE FROM progress WHERE user_id = ? AND lesson_id = ?`, userID, lessonID)
 	return err
 }
 
+func (r sqlProgress) Laps(ctx context.Context, userID string) ([]LapRecord, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT lesson_id, count, best_ms, last_ms, last_at FROM laps WHERE user_id = ? ORDER BY lesson_id`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []LapRecord
+	for rows.Next() {
+		rec := LapRecord{UserID: userID}
+		if err := rows.Scan(&rec.LessonID, &rec.Count, &rec.BestMs, &rec.LastMs, &rec.LastAt); err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, rows.Err()
+}
+
+func (r sqlProgress) PutLap(ctx context.Context, rec LapRecord) error {
+	_, err := r.db.ExecContext(ctx, `INSERT INTO laps (user_id, lesson_id, count, best_ms, last_ms, last_at) VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT (user_id, lesson_id) DO UPDATE SET count = excluded.count, best_ms = excluded.best_ms, last_ms = excluded.last_ms, last_at = excluded.last_at`,
+		rec.UserID, rec.LessonID, rec.Count, rec.BestMs, rec.LastMs, rec.LastAt)
+	return err
+}
+
 func (r sqlProgress) DeleteAll(ctx context.Context, userID string) error {
+	if _, err := r.db.ExecContext(ctx, `DELETE FROM laps WHERE user_id = ?`, userID); err != nil {
+		return err
+	}
 	_, err := r.db.ExecContext(ctx, `DELETE FROM progress WHERE user_id = ?`, userID)
 	return err
 }

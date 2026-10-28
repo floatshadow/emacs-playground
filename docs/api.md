@@ -31,7 +31,7 @@ Contracts between browser, gateway, sessiond and the Emacs agent. The Go types i
 
 ### 2.4 Progress
 
-- `GET /progress` → `{lessons:{[id]:{status, counts:{done, demonstrated, skipped, total}, steps:{[id]:{status, hintsUsed, resets, completedAt?}}}}, updatedAt}`.
+- `GET /progress` → `{lessons:{[id]:{status, counts:{done, demonstrated, skipped, total}, steps:{[id]:{status, hintsUsed, resets, completedAt?}}, laps?:{count, bestMs, lastMs, lastAt}}}, updatedAt}`; `laps` counts finished "again, without hints" laps.
 - `POST /progress/reset {lessonId}` clears one lesson; no body, `{}` or empty `lessonId` clears all ("Start over"). `204`; the gateway then sends the session `drop-step` with the same body. Files, checkpoints and modules stay.
 
 Step statuses only rise, `not-started` < `in-progress` < `demonstrated` < `skipped` < `done` (`protocol.ProgressRank`); only a reset lowers them. `hintsUsed` and `resets` are absolute totals. A lesson is `done` only when every step of the bundle's scenario is `done`; `counts.total` is 0 outside the bundle. Resume starts at the first step neither `done` nor `skipped`.
@@ -45,7 +45,7 @@ Step statuses only rise, `not-started` < `in-progress` < `demonstrated` < `skipp
 `Authorization: Bearer <PG_SESSION_TOKEN>` of the session in the path; in server mode, requests with `X-Forwarded-For` or `Forwarded` get `404`. Learners can read their token, so bodies are untrusted: progress only for the bundle's steps (`400`), stuck reports under the hourly limit.
 
 - `GET /internal/curriculum/scenarios/{lessonId}`; `GET /internal/curriculum/fixtures/{lessonId}` (zstd tarball, `204` if none, ETag).
-- `POST /internal/sessions/{id}/progress` `{lessonId, stepId, status, hintsUsed?, resets?, at?}`; `…/stuck` `{lessonId?, stepId?, note, events}`; `…/heartbeat` `{activeWebSockets}` every 30 s.
+- `POST /internal/sessions/{id}/progress` `{lessonId, stepId, status, hintsUsed?, resets?, at?, lapMs?}` (`lapMs` only on the last step's `done`); `…/stuck` `{lessonId?, stepId?, note, events}`; `…/heartbeat` `{activeWebSockets}` every 30 s.
 
 ## 3. Session API (`/s/{id}`)
 
@@ -73,7 +73,7 @@ Result `{"ok":true,"result":…}` or problem+json. *(n)*: not idempotent. Ops ne
 - `eval {form, timeoutMs?}` → `{value}`: author mode only (`403`); 2 s default, 10 s max; symbol-keyed alists become objects.
 - `open {path}` → `{buffer}`: visits a workspace file.
 - `rescue {}` → `{did}`: `playground-rescue` (emacs.md §10.3), or C-g through tmux when Emacs is unresponsive.
-- `scenario {lessonId, stepId?, reset?}` → `{step, index, count, modules, restarting}`: backend.md §3.12. Returns when the step is active, or with `restarting: true` before a daemon restart.
+- `scenario {lessonId, stepId?, reset?, lap?}` → `{step, index, count, modules, restarting, lap?}`: backend.md §3.12. Returns when the step is active, or with `restarting: true` before a daemon restart. `lap: true` starts the lap (CURRICULUM.md B.3): reset, first step, `lap {lessonId, startedAt}`; until it ends `hint`, `demo start` and `skip` answer `409`.
 - `check {}` → `{lessonId, stepId, conditions:[{id, ok, unknown?, detail?}], complete}`.
 - `hint {stepId, level}` → `{}`.
 - `checkpoint {label}` → `{ref, createdAt}`; `checkpoints {}` → `{items:[{label, ref, createdAt, files, step?}]}`, newest first; `files` would change on restore.
@@ -82,7 +82,7 @@ Result `{"ok":true,"result":…}` or problem+json. *(n)*: not idempotent. Ops ne
 - `modules {enabled}` → `{restarting}`: sets the set exactly (`scenario` only adds).
 - `restart-emacs {}` → `{}`: background restart, reported by `emacs` events.
 - `stuck {note}` → `{events}`: last 200 events. Through the proxy (`X-Forwarded-For` present) sessiond also files the report.
-- `status {}` (also `GET /status`) → `{sessionId, emacs, frames, mode, step, modules, versions?, activeWebSockets}`.
+- `status {}` (also `GET /status`) → `{sessionId, emacs, frames, mode, step, modules, versions?, activeWebSockets, lap?, remoteBox?}`; `remoteBox` once the box alias is written (deployment.md §6).
 - `describe {keys}` → `{cmd, doc}`: for ticker glosses; `cmd` `""` when unbound or a prefix.
 - `demo {stepId, phase: start|end}` → `{restored}` *(n)*; `skip {stepId}` → `{next|null, demoCompleted}` *(n)*, `409` while another skip runs: §4.1.
 - `drop-step {lessonId}|{}` → `{}`: internal (gateway only); forgets that lesson's (or all) saved progress and the active step if it belongs to it.
@@ -99,14 +99,14 @@ A workspace file via `os.Root`; `.playground/` never served. `no-store`, `nosnif
 
 Envelope `{t, seq, ts, …}`, `seq` monotonic from 1 per process; unknown types are ignored.
 
-- `hello`: `protocol, sessionId, mode, emacs, frames, step|null, modules, replayed`.
+- `hello`: `protocol, sessionId, mode, emacs, frames, step|null, modules, replayed, lap?`.
 - `key`: `keys, cmd, buf, mode, frame, prefixArg?, mx?`. `cmd` is `real-this-command` (emacs.md §10.1), `"<lambda>"` or `"undefined"`; with `mx: true` (M-x) `keys` are the reader's.
 - `prefix`: `keys, source: tap|agent`; `""` clears. Advisory; never follows the `key` that consumed it.
 - `state` (§5): coalesced, duplicates suppressed. `echo`: `text` ≤ 500 characters, noise filtered. `minibuffer`: `open, prompt, depth, kind: prompt|isearch`.
 - `emacs`: `event, frame?, reason?`; `frame-opened`, `frame-closed`, `daemon-restarted`, `restarting`, `suspended`, `resumed`, `unresponsive`, `responsive`, `stopping`.
 - `file`: `path, event: created|modified|deleted`.
 - `check`: as the RPC; `unknown: true` (with `ok: false`) when unevaluable; `detail` is evaluator output.
-- `step`: `lessonId, stepId, status, index (0-based), count, lessonComplete?`.
+- `step`: `lessonId, stepId, status, index (0-based), count, lessonComplete?, lap?, lapMs?` (`lapMs` on the event that ends a lap).
 - `nudge`: `id` (stable per rule), `kind: calm|ask, title, body`.
 - `checkpoint`: `label, ref, createdAt`. `mode`: `mode`. `modules`: `enabled, restarting` (`true`, then `false`).
 - `gap`: `from, to`; resync (`rpc check`) or reconnect.
@@ -153,7 +153,7 @@ From the agent, plus `seq` and `ts`. Field names are the paths `state` predicate
 Parsed `scenario.yaml` (CURRICULUM.md B.3, `protocol.Scenario`), served with ids assigned (`Scenario.AssignIDs`):
 
 - Condition ids default to `<stepId>/<n>` (1-based, top level), stuck rules `<stepId>/stuck/<n>`; an explicit `id` wins.
-- Conditions: `event {command, min?, since?}`, `elisp`, `file {path, exists|contains|not_contains|regex|json_path+equals}`, `shell {run, cwd?, timeout?}`, `layout`, `state` (`protocol.Predicate` over §5); `all`, `any`, `not`.
+- Conditions: `event {command, min?, since?}`, `elisp`, `file {path, host?, exists|contains|not_contains|regex|json_path+equals}`, `shell {run, cwd?, timeout?, host?}`, `buffer {name, mode?, contains?, process?, modified?}`, `layout`, `state` (`protocol.Predicate` over §5); `all`, `any`, `not`.
 - Stuck rule `when` (all must hold): `minibuffer_seconds`, `idle_seconds`, `step_seconds`, `quits_in_window {count, seconds}`, `unbound_repeats`.
 - `title`, `goal`, `detail`, `text`, `hint`, `say`: a string or a locale map.
 - Demos (`protocol.ParseDemo`): Emacs keys, `"typed text"` (`\"`, `\\`, `\n`, `\t`), `~N` pauses; played at 170 ms per chord, 70 ms per character (`protocol.PlayDemo`).

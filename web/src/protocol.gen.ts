@@ -39,12 +39,18 @@ export type Availability = "ready" | "planned";
 export const Ready = "ready" satisfies Availability;
 export const Planned = "planned" satisfies Availability;
 
+/** BufferProcess is the process state a BufferCond expects. */
+export type BufferProcess = "running" | "none";
+export const ProcessRunning = "running" satisfies BufferProcess;
+export const ProcessNone = "none" satisfies BufferProcess;
+
 /** ConditionKind names the kind of a Condition (CURRICULUM.md Part B.3). */
-export type ConditionKind = "event" | "elisp" | "file" | "shell" | "layout" | "state" | "all" | "any" | "not";
+export type ConditionKind = "event" | "elisp" | "file" | "shell" | "buffer" | "layout" | "state" | "all" | "any" | "not";
 export const CondEvent = "event" satisfies ConditionKind;
 export const CondElisp = "elisp" satisfies ConditionKind;
 export const CondFile = "file" satisfies ConditionKind;
 export const CondShell = "shell" satisfies ConditionKind;
+export const CondBuffer = "buffer" satisfies ConditionKind;
 export const CondLayout = "layout" satisfies ConditionKind;
 export const CondState = "state" satisfies ConditionKind;
 export const CondAll = "all" satisfies ConditionKind;
@@ -447,6 +453,27 @@ export interface AuthConfigInfo {
   oidcStartUrl?: string;
 }
 
+/**
+ * BufferCond is a predicate on a live Emacs buffer: true when a buffer
+ * named Name exists and every other set field holds. sessiond turns it
+ * into one elisp form for the agent's check (an error is unknown).
+ */
+export interface BufferCond {
+  /**
+   * Name is the buffer name ("*compilation*", "*eat*"); a name with
+   * <...> uniquify suffix also matches ("main.rs<hello>" for "main.rs").
+   */
+  name: string;
+  /** Mode: the buffer's major mode is or derives from it. */
+  mode?: string;
+  /** Contains: the buffer's text contains this literal string. */
+  contains?: string;
+  /** Process: running or none. */
+  process?: BufferProcess;
+  /** Modified: the buffer has (true) or has no (false) unsaved changes. */
+  modified?: boolean;
+}
+
 /** CheckEvent carries the latest evaluation of the active step. */
 export interface CheckEvent {
   t: "check";
@@ -537,7 +564,7 @@ export interface CondResult {
 
 /**
  * Condition is one predicate of a step. Exactly one kind field (Event,
- * Elisp, File, Shell, Layout, State, All, Any, Not) is set. Text and Hint
+ * Elisp, File, Shell, Buffer, Layout, State, All, Any, Not) is set. Text and Hint
  * are used on top-level conditions; nested conditions inside all, any and
  * not only need the kind field.
  */
@@ -555,6 +582,7 @@ export interface Condition {
   elisp?: string;
   file?: FileCond;
   shell?: ShellCond;
+  buffer?: BufferCond;
   layout?: string;
   state?: Predicate;
   all?: Condition[];
@@ -868,9 +896,13 @@ export interface FeaturesConfig {
  * FileCond is a predicate on a workspace file. Path is workspace-relative.
  * Exactly one predicate is set: Exists, Contains, NotContains, Regex, or
  * JSONPath with Equals. Files are read through os.Root, capped at 1 MB.
+ * With Host "box" the file is on the remote box instead (Path absolute or
+ * relative to the box user's home), read over ssh.
  */
 export interface FileCond {
   path: string;
+  /** Host is "" (the workspace) or BoxHost. */
+  host?: string;
   /** Exists: true requires the file to exist, false requires it not to. */
   exists?: boolean;
   /** Contains requires the substring. */
@@ -979,6 +1011,8 @@ export interface HelloEvent {
    * connected with ?after= and the gap was still in the ring buffer).
    */
   replayed: boolean;
+  /** Lap is the running lap, if any (ScenarioRequest.Lap). */
+  lap?: LapInfo;
 }
 
 /** HintRequest records that the learner revealed a hint (progress counts it). */
@@ -1057,6 +1091,22 @@ export interface KeysRequest {
   frame?: FrameKind;
 }
 
+/** LapInfo describes the running lap (ScenarioRequest.Lap). */
+export interface LapInfo {
+  lessonId: string;
+  /** StartedAt is when the lap's first step became active (ms). */
+  startedAt: number;
+}
+
+/** LapStats summarises a lesson's finished laps. */
+export interface LapStats {
+  count: number;
+  bestMs: number;
+  lastMs: number;
+  /** LastAt is when the last lap finished (ms). */
+  lastAt: number;
+}
+
 /** LessonBundle is GET /api/v1/curriculum/lessons/{lessonId}. */
 export interface LessonBundle {
   id: string;
@@ -1092,6 +1142,8 @@ export interface LessonProgress {
   status: ProgressStatus;
   counts: ProgressCounts;
   steps: Record<string, StepProgress>;
+  /** Laps summarises finished "again, without hints" laps (projects). */
+  laps?: LapStats;
 }
 
 /** LessonRef is a lesson entry in the index. */
@@ -1402,6 +1454,11 @@ export interface ProgressReport {
    * completedAt for done.
    */
   at?: number;
+  /**
+   * LapMs, on the done report of a lap's last step, records a finished
+   * lap of this many milliseconds.
+   */
+  lapMs?: number;
 }
 
 /**
@@ -1425,6 +1482,24 @@ export interface ProjectRef {
   tags?: string[];
   status: Availability;
   tasks: ProjectTask[];
+}
+
+/**
+ * ProjectSpec configures a project (CURRICULUM.md Part 14, frontend.md
+ * §10). Its tasks are the scenario's steps.
+ */
+export interface ProjectSpec {
+  /**
+   * Roots are the workspace-relative directories the file tree shows as
+   * separate roots ("polyglot/service", "polyglot/report"); default
+   * setup.root.
+   */
+  roots?: string[];
+  /**
+   * LapMinutes is the target time of the "again, without hints" lap
+   * (ScenarioRequest.Lap); 0 shows the timer without a target.
+   */
+  lapMinutes?: number;
 }
 
 /**
@@ -1520,6 +1595,11 @@ export interface Scenario {
   preview?: PreviewSpec;
   /** Remote requests the SSH box (optional). */
   remote?: RemoteSpec;
+  /**
+   * Project configures a project's screen and its "again, without
+   * hints" lap (projects only, optional).
+   */
+  project?: ProjectSpec;
   /** Setup prepares the workspace and Emacs when the scenario loads. */
   setup: Setup;
   /** Steps are the lesson's goals in order. */
@@ -1536,6 +1616,14 @@ export interface ScenarioRequest {
   stepId?: string;
   /** Reset forces fixture extraction over learner files (setup.reset). */
   reset?: boolean;
+  /**
+   * Lap starts the "again, without hints" lap of a project: the lesson
+   * loads with reset from its first step (StepID must be empty or the
+   * first step) and a timer starts; until the last step completes, hint,
+   * demo and skip answer 409 and stuck rules are silent. Any other load
+   * ends the lap.
+   */
+  lap?: boolean;
 }
 
 /** ScenarioResult reports the loaded step. */
@@ -1551,6 +1639,11 @@ export interface ScenarioResult {
    * is restarting (the step becomes active after the restart).
    */
   restarting: boolean;
+  /**
+   * Lap is set when the request started a lap; StartedAt is 0 until the
+   * first step is active (after a restart).
+   */
+  lap?: LapInfo;
 }
 
 /**
@@ -1673,15 +1766,48 @@ export interface Setup {
    * file, or that file's directory when it is in no project.
    */
   compile?: string;
+  /**
+   * Repos are directories relative to Root ("." for Root itself) made
+   * git repositories of their own, with the fixtures as one initial
+   * commit (fixed identity and date, branch main), when they have no
+   * .git yet or the load resets. Checkpoints capture such nested
+   * repositories whole (.git included, so the staging area and commits
+   * made in a step are restored too).
+   */
+  repos?: string[];
+  /**
+   * Run is a shell script sessiond runs as the learner (sh -c) in Root
+   * after the fixtures and Repos and before Emacs opens anything, on
+   * every load; at most SetupRunTimeout. It must be idempotent (a git
+   * history for a Magit lesson, files on the box over ssh). A failure is
+   * logged and reported as an error event.
+   */
+  run?: string;
 }
 
-/** ShellCond runs `sh -c Run` as the learner; exit status 0 is true. */
+/**
+ * ShellCond runs `sh -c Run` as the learner; exit status 0 is true.
+ * A run longer than about a second does not hold up the step's other
+ * conditions: it is unknown ("running") until it finishes, and its result
+ * is kept until the next file event or step change.
+ */
 export interface ShellCond {
   run: string;
-  /** Cwd is workspace-relative; default the scenario's setup root. */
+  /**
+   * Cwd is workspace-relative; default the scenario's setup root. With
+   * Host it is a directory on the box (default the box user's home).
+   */
   cwd?: string;
-  /** Timeout in seconds, default 5; a timeout yields unknown. */
+  /**
+   * Timeout in seconds, default 5, at most MaxShellTimeout; a timeout
+   * yields unknown.
+   */
   timeout?: number;
+  /**
+   * Host is "" (the session) or BoxHost: the script runs on the remote
+   * box over ssh.
+   */
+  host?: string;
 }
 
 /**
@@ -1802,6 +1928,13 @@ export interface StatusResult {
   versions?: Record<string, string>;
   /** ActiveWebSockets counts open /pty, /events and /vnc connections. */
   activeWebSockets: number;
+  /** Lap is the running lap, if any. */
+  lap?: LapInfo;
+  /**
+   * RemoteBox is true when the box alias is set up (key pair and
+   * ~/.ssh/config written; deployment.md §6).
+   */
+  remoteBox?: boolean;
 }
 
 /** Step is one goal of a lesson. */
@@ -1849,6 +1982,10 @@ export interface StepEvent {
    * last step.
    */
   lessonComplete?: boolean;
+  /** Lap is true while the step belongs to a lap (ScenarioRequest.Lap). */
+  lap?: boolean;
+  /** LapMs is the lap's time, on the event that completes it. */
+  lapMs?: number;
 }
 
 /** StepProgress is the progress of one step. */
@@ -2113,6 +2250,9 @@ export const ExitSessionRoot = "session";
 export const TagRemote = "remote";
 export const TagGUI = "gui";
 export const TagProject = "project";
+export const BoxHost = "box";
+export const SetupRunTimeout = 120;
+export const MaxShellTimeout = 300;
 export const DefaultLocale = "en";
 export const PathPty = "/pty";
 export const PathEvents = "/events";

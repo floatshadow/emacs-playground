@@ -7,12 +7,12 @@
 | Image (`ghcr.io/floatshadow/emacs-playground/…`) | Contents |
 |---|---|
 | `gateway` | distroless; gateway with the embedded web bundle (`-tags embedweb`), the curriculum bundle (`/srv/curriculum`, strict build), web fonts (`/srv/fonts`) |
-| `session` | Emacs 31.1 (native compilation), tmux, TigerVNC, toolchains, pinned packages, sessiond; about 3.4 GB |
-| `remote-box` | sshd and the session's toolchain pins, no Emacs |
+| `session` | Emacs 31.1 (native compilation), tmux, TigerVNC, toolchains, pinned packages, sessiond; about 5.8 GB |
+| `remote-box` | sshd, sudo, nginx, Emacs with the pinned packages, the session's Rust and Python with the prefetched crates and wheels |
 
 Dockerfiles: `images/<name>/Dockerfile`, context the repository root. Pins: third-party.md; `images/session/versions.env` is reported by sessiond's `/status`.
 
-GitHub Actions builds everything: `ci.yml` (Go, web and curriculum checks), `image-emacs.yml` (session and remote-box images, then their ERT suites; cold build 40–60 min), `image-web.yml` (gateway image, smoke-tested in local mode), `release.yml` (`v*` tags). Pull requests build without pushing.
+GitHub Actions builds everything: `ci.yml` (Go, web and curriculum checks), `image-emacs.yml` (session and remote-box images, then their ERT suites; a cold build takes over an hour), `image-web.yml` (gateway image, smoke-tested in local mode), `release.yml` (`v*` tags). Pull requests build without pushing.
 
 Tags: `main`, `main-<sha>`, `latest`; releases add `X.Y.Z`, `X.Y`. Forks set `IMAGE_BASE` in `.env`. *Planned:* the gateway refuses a session image of another major version.
 
@@ -23,7 +23,7 @@ Tags: `main`, `main-<sha>`, `latest`; releases add `X.Y.Z`, `X.Y`. Forks set `IM
 | `compose.yaml` | gateway with `gateway-data` and `deploy/config.json`; networks `front`, internal `sessions` |
 | `compose.local.yaml` | local mode on `127.0.0.1:8080`; session (`./workspace:/work`, id and token `local`); remote box (alias `box`) |
 | `compose.server.yaml` | server mode; Caddy (80, 443); Docker socket proxy on the internal `docker` network; invites and OIDC secret |
-| `compose.dev.yaml` | `make dev`: session on the host network, `127.0.0.1:7000` |
+| `compose.dev.yaml` | `make dev`: session on the host network, `127.0.0.1:7000`; remote box on `127.0.0.1:2222` |
 
 `.env` holds only `COMPOSE_FILE`, `TAG`, `IMAGE_BASE`, `DOMAIN`. Never set `hostname:` on the gateway in server mode: it finds its own container by hostname (§7). Caddy answers `/internal/*` with 404; the server-mode gateway also refuses `/internal` requests with forwarding headers.
 
@@ -72,7 +72,7 @@ Copy `deploy/config.example.json` and `deploy/invites.example.txt` to `deploy/co
 
 ## 6. Remote box
 
-sshd, a `deploy` user and the session toolchains; TRAMP lessons use `/ssh:box:`, P5 and P6 deploy to it. Locally one box starts with the stack and has no authorised key yet. *Planned (M6):* a key pair per session with a `box` alias in `~/.ssh/config`; on servers a box per learner on the session network.
+sshd, a `deploy` user (passwordless sudo, for `/ssh:box|sudo::`), Emacs with the pinned packages (lesson 13.6), Rust and Python running offline like the session's (emacs.md §9), nginx serving `/srv/www`; TRAMP lessons use `/ssh:box:`, P5 deploys to `/srv/www`, P6 to `/srv/app`. Each session has an ed25519 key pair in `/work/.playground/ssh` and a `box` alias in `~/.ssh/config` (`HostName` `PG_BOX_HOST`, user `deploy`, `BatchMode`, no host-key checks: a re-created box has new host keys), so `ssh box` and TRAMP never prompt; `/status` reports `remoteBox` once written. Locally sessiond generates the pair and one box, started with the stack, reads `authorized_keys` from that directory (mounted read-only) at every login. On servers the docker backend creates a box per session (`pg-box-<id>`, alias `box` on `pg-net-<id>`) with a fresh pair, the public half as `AUTHORIZED_KEYS`, the private half to sessiond as `PG_BOX_KEY`; the box keeps nothing across re-creation.
 
 ## 7. Networking
 
@@ -85,7 +85,7 @@ sshd, a `deploy` user and the session toolchains; TRAMP lessons use `/ssh:box:`,
 | session → remote box | 22 | TRAMP |
 | session → internet | 443 | per `sessions.egress` |
 
-With `isolation: network`, each session is alone on `pg-net-<id>`, created before its container, `internal` unless egress is `all`, removed with it. The gateway joins as alias `gateway`. A replacement gateway re-joins running sessions' networks while rebuilding its registry; rebuild and reaper prune networks without a container. Sessions reach only the gateway.
+With `isolation: network`, each session is alone on `pg-net-<id>`, created before its container, `internal` unless egress is `all`, removed with it. The gateway joins as alias `gateway`. A replacement gateway re-joins running sessions' networks while rebuilding its registry; rebuild and reaper prune networks without a container. Sessions reach only the gateway and their box.
 
 ## 8. Storage
 
@@ -107,7 +107,7 @@ Learners are untrusted and run arbitrary code; host and operator are trusted. Th
 
 ```
 user 1000 (learner), no sudo; init; read-only rootfs
-tmpfs /tmp (1g, exec: builds), /run (64m, noexec), /home/learner/.cache (2g)
+tmpfs /tmp (1g, exec: builds), /run (64m, noexec), /home/learner/.cache (2g; `~/.ssh` links to `~/.cache/ssh`)
 only pg-ws-<user>:/work; no Docker socket, no published ports
 cap_drop ALL; no-new-privileges; default seccomp and AppArmor
 sessions.limits; memory-swap = memory; nofile 65536; restart none; stop timeout 20 s
@@ -115,7 +115,7 @@ sessions.limits; memory-swap = memory; nofile 65536; restart none; stop timeout 
 
 No `nproc` ulimit: it counts per uid across the host and every session is uid 1000, so it would be one budget for all; `pids_limit` bounds each container.
 
-Egress: session networks have no route unless `egress: all` (NAT); lessons work offline. *Planned:* `registries` adds an allowlist proxy (crates.io, opam, PyPI, Typst packages, CTAN) via `HTTP(S)_PROXY`; until then it behaves like `none`.
+Egress: session networks have no route unless `egress: all` (NAT, and cargo and uv go online); lessons work offline. *Planned:* `registries` adds an allowlist proxy (crates.io, opam, PyPI, Typst packages, CTAN) via `HTTP(S)_PROXY`; until then it behaves like `none`.
 
 ### 9.3 Gateway and web application
 
@@ -137,4 +137,4 @@ CI builds from pinned bases, `versions.env` (checksummed) and `packages.lock` (S
 
 ### 9.6 Residual risks
 
-gVisor narrows kernel escapes. A learner can exhaust only their own session. The remote box (M6) gets the same profile.
+gVisor narrows kernel escapes. A learner can exhaust only their own session. The server-mode box (`docker.HardenBox`) runs sshd as root with all capabilities dropped except `CHOWN DAC_OVERRIDE FOWNER SETUID SETGID SYS_CHROOT AUDIT_WRITE KILL NET_BIND_SERVICE` (sshd, sudo, nginx), 2 GB, 1024 processes, alone with its session on `pg-net-<id>`.

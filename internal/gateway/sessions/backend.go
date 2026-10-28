@@ -166,12 +166,14 @@ type DockerBackend struct {
 	// Internal makes session networks internal: no route out of the host
 	// (sessions.egress none and registries).
 	// TODO(gateway, deployment.md §9.2): with egress registries, connect the
-	// egress proxy to each session network as the remote box will be
-	// (TODO(gateway, deployment.md §6) in Create).
+	// egress proxy to each session network as the remote box is (Create).
 	Internal bool
 	// SubnetPool is where session networks take their /28 subnets; the
 	// zero value lets the daemon choose from its default-address-pools.
 	SubnetPool netip.Prefix
+	// BoxErr is the last remote box creation failure (the session started
+	// without a box), for logs and tests.
+	BoxErr error
 
 	netMu sync.Mutex
 }
@@ -323,6 +325,9 @@ const labelVolume = "playground.volume"
 // ContainerName is the session container's name and DNS alias.
 func ContainerName(id string) string { return "pg-session-" + id }
 
+// BoxName is a session's remote box container (deployment.md §6).
+func BoxName(id string) string { return "pg-box-" + id }
+
 func (b *DockerBackend) Create(ctx context.Context, spec Spec) (Handle, error) {
 	h := Handle{ID: spec.ID, UserID: spec.UserID, Volume: spec.Volume, Image: spec.Image}
 	if err := b.Client.CreateVolume(ctx, spec.Volume, map[string]string{
@@ -331,8 +336,6 @@ func (b *DockerBackend) Create(ctx context.Context, spec Spec) (Handle, error) {
 	}); err != nil {
 		return h, err
 	}
-	// TODO(gateway, deployment.md §6): create the remote box from
-	// spec.RemoteImage with the learner's public key.
 	// TODO(gateway, deployment.md §1): refuse a session image whose
 	// org.opencontainers.image.version has another major version than the
 	// gateway (needs ImageInspect in docker.Client).
@@ -373,8 +376,21 @@ func (b *DockerBackend) Create(ctx context.Context, spec Spec) (Handle, error) {
 		}
 		cs.Network = net
 	}
+	// The remote box is best effort: without it the session runs and
+	// reports no box (PG_BOX_HOST empty).
+	env["PG_BOX_HOST"] = ""
+	if spec.RemoteImage != "" {
+		if boxID, host, key, err := b.createBox(ctx, spec, cs.Network); err == nil {
+			h.RemoteContainerID = boxID
+			env["PG_BOX_HOST"] = host
+			env["PG_BOX_KEY"] = key
+		} else {
+			b.BoxErr = err
+		}
+	}
 	id, err := b.Client.CreateContainer(ctx, cs)
 	if err != nil {
+		b.removeBoxes(context.WithoutCancel(ctx), spec.ID)
 		if b.Isolate {
 			_ = b.removeNetwork(context.WithoutCancel(ctx), spec.ID)
 		}
@@ -384,7 +400,62 @@ func (b *DockerBackend) Create(ctx context.Context, spec Spec) (Handle, error) {
 	return h, nil
 }
 
+// createBox creates the session's remote box on network with a fresh key
+// pair: the public half authorised in the box, the private half (and the
+// box's address) for sessiond. A box left from an earlier container of the
+// session is removed first.
+func (b *DockerBackend) createBox(ctx context.Context, spec Spec, network string) (id, host, key string, err error) {
+	b.removeBoxes(ctx, spec.ID)
+	priv, pub, err := protocol.GenerateBoxKey("playground-" + spec.ID)
+	if err != nil {
+		return "", "", "", err
+	}
+	host = BoxName(spec.ID)
+	aliases := []string{host}
+	if b.Isolate {
+		// Alone on the session's network: the short name the lessons use.
+		host = protocol.BoxHost
+		aliases = append(aliases, protocol.BoxHost)
+	}
+	bs := docker.ContainerSpec{
+		Name:     BoxName(spec.ID),
+		Hostname: protocol.BoxHost,
+		Image:    spec.RemoteImage,
+		Env:      map[string]string{"AUTHORIZED_KEYS": pub},
+		Labels: map[string]string{
+			docker.LabelSession: spec.ID,
+			docker.LabelUser:    spec.UserID,
+			docker.LabelVersion: b.Version,
+			docker.LabelRole:    docker.RoleRemoteBox,
+		},
+		Network: network,
+		Aliases: aliases,
+		Runtime: spec.Runtime,
+	}
+	docker.HardenBox(&bs)
+	id, err = b.Client.CreateContainer(ctx, bs)
+	if err != nil {
+		return "", "", "", fmt.Errorf("sessions: creating the remote box: %w", err)
+	}
+	return id, host, string(priv), nil
+}
+
+// removeBoxes removes every remote box container of session id.
+func (b *DockerBackend) removeBoxes(ctx context.Context, id string) {
+	cs, err := b.Client.ListContainers(ctx, map[string]string{docker.LabelRole: docker.RoleRemoteBox, docker.LabelSession: id})
+	if err != nil {
+		return
+	}
+	for _, c := range cs {
+		_ = b.Client.RemoveContainer(ctx, c.ID, true)
+	}
+}
+
 func (b *DockerBackend) Start(ctx context.Context, h Handle) error {
+	if h.RemoteContainerID != "" {
+		// Best effort, like its creation.
+		_ = b.Client.StartContainer(ctx, h.RemoteContainerID)
+	}
 	return b.Client.StartContainer(ctx, h.ContainerID)
 }
 
@@ -395,10 +466,17 @@ func (b *DockerBackend) Stop(ctx context.Context, h Handle, grace time.Duration)
 	if err := b.Client.StopContainer(ctx, h.ContainerID, grace); err != nil && !errors.Is(err, docker.ErrNotFound) {
 		return err
 	}
+	if h.RemoteContainerID != "" {
+		_ = b.Client.StopContainer(ctx, h.RemoteContainerID, 5*time.Second)
+	}
 	return nil
 }
 
 func (b *DockerBackend) Remove(ctx context.Context, h Handle, keepVolume bool) error {
+	// The box keeps nothing worth saving.
+	if h.ID != "" {
+		b.removeBoxes(ctx, h.ID)
+	}
 	if h.ContainerID != "" {
 		if err := b.Client.RemoveContainer(ctx, h.ContainerID, true); err != nil && !errors.Is(err, docker.ErrNotFound) {
 			return err
@@ -436,13 +514,19 @@ func (b *DockerBackend) List(ctx context.Context) ([]Handle, error) {
 	if err != nil {
 		return nil, err
 	}
+	boxes := map[string]string{}
+	if bs, err := b.Client.ListContainers(ctx, map[string]string{docker.LabelRole: docker.RoleRemoteBox}); err == nil {
+		for _, c := range bs {
+			boxes[c.Labels[docker.LabelSession]] = c.ID
+		}
+	}
 	out := make([]Handle, 0, len(cs))
 	for _, c := range cs {
 		id := c.Labels[docker.LabelSession]
 		if id == "" {
 			continue
 		}
-		out = append(out, Handle{ID: id, UserID: c.Labels[docker.LabelUser], ContainerID: c.ID, Volume: c.Labels[labelVolume], Image: c.Image})
+		out = append(out, Handle{ID: id, UserID: c.Labels[docker.LabelUser], ContainerID: c.ID, RemoteContainerID: boxes[id], Volume: c.Labels[labelVolume], Image: c.Image})
 	}
 	return out, nil
 }

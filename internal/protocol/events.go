@@ -192,6 +192,8 @@ type HelloEvent struct {
 	// Replayed is true when the hello precedes replayed events (the client
 	// connected with ?after= and the gap was still in the ring buffer).
 	Replayed bool `json:"replayed"`
+	// Lap is the running lap, if any (ScenarioRequest.Lap).
+	Lap *LapInfo `json:"lap,omitempty"`
 }
 
 // Type implements Event.
@@ -381,6 +383,10 @@ type StepEvent struct {
 	// LessonComplete is true on the "complete" or "skipped" event of the
 	// last step.
 	LessonComplete bool `json:"lessonComplete,omitempty"`
+	// Lap is true while the step belongs to a lap (ScenarioRequest.Lap).
+	Lap bool `json:"lap,omitempty"`
+	// LapMs is the lap's time, on the event that completes it.
+	LapMs int64 `json:"lapMs,omitempty"`
 }
 
 // Type implements Event.

@@ -3,6 +3,8 @@
 # source on the host reaches it at 127.0.0.1:7000 and it reaches the gateway
 # at 127.0.0.1:8080. Use with compose.yaml and compose.local.yaml:
 #   docker compose -f compose.yaml -f compose.local.yaml -f compose.dev.yaml up -d session
+# The remote box (`up -d remote-box`) is published on 127.0.0.1:2222, where
+# the session's "box" alias points.
 services:
   session:
     network_mode: host
@@ -10,3 +12,7 @@ services:
     environment:
       PG_LISTEN: 127.0.0.1:7000
       PG_GATEWAY_URL: http://127.0.0.1:8080
+      PG_BOX_HOST: 127.0.0.1
+      PG_BOX_PORT: "2222"
+  remote-box:
+    ports: ["127.0.0.1:2222:22"]

@@ -171,7 +171,7 @@ curriculum/
       assets/                       images used by lesson.md (optional)
   …
   projects/p6-polyglot/
-    project.md  scenario.yaml  fixtures/  remote.yaml
+    project.md  scenario.yaml  fixtures/
   tables/
     exits.yaml  habits.yaml  gloss.yaml  cheats.yaml  glossary.yaml
   tools/                            validate.py, sync_fixtures.py, the replay harness (tools/README.md)
@@ -214,6 +214,7 @@ preview:                       # optional
   tabs: [docs/report.pdf, README.md]
   follow: { docs/report.typ: docs/report.pdf }
 remote: { box: true }          # optional; provisions and expects the SSH box
+project: { roots: [projects/polyglot/service, projects/polyglot/report], lapMinutes: 25 }   # projects only
 setup:
   workspace: fixtures/hello    # fixture directory, relative to the lesson directory
   root: hello                  # extracted to /work/hello
@@ -222,6 +223,8 @@ setup:
   layout: single               # single | a layout pattern | a window-state file (.eld)
   eval: "(goto-char (point-min))"
   compile: null                # a command run once so *compilation* exists
+  repos: ["."]                 # directories under root made git repositories (fixtures as "Initial commit")
+  run: "ssh box 'mkdir -p site'"   # sh -c in root by sessiond, every load, ≤ 120 s; must be idempotent
 steps:
   - id: open                   # [a-z0-9-]+, unique in the scenario
     goal: Open src/main.rs
@@ -249,7 +252,7 @@ steps:
         hint: "C-x 2 splits; C-x o moves; C-x b *compilation* RET shows the compile buffer there."
 ```
 
-**Setup** runs on every `scenario` load: sessiond extracts the fixtures into `/work/<root>` (existing files are kept unless `reset`), writes the module set, then the agent opens the files, applies the layout, evaluates `eval` and runs `compile` (in the project root of the first `open` file, or that file's directory), in that order. It waits up to 15 s for an Emacs restart in progress and for the terminal frame, so layouts never land in the daemon's invisible initial frame. Modules unlock monotonically: a scenario's `modules` are added to the session's set, never removed, so a lesson may run with modules from later parts.
+**Setup** runs on every `scenario` load: sessiond extracts the fixtures into `/work/<root>` (existing files are kept unless `reset`), makes the `repos` without a `.git` (all of them with `reset`) git repositories of their own (branch `main`, one commit with a fixed date and identity, repository-local identity `Learner`), runs `run`, writes the module set, then the agent opens the files, applies the layout, evaluates `eval` and runs `compile` (in the project root of the first `open` file, or that file's directory), in that order. A failing `repos` or `run` is an `error` event, not a failed load. It waits up to 15 s for an Emacs restart in progress and for the terminal frame, so layouts never land in the daemon's invisible initial frame. Modules unlock monotonically: a scenario's `modules` are added to the session's set, never removed, so a lesson may run with modules from later parts.
 
 `setup.reset: true` (requires `workspace`) makes the lesson replayable in any order:
 
@@ -267,12 +270,15 @@ steps:
 | `event` | `command`, `min` (default 1), `since` (`step` default, or `lesson`) | the command ran at least `min` times (the agent reports `real-this-command`: `C-k` is `kill-line`, `M-y` is `yank-pop`) |
 | `elisp` | a form | the form returns non-nil inside Emacs (2 s timeout; an error or timeout is unknown) |
 | `file` | `path`, one of `exists`, `contains`, `not_contains`, `regex` (RE2), `json_path` + `equals` | the predicate holds on the workspace file (read up to 1 MB; `not_contains` also requires the file to exist) |
-| `shell` | `run`, `cwd` (default the setup root), `timeout` (seconds, default 5) | `sh -c run` exits 0 (a timeout is unknown) |
+| `shell` | `run`, `cwd` (default the setup root), `timeout` (seconds, default 5, at most 300) | `sh -c run` exits 0 (a timeout is unknown); a run over about 1.5 s is unknown ("running") until it ends in the background |
+| `buffer` | `name` (a `<…>` uniquify suffix also matches), optional `mode` (derived), `contains` (literal), `process` (`running` or `none`), `modified` | a live buffer matches (evaluated in Emacs, like `elisp`) |
 | `layout` | a layout pattern | the selected frame's window tree matches |
 | `state` | a predicate (B.4), e.g. `{ narrowed: true }`, `{ "windows.length": 2, "windows.1.selected": true }` | it holds on the latest state |
 | `all`, `any`, `not` | a list of conditions, or one condition for `not` | combinators |
 
-A condition that cannot be evaluated is reported `unknown` (not met). Layout patterns: `single` (one window), a buffer name (one window showing it), or s-expressions of `vsplit` (stacked top to bottom, `C-x 2`) and `hsplit` (side by side, `C-x 3`) over buffer names and `*` (any window): `(hsplit * (vsplit a b))`. Names compare by uniquify base name (`main.rs<hello>` matches `main.rs`), a name with `/` by its base name; quote names with spaces or parentheses; same-orientation nesting is flattened.
+`file` and `shell` take `host: box` to run on the remote box over ssh (paths and `cwd` then relative to the box user's home; the scenario needs `remote: {box: true}`); box results are kept 3 s, local shell results until the next file event or commit in a nested repository. Checkpoints do not cover the box: put what a step needs there in `setup.run`. A condition that cannot be evaluated is reported `unknown` (not met). Layout patterns: `single` (one window), a buffer name (one window showing it), or s-expressions of `vsplit` (stacked top to bottom, `C-x 2`) and `hsplit` (side by side, `C-x 3`) over buffer names and `*` (any window): `(hsplit * (vsplit a b))`. Names compare by uniquify base name (`main.rs<hello>` matches `main.rs`), a name with `/` by its base name; quote names with spaces or parentheses; same-orientation nesting is flattened.
+
+**Projects** are scenarios under `projects/` whose steps are the index's tasks, each with its checkpoint. A checkpoint keeps each nested git repository whole (working tree and `.git`: commits, branches, staging area), so Reset and Go to this step undo a commit. `project.roots` are the file tree's roots (default `setup.root`). The "again, without hints" lap is `scenario {lap: true}`: the project reloads with reset from its first task, hints, Watch it and Skip answer 409, stuck rules are silent, and the last step's `complete` event carries `lapMs` (progress keeps count, best and last, api.md §2.4); `lapMinutes` is the timer's target.
 
 **Hints** belong to conditions. "Show a hint" shows the hint of the first unmet condition; the second level shows the exact keys of the step's `demo`.
 
@@ -348,6 +354,6 @@ The browser shows every exit row that matches, so the prompt rows are one per ki
 
 1. Write `lesson.md` and `scenario.yaml`; put fixtures in place (`tools/fixture-src/`, then `python3 curriculum/tools/sync_fixtures.py`).
 2. `playctl curriculum validate curriculum`: schema (unknown keys are errors), the id equals the directory, modules are known and include base and agent, every step has a goal, a demo that tokenises and at least one condition, ids are unique, fixture paths and window-state files exist, `reset` has a `workspace`, elisp is balanced, predicates and regexes are valid, exit rows reference known state fields or `session.*`, every ready lesson in `index.yaml` exists. `python3 curriculum/tools/validate.py` adds the content rules of B.3 and B.4 and fixture drift.
-3. `playctl curriculum play <lesson | n.m | part:N | all> -session <url>`: loads each lesson in a live session, replays each step's demo and requires each step to complete; `-watch` first plays each step as a "Watch it" demonstration, resets it and then plays it as the learner; `-repeat N` replays N times. Run it on a fresh workspace (`make reset-workspace`) for results that match a learner going through the course in order. A lesson whose demo cannot solve its own steps does not ship. `tools/play/play.py` replays demos in a plain Emacs 31.1 without the stack and reports steps that complete early or never.
+3. `playctl curriculum play <lesson | n.m | Pn | part:N | all>[@step] -session <url>` (`@step`: a step id or task number, played from there; `-lap` plays projects as the lap): loads each lesson in a live session, replays each step's demo and requires each step to complete; `-watch` first plays each step as a "Watch it" demonstration, resets it and then plays it as the learner; `-repeat N` replays N times. Run it on a fresh workspace (`make reset-workspace`) for results that match a learner going through the course in order. A lesson whose demo cannot solve its own steps does not ship. `tools/play/play.py` replays demos in a plain Emacs 31.1 without the stack and reports steps that complete early or never.
 4. `playctl dev` (or `make dev`) with author mode on: the lesson screen shows condition results live, the exit rows that matched and the raw state, so authors see what the learner will see.
 5. Localisation: add `lesson.<locale>.md`; the scenario is shared, so `title`, `goal`, `detail`, condition `text` and `hint`, and stuck `say` and `title` accept per-locale maps (`hint: { en: …, zh-CN: … }`).

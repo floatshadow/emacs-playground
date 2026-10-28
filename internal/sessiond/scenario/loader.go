@@ -16,6 +16,7 @@ import (
 
 	"github.com/floatshadow/emacs-playground/internal/httpx"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/gwclient"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 )
@@ -67,6 +68,10 @@ type Loader struct {
 	// Snapshot, when set, returns the last saved buffer and window spec
 	// (supervisor.LastSnapshot), or nil. Resume re-opens it.
 	Snapshot func() *protocol.WindowSpec
+	// Git runs git for setup.repos (default the git binary).
+	Git checkpoint.Runner
+	// Shell runs setup.run.
+	Shell steps.ShellRunner
 
 	mu sync.Mutex
 	// pending is the lesson whose load waits for a daemon restart.
@@ -120,12 +125,28 @@ func (l *Loader) Load(ctx context.Context, req protocol.ScenarioRequest) (protoc
 	if len(sc.Steps) == 0 {
 		return protocol.ScenarioResult{}, httpx.Conflict("the lesson has no steps")
 	}
-	reset := req.Reset || sc.Setup.Reset
+	lap := steps.LapEnd
+	if req.Lap {
+		// A lap is the whole lesson again from its initial state.
+		if idx != 0 && req.StepID != "" {
+			return protocol.ScenarioResult{}, httpx.BadRequest("a lap starts at the first step")
+		}
+		idx, lap = 0, steps.LapStart
+	}
+	reset := req.Reset || sc.Setup.Reset || req.Lap
 
 	extracted, err := l.fixtures(ctx, sc, reset)
 	if err != nil {
 		l.emit(&protocol.ErrorEvent{Code: protocol.ErrSessionUnavailable, Message: "Could not load the lesson files. Try again in a moment."})
 		return protocol.ScenarioResult{}, err
+	}
+	if err := l.prepareRepos(ctx, sc, reset); err != nil {
+		l.log().Warn("setup.repos", "lesson", sc.ID, "err", err)
+		l.emit(&protocol.ErrorEvent{Code: protocol.ErrInternal, Message: "Could not prepare the lesson's git repository."})
+	}
+	if err := l.runSetup(ctx, sc); err != nil {
+		l.log().Warn("setup.run", "lesson", sc.ID, "err", err)
+		l.emit(&protocol.ErrorEvent{Code: protocol.ErrInternal, Message: "The lesson's setup script failed; some files may be missing."})
 	}
 
 	cur := l.Modules.Current()
@@ -135,6 +156,9 @@ func (l *Loader) Load(ctx context.Context, req protocol.ScenarioRequest) (protoc
 		Index: idx, Count: len(sc.Steps), Modules: want,
 	}
 	forceCheckpoint := reset && extracted > 0
+	if lap == steps.LapStart {
+		res.Lap = &protocol.LapInfo{LessonID: sc.ID}
+	}
 	if !slices.Equal(cur, want) {
 		if err := l.Modules.Write(want); err != nil {
 			return protocol.ScenarioResult{}, httpx.Internal("could not write modules.el").Wrap(err)
@@ -145,18 +169,21 @@ func (l *Loader) Load(ctx context.Context, req protocol.ScenarioRequest) (protoc
 			l.mu.Lock()
 			defer l.mu.Unlock()
 			l.pending = ""
-			l.finish(bctx, sc, idx, reset, forceCheckpoint)
+			l.finish(bctx, sc, idx, reset, forceCheckpoint, lap)
 		})
 		return res, nil
 	}
-	l.finish(ctx, sc, idx, reset, forceCheckpoint)
+	l.finish(ctx, sc, idx, reset, forceCheckpoint, lap)
+	if res.Lap != nil {
+		res.Lap = l.Engine.Lap()
+	}
 	return res, nil
 }
 
 // alreadyActive answers a reload of the active lesson without re-running
 // setup.
 func (l *Loader) alreadyActive(req protocol.ScenarioRequest) (protocol.ScenarioResult, bool) {
-	if req.Reset {
+	if req.Reset || req.Lap {
 		return protocol.ScenarioResult{}, false
 	}
 	sc := l.Engine.Scenario()
@@ -168,7 +195,7 @@ func (l *Loader) alreadyActive(req protocol.ScenarioRequest) (protocol.ScenarioR
 		return protocol.ScenarioResult{}, false
 	}
 	idx, n := l.Engine.ActiveIndex()
-	return protocol.ScenarioResult{Step: *act, Index: idx, Count: n, Modules: l.Modules.Current()}, true
+	return protocol.ScenarioResult{Step: *act, Index: idx, Count: n, Modules: l.Modules.Current(), Lap: l.Engine.Lap()}, true
 }
 
 // FastForwardTimeout bounds the replay of earlier steps' demos when "Go to
@@ -188,7 +215,7 @@ const RehearsalSettle = 10 * time.Second
 // earlier steps' demos are replayed with nothing recorded and the
 // checkpoint is taken from the result. A later step's checkpoint is never
 // overwritten with the lesson's initial state (api.md §3.4).
-func (l *Loader) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset, forceCheckpoint bool) {
+func (l *Loader) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset, forceCheckpoint bool, lap steps.LapMode) {
 	l.setup(ctx, sc, reset)
 	st := &sc.Steps[idx]
 	if idx > 0 {
@@ -198,7 +225,7 @@ func (l *Loader) finish(ctx context.Context, sc *protocol.Scenario, idx int, res
 				l.log().Warn("restoring the step's checkpoint", "lesson", sc.ID, "step", st.ID, "err", err)
 			}
 			if ok {
-				l.Engine.Activate(sc, idx)
+				l.Engine.ActivateLap(sc, idx, lap)
 				return
 			}
 		}
@@ -210,7 +237,7 @@ func (l *Loader) finish(ctx context.Context, sc *protocol.Scenario, idx int, res
 			l.log().Warn("checkpoint at scenario load", "err", err)
 		}
 	}
-	l.Engine.Activate(sc, idx)
+	l.Engine.ActivateLap(sc, idx, lap)
 }
 
 // fastForward replays the demos of the steps before idx into Emacs, each
@@ -316,7 +343,7 @@ func (l *Loader) Resume(ctx context.Context, ref protocol.StepRef) error {
 		return nil
 	}
 	l.reopen(ctx, sc)
-	l.Engine.Activate(sc, idx)
+	l.Engine.ActivateLap(sc, idx, steps.LapKeep)
 	return nil
 }
 

@@ -67,6 +67,16 @@ type StepRecord struct {
 	UpdatedAt   int64                   `json:"updatedAt"`
 }
 
+// LapRecord summarises a user's finished laps of one lesson (laps table).
+type LapRecord struct {
+	UserID   string `json:"-"`
+	LessonID string `json:"-"`
+	Count    int    `json:"count"`
+	BestMs   int64  `json:"bestMs"`
+	LastMs   int64  `json:"lastMs"`
+	LastAt   int64  `json:"lastAt"`
+}
+
 // StuckReport is an "I'm stuck" report (stuck_reports table).
 type StuckReport struct {
 	ID        int64  `json:"id"`
@@ -127,10 +137,14 @@ type ProgressRepo interface {
 	List(ctx context.Context, userID string) ([]StepRecord, error)
 	// Put inserts or replaces one step record.
 	Put(ctx context.Context, r StepRecord) error
-	// DeleteLesson removes a user's records for one lesson.
+	// DeleteLesson removes a user's records (laps too) for one lesson.
 	DeleteLesson(ctx context.Context, userID, lessonID string) error
 	// DeleteAll removes every record of a user ("Start over").
 	DeleteAll(ctx context.Context, userID string) error
+	// Laps returns a user's lap summaries.
+	Laps(ctx context.Context, userID string) ([]LapRecord, error)
+	// PutLap inserts or replaces one lap summary.
+	PutLap(ctx context.Context, r LapRecord) error
 }
 
 // StuckRepo stores stuck reports.

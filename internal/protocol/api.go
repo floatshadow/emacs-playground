@@ -160,6 +160,17 @@ type LessonProgress struct {
 	Status ProgressStatus          `json:"status"`
 	Counts ProgressCounts          `json:"counts"`
 	Steps  map[string]StepProgress `json:"steps"`
+	// Laps summarises finished "again, without hints" laps (projects).
+	Laps *LapStats `json:"laps,omitempty"`
+}
+
+// LapStats summarises a lesson's finished laps.
+type LapStats struct {
+	Count  int   `json:"count"`
+	BestMs int64 `json:"bestMs"`
+	LastMs int64 `json:"lastMs"`
+	// LastAt is when the last lap finished (ms).
+	LastAt int64 `json:"lastAt"`
 }
 
 // Progress is GET /api/v1/progress.
@@ -199,6 +210,9 @@ type ProgressReport struct {
 	// At is when the change happened (ms); the gateway uses it as
 	// completedAt for done.
 	At int64 `json:"at,omitempty"`
+	// LapMs, on the done report of a lap's last step, records a finished
+	// lap of this many milliseconds.
+	LapMs int64 `json:"lapMs,omitempty"`
 }
 
 // InternalStuckReport is POST /internal/sessions/{id}/stuck from sessiond.

@@ -95,6 +95,19 @@ type ScenarioRequest struct {
 	StepID string `json:"stepId,omitempty"`
 	// Reset forces fixture extraction over learner files (setup.reset).
 	Reset bool `json:"reset,omitempty"`
+	// Lap starts the "again, without hints" lap of a project: the lesson
+	// loads with reset from its first step (StepID must be empty or the
+	// first step) and a timer starts; until the last step completes, hint,
+	// demo and skip answer 409 and stuck rules are silent. Any other load
+	// ends the lap.
+	Lap bool `json:"lap,omitempty"`
+}
+
+// LapInfo describes the running lap (ScenarioRequest.Lap).
+type LapInfo struct {
+	LessonID string `json:"lessonId"`
+	// StartedAt is when the lap's first step became active (ms).
+	StartedAt int64 `json:"startedAt"`
 }
 
 // ScenarioResult reports the loaded step.
@@ -108,6 +121,9 @@ type ScenarioResult struct {
 	// Restarting is true when loading changed the module set and the daemon
 	// is restarting (the step becomes active after the restart).
 	Restarting bool `json:"restarting"`
+	// Lap is set when the request started a lap; StartedAt is 0 until the
+	// first step is active (after a restart).
+	Lap *LapInfo `json:"lap,omitempty"`
 }
 
 // CheckResult forces an evaluation of the active step now. When no step is
@@ -225,6 +241,11 @@ type StatusResult struct {
 	Versions map[string]string `json:"versions,omitempty"`
 	// ActiveWebSockets counts open /pty, /events and /vnc connections.
 	ActiveWebSockets int `json:"activeWebSockets"`
+	// Lap is the running lap, if any.
+	Lap *LapInfo `json:"lap,omitempty"`
+	// RemoteBox is true when the box alias is set up (key pair and
+	// ~/.ssh/config written; deployment.md §6).
+	RemoteBox bool `json:"remoteBox,omitempty"`
 }
 
 // DescribeRequest asks what a key sequence runs (ticker glosses for commands

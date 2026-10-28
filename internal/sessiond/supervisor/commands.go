@@ -31,6 +31,7 @@ func Env(cfg *protocol.SessiondConfig) []string {
 		"PG_PLAYGROUND":    "1",
 		"PG_SESSION_TOKEN": "",
 		"PG_PROXY_SECRET":  "",
+		"PG_BOX_KEY":       "",
 	}
 	// git refuses a workspace owned by another uid; see
 	// checkpoint.SafeDirectoryEnv.

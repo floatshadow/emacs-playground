@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -506,9 +507,25 @@ func TestServerModeEndToEnd(t *testing.T) {
 	if info.State != protocol.SessionReady || info.ID == "local" {
 		t.Fatalf("session %+v", info)
 	}
-	live := fake.Live()
+	var live, boxes []dockertest.FakeContainer
+	for _, c := range fake.Live() {
+		switch c.Spec.Labels[docker.LabelRole] {
+		case docker.RoleSession:
+			live = append(live, c)
+		case docker.RoleRemoteBox:
+			boxes = append(boxes, c)
+		}
+	}
 	if len(live) != 1 || live[0].Spec.Labels[docker.LabelUser] != me.User.ID || !live[0].Spec.ReadOnlyRootfs {
 		t.Fatalf("container %+v", live)
+	}
+	// The session's remote box authorises the key sessiond gets.
+	if !me.Features.RemoteBox || len(boxes) != 1 || live[0].Spec.Env["PG_BOX_HOST"] != boxes[0].Spec.Name {
+		t.Fatalf("remote box %+v, me %+v", boxes, me.Features)
+	}
+	if k, err := protocol.ParseBoxKey([]byte(live[0].Spec.Env["PG_BOX_KEY"])); err != nil ||
+		protocol.AuthorizedKey(k.Public().(ed25519.PublicKey), "playground-"+info.ID) != boxes[0].Spec.Env["AUTHORIZED_KEYS"] {
+		t.Fatalf("box key mismatch: %v", err)
 	}
 	token := live[0].Spec.Env["PG_SESSION_TOKEN"]
 	if live[0].Spec.Env["PG_GATEWAY_URL"] != "http://gateway:8080" {
@@ -583,10 +600,19 @@ func TestServerModeEndToEnd(t *testing.T) {
 	alice.json("GET", "/s/"+info.ID+"/status", nil, nil, 503)
 	alice.json("GET", "/internal/curriculum/scenarios/00-orientation/02-second", nil, nil, 200, "Authorization", auth)
 	alice.json("POST", "/api/v1/sessions", nil, &info, 201)
-	if len(fake.Live()) != 1 {
+	live = live[:0]
+	boxes = boxes[:0]
+	for _, c := range fake.Live() {
+		if c.Spec.Labels[docker.LabelRole] == docker.RoleSession {
+			live = append(live, c)
+		} else {
+			boxes = append(boxes, c)
+		}
+	}
+	if len(live) != 1 || len(boxes) != 1 {
 		t.Fatalf("recreated %+v", fake.Live())
 	}
-	if got := fake.Live()[0].Spec.Env["PG_PROXY_SECRET"]; got != secret {
+	if got := live[0].Spec.Env["PG_PROXY_SECRET"]; got != secret {
 		t.Fatalf("re-created session has another proxy secret: %q", got)
 	}
 	alice.json("GET", "/internal/curriculum/scenarios/00-orientation/02-second", nil, nil, 401, "Authorization", auth)

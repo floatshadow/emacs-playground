@@ -35,13 +35,18 @@ type watchEngine struct {
 	resets   []string
 	demoOps  []string
 	restores int
+	lap      bool
+	hints    int
 }
 
 func (e *watchEngine) steps() []protocol.Step { return e.src.Lessons[e.lesson].Scenario.Steps }
 
 func (e *watchEngine) emitLocked(st protocol.StepStatus, stepID string) {
 	e.seq++
-	ev := &protocol.StepEvent{LessonID: e.lesson, StepID: stepID, Status: st}
+	ev := &protocol.StepEvent{LessonID: e.lesson, StepID: stepID, Status: st, Lap: e.lap}
+	if e.lap && st == protocol.StepComplete && stepID == e.steps()[len(e.steps())-1].ID {
+		ev.LapMs = 1234
+	}
 	protocol.Stamp(ev, e.seq, time.Now().UnixMilli())
 	b, _ := protocol.MarshalEvent(ev)
 	for _, c := range e.subs {
@@ -83,14 +88,25 @@ func (e *watchEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/s/local/rpc/scenario":
 		var req protocol.ScenarioRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
-		e.lesson, e.step, e.got, e.latch = req.LessonID, 0, nil, false
+		e.lesson, e.step, e.got, e.latch, e.lap = req.LessonID, 0, nil, false, req.Lap
 		for i, s := range e.steps() {
 			if s.ID == req.StepID {
 				e.step = i
 			}
 		}
 		e.emitLocked(protocol.StepLoaded, e.steps()[e.step].ID)
-		httpx.WriteOK(w, protocol.ScenarioResult{})
+		var res protocol.ScenarioResult
+		if req.Lap {
+			res.Lap = &protocol.LapInfo{LessonID: req.LessonID, StartedAt: 1}
+		}
+		httpx.WriteOK(w, res)
+	case "/s/local/rpc/hint":
+		e.hints++
+		if e.lap {
+			httpx.WriteError(w, r, httpx.Conflict("lap"))
+			return
+		}
+		httpx.WriteOK(w, protocol.Empty{})
 	case "/s/local/rpc/demo":
 		var req protocol.DemoRequest
 		_ = json.NewDecoder(r.Body).Decode(&req)
@@ -185,7 +201,7 @@ func TestPlayWatchAndResetProgress(t *testing.T) {
 	}
 	defer ev.close()
 	p := &player{c: c, timeout: time.Second, speed: 50, keepGoing: true, log: io.Discard, events: ev}
-	res := p.playLesson(context.Background(), src.Lessons["00-orientation/01-first"])
+	res := p.playLesson(context.Background(), src.Lessons["00-orientation/01-first"], 0)
 	if len(res) != 3 || !res[0].OK || res[1].OK || !strings.Contains(res[1].Detail, "completed the step as done") {
 		t.Fatalf("a demo completing the step must fail: %+v", res)
 	}
@@ -211,6 +227,26 @@ func TestPlayWatchAndResetProgress(t *testing.T) {
 	eng.mu.Unlock()
 	if n != 2 {
 		t.Fatalf("one reset per lesson, after its repeats: %d", n)
+	}
+}
+
+func TestPlayLap(t *testing.T) {
+	src, diags := curriculum.Load(goodDir)
+	if diags.HasErrors() {
+		t.Fatal(diags.Err())
+	}
+	eng := &watchEngine{src: src, step: -1, broken: map[string]bool{}}
+	srv := httptest.NewServer(eng)
+	defer srv.Close()
+	session := srv.URL + "/s/local"
+	if code := curriculumPlay([]string{"0.1", "-lap", "-session", session, "-dir", goodDir, "-speed", "50", "-timeout", "2s"}); code != 0 {
+		t.Fatalf("play -lap: %d", code)
+	}
+	if eng.hints != 1 || len(eng.demoOps) != 0 {
+		t.Fatalf("hints %d, demo ops %v", eng.hints, eng.demoOps)
+	}
+	if code := curriculumPlay([]string{"0.1", "-lap", "-watch", "-session", session, "-dir", goodDir}); code != 2 {
+		t.Fatalf("-lap -watch: %d", code)
 	}
 }
 

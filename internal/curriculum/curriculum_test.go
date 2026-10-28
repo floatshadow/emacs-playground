@@ -180,6 +180,24 @@ func TestValidateErrors(t *testing.T) {
 		{"part status", func(t *testing.T, dir string) {
 			edit(t, dir, "index.yaml", "status: planned\n    suggestedAfter: 0", "status: ready\n    suggestedAfter: 0")
 		}, "not every lesson is ready"},
+		{"project section on a lesson", func(t *testing.T, dir string) {
+			edit(t, dir, first, "minutes: 12", "minutes: 12\nproject: { roots: [hello] }")
+		}, "only projects"},
+		{"box condition without the box", func(t *testing.T, dir string) {
+			edit(t, dir, first, "event: { command: find-file, min: 1 }", "file: { host: box, path: site/index.html, exists: true }")
+		}, "needs remote: {box: true}"},
+		{"unknown host", func(t *testing.T, dir string) {
+			edit(t, dir, first, "event: { command: find-file, min: 1 }", "shell: { host: server, run: \"true\" }")
+		}, "must be \"box\" or absent"},
+		{"shell timeout", func(t *testing.T, dir string) {
+			edit(t, dir, first, "event: { command: find-file, min: 1 }", "shell: { run: \"cargo test\", timeout: 900 }")
+		}, "between 1 and 300"},
+		{"buffer process", func(t *testing.T, dir string) {
+			edit(t, dir, first, "event: { command: find-file, min: 1 }", "buffer: { name: \"*eat*\", process: alive }")
+		}, "must be running or none"},
+		{"repo outside a root", func(t *testing.T, dir string) {
+			edit(t, dir, first, "  root: hello\n", "  repos: [\".\"]\n")
+		}, "cannot be a nested repository"},
 		{"lesson id prefix", func(t *testing.T, dir string) {
 			edit(t, dir, "index.yaml", "{ id: 01-moving-and-editing/01-motion", "{ id: 02-other/01-motion")
 		}, "must start with the part directory"},

@@ -38,6 +38,9 @@ type Scenario struct {
 	Preview *PreviewSpec `json:"preview,omitempty"`
 	// Remote requests the SSH box (optional).
 	Remote *RemoteSpec `json:"remote,omitempty"`
+	// Project configures a project's screen and its "again, without
+	// hints" lap (projects only, optional).
+	Project *ProjectSpec `json:"project,omitempty"`
 	// Setup prepares the workspace and Emacs when the scenario loads.
 	Setup Setup `json:"setup"`
 	// Steps are the lesson's goals in order.
@@ -75,6 +78,22 @@ type RemoteSpec struct {
 	Box bool `json:"box"`
 }
 
+// BoxHost is the only remote host conditions may name (FileCond.Host,
+// ShellCond.Host): the "box" alias sessiond writes to ~/.ssh/config.
+const BoxHost = "box"
+
+// ProjectSpec configures a project (CURRICULUM.md Part 14, frontend.md
+// §10). Its tasks are the scenario's steps.
+type ProjectSpec struct {
+	// Roots are the workspace-relative directories the file tree shows as
+	// separate roots ("polyglot/service", "polyglot/report"); default
+	// setup.root.
+	Roots []string `json:"roots,omitempty"`
+	// LapMinutes is the target time of the "again, without hints" lap
+	// (ScenarioRequest.Lap); 0 shows the timer without a target.
+	LapMinutes int `json:"lapMinutes,omitempty"`
+}
+
 // Setup prepares the workspace and Emacs for a scenario.
 type Setup struct {
 	// Workspace is the fixture directory relative to the lesson directory,
@@ -100,7 +119,23 @@ type Setup struct {
 	// for none. It runs in the project root (project.el) of the first Open
 	// file, or that file's directory when it is in no project.
 	Compile string `json:"compile,omitempty"`
+	// Repos are directories relative to Root ("." for Root itself) made
+	// git repositories of their own, with the fixtures as one initial
+	// commit (fixed identity and date, branch main), when they have no
+	// .git yet or the load resets. Checkpoints capture such nested
+	// repositories whole (.git included, so the staging area and commits
+	// made in a step are restored too).
+	Repos []string `json:"repos,omitempty"`
+	// Run is a shell script sessiond runs as the learner (sh -c) in Root
+	// after the fixtures and Repos and before Emacs opens anything, on
+	// every load; at most SetupRunTimeout. It must be idempotent (a git
+	// history for a Magit lesson, files on the box over ssh). A failure is
+	// logged and reported as an error event.
+	Run string `json:"run,omitempty"`
 }
+
+// SetupRunTimeout bounds Setup.Run.
+const SetupRunTimeout = 120 // seconds
 
 // Step is one goal of a lesson.
 type Step struct {
@@ -135,6 +170,7 @@ const (
 	CondElisp  ConditionKind = "elisp"
 	CondFile   ConditionKind = "file"
 	CondShell  ConditionKind = "shell"
+	CondBuffer ConditionKind = "buffer"
 	CondLayout ConditionKind = "layout"
 	CondState  ConditionKind = "state"
 	CondAll    ConditionKind = "all"
@@ -143,7 +179,7 @@ const (
 )
 
 // Condition is one predicate of a step. Exactly one kind field (Event,
-// Elisp, File, Shell, Layout, State, All, Any, Not) is set. Text and Hint
+// Elisp, File, Shell, Buffer, Layout, State, All, Any, Not) is set. Text and Hint
 // are used on top-level conditions; nested conditions inside all, any and
 // not only need the kind field.
 type Condition struct {
@@ -159,6 +195,7 @@ type Condition struct {
 	Elisp  string      `json:"elisp,omitempty"`
 	File   *FileCond   `json:"file,omitempty"`
 	Shell  *ShellCond  `json:"shell,omitempty"`
+	Buffer *BufferCond `json:"buffer,omitempty"`
 	Layout string      `json:"layout,omitempty"`
 	State  StateCond   `json:"state,omitempty"`
 	All    []Condition `json:"all,omitempty"`
@@ -191,6 +228,9 @@ func (c *Condition) Kinds() []ConditionKind {
 	}
 	if c.Shell != nil {
 		out = append(out, CondShell)
+	}
+	if c.Buffer != nil {
+		out = append(out, CondBuffer)
 	}
 	if c.Layout != "" {
 		out = append(out, CondLayout)
@@ -276,8 +316,12 @@ func (e *EventCond) MinOrDefault() int {
 // FileCond is a predicate on a workspace file. Path is workspace-relative.
 // Exactly one predicate is set: Exists, Contains, NotContains, Regex, or
 // JSONPath with Equals. Files are read through os.Root, capped at 1 MB.
+// With Host "box" the file is on the remote box instead (Path absolute or
+// relative to the box user's home), read over ssh.
 type FileCond struct {
 	Path string `json:"path"`
+	// Host is "" (the workspace) or BoxHost.
+	Host string `json:"host,omitempty"`
 	// Exists: true requires the file to exist, false requires it not to.
 	Exists *bool `json:"exists,omitempty"`
 	// Contains requires the substring.
@@ -293,12 +337,54 @@ type FileCond struct {
 }
 
 // ShellCond runs `sh -c Run` as the learner; exit status 0 is true.
+// A run longer than about a second does not hold up the step's other
+// conditions: it is unknown ("running") until it finishes, and its result
+// is kept until the next file event or step change.
 type ShellCond struct {
 	Run string `json:"run"`
-	// Cwd is workspace-relative; default the scenario's setup root.
+	// Cwd is workspace-relative; default the scenario's setup root. With
+	// Host it is a directory on the box (default the box user's home).
 	Cwd string `json:"cwd,omitempty"`
-	// Timeout in seconds, default 5; a timeout yields unknown.
+	// Timeout in seconds, default 5, at most MaxShellTimeout; a timeout
+	// yields unknown.
 	Timeout int `json:"timeout,omitempty"`
+	// Host is "" (the session) or BoxHost: the script runs on the remote
+	// box over ssh.
+	Host string `json:"host,omitempty"`
+}
+
+// MaxShellTimeout bounds ShellCond.Timeout (seconds): long enough for a
+// build or a test run.
+const MaxShellTimeout = 300
+
+// BufferProcess is the process state a BufferCond expects.
+type BufferProcess string
+
+// Buffer process states.
+const (
+	// ProcessRunning: the buffer has a live process (a terminal, a REPL, a
+	// build still running).
+	ProcessRunning BufferProcess = "running"
+	// ProcessNone: the buffer has no live process (it exited, or never had
+	// one).
+	ProcessNone BufferProcess = "none"
+)
+
+// BufferCond is a predicate on a live Emacs buffer: true when a buffer
+// named Name exists and every other set field holds. sessiond turns it
+// into one elisp form for the agent's check (an error is unknown).
+type BufferCond struct {
+	// Name is the buffer name ("*compilation*", "*eat*"); a name with
+	// <...> uniquify suffix also matches ("main.rs<hello>" for "main.rs").
+	Name string `json:"name"`
+	// Mode: the buffer's major mode is or derives from it.
+	Mode string `json:"mode,omitempty"`
+	// Contains: the buffer's text contains this literal string.
+	Contains string `json:"contains,omitempty"`
+	// Process: running or none.
+	Process BufferProcess `json:"process,omitempty"`
+	// Modified: the buffer has (true) or has no (false) unsaved changes.
+	Modified *bool `json:"modified,omitempty"`
 }
 
 // TimeoutOrDefault returns Timeout, or 5 when unset.

@@ -12,7 +12,7 @@ internal/httpx       problem+json, JSON, middleware, WebSocket helpers
 internal/curriculum  loader, validator, bundle builder
 internal/docker      Engine client wrapper, hardening
 internal/gateway/    auth sessions proxy store curriculum progress limit
-internal/sessiond/   supervisor pty agent inputtap events steps checkpoint preview vnc scenario gwclient
+internal/sessiond/   supervisor pty agent inputtap events steps checkpoint preview vnc scenario gwclient sshbox
 web/embed.go         bundle in the gateway binary (tag embedweb)
 ```
 
@@ -38,7 +38,7 @@ Serve the web bundle, fonts and curriculum; authenticate and issue cookies; own 
 Interfaces in `internal/gateway/sessions` (`Manager`, implemented by `Service`; `Backend`; `Networker`), `store.Store`, `auth.Authenticator`.
 
 - **StaticBackend** (local): one pre-existing session at `local.sessionUrl` shared by all users, id and token `local.sessionId`/`local.sessionToken` (default `local`). Lifecycle calls are no-ops; `Inspect` probes `/healthz`.
-- **DockerBackend** (server, experimental): container `pg-session-<id>` labelled `playground.{session,user,version,role}`, volume `pg-ws-<user>` at `/work`, `docker.Harden` (deployment.md §9.2). Tokens are 256-bit random, stored as SHA-256.
+- **DockerBackend** (server, experimental): container `pg-session-<id>` labelled `playground.{session,user,version,role}`, volume `pg-ws-<user>` at `/work`, `docker.Harden` (deployment.md §9.2). Tokens are 256-bit random, stored as SHA-256. With `sessions.remoteBox.enabled`, a box `pg-box-<id>` (`docker.HardenBox`, alias `box` on the session network) gets the public half of a fresh ed25519 pair and sessiond the private half (`PG_BOX_KEY`, `PG_BOX_HOST`); a box that fails to start leaves the session without one.
 - **Isolation** `sessions.isolation`: `network` (default) gives each session an internal network `pg-net-<id>` (a `/28` from `sessions.subnetPool`), which the gateway container (`sessions.gatewayContainer`, default its hostname) joins as `gateway`. The registry rebuild re-attaches a new gateway container; rebuild and reaper prune networks without a session. `shared` uses `sessions.network`.
 - **Proxy secret**: all gateway → session traffic (proxy, `Service.Call`, `Service.Status`) carries `X-Playground-Proxy: hex(HMAC-SHA256(key, "playground session proxy\0" + id))`, key in `<dataDir>/session-proxy.secret`; stable across restarts and re-creation; given to the container as `PG_PROXY_SECRET` (§3.13). The static session has none.
 
@@ -70,7 +70,7 @@ Serves `playctl curriculum build` output from `curriculum.dir` (layout in `proto
 
 ### 2.9 Progress
 
-sessiond reports progress (step start, completion, demonstrated, skipped, hints via `rpc hint`, resets), so it survives a tab closing mid-step. `progress.Service.Apply` only raises a status (api.md §2.4), takes absolute `hintsUsed`/`resets`, and rejects lessons or steps outside the loaded bundle (the learner can read their session token). `POST /progress/reset` then sends the session `drop-step` (best effort, 5 s).
+sessiond reports progress (step start, completion, demonstrated, skipped, hints via `rpc hint`, resets, finished laps), so it survives a tab closing mid-step. `progress.Service.Apply` only raises a status (api.md §2.4), takes absolute `hintsUsed`/`resets`, and rejects lessons or steps outside the loaded bundle (the learner can read their session token). `POST /progress/reset` then sends the session `drop-step` (best effort, 5 s).
 
 ## 3. sessiond
 
@@ -81,7 +81,7 @@ Keep Emacs, tmux and Xvnc alive; serve PTY, events, VNC, RPC and preview; tap in
 ### 3.2 Startup sequence
 
 1. Parse the environment; open the agent socket.
-2. Initialise the workspace if needed: `git init`, `.playground/`, pristine config to `/work/emacs.d` (first start only), `modules.el` = `base agent`.
+2. Initialise the workspace if needed: `git init`, `.playground/`, pristine config to `/work/emacs.d` (first start only), `modules.el` = `base agent`; the box key pair and alias (`sshbox`, deployment.md §6).
 3. Start HTTP; `/healthz` answers 503 until step 4 is done.
 4. Start the daemon and wait for `hello` (60 s, then restart once).
 5. Start tmux and the terminal frame.
@@ -122,14 +122,15 @@ Decodes input into Emacs keys independently of Emacs to emit `prefix` within mil
 
 Triggers: agent `key`/`state`, `file` events, a 2 s ticker (for asynchronous output). One goroutine with a trailing debounce: 40 ms after the last trigger, at most 120 ms after the first (`DefaultDebounce`, `DefaultDebounceMax`); `check` follows its `key` by about 50 ms.
 
-Evaluators: `event` from command counts; `elisp` by agent `check`, batched (error or timeout → unknown); `file` through `os.Root`, fresh, ≤ 1 MB; `shell` as `sh -c` in `cwd` (default setup root), exit 0 true, timeout → unknown, stdout ≤ 4 KB in `detail`, cached until the next file event or step change; `layout` and `state` on the last agent state (no state → unknown). `all`/`any`/`not` are three-valued. A step completes when every top-level condition is true. Stuck rules run on the ticker, never while a demo plays.
+Evaluators: `event` from command counts; `elisp` and `buffer` (turned into a form) by agent `check`, batched (error or timeout → unknown); `file` through `os.Root`, fresh, ≤ 1 MB; `shell` as `sh -c` in `cwd` (default setup root), exit 0 true, timeout → unknown, stdout ≤ 4 KB in `detail`, cached until the next file event, nested `.git` change or step change, one run per script at a time, unknown ("running") after 1.5 s while it finishes in the background and triggers a re-evaluation; `host: box` file and shell conditions run `ssh box` (exit 255 → unknown), cached 3 s; `layout` and `state` on the last agent state (no state → unknown). `all`/`any`/`not` are three-valued. A step completes when every top-level condition is true. Stuck rules run on the ticker, never while a demo plays.
 
 Statuses and the demo latch: api.md §4.1. Internals:
 
 - The restore of `demo start` or `skip` emits `step reset` without counting a reset.
 - `skip` holds completions while `protocol.PlayDemo` plays, detached from the request.
 - `Engine.Rehearse` (fast-forward, §3.12) activates a step with nothing recorded, emitted or persisted.
-- `.playground/state.json` keeps the active step and per lesson the done, skipped and demonstrated times, hints and resets.
+- `.playground/state.json` keeps the active step, the running lap and per lesson the done, skipped and demonstrated times, hints and resets.
+- Laps (`Engine.ActivateLap`): `LapStart` from `scenario {lap}`, `LapKeep` on resume, any other activation or `drop-step` ends it; `Hint`, `StartDemo`, `BeginSkip` refuse and stuck rules pause; the last completion reports `lapMs`.
 
 ### 3.9 Checkpoints
 
@@ -141,19 +142,20 @@ The workspace is a git repository. A checkpoint is a commit at `refs/playground/
 - `buffers`: each file buffer's unsaved text (≤ 256 KiB) and readable undo entries (≤ 128 KiB), 512 KiB in all. A step usually starts with the previous step's edit still unsaved (auto-save waits 5 s).
 - `globals`: printed `sessiond.GlobalVars` (kill ring, minibuffer and search histories, last macro and counters; ≤ 256 KiB), so Watch it then Do it yourself leaves none of the demo's kills, history or macro counts. Add a variable when a lesson depends on more session state.
 - `emptyDirs` (≤ 1000).
+- `nested`: each nested git repository (a directory with a `.git` directory, ≤ 50) as two commits, its working tree (its own ignores apply) and its `.git` (lock files left out), kept reachable as extra parents of the checkpoint commit; the workspace tree leaves them out.
 
-Restore: `git restore --worktree --staged` and `git clean -fd` against the temporary index (removing exactly what the checkpoint lacks, except build output and `.playground`); recreate empty directories; keep `emacs.d/modules.el` (modules only grow, emacs.md §4); agent `reset-step`; then unsaved text (`replace-buffer-contents`) and undo with recording off; then globals. `restoredFiles` counts files changed on disk plus buffers whose unsaved edits were discarded.
+Restore: `.git` of nested repositories the checkpoint lacks is removed (their files become ordinary workspace files); `git restore --worktree --staged` and `git clean -fd` against the temporary index, leaving the checkpoint's nested repositories out (removing exactly what the checkpoint lacks, except build output and `.playground`); each nested repository's `.git`, then its working tree, restored the same way; recreate empty directories; keep `emacs.d/modules.el` (modules only grow, emacs.md §4); agent `reset-step`; then unsaved text (`replace-buffer-contents`) and undo with recording off; then globals. `restoredFiles` counts files changed on disk plus buffers whose unsaved edits were discarded.
 
 A started restore runs to the end without the request's cancellation (`Server.restoreCheckpoint`). Git commands are serialised, detached and bounded by `checkpoint.GitTimeout`; a lock older than `checkpoint.StaleLockAge` (10 s) that blocks a command is removed and the command retried once.
 
 Limits and open items:
 
-- Not captured: the staging area (TODO(sessiond, backend.md §3.9), for Magit lessons), minor modes a demo turned on, variables outside `GlobalVars` such as `display-buffer-alist`; a step whose state lives there lacks it after Go to this step or Watch it.
+- Not captured: the staging area of `/work` itself (nested repositories keep theirs), minor modes a demo turned on, variables outside `GlobalVars` such as `display-buffer-alist`; a step whose state lives there lacks it after Go to this step or Watch it.
 - `/work` being the checkpoint repository makes project.el treat it as a project (`emacs.d` in `project-files`); hiding it needs a separate `GIT_DIR`.
 
 ### 3.10 Preview and file watching
 
-`/preview/` serves `/work` through `os.Root` (no `..` or symlink escape; `.playground/` hidden), headers in api.md §3.5. The CSP's `allow-same-origin` is an open question (deployment.md §9.3). `fsnotify` watches `/work` recursively (ignoring `.git`, build output, `.playground`, lock and backup files), coalescing per path at 200 ms.
+`/preview/` serves `/work` through `os.Root` (no `..` or symlink escape; `.playground/` hidden), headers in api.md §3.5. The CSP's `allow-same-origin` is an open question (deployment.md §9.3). `fsnotify` watches `/work` recursively (ignoring `.git`, build output, `.playground`, lock and backup files), coalescing per path at 200 ms; a change at the top of a nested repository's `.git` (commit, staging, checkout) emits no event but drops cached shell results.
 
 ### 3.11 VNC bridge
 
@@ -165,7 +167,7 @@ Limits and open items:
 
 1. Reloading the active lesson (same or no `stepId`, no `reset`) returns at once, never re-running setup.
 2. Fetch scenario and fixtures, cached by ETag in `.playground/cache` and used from there when the gateway is down.
-3. Extract fixtures into `/work/<setup.root>`, keeping existing files unless `reset` (request or `setup.reset`); with reset the root matches the fixtures exactly (except build output and `.git`), so lessons replay in any order.
+3. Extract fixtures into `/work/<setup.root>`, keeping existing files unless `reset` (request, `setup.reset` or `lap`); with reset the root matches the fixtures exactly (except build output and `.git`), so lessons replay in any order. Then `setup.repos` (`git init`, re-created on reset) and `setup.run` (≤ 120 s); failures are `error` events.
 4. Modules = current ∪ scenario's (`rpc modules` sets exactly), so lessons must pass with more modules than they list. On change: write `modules.el`, emit `modules {restarting}`, return `restarting: true`, finish after the restart.
 5. Agent `setup` (emacs.md §10.3), after waiting ≤ 15 s for a restart and for the terminal frame, so layouts never land in the daemon's invisible frame. `compile` runs in the project root of the first `open` file. TODO(sessiond, CURRICULUM.md Part B.3): `.eld` layouts are ignored.
 6. A later step (Go to this step, resume mid-lesson) starts from its checkpoint; without one the loader fast-forwards, rehearsing each earlier step and playing its demo at playctl pacing (≤ 10 s per step, 3 min total, detached from the request). A later step's checkpoint is never overwritten with the lesson's initial state.
@@ -180,7 +182,7 @@ Environment only: `protocol.SessiondConfig` (names and defaults in its tags), ea
 ## 4. playctl
 
 - `curriculum validate [dir]`; `curriculum build [dir] -o out [-lenient]` (`-lenient` drops broken lessons, test builds only).
-- `curriculum play <lesson id|2.3|part:N|all>… [-session URL] [-timeout] [-speed] [-watch] [-repeat N] [-reset-progress]`: loads each lesson by `/rpc/scenario`, plays its demos by `/rpc/keys` at playctl pacing, requires every step to complete, prints a table and the unmet conditions, exits non-zero on failure. `-session` is sessiond (default `$PG_PLAY_SESSION`) or a gateway session path, after which played lessons' progress is reset. `-watch` plays each step first as Watch it (`demo start`, demo, `demo end`, expect `step demonstrated`, `restore {}`).
+- `curriculum play <lesson id|2.3|P1|part:N|all>[@step]… [-session URL] [-timeout] [-speed] [-watch|-lap] [-repeat N] [-reset-progress]`: loads each lesson by `/rpc/scenario`, plays its demos by `/rpc/keys` at playctl pacing, requires every step to complete, prints a table and the unmet conditions, exits non-zero on failure. `-session` is sessiond (default `$PG_PLAY_SESSION`) or a gateway session path, after which played lessons' progress is reset. `-watch` plays each step first as Watch it (`demo start`, demo, `demo end`, expect `step demonstrated`, `restore {}`). `@step` (id or task number) loads that step (checkpoint or fast-forward) and plays from it; `-lap` starts the lap, expects a refused hint and the final `lapMs`.
 - `config schema`, `config check <file>`; `protocol typescript [-check]` (api.md §8); `images build`, `dev`, `fonts`, `session shell` (notes.md §3); `export-user` is a TODO.
 
 ## 5. Cross-cutting

@@ -54,6 +54,8 @@ type Saved struct {
 	Active *protocol.StepRef `json:"active,omitempty"`
 	// Lessons is per-lesson progress known to this session.
 	Lessons map[string]*LessonState `json:"lessons,omitempty"`
+	// Lap is the running "again, without hints" lap.
+	Lap *protocol.LapInfo `json:"lap,omitempty"`
 }
 
 // LessonState is the progress of one lesson.
@@ -122,6 +124,8 @@ type Options struct {
 	Debounce    time.Duration
 	DebounceMax time.Duration
 	Tick        time.Duration
+	// ShellWait overrides ShellSyncWait.
+	ShellWait time.Duration
 }
 
 // Engine evaluates the active step. Methods are safe for concurrent use.
@@ -224,6 +228,10 @@ func (e *Engine) savedLocked() Saved {
 		a := *e.saved.Active
 		out.Active = &a
 	}
+	if e.saved.Lap != nil {
+		l := *e.saved.Lap
+		out.Lap = &l
+	}
 	for id, ls := range e.saved.Lessons {
 		out.Lessons[id] = &LessonState{
 			Done: maps.Clone(ls.Done), Skipped: maps.Clone(ls.Skipped), Demonstrated: maps.Clone(ls.Demonstrated),
@@ -304,9 +312,30 @@ func (e *Engine) ActiveIndex() (int, int) {
 	return e.idx, len(e.sc.Steps)
 }
 
+// LapMode says what an activation does with the "again, without hints"
+// lap (ScenarioRequest.Lap).
+type LapMode int
+
+// Lap modes.
+const (
+	// LapEnd ends a running lap (any ordinary load).
+	LapEnd LapMode = iota
+	// LapStart starts a lap of the lesson now.
+	LapStart
+	// LapKeep keeps a lap of the same lesson running (resume after a
+	// sessiond restart).
+	LapKeep
+)
+
 // Activate makes step idx of sc active (the scenario loader has already
-// taken its checkpoint), emits step loaded, and schedules an evaluation.
+// taken its checkpoint), emits step loaded, and schedules an evaluation. A
+// running lap ends.
 func (e *Engine) Activate(sc *protocol.Scenario, idx int) protocol.StepRef {
+	return e.ActivateLap(sc, idx, LapEnd)
+}
+
+// ActivateLap is Activate with the lap handled as mode says.
+func (e *Engine) ActivateLap(sc *protocol.Scenario, idx int, mode LapMode) protocol.StepRef {
 	sc.AssignIDs()
 	e.mu.Lock()
 	sameLesson := e.sc != nil && e.sc.ID == sc.ID
@@ -316,6 +345,13 @@ func (e *Engine) Activate(sc *protocol.Scenario, idx int) protocol.StepRef {
 	}
 	if idx < 0 || idx >= len(sc.Steps) {
 		idx = 0
+	}
+	switch {
+	case mode == LapStart:
+		e.saved.Lap = &protocol.LapInfo{LessonID: sc.ID, StartedAt: e.opt.Now().UnixMilli()}
+	case mode == LapKeep && e.saved.Lap != nil && e.saved.Lap.LessonID == sc.ID:
+	default:
+		e.saved.Lap = nil
 	}
 	e.hold = holdNone
 	evs := e.startStepLocked(idx, protocol.StepLoaded)
@@ -372,8 +408,24 @@ func (e *Engine) startStepLocked(idx int, status protocol.StepStatus) []protocol
 	e.saved.Active = &protocol.StepRef{LessonID: e.sc.ID, StepID: e.sc.Steps[idx].ID}
 	return []protocol.Event{&protocol.StepEvent{
 		LessonID: e.sc.ID, StepID: e.sc.Steps[idx].ID, Status: status,
-		Index: idx, Count: len(e.sc.Steps),
+		Index: idx, Count: len(e.sc.Steps), Lap: e.inLapLocked(),
 	}}
+}
+
+// inLapLocked reports whether the loaded lesson runs a lap.
+func (e *Engine) inLapLocked() bool {
+	return e.sc != nil && e.saved.Lap != nil && e.saved.Lap.LessonID == e.sc.ID
+}
+
+// Lap returns the running lap, or nil.
+func (e *Engine) Lap() *protocol.LapInfo {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.inLapLocked() {
+		return nil
+	}
+	l := *e.saved.Lap
+	return &l
 }
 
 // inProgressLocked reports a step as started once per session.
@@ -426,6 +478,7 @@ func (e *Engine) Drop(lessonID string) bool {
 		e.hold = holdNone
 		e.demoLatch, e.demoPlaying, e.demonstrated = false, false, false
 		e.saved.Active = nil
+		e.saved.Lap = nil
 	}
 	if lessonID == "" {
 		e.saved.Lessons = map[string]*LessonState{}
@@ -509,7 +562,7 @@ func (e *Engine) StartDemo(stepID string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	a := e.activeLocked()
-	if a == nil || a.StepID != stepID || e.hold != holdNone {
+	if a == nil || a.StepID != stepID || e.hold != holdNone || e.inLapLocked() {
 		return false
 	}
 	e.demoLatch, e.demoPlaying = true, true
@@ -590,7 +643,7 @@ func (e *Engine) BeginSkip(stepID string) bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	a := e.activeLocked()
-	if a == nil || a.StepID != stepID || e.hold != holdNone {
+	if a == nil || a.StepID != stepID || e.hold != holdNone || e.inLapLocked() {
 		return false
 	}
 	e.hold = holdSkip
@@ -641,7 +694,7 @@ func (e *Engine) FinishSkip(ctx context.Context, stepID string) (*string, bool) 
 // HintsUsed is the highest level shown (an absolute total).
 func (e *Engine) Hint(stepID string, level int) bool {
 	e.mu.Lock()
-	if e.sc == nil || e.sc.StepIndex(stepID) < 0 || level <= 0 {
+	if e.sc == nil || e.sc.StepIndex(stepID) < 0 || level <= 0 || e.inLapLocked() {
 		e.mu.Unlock()
 		return false
 	}
@@ -728,6 +781,13 @@ func (e *Engine) OnFile(*protocol.FileEvent) {
 	e.Trigger()
 }
 
+// Invalidate drops cached shell results and schedules an evaluation (a
+// nested repository's .git changed: git state is not a file event).
+func (e *Engine) Invalidate() {
+	e.shellCache.clear()
+	e.Trigger()
+}
+
 // Trigger schedules a debounced evaluation.
 func (e *Engine) Trigger() {
 	select {
@@ -810,6 +870,9 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 		shell:        e.opt.Shell,
 		shellCache:   &e.shellCache,
 		patterns:     &e.patterns,
+		trigger:      e.Trigger,
+		shellWait:    e.opt.ShellWait,
+		now:          e.opt.Now,
 	}
 	e.mu.Unlock()
 
@@ -877,7 +940,7 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 		e.mu.Unlock()
 		return out, true
 	case !complete:
-		if !e.demoPlaying && e.hold == holdNone {
+		if !e.demoPlaying && e.hold == holdNone && !e.inLapLocked() {
 			evs = append(evs, e.stuckLocked(step, now)...)
 		}
 		e.mu.Unlock()
@@ -913,8 +976,14 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 	ls := e.lesson(sc.ID)
 	ls.Done[step.ID] = now.UnixMilli()
 	last := idx+1 >= len(sc.Steps)
-	evs = append(evs, &protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepComplete, Index: idx, Count: len(sc.Steps), LessonComplete: last})
+	ev := &protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepComplete, Index: idx, Count: len(sc.Steps), LessonComplete: last, Lap: e.inLapLocked()}
 	rep := ls.progress(sc.ID, step.ID, protocol.ProgressDone, now)
+	if last && ev.Lap {
+		ev.LapMs = max(now.UnixMilli()-e.saved.Lap.StartedAt, 1)
+		rep.LapMs = ev.LapMs
+		e.saved.Lap = nil
+	}
+	evs = append(evs, ev)
 	e.advanceLocked(ctx, sc, idx, evs, rep)
 	return out, true
 }

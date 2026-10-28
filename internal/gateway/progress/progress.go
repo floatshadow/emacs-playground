@@ -99,7 +99,46 @@ func (s *Service) Apply(ctx context.Context, userID string, rep protocol.Progres
 		rec.Resets = *rep.Resets
 	}
 	rec.UpdatedAt = now
-	return s.Store.Progress().Put(ctx, rec)
+	if err := s.Store.Progress().Put(ctx, rec); err != nil {
+		return err
+	}
+	if rep.LapMs > 0 {
+		return s.addLap(ctx, userID, rep, now)
+	}
+	return nil
+}
+
+// addLap records a finished lap: only on the done report of the lesson's
+// last step (the engine sends it there).
+func (s *Service) addLap(ctx context.Context, userID string, rep protocol.ProgressReport, now int64) error {
+	if rep.Status != protocol.ProgressDone {
+		return httpx.BadRequest("lapMs comes with a done report")
+	}
+	if s.Steps != nil {
+		if steps, ok := s.Steps.StepIDs(rep.LessonID); ok && (len(steps) == 0 || steps[len(steps)-1] != rep.StepID) {
+			return httpx.BadRequest("lapMs comes with the last step")
+		}
+	}
+	laps, err := s.Store.Progress().Laps(ctx, userID)
+	if err != nil {
+		return err
+	}
+	lr := store.LapRecord{UserID: userID, LessonID: rep.LessonID}
+	for _, l := range laps {
+		if l.LessonID == rep.LessonID {
+			lr = l
+		}
+	}
+	lr.Count++
+	lr.LastMs = rep.LapMs
+	if lr.BestMs == 0 || rep.LapMs < lr.BestMs {
+		lr.BestMs = rep.LapMs
+	}
+	lr.LastAt = rep.At
+	if lr.LastAt == 0 {
+		lr.LastAt = now
+	}
+	return s.Store.Progress().PutLap(ctx, lr)
 }
 
 // Get aggregates a user's progress.
@@ -122,6 +161,18 @@ func (s *Service) Get(ctx context.Context, userID string) (protocol.Progress, er
 		if r.UpdatedAt > out.UpdatedAt {
 			out.UpdatedAt = r.UpdatedAt
 		}
+	}
+	laps, err := s.Store.Progress().Laps(ctx, userID)
+	if err != nil {
+		return out, err
+	}
+	for _, l := range laps {
+		lp, ok := out.Lessons[l.LessonID]
+		if !ok {
+			lp = protocol.LessonProgress{Status: protocol.ProgressNotStarted, Steps: map[string]protocol.StepProgress{}}
+		}
+		lp.Laps = &protocol.LapStats{Count: l.Count, BestMs: l.BestMs, LastMs: l.LastMs, LastAt: l.LastAt}
+		out.Lessons[l.LessonID] = lp
 	}
 	for id, lp := range out.Lessons {
 		var steps []string

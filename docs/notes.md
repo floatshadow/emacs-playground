@@ -1,6 +1,6 @@
 # Implementation notes
 
-Developer workflow, test tools, toolchain, slice-1 scope, known limitations and curriculum authoring pitfalls. Rules and main commands: `AGENTS.md`.
+Developer workflow, test tools, toolchain, scope, known limitations and curriculum authoring pitfalls. Rules and main commands: `AGENTS.md`.
 
 ## 1. Where the details live
 
@@ -43,9 +43,9 @@ Without `PG_SESSIOND_URL` the test uses testcontainers (`PG_SESSION_IMAGE`) and 
 
 Go 1.27.3 from go.dev into `~/.local/go` (`go1.27.3.linux-amd64.tar.gz`, sha256 `65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40`, as listed at `https://go.dev/dl/?mode=json`); pnpm through corepack: `corepack enable --install-directory ~/.local/bin pnpm`, then `corepack install` in `web/` fetches the `packageManager` version (Node 25+: `npm install -g corepack` first). Commit the `minimumReleaseAgeExclude` entries pnpm adds to `web/pnpm-workspace.yaml` with the lockfile. Builds need GitHub, go.dev, npm, GNU/NonGNU ELPA, MELPA, Docker Hub and GHCR.
 
-## 5. Slice 1 scope
+## 5. Scope
 
-Session image with Emacs 31.1, Rust, Python and twelve modules (others stubs), under 4 GB; all of sessiond (backend.md §3); gateway local mode, docker backend experimental, OIDC 501; playctl; every web screen; curriculum Parts 0 to 3. Everything else is a `TODO` with its doc section (DESIGN.md §10).
+Session image with Emacs 31.1, every toolchain and all eighteen modules (emacs.md); all of sessiond (backend.md §3) with projects, laps and the remote box; gateway local mode, docker backend experimental, OIDC 501; playctl; every web screen; curriculum Parts 0 to 3 ready, Parts 4–14 and P1–P8 in authoring. Everything else is a `TODO` with its doc section (DESIGN.md §10).
 
 ## 6. Known limitations
 

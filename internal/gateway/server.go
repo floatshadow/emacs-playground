@@ -185,6 +185,11 @@ func (a *App) buildSessions(ctx context.Context) error {
 			"PG_AUTHOR_MODE":  strconv.FormatBool(cfg.Features.AuthorMode),
 		},
 	}
+	if cfg.Sessions.Egress == protocol.EgressAll {
+		// The session image runs cargo and uv offline (emacs.md §9).
+		so.Env["CARGO_NET_OFFLINE"] = "false"
+		so.Env["UV_OFFLINE"] = "0"
+	}
 	if cfg.Sessions.RemoteBox.Enabled {
 		so.RemoteImage = cfg.Sessions.RemoteBox.Image
 	}
@@ -445,9 +450,9 @@ func (a *App) me(w http.ResponseWriter, r *http.Request) error {
 		User: *u, Mode: a.cfg.Mode, AuthMode: a.cfg.Auth.Mode, Version: buildinfo.Version,
 		Features: protocol.MeFeatures{
 			GUI: a.cfg.Sessions.GUI.Enabled,
-			// TODO(gateway, deployment.md §6): true once remote boxes are
-			// provisioned (M6).
-			RemoteBox:    false,
+			// Local mode runs the shared box with the stack; the docker
+			// backend creates one per session (deployment.md §6).
+			RemoteBox:    a.cfg.Sessions.RemoteBox.Enabled,
 			StuckReports: a.cfg.Features.StuckReports,
 			AuthorMode:   a.cfg.Features.AuthorMode,
 		},

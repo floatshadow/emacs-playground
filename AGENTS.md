@@ -42,7 +42,7 @@ The specification is in `docs/`: start with `DESIGN.md` (overview, decisions, ro
 | `make build` / `make gateway` | binaries and `web/dist` / gateway with embedded bundle |
 | `make local` / `make server` | write `.env` for a mode; `BUILD=1 make local` builds images |
 | `make images`, `image-gateway`, `image-session` | build images (`TAG=dev` for a local tag) |
-| `make dev` | session container on the host network, gateway from source, Vite on :5173 |
+| `make dev` | session container on the host network and remote box, gateway from source, Vite on :5173 |
 | `make shell` / `make reset-workspace` | attach to the local Emacs / start with a fresh `./workspace` |
 | `make emacs-test` | agent and configuration ERT tests in the session image |
 | `make e2e` | browser smoke test against the running stack (Chrome on CDP :9222) |

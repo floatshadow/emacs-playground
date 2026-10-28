@@ -37,10 +37,27 @@ type Checker interface {
 type ShellResult struct {
 	OK       bool
 	TimedOut bool
-	// Output is stdout truncated to MaxShellOutput.
+	// ExitCode is the exit status (0 when OK; -1 when it did not exit).
+	ExitCode int
+	// Output is stdout truncated to MaxShellOutput (or the cap given to
+	// RunCapped).
 	Output string
 	Err    error
 }
+
+// CappedShellRunner is a ShellRunner that can keep more output (remote
+// file conditions read the file through ssh).
+type CappedShellRunner interface {
+	RunCapped(ctx context.Context, dir, script string, timeout time.Duration, maxOutput int) ShellResult
+}
+
+// ShellSyncWait is how long an evaluation waits for a shell condition
+// before reporting it unknown ("running") and finishing in the background.
+const ShellSyncWait = 1500 * time.Millisecond
+
+// RemoteTTL is how long the result of a condition on the box is kept: the
+// box sends no file events.
+const RemoteTTL = 3 * time.Second
 
 // ShellRunner runs `sh -c script` in dir.
 type ShellRunner interface {
@@ -58,6 +75,11 @@ type ExecShell struct {
 
 // Run implements ShellRunner.
 func (s ExecShell) Run(ctx context.Context, dir, script string, timeout time.Duration) ShellResult {
+	return s.RunCapped(ctx, dir, script, timeout, MaxShellOutput)
+}
+
+// RunCapped implements CappedShellRunner.
+func (s ExecShell) RunCapped(ctx context.Context, dir, script string, timeout time.Duration, maxOutput int) ShellResult {
 	sh := s.Sh
 	if sh == "" {
 		sh = "/bin/sh"
@@ -76,18 +98,21 @@ func (s ExecShell) Run(ctx context.Context, dir, script string, timeout time.Dur
 	}
 	cmd.WaitDelay = time.Second
 	var out bytes.Buffer
-	cmd.Stdout = &capWriter{b: &out, max: MaxShellOutput}
+	cmd.Stdout = &capWriter{b: &out, max: maxOutput}
 	cmd.Stderr = io.Discard
 	err := cmd.Run()
-	res := ShellResult{Output: out.String()}
+	res := ShellResult{Output: out.String(), ExitCode: -1}
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
 		res.TimedOut = true
 	case err == nil:
 		res.OK = true
+		res.ExitCode = 0
 	default:
 		var ee *exec.ExitError
-		if !errors.As(err, &ee) {
+		if errors.As(err, &ee) {
+			res.ExitCode = ee.ExitCode()
+		} else {
 			res.Err = err
 		}
 	}
@@ -126,6 +151,11 @@ type evalContext struct {
 	shell        ShellRunner
 	shellCache   *shellCache
 	patterns     *patternCache
+	// trigger schedules another evaluation (a background shell finished).
+	trigger func()
+	// shellWait overrides ShellSyncWait (tests).
+	shellWait time.Duration
+	now       func() time.Time
 }
 
 // result is a three-valued truth with an optional detail for author mode.
@@ -185,6 +215,11 @@ func collectElisp(c *protocol.Condition, forms []string, seen map[string]bool) [
 			seen[c.Elisp] = true
 			forms = append(forms, c.Elisp)
 		}
+	case protocol.CondBuffer:
+		if f := BufferForm(c.Buffer); !seen[f] {
+			seen[f] = true
+			forms = append(forms, f)
+		}
 	case protocol.CondAll:
 		for i := range c.All {
 			forms = collectElisp(&c.All[i], forms, seen)
@@ -214,7 +249,20 @@ func (ec *evalContext) eval(c *protocol.Condition) result {
 			return result{t: protocol.Unknown, detail: ec.elispErr}
 		}
 		return result{t: t, detail: ec.elispErr}
+	case protocol.CondBuffer:
+		t, ok := ec.elisp[BufferForm(c.Buffer)]
+		if !ok {
+			return result{t: protocol.Unknown, detail: ec.elispErr}
+		}
+		d := "buffer " + c.Buffer.Name
+		if t == protocol.False {
+			d += " does not match"
+		}
+		return result{t: t, detail: d}
 	case protocol.CondFile:
+		if c.File.Host != "" {
+			return ec.evalRemoteFile(c.File)
+		}
 		return ec.evalFile(c.File)
 	case protocol.CondShell:
 		return ec.evalShell(c.Shell)
@@ -311,6 +359,11 @@ func (ec *evalContext) evalFile(f *protocol.FileCond) result {
 	if err != nil {
 		return result{t: protocol.Unknown, detail: err.Error()}
 	}
+	return ec.matchContent(f, data, rel)
+}
+
+// matchContent applies a file condition's content predicate to data.
+func (ec *evalContext) matchContent(f *protocol.FileCond, data []byte, rel string) result {
 	switch {
 	case f.Contains != "":
 		return result{t: truth(bytes.Contains(data, []byte(f.Contains)))}
@@ -373,6 +426,23 @@ func normalize(v any) (any, error) {
 }
 
 func (ec *evalContext) evalShell(s *protocol.ShellCond) result {
+	timeout := time.Duration(s.TimeoutOrDefault()) * time.Second
+	if s.Host != "" {
+		if s.Host != protocol.BoxHost {
+			return result{t: protocol.Unknown, detail: "unknown host " + s.Host}
+		}
+		remote := "sh -c " + ShQuote(s.Run)
+		if s.Cwd != "" {
+			remote = "cd " + ShQuote(s.Cwd) + " && " + remote
+		}
+		script := SSHCommand(remote)
+		return ec.runShell("box\x00"+s.Cwd+"\x00"+s.Run, ec.workspace, script, timeout, RemoteTTL, MaxShellOutput, func(res ShellResult) result {
+			if res.ExitCode == 255 {
+				return result{t: protocol.Unknown, detail: "ssh box failed"}
+			}
+			return result{t: truth(res.OK), detail: res.Output}
+		})
+	}
 	dir := ec.workspace
 	sub := s.Cwd
 	if sub == "" {
@@ -388,55 +458,190 @@ func (ec *evalContext) evalShell(s *protocol.ShellCond) result {
 		}
 		dir = path.Join(ec.workspace, rel)
 	}
-	key := dir + "\x00" + s.Run
-	if r, ok := ec.shellCache.get(key); ok {
+	return ec.runShell(dir+"\x00"+s.Run, dir, s.Run, timeout, 0, MaxShellOutput, func(res ShellResult) result {
+		return result{t: truth(res.OK), detail: res.Output}
+	})
+}
+
+// evalRemoteFile reads a file on the box over ssh and applies the same
+// predicates as evalFile.
+func (ec *evalContext) evalRemoteFile(f *protocol.FileCond) result {
+	if f.Host != protocol.BoxHost {
+		return result{t: protocol.Unknown, detail: "unknown host " + f.Host}
+	}
+	p := f.Path
+	onlyExists := f.Contains == "" && f.NotContains == "" && f.Regex == "" && f.JSONPath == ""
+	// Exit 3: the file is missing; 255: ssh failed.
+	remote := "test -e " + ShQuote(p) + " || exit 3; "
+	if !onlyExists {
+		remote += "test -f " + ShQuote(p) + " || exit 4; head -c " + itoa(MaxFileRead) + " -- " + ShQuote(p)
+	}
+	key, _ := json.Marshal(f)
+	return ec.runShell("box-file\x00"+string(key), ec.workspace, SSHCommand(remote), 10*time.Second, RemoteTTL, MaxFileRead, func(res ShellResult) result {
+		switch {
+		case res.TimedOut:
+			return result{t: protocol.Unknown, detail: "ssh box timed out"}
+		case res.ExitCode == 255 || res.Err != nil:
+			return result{t: protocol.Unknown, detail: "ssh box failed"}
+		}
+		exists := res.ExitCode != 3
+		if onlyExists {
+			want := f.Exists == nil || *f.Exists
+			return result{t: truth(exists == want), detail: "box:" + p + existsWord(exists)}
+		}
+		if !res.OK {
+			return result{t: protocol.False, detail: "box:" + p + " does not exist"}
+		}
+		return ec.matchContent(f, []byte(res.Output), "box:"+p)
+	})
+}
+
+func itoa(n int) string { return fmt.Sprint(n) }
+
+// ShQuote quotes s for a POSIX shell.
+func ShQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// SSHCommand is the local script that runs remote (a shell command line)
+// on the box. It never prompts (the alias sets BatchMode).
+func SSHCommand(remote string) string {
+	return "exec ssh -o ConnectTimeout=5 " + protocol.BoxHost + " " + ShQuote(remote)
+}
+
+// runShell runs script once per key until the cache is cleared (or ttl
+// passes, when set) and turns its result into a condition result with
+// conv. A run that takes longer than the sync wait finishes in the
+// background and triggers another evaluation; meanwhile it is unknown.
+func (ec *evalContext) runShell(key, dir, script string, timeout, ttl time.Duration, maxOutput int, conv func(ShellResult) result) result {
+	now := time.Now
+	if ec.now != nil {
+		now = ec.now
+	}
+	if r, ok := ec.shellCache.get(key, now()); ok {
 		return r
 	}
 	if ec.shell == nil {
 		return result{t: protocol.Unknown, detail: "shell conditions unavailable"}
 	}
-	res := ec.shell.Run(ec.ctx, dir, s.Run, time.Duration(s.TimeoutOrDefault())*time.Second)
-	var r result
-	switch {
-	case res.TimedOut:
-		r = result{t: protocol.Unknown, detail: fmt.Sprintf("timed out after %ds", s.TimeoutOrDefault())}
-	case res.Err != nil:
-		r = result{t: protocol.Unknown, detail: res.Err.Error()}
-	default:
-		r = result{t: truth(res.OK), detail: res.Output}
+	fl, started, epoch := ec.shellCache.start(key)
+	if !started {
+		// A run from an earlier evaluation: do not hold this one up.
+		select {
+		case <-fl.done:
+			return fl.r
+		default:
+			return result{t: protocol.Unknown, detail: "running"}
+		}
 	}
-	if ec.ctx.Err() == nil {
-		ec.shellCache.put(key, r)
+	bctx := context.WithoutCancel(ec.ctx)
+	go func() {
+		var res ShellResult
+		if cr, ok := ec.shell.(CappedShellRunner); ok && maxOutput != MaxShellOutput {
+			res = cr.RunCapped(bctx, dir, script, timeout, maxOutput)
+		} else {
+			res = ec.shell.Run(bctx, dir, script, timeout)
+		}
+		var r result
+		switch {
+		case res.TimedOut:
+			r = result{t: protocol.Unknown, detail: fmt.Sprintf("timed out after %ds", int(timeout/time.Second))}
+		case res.Err != nil:
+			r = result{t: protocol.Unknown, detail: res.Err.Error()}
+		default:
+			r = conv(res)
+		}
+		var exp time.Time
+		if ttl > 0 {
+			exp = now().Add(ttl)
+		}
+		ec.shellCache.finish(key, epoch, fl, r, exp)
+		if ec.trigger != nil {
+			ec.trigger()
+		}
+	}()
+	wait := ShellSyncWait
+	if ec.shellWait > 0 {
+		wait = ec.shellWait
 	}
-	return r
+	t := time.NewTimer(wait)
+	defer t.Stop()
+	select {
+	case <-fl.done:
+		return fl.r
+	case <-t.C:
+		return result{t: protocol.Unknown, detail: "running"}
+	case <-ec.ctx.Done():
+		return result{t: protocol.Unknown, detail: "cancelled"}
+	}
 }
 
 // shellCache keeps shell results until invalidated by a file event or a
-// step change.
+// step change (remote ones also expire), and runs each script once at a
+// time.
 type shellCache struct {
-	mu sync.Mutex
-	m  map[string]result
+	mu       sync.Mutex
+	m        map[string]cached
+	inflight map[string]*flight
+	epoch    uint64
 }
 
-func (c *shellCache) get(k string) (result, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	r, ok := c.m[k]
-	return r, ok
+type cached struct {
+	r   result
+	exp time.Time
 }
 
-func (c *shellCache) put(k string, r result) {
+type flight struct {
+	done chan struct{}
+	r    result
+}
+
+func (c *shellCache) get(k string, now time.Time) (result, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.m == nil {
-		c.m = map[string]result{}
+	e, ok := c.m[k]
+	if !ok || (!e.exp.IsZero() && now.After(e.exp)) {
+		return result{}, false
 	}
-	c.m[k] = r
+	return e.r, true
+}
+
+// start returns the run in flight for k, or a new one (started true) the
+// caller must finish.
+func (c *shellCache) start(k string) (*flight, bool, uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if f, ok := c.inflight[k]; ok {
+		return f, false, c.epoch
+	}
+	if c.inflight == nil {
+		c.inflight = map[string]*flight{}
+	}
+	f := &flight{done: make(chan struct{})}
+	c.inflight[k] = f
+	return f, true, c.epoch
+}
+
+// finish records a run's result, unless the cache was cleared since it
+// started (the result may be stale).
+func (c *shellCache) finish(k string, epoch uint64, f *flight, r result, exp time.Time) {
+	c.mu.Lock()
+	if c.inflight[k] == f {
+		delete(c.inflight, k)
+	}
+	if epoch == c.epoch {
+		if c.m == nil {
+			c.m = map[string]cached{}
+		}
+		c.m[k] = cached{r: r, exp: exp}
+	}
+	f.r = r
+	c.mu.Unlock()
+	close(f.done)
 }
 
 func (c *shellCache) clear() {
 	c.mu.Lock()
 	c.m = nil
+	c.epoch++
 	c.mu.Unlock()
 }
 

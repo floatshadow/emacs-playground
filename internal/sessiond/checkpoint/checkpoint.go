@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -138,6 +139,8 @@ type Meta struct {
 	// which a commit cannot hold; a restore recreates them (lesson 2.6
 	// moves files into a docs folder made in the step before).
 	EmptyDirs []string `json:"emptyDirs,omitempty"`
+	// Nested are the nested git repositories, kept whole (nested.go).
+	Nested []NestedRepo `json:"nested,omitempty"`
 }
 
 // BufferState is what a checkpoint keeps of one file buffer besides the
@@ -302,9 +305,14 @@ var lockRe = regexp.MustCompile(`Unable to create '([^']+\.lock)': File exists`)
 // removes it if it is older than StaleLockAge (else waits for it to go,
 // up to two seconds) and runs the command once more.
 func (m *Manager) run(ctx context.Context, env []string, args ...string) ([]byte, error) {
+	return m.runIn(ctx, m.Workspace, env, args...)
+}
+
+// runIn is run with dir as the working directory.
+func (m *Manager) runIn(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), GitTimeout)
 	defer cancel()
-	out, err := m.Git.Run(ctx, m.Workspace, env, args...)
+	out, err := m.Git.Run(ctx, dir, env, args...)
 	if err == nil {
 		return out, nil
 	}
@@ -314,12 +322,12 @@ func (m *Manager) run(ctx context.Context, env []string, args ...string) ([]byte
 	}
 	lock := match[1]
 	if !filepath.IsAbs(lock) {
-		lock = filepath.Join(m.Workspace, lock)
+		lock = filepath.Join(dir, lock)
 	}
 	if !m.clearLock(lock) {
 		return out, err
 	}
-	return m.Git.Run(ctx, m.Workspace, env, args...)
+	return m.Git.Run(ctx, dir, env, args...)
 }
 
 // clearLock waits up to two seconds for the git lock file to go away and
@@ -456,19 +464,31 @@ func (m *Manager) TakeWith(ctx context.Context, meta Meta) (Meta, error) {
 		return Meta{}, err
 	}
 	parent, _ := m.commitOf(ctx, ref)
+	repos := m.nestedRepos()
 	cmds := TakeCommands(m.IndexFile(), ref, "checkpoint "+label, "$tree", parent)
-	if _, err := m.git(ctx, cmds[0].Env, cmds[0].Args...); err != nil {
+	add := withExcludes(cmds[0], repos)
+	if _, err := m.git(ctx, add.Env, add.Args...); err != nil {
 		return Meta{}, err
 	}
 	tree, err := m.git(ctx, cmds[1].Env, cmds[1].Args...)
 	if err != nil {
 		return Meta{}, err
 	}
-	cmds = TakeCommands(m.IndexFile(), ref, "checkpoint "+label, tree, parent)
-	commit, err := m.git(ctx, cmds[2].Env, cmds[2].Args...)
+	nested, err := m.snapshotNested(ctx, repos, label)
 	if err != nil {
 		return Meta{}, err
 	}
+	cmds = TakeCommands(m.IndexFile(), ref, "checkpoint "+label, tree, parent)
+	commitCmd := cmds[2]
+	for _, n := range nested {
+		// Extra parents keep the nested snapshots reachable.
+		commitCmd.Args = append(commitCmd.Args, "-p", n.Worktree, "-p", n.GitDir)
+	}
+	commit, err := m.git(ctx, commitCmd.Env, commitCmd.Args...)
+	if err != nil {
+		return Meta{}, err
+	}
+	meta.Nested = nested
 	if _, err := m.git(ctx, nil, "update-ref", ref, commit); err != nil {
 		return Meta{}, err
 	}
@@ -537,7 +557,8 @@ func (m *Manager) List(ctx context.Context) ([]protocol.CheckpointInfo, error) {
 	if out == "" {
 		return []protocol.CheckpointInfo{}, nil
 	}
-	if err := m.stageWorktree(ctx); err != nil {
+	repos := m.nestedRepos()
+	if err := m.stageWorktree(ctx, repos); err != nil {
 		return nil, err
 	}
 	var items []protocol.CheckpointInfo
@@ -550,7 +571,8 @@ func (m *Manager) List(ctx context.Context) ([]protocol.CheckpointInfo, error) {
 		var secs int64
 		fmt.Sscan(f[1], &secs)
 		info.CreatedAt = secs * 1000
-		if meta, err := m.ReadMeta(f[0]); err == nil {
+		meta, merr := m.ReadMeta(f[0])
+		if merr == nil {
 			info.Label = meta.Label
 			info.CreatedAt = meta.CreatedAt
 			info.Step = meta.Step
@@ -559,6 +581,11 @@ func (m *Manager) List(ctx context.Context) ([]protocol.CheckpointInfo, error) {
 		if err != nil {
 			return nil, err
 		}
+		// Files under a nested repository are the nested diff's.
+		files = slices.DeleteFunc(files, func(p string) bool { return underAny(p, repos) })
+		for _, n := range meta.Nested {
+			files = append(files, m.nestedDiff(ctx, n)...)
+		}
 		info.Files = files
 		items = append(items, info)
 	}
@@ -566,12 +593,23 @@ func (m *Manager) List(ctx context.Context) ([]protocol.CheckpointInfo, error) {
 	return items, nil
 }
 
-// stageWorktree refreshes the temporary index from the working tree.
-// Caller holds m.mu.
-func (m *Manager) stageWorktree(ctx context.Context) error {
+// stageWorktree refreshes the temporary index from the working tree,
+// leaving out the nested repositories in skip. Caller holds m.mu.
+func (m *Manager) stageWorktree(ctx context.Context, skip []string) error {
 	cmds := TakeCommands(m.IndexFile(), "", "", "", "")
-	_, err := m.git(ctx, cmds[0].Env, cmds[0].Args...)
+	add := withExcludes(cmds[0], skip)
+	_, err := m.git(ctx, add.Env, add.Args...)
 	return err
+}
+
+// underAny reports whether p is one of dirs or below one.
+func underAny(p string, dirs []string) bool {
+	for _, d := range dirs {
+		if p == d || strings.HasPrefix(p, d+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 // diffFiles lists paths that differ between ref and the staged working
@@ -603,13 +641,23 @@ func (m *Manager) Restore(ctx context.Context, ref string) ([]string, Meta, erro
 	if _, err := m.commitOf(ctx, ref); err != nil {
 		return nil, Meta{}, fmt.Errorf("checkpoint %s: %w", ref, os.ErrNotExist)
 	}
-	if err := m.stageWorktree(ctx); err != nil {
+	meta, err := m.ReadMeta(ref)
+	if err != nil {
+		meta = Meta{Ref: ref, Label: strings.TrimPrefix(ref, RefPrefix)}
+	}
+	// Repositories made since the checkpoint lose their .git and become
+	// ordinary files; the checkpoint's own nested repositories stay out of
+	// the workspace restore and are restored whole afterwards.
+	dropped := m.dropNewRepos(m.nestedRepos(), meta.Nested)
+	skip := nestedPaths(meta.Nested)
+	if err := m.stageWorktree(ctx, skip); err != nil {
 		return nil, Meta{}, err
 	}
 	files, err := m.diffFiles(ctx, ref)
 	if err != nil {
 		return nil, Meta{}, err
 	}
+	files = append(files, dropped...)
 	// Best effort: without it the restore rewrites every file (new mtimes,
 	// a file event per path, buffers that look changed on disk).
 	for _, c := range RestorePrepCommands(m.IndexFile(), ref) {
@@ -618,13 +666,15 @@ func (m *Manager) Restore(ctx context.Context, ref string) ([]string, Meta, erro
 		}
 	}
 	for _, c := range RestoreCommands(m.IndexFile(), ref) {
+		c = withExcludes(c, skip)
 		if _, err := m.git(ctx, c.Env, c.Args...); err != nil {
 			return nil, Meta{}, err
 		}
 	}
-	meta, err := m.ReadMeta(ref)
+	nfiles, err := m.restoreNested(ctx, meta.Nested)
+	files = append(files, nfiles...)
 	if err != nil {
-		meta = Meta{Ref: ref, Label: strings.TrimPrefix(ref, RefPrefix)}
+		return files, meta, err
 	}
 	// git has no empty directories: git clean removed the ones that
 	// existed at the checkpoint if anything was put into them since.

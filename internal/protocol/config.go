@@ -290,4 +290,16 @@ type SessiondConfig struct {
 	LogFormat    string `json:"logFormat" env:"PG_LOG_FORMAT" default:"json"`
 	// AuthorMode allows rpc eval (the gateway also gates it).
 	AuthorMode bool `json:"authorMode" env:"PG_AUTHOR_MODE" default:"false"`
+	// BoxHost is the remote box's address behind the "box" alias that
+	// sessiond writes to ~/.ssh/config (deployment.md §6); empty: no box.
+	BoxHost string `json:"boxHost" env:"PG_BOX_HOST" default:"box"`
+	BoxPort int    `json:"boxPort" env:"PG_BOX_PORT" default:"22"`
+	BoxUser string `json:"boxUser" env:"PG_BOX_USER" default:"deploy"`
+	// BoxKey is the session's ed25519 private key in OpenSSH format, set by
+	// the gateway when it gave the public half to the box (server mode).
+	// Empty: sessiond generates the pair under .playground/ssh, where the
+	// local box reads authorized_keys.
+	BoxKey string `json:"boxKey" env:"PG_BOX_KEY" secret:"true"`
+	// SSHDir is where the ssh client configuration goes, default $HOME/.ssh.
+	SSHDir string `json:"sshDir" env:"PG_SSH_DIR"`
 }

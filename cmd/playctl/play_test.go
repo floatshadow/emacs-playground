@@ -127,7 +127,7 @@ func TestPlayLesson(t *testing.T) {
 		t.Fatal(err)
 	}
 	p := &player{c: c, timeout: 2 * time.Second, speed: 50, keepGoing: true, log: io.Discard}
-	res := p.playLesson(context.Background(), src.Lessons["00-orientation/01-first"])
+	res := p.playLesson(context.Background(), src.Lessons["00-orientation/01-first"], 0)
 	if len(res) != 3 {
 		t.Fatalf("results %+v", res)
 	}
@@ -149,7 +149,7 @@ func TestPlayLesson(t *testing.T) {
 	// and the next step is loaded explicitly.
 	eng.refuse["save"] = true
 	p.timeout = 500 * time.Millisecond
-	res = p.playLesson(context.Background(), src.Lessons["00-orientation/01-first"])
+	res = p.playLesson(context.Background(), src.Lessons["00-orientation/01-first"], 0)
 	if len(res) != 3 || !res[0].OK || res[1].OK || !strings.Contains(res[1].Detail, "save/1") || !res[2].OK {
 		t.Fatalf("with a refused step: %+v", res)
 	}
@@ -187,9 +187,22 @@ func TestSelectLessons(t *testing.T) {
 		}
 		var s []string
 		for _, l := range ls {
-			s = append(s, l.ID)
+			id := l.l.ID
+			if l.from > 0 {
+				id += "@" + l.l.Scenario.Steps[l.from].ID
+			}
+			s = append(s, id)
 		}
 		return strings.Join(s, " ")
+	}
+	if got := ids("0.1@save", "0.1@3", "0.1@1"); got != "00-orientation/01-first@save 00-orientation/01-first@layout 00-orientation/01-first" {
+		t.Fatal(got)
+	}
+	if got := ids("0.1@nope"); got != "error" {
+		t.Fatal(got)
+	}
+	if got := ids("0.1@4"); got != "error" {
+		t.Fatal(got)
 	}
 	if got := ids("all"); got != "00-orientation/01-first 00-orientation/02-second" {
 		t.Fatal(got)

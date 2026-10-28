@@ -141,5 +141,36 @@ class PlainScalarCommentTest(unittest.TestCase):
             self.assertEqual(v.plain_scalar_comments(p.read_text(encoding="utf-8")), [], p)
 
 
+class ConditionKindsTest(unittest.TestCase):
+    def errors(self, cond):
+        rep = v.Report()
+        v.check_condition("c", cond, rep, False, set(), set())
+        return rep.errors
+
+    def test_buffer_box_and_long_shell_pass(self):
+        for c in [
+            {"buffer": {"name": "*vterm*", "process": "running"}},
+            {"buffer": {"name": "main.rs", "mode": "rust-ts-mode", "modified": False}},
+            {"file": {"host": "box", "path": "/srv/www/index.html", "contains": "Hello"}},
+            {"shell": {"host": "box", "run": "systemctl is-active nginx"}},
+            {"shell": {"run": "cargo test", "timeout": 300}},
+        ]:
+            self.assertEqual(self.errors(c), [], c)
+
+    def test_bad_fields_fail(self):
+        for c in [
+            {"buffer": {"process": "running"}},
+            {"buffer": {"name": "x", "process": "alive"}},
+            {"file": {"host": "web", "path": "a", "exists": True}},
+            {"file": {"path": "/abs", "exists": True}},
+            {"shell": {"run": "make", "timeout": 301}},
+        ]:
+            self.assertNotEqual(self.errors(c), [], c)
+
+    def test_uses_box(self):
+        self.assertTrue(v.uses_box({"all": [{"not": {"shell": {"host": "box", "run": "true"}}}]}))
+        self.assertFalse(v.uses_box({"any": [{"shell": {"run": "true"}}]}))
+
+
 if __name__ == "__main__":
     unittest.main()

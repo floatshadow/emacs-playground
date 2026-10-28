@@ -2,7 +2,7 @@
 
 A hands-on Emacs course in the browser on a real, fully configured Emacs in a container. Learners do real work in Rust, OCaml, Python, Markdown, Typst and LaTeX; every keystroke is explained, there is always a way out of a confusing state, and any step can be reset.
 
-Slice 1 is implemented (§10). The code is authoritative where a document disagrees; commands and ownership are in AGENTS.md.
+Slice 1 and the slice-2 platform are implemented (§10). The code is authoritative where a document disagrees; commands and ownership are in AGENTS.md.
 
 ## 1. Reading guide
 
@@ -132,7 +132,7 @@ workspace/  artifacts/  .dev/   (git-ignored)
 
 ## 10. Roadmap
 
-Slice 1 delivers M1 to M3, M0 for Rust and Python (other toolchains and modules are stubs), and the GUI and preview panes. The server-mode docker backend is experimental and OIDC answers 501.
+Slice 1 delivers M1 to M3 and the GUI and preview panes. The slice-2 platform adds M0 for every toolchain and module, project scenarios with laps, and the per-session remote box; curriculum Parts 4–14 and P1–P8 are being authored on it (M4–M6). The server-mode docker backend is experimental and OIDC answers 501.
 
 | Milestone | Deliverable | Done when |
 |---|---|---|
@@ -160,9 +160,9 @@ Slice 1 delivers M1 to M3, M0 for Rust and Python (other toolchains and modules 
 - "Start over" says files stay as they are, yet an open lesson tab then reloads with `setup.reset` and drops unsaved edits.
 - "Skip this step" appears only after an "I'm stuck" report, so `features.stuckReports: false` hides it.
 - project.el sees `/work` (the checkpoint repository) as a project; hiding it needs a separate `GIT_DIR`.
-- Checkpoints record neither the git staging area, `display-buffer-alist` nor minor modes a demo turned on (backend.md §3.9); a Magit lesson using staged changes needs the first.
+- Checkpoints record neither `/work`'s own staging area (nested repositories keep theirs), `display-buffer-alist` nor minor modes a demo turned on (backend.md §3.9).
 - The preview CSP keeps `allow-same-origin` (deployment.md §9.3): a separate origin, or drop it.
 - Can Emacs 31's terminal key handling replace `kkp.el`? Should vterm join eat?
 - `make dev` and `playctl dev` duplicate each other; the `keys` RPC maps errors to 400/409 by message text; `editing.el` binds `M-g i`/`M-g o` to consult before the completion module teaches it; `.eld` layouts validate but are not applied.
 - Repository hygiene (deployment.md §9.5): no LICENSE, a tracked `deploy/config.json`, two unused devDependencies.
-- No zh-CN curriculum, a partial (hidden) zh-CN UI. Unscheduled: image major-version check, per-learner remote box, egress proxy for registries, `DELETE /me`, user export, latency histograms, govulncheck, Renovate.
+- No zh-CN curriculum, a partial (hidden) zh-CN UI. Unscheduled: image major-version check, egress proxy for registries, `DELETE /me`, user export, latency histograms, govulncheck, Renovate.

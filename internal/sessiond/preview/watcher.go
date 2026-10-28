@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -43,6 +44,13 @@ type Watcher struct {
 	emit   func(*protocol.FileEvent)
 	log    *slog.Logger
 	window time.Duration
+
+	// OnGit, when set before Run, is called (coalesced like file events)
+	// when the top level of a nested repository's .git changes: a commit,
+	// staging, a checkout. Those changes are not file events, but shell
+	// conditions that read git must see them.
+	OnGit    func()
+	gitTimer *time.Timer
 
 	mu      sync.Mutex
 	pending map[string]*pendingEvent
@@ -125,6 +133,11 @@ func (w *Watcher) addTree(dir string, announce bool) {
 			return nil
 		}
 		rel, ok := w.rel(p)
+		if ok && d.IsDir() && d.Name() == ".git" && rel != ".git" && !Ignored(path.Dir(rel)) {
+			// A nested repository: its top level only (nestedGit).
+			_ = w.fw.Add(p)
+			return fs.SkipDir
+		}
 		if ok && Ignored(rel) {
 			if d.IsDir() {
 				return fs.SkipDir
@@ -150,9 +163,30 @@ func (w *Watcher) addTree(dir string, announce bool) {
 	})
 }
 
+// nestedGit reports whether rel is directly inside a nested repository's
+// .git directory ("projects/hello/.git/index").
+func nestedGit(rel string) bool {
+	dir := path.Dir(rel)
+	return path.Base(dir) == ".git" && dir != ".git" && !Ignored(path.Dir(dir))
+}
+
 func (w *Watcher) handle(ev fsnotify.Event) {
 	rel, ok := w.rel(ev.Name)
-	if !ok || Ignored(rel) {
+	if !ok {
+		return
+	}
+	if nestedGit(rel) {
+		w.gitChanged()
+		return
+	}
+	if ev.Has(fsnotify.Create) && path.Base(rel) == ".git" && !Ignored(path.Dir(rel)) {
+		if st, err := os.Lstat(ev.Name); err == nil && st.IsDir() {
+			_ = w.fw.Add(ev.Name) // git init in the workspace
+			w.gitChanged()
+			return
+		}
+	}
+	if Ignored(rel) {
 		return
 	}
 	switch {
@@ -170,6 +204,25 @@ func (w *Watcher) handle(ev fsnotify.Event) {
 	case ev.Has(fsnotify.Remove), ev.Has(fsnotify.Rename):
 		w.record(rel, protocol.FileDeleted)
 	}
+}
+
+// gitChanged calls OnGit once per coalescing window.
+func (w *Watcher) gitChanged() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.OnGit == nil || w.closed || w.gitTimer != nil {
+		return
+	}
+	w.gitTimer = time.AfterFunc(w.window, func() {
+		w.mu.Lock()
+		w.gitTimer = nil
+		f := w.OnGit
+		closed := w.closed
+		w.mu.Unlock()
+		if f != nil && !closed {
+			f()
+		}
+	})
 }
 
 // merge combines the pending kind with a new one within the window.
