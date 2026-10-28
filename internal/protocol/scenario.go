@@ -155,6 +155,11 @@ type Step struct {
 	// Checkpoint takes a checkpoint when the step starts. Default true; set
 	// false explicitly to skip (a pointer so absence means default).
 	Checkpoint *bool `json:"checkpoint,omitempty"`
+	// Mode is the frame this step needs when the lesson's mode does not
+	// say it (a project task with images or PDF pages): gui switches to
+	// the GUI frame when the step becomes active, as a gui lesson does on
+	// load.
+	Mode LessonMode `json:"mode,omitempty"`
 }
 
 // TakesCheckpoint reports whether a checkpoint is taken when the step

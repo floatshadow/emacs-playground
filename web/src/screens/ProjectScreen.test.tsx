@@ -377,6 +377,20 @@ describe('ProjectScreen', () => {
     await waitFor(() => expect(rpcCalls.filter((c) => c.op === 'mode')).toHaveLength(2))
   })
 
+  it('a task with mode gui opens the GUI frame when it becomes active', async () => {
+    const steps = P6_BUNDLE.scenario.steps.map((s, i) =>
+      i === 1 ? { ...s, mode: 'gui' as const } : s,
+    )
+    bundle = { ...P6_BUNDLE, scenario: { ...P6_BUNDLE.scenario, steps } }
+    await openProject()
+    await waitFor(() => expect(rpcCalls.find((c) => c.op === 'scenario')).toBeDefined())
+    send(step({}))
+    await new Promise((r) => setTimeout(r, 50))
+    expect(rpcCalls.find((c) => c.op === 'mode')).toBeUndefined()
+    send(step({ stepId: stepIds[1] ?? '', index: 1 }))
+    await waitFor(() => expect(rpcCalls).toContainEqual({ op: 'mode', body: { mode: 'gui' } }))
+  })
+
   it('with the GUI frame turned off, a GUI project says so and stays in the terminal', async () => {
     features = { ...features, gui: false }
     bundle = { ...P6_BUNDLE, scenario: { ...P6_BUNDLE.scenario, mode: 'gui', tags: ['project'] } }

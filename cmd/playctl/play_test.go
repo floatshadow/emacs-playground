@@ -65,7 +65,7 @@ func (e *stepEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.URL.Path {
 	case "/status":
-		st := protocol.StatusResult{Emacs: protocol.EmacsStatus{Agent: true, Version: "31.1"}}
+		st := protocol.StatusResult{Emacs: protocol.EmacsStatus{Agent: true, Version: "31.1"}, Mode: protocol.FrameTerminal, Frames: protocol.Frames{Terminal: true}}
 		if e.step >= 0 {
 			st.Step = &protocol.StepRef{LessonID: e.lesson, StepID: e.steps()[e.step].ID}
 		}
@@ -250,5 +250,22 @@ func TestValidateAndBuildCommands(t *testing.T) {
 	}
 	if code := curriculumBuild([]string{goodDir}); code != 2 {
 		t.Fatalf("build without -o: %d", code)
+	}
+}
+
+func TestLessonFrame(t *testing.T) {
+	for _, c := range []struct {
+		sc   protocol.Scenario
+		want protocol.FrameKind
+		ok   bool
+	}{
+		{protocol.Scenario{}, protocol.FrameTerminal, true},
+		{protocol.Scenario{Mode: protocol.LessonGUI}, protocol.FrameGUI, true},
+		{protocol.Scenario{Tags: []string{protocol.TagGUI}}, protocol.FrameGUI, true},
+		{protocol.Scenario{Mode: protocol.LessonAny}, "", false},
+	} {
+		if got, ok := lessonFrame(&c.sc); got != c.want || ok != c.ok {
+			t.Errorf("lessonFrame(%+v) = %q, %v; want %q, %v", c.sc, got, ok, c.want, c.ok)
+		}
 	}
 }

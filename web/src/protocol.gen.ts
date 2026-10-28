@@ -1959,6 +1959,13 @@ export interface Step {
    * false explicitly to skip (a pointer so absence means default).
    */
   checkpoint?: boolean;
+  /**
+   * Mode is the frame this step needs when the lesson's mode does not
+   * say it (a project task with images or PDF pages): gui switches to
+   * the GUI frame when the step becomes active, as a gui lesson does on
+   * load.
+   */
+  mode?: LessonMode;
 }
 
 /**

@@ -123,6 +123,19 @@ export function useScenarioLoad(
     guiOff,
   ])
 
+  // A step that needs the GUI frame (a project task with images or PDF
+  // pages: step mode gui) switches to it when it becomes active, once per
+  // activation, so the learner can switch back.
+  const guiStep = useRef<string | null>(null)
+  useEffect(() => {
+    if (!scenario || !active || active.lessonId !== lessonId || guiOff) return
+    const key = `${active.lessonId}#${active.stepId}`
+    if (guiStep.current === key) return
+    guiStep.current = key
+    const step = scenario.steps.find((s) => s.id === active.stepId)
+    if (step?.mode === 'gui' && useSessionStore.getState().mode !== 'gui') void switchFrame('gui')
+  }, [active, lessonId, scenario, guiOff])
+
   return {
     loading: loading || (!ready && !!scenario),
     error,

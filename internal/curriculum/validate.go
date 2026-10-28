@@ -274,6 +274,9 @@ func validateScenario(l *Lesson, r reporter) {
 		if st.Goal.IsZero() {
 			r.errorf(w+".goal", "required")
 		}
+		if st.Mode != "" && st.Mode != protocol.LessonGUI {
+			r.errorf(w+".mode", "may only be gui, got %q", st.Mode)
+		}
 		if strings.TrimSpace(st.Demo) == "" {
 			r.errorf(w+".demo", "required: a demo that completes the step (CURRICULUM.md B.3)")
 		} else if _, err := protocol.ParseDemo(st.Demo); err != nil {

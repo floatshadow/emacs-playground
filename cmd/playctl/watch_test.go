@@ -80,7 +80,7 @@ func (e *watchEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		e.resets = append(e.resets, req.LessonID)
 		w.WriteHeader(204)
 	case "/s/local/status":
-		st := protocol.StatusResult{Emacs: protocol.EmacsStatus{Agent: true}}
+		st := protocol.StatusResult{Emacs: protocol.EmacsStatus{Agent: true}, Mode: protocol.FrameTerminal, Frames: protocol.Frames{Terminal: true}}
 		if e.step >= 0 {
 			st.Step = &protocol.StepRef{LessonID: e.lesson, StepID: e.steps()[e.step].ID}
 		}

@@ -52,6 +52,9 @@ import (
 // its checkpoint, else a fast-forward) and plays from there. -lap plays
 // projects as the "again, without hints" lap (rpc scenario {lap: true}):
 // hints must be refused and the last step must report the lap's time.
+//
+// Frames follow the browser: gui lessons and steps with mode gui play in
+// the GUI frame, the other lessons in the terminal frame (rpc mode).
 func curriculumPlay(args []string) int {
 	fs := flag.NewFlagSet("curriculum play", flag.ExitOnError)
 	session := fs.String("session", envOr("PG_PLAY_SESSION", "http://127.0.0.1:7000"), "session URL: sessiond or <gateway>/s/<id>")
@@ -446,6 +449,11 @@ func (p *player) playLesson(ctx context.Context, l *curriculum.Lesson, from int)
 		return out
 	}
 	fmt.Fprintf(p.log, "▶ %s (%d steps)\n", l.ID, len(steps)-from)
+	if want, ok := lessonFrame(&l.Scenario); ok {
+		if err := p.ensureFrame(ctx, want); err != nil {
+			return fail(from, "frame: "+err.Error())
+		}
+	}
 	var lapMark int
 	switch {
 	case p.lap:
@@ -474,6 +482,13 @@ func (p *player) playLesson(ctx context.Context, l *curriculum.Lesson, from int)
 					out = append(out, stepResult{Lesson: l.ID, Step: st.ID, Detail: "load: " + err.Error()})
 					continue
 				}
+			}
+		}
+		if st.Mode == protocol.LessonGUI {
+			// As the browser does when the step becomes active.
+			if err := p.ensureFrame(ctx, protocol.FrameGUI); err != nil {
+				out = append(out, stepResult{Lesson: l.ID, Step: st.ID, Detail: "frame: " + err.Error()})
+				continue
 			}
 		}
 		time.Sleep(300 * time.Millisecond)
@@ -526,6 +541,54 @@ func (p *player) playLesson(ctx context.Context, l *curriculum.Lesson, from int)
 		out = append(out, r)
 	}
 	return out
+}
+
+// lessonFrame is the frame a lesson plays in: the GUI frame for gui
+// lessons (mode gui or tagged gui), as the browser switches on load; the
+// terminal frame for the others, so a replay does not depend on the frame
+// an earlier lesson left. Lessons with mode any keep the current frame.
+func lessonFrame(sc *protocol.Scenario) (protocol.FrameKind, bool) {
+	switch {
+	case sc.Mode == protocol.LessonGUI || slices.Contains(sc.Tags, protocol.TagGUI):
+		return protocol.FrameGUI, true
+	case sc.Mode == protocol.LessonAny:
+		return "", false
+	default:
+		return protocol.FrameTerminal, true
+	}
+}
+
+// ensureFrame switches the session to frame want (rpc mode) unless it
+// shows it already, and waits until the switch has settled: the new frame
+// is up, the old one gone and the agent connected.
+func (p *player) ensureFrame(ctx context.Context, want protocol.FrameKind) error {
+	st, err := p.c.status(ctx)
+	if err != nil {
+		return err
+	}
+	if st.Mode == want {
+		return nil
+	}
+	fmt.Fprintf(p.log, "  ⇄ %s frame\n", want)
+	var res protocol.ModeResult
+	if err := p.c.rpc(ctx, protocol.OpMode, protocol.ModeRequest{Mode: want}, &res); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		st, err := p.c.status(ctx)
+		if err == nil && st.Mode == want && st.Emacs.Agent &&
+			(want != protocol.FrameGUI || st.Frames.GUI) && (want != protocol.FrameTerminal || !st.Frames.GUI) {
+			// Emacs finishes deleting or creating frames after the
+			// supervisor reports them.
+			p.sleep(ctx, 2*time.Second)
+			return ctx.Err()
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the %s frame did not settle within 30s", want)
+		}
+		p.sleep(ctx, 250*time.Millisecond)
+	}
 }
 
 // loadLap starts the lesson's lap and checks that hints are refused.
