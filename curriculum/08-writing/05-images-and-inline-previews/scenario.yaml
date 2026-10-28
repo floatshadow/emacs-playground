@@ -1,0 +1,95 @@
+id: 08-writing/05-images-and-inline-previews
+title: Images, SVG and inline previews
+minutes: 10
+mode: gui
+tags: [gui]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input]
+vscode: image preview
+setup:
+  workspace: fixtures/writing
+  root: writing
+  reset: true
+  open: [writing/gallery.org]
+  layout: single
+  # Image buffers, thumbnails and listings of figures/ from an earlier
+  # visit, and previews left in gallery.org, would hold before the steps
+  # ran.
+  eval: >-
+    (let ((kill-buffer-query-functions nil))
+      (dolist (b (buffer-list))
+        (when (or (member (buffer-name b) '("lantern.jpg" "site-sketch.png" "plot.svg" "*image-dired*" "*image-dired-display-image*"))
+                  (string-prefix-p " *diff-hl-dired* tmp status" (buffer-name b))
+                  (with-current-buffer b
+                    (or (derived-mode-p 'image-dired-thumbnail-mode)
+                        (and (derived-mode-p 'dired-mode)
+                             (string-prefix-p "/work/writing/figures" (expand-file-name default-directory))))))
+          (kill-buffer b)))
+      (with-current-buffer (find-buffer-visiting "/work/writing/gallery.org")
+        (when (fboundp 'org-link-preview-clear) (org-link-preview-clear))
+        (when (fboundp 'org-clear-latex-preview) (org-clear-latex-preview))
+        (goto-char (point-min))
+        (dolist (w (get-buffer-window-list nil nil t))
+          (set-window-point w (point-min)) (set-window-start w (point-min)))))
+steps:
+  - id: photo
+    goal: Open the photo, zoom in and rotate it
+    detail: "`C-x C-f /work/writing/figures/lantern.jpg RET`. Then `i +` twice to zoom in and `i r` to rotate it a quarter turn."
+    demo: 'C-x C-f ~400 "/work/writing/figures/lantern.jpg" RET ~1200 i + ~500 i + ~500 i r ~800'
+    conditions:
+      - text: you zoomed
+        any:
+          - event: { command: image-increase-size }
+          - event: { command: image-decrease-size }
+          - event: { command: image-mouse-increase-size }
+          - event: { command: image-mouse-decrease-size }
+        hint: "Press i, release it, then +. The cursor has to be on the image, which it is right after opening the file."
+      - text: you rotated or flipped it
+        any:
+          - event: { command: image-rotate }
+          - event: { command: image-flip-horizontally }
+          - event: { command: image-flip-vertically }
+        hint: "i r rotates; each press turns it another quarter. i h and i v flip it instead."
+  - id: svg
+    goal: Open the SVG chart and look at its source
+    detail: "`C-x C-f /work/writing/plot.svg RET` shows the chart. `C-c C-c` switches to the XML it is drawn from; `C-c C-c` again switches back to the picture."
+    demo: 'C-x C-f ~400 "/work/writing/plot.svg" RET ~1200 C-c C-c ~1500 C-c C-c ~800'
+    conditions:
+      - text: plot.svg is open
+        buffer: { name: plot.svg }
+        hint: "The chart is in /work/writing itself, not in figures/."
+      - text: you toggled between picture and source
+        event: { command: image-toggle-display }
+        hint: "C-c C-c in the plot.svg buffer. In the source view the bars are the <rect> lines; change a height and C-c C-c draws it again."
+  - id: thumbnails
+    goal: Browse the figures folder as thumbnails
+    detail: "`M-x image-dired RET`, then the folder `/work/writing/figures/` and `RET`. The listing and the thumbnails open in two windows."
+    demo: 'M-x ~400 "image-dired" RET ~600 "/work/writing/figures/" RET ~2500'
+    conditions:
+      - text: image-dired ran
+        event: { command: image-dired }
+        hint: "The folder prompt completes with TAB like any file prompt. Type the folder, with or without the final /, then RET."
+      - text: the thumbnails are shown
+        elisp: '(seq-some (lambda (w) (with-current-buffer (window-buffer w) (derived-mode-p (quote image-dired-thumbnail-mode)))) (window-list))'
+        hint: "Thumbnails take a moment the first time. If the thumbnail window was closed, M-x image-dired again shows it."
+  - id: inline
+    goal: Show the two figures inline in gallery.org
+    detail: "`C-x 1`, `C-x b gallery.org RET`, then move into the `* Figures` section (`C-s The chart RET`) and press `C-c C-x C-v`. The photo and the chart appear in place of their links."
+    demo: 'C-x 1 ~400 C-x b ~400 "gallery.org" RET ~500 M-< ~300 C-s ~300 "The chart" RET ~500 C-c C-x C-v ~1500'
+    conditions:
+      - text: both images show inline
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/gallery.org") (>= (seq-count (lambda (o) (overlay-get o (quote org-image-overlay))) (overlays-in (point-min) (point-max))) 2))'
+        hint: "C-c C-x C-v works on the section the cursor is in: put it under * Figures, or use C-u C-u C-c C-x C-v for the whole file. Pressing it twice hides the images again."
+      - text: gallery.org is the selected buffer
+        state: { buf: gallery.org }
+        hint: "The images belong to gallery.org: if the thumbnails or an image window is still selected, the bright mode line names it; go back to gallery.org first."
+  - id: formula
+    goal: Render the formula inline
+    detail: "Move into the `* The formula` section (`M->` then `C-p`) and press `C-c C-x C-l`. After a second the dollar signs give way to typeset maths."
+    demo: 'M-> ~300 C-p ~300 C-c C-x C-l ~4000'
+    conditions:
+      - text: the formula is rendered
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/gallery.org") (seq-some (lambda (o) (eq (overlay-get o (quote org-overlay-type)) (quote org-latex-overlay))) (overlays-in (point-min) (point-max))))'
+        hint: "The cursor must be in the formula's section. LaTeX runs in the background: give it a few seconds the first time. C-c C-x C-l again shows the source."
+      - text: the images are still inline
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/gallery.org") (>= (seq-count (lambda (o) (overlay-get o (quote org-image-overlay))) (overlays-in (point-min) (point-max))) 2))'
+        hint: "C-c C-x C-v in the Figures section toggles the images; if they went away, press it there once more."

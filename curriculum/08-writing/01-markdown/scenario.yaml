@@ -1,0 +1,83 @@
+id: 08-writing/01-markdown
+title: Markdown with live preview
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input]
+vscode: Markdown preview
+setup:
+  workspace: fixtures/writing
+  root: writing
+  reset: true
+  open: [writing/README.md]
+  layout: single
+  # A preview left from an earlier visit would show the old page.
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (with-current-buffer b (derived-mode-p 'eww-mode))
+          (kill-buffer b)))
+      (with-current-buffer (find-buffer-visiting "/work/writing/README.md")
+        (goto-char (point-min))
+        (dolist (w (get-buffer-window-list nil nil t))
+          (set-window-point w (point-min)) (set-window-start w (point-min)))))
+preview:
+  tabs: [writing/README.md]
+steps:
+  - id: bold
+    goal: Make the word offline bold
+    detail: "The word is at the start of line 4. Put the cursor on it (`C-s offline RET` gets you there) and press `C-c C-s b`: markdown-mode adds the two pairs of stars around the word."
+    demo: 'M-< ~300 C-s ~300 "offline" RET ~500 C-c C-s b'
+    conditions:
+      - text: "**offline** is in README.md"
+        buffer: { name: README.md, contains: "**offline**" }
+        hint: "The cursor only has to touch the word, at its start, middle or end: C-c C-s b finds the word itself. Pressing it twice removes the stars again."
+      - text: the bold key was used
+        event: { command: markdown-insert-bold }
+        hint: "Type the keys one after the other: Control c, Control s, then a plain b. If the bottom line shows C-c C-s- the mode is waiting for the last key."
+  - id: item
+    goal: Add a third feature to the list with M-RET
+    detail: "Go to the end of the line `- One command, no configuration` and press `M-RET`: a new `- ` item starts below. Type `Works offline`."
+    demo: 'M-< ~300 C-s ~300 "no configuration" RET ~400 C-e ~300 M-RET ~400 "Works offline"'
+    conditions:
+      - text: M-RET started a list item
+        event: { command: markdown-insert-list-item }
+        hint: "M-RET is Alt and Enter together (or Esc, then Enter). Press it at the end of the last item, not on the empty line below it."
+      - text: the Features list has three items
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/README.md") (save-excursion (goto-char (point-min)) (and (re-search-forward "^## Features" nil t) (let ((end (save-excursion (re-search-forward "^## " nil t))) (n 0)) (while (re-search-forward "^- [^ \n]" end t) (setq n (1+ n))) (>= n 3)))))'
+        hint: "The new item needs some text after its `- `: an empty item does not count."
+  - id: link
+    goal: Add a link at the end of the README
+    detail: "`M->` goes to the end of the file. Press `C-c C-l`, type a URL such as `https://example.org/lantern`, `RET`, then the text to show, such as `the project page`, `RET`, and `RET` once more to leave the title empty."
+    demo: 'M-> ~400 C-c C-l ~600 "https://example.org/lantern" RET ~500 "the project page" RET ~500 RET'
+    conditions:
+      - text: a link was inserted with C-c C-l
+        event: { command: markdown-insert-link }
+        hint: "C-c C-l asks three questions at the bottom of the screen: the URL, the link text and an optional title. RET on an empty title skips it."
+      - text: README.md has a Markdown link
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/README.md") (save-excursion (goto-char (point-min)) (re-search-forward "\\[[^]\n]+\\]([^) \n]+)" nil t)))'
+        hint: "A link looks like [text](url). If you left the link text empty, markdown-mode wrote <url> instead: undo with C-/ and give it a text."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "Still in a prompt? C-c C-l asks for the URL first, then the text, then an optional title: RET after each. C-g gives up."
+  - id: table
+    goal: Add a row to the Commands table and align it with TAB
+    detail: "Below the `lantern build` row, open a new line and type `| lantern serve | previews the site |` without lining anything up. Then press `TAB` with the cursor anywhere in the table: every column gets the same width."
+    demo: 'M-< ~300 C-s ~300 "out/" RET ~400 C-e ~300 RET "| lantern serve | previews the site |" ~400 C-a ~300 TAB'
+    conditions:
+      - text: the table has a lantern serve row
+        buffer: { name: README.md, contains: "| lantern serve" }
+        hint: "Start the row with a | and put a | between the two cells. The new line must touch the table: no empty line above it."
+      - text: the table is aligned
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/README.md") (save-excursion (goto-char (point-min)) (and (re-search-forward "^| Command" nil t) (let ((w (- (line-end-position) (line-beginning-position))) (ok t) (n 0)) (forward-line 1) (while (looking-at "^|") (setq n (1+ n)) (unless (= (- (line-end-position) (line-beginning-position)) w) (setq ok nil)) (forward-line 1)) (and ok (>= n 3))))))'
+        hint: "TAB aligns only when the cursor is inside the table. TAB in the last cell adds an empty row; that is fine, or remove it with C-/."
+  - id: preview
+    goal: Preview the README with C-c C-c p
+    detail: "`C-x C-s` saves (the preview pane reloads), then `C-c C-c p` opens the rendered page in eww, on the right. Check the bold word, the list, the table and the link."
+    demo: 'C-x C-s ~600 C-c C-c p ~2500'
+    conditions:
+      - text: the preview command ran
+        event: { command: markdown-preview }
+        hint: "Run it from the README.md window: C-c C-c p means nothing in eww. C-x o moves between the windows."
+      - text: eww shows the page
+        buffer: { name: "*eww*", mode: eww-mode }
+        hint: "The page takes a second to render. If nothing opened, look at the bottom line for a pandoc error."

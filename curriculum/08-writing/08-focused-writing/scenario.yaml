@@ -1,0 +1,68 @@
+id: 08-writing/08-focused-writing
+title: Focused writing
+minutes: 8
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input]
+vscode: "zen mode, spell check, word count"
+setup:
+  workspace: fixtures/writing
+  root: writing
+  reset: true
+  open: [writing/draft.md]
+  layout: single
+  # The steps turn these on; they start off, at the default fill column.
+  eval: >-
+    (with-current-buffer (find-buffer-visiting "/work/writing/draft.md")
+      (when (bound-and-true-p olivetti-mode) (olivetti-mode -1))
+      (when (bound-and-true-p visual-line-mode) (visual-line-mode -1))
+      (kill-local-variable 'fill-column)
+      (goto-char (point-min))
+      (dolist (w (get-buffer-window-list nil nil t))
+        (set-window-point w (point-min)) (set-window-start w (point-min))))
+steps:
+  - id: page
+    goal: Centre the draft and wrap its lines on screen
+    detail: "`M-x olivetti-mode RET`. The paragraphs, one long line each, now wrap at word boundaries in a centred column: olivetti turned on `visual-line-mode` too, and the mode line shows `Olv Wrap`."
+    demo: 'C-u M-x ~400 "olivetti-mode" RET ~800'
+    conditions:
+      - text: olivetti-mode is on in draft.md
+        elisp: '(buffer-local-value (quote olivetti-mode) (find-buffer-visiting "/work/writing/draft.md"))'
+        hint: "Run it in the draft.md window. Running it a second time turns it off again; C-u M-x olivetti-mode only ever turns it on."
+      - text: visual-line-mode is on in draft.md
+        elisp: '(buffer-local-value (quote visual-line-mode) (find-buffer-visiting "/work/writing/draft.md"))'
+        hint: "olivetti turns Wrap on by itself. If the mode line shows Olv without Wrap, M-x visual-line-mode turned it off again: run it once more."
+  - id: spelling
+    goal: Fix every misspelling using only M-$
+    detail: "There are seven. `M-<`, then `C-u M-$` walks through them all: press the digit of the right suggestion each time. Check the list before pressing `1`: for `adress`, the first suggestion is not the word you want."
+    demo: 'M-< ~400 C-u M-$ ~1200 1 ~700 1 ~700 1 ~700 1 ~700 1 ~700 2 ~700 1 ~800'
+    conditions:
+      - text: M-$ was used
+        event: { command: jinx-correct }
+        hint: "M-$ is Alt and the dollar sign (Alt Shift 4 on most keyboards), or Esc then $."
+      - text: no misspelling is left
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/draft.md") (save-excursion (goto-char (point-min)) (and (not (re-search-forward "\\_<\\(recieve\\|seperate\\|definately\\|untill\\|occured\\|adress\\|enviroment\\)\\_>" nil t)) (progn (goto-char (point-min)) (let ((n 0)) (dolist (w (list "receive" "separate" "definitely" "until" "occurred" "address" "environment")) (goto-char (point-min)) (when (re-search-forward (concat "\\_<" w "\\_>") nil t) (setq n (1+ n)))) (= n 7))))))'
+        hint: "The underlined words are the ones left. M-$ alone fixes the one nearest the cursor; if a digit picked the wrong word, C-/ undoes it and M-$ offers the list again."
+  - id: fill
+    goal: Set the fill column to 60 and refill the first paragraph
+    detail: "`C-x f 60 RET` sets the fill column for this buffer. Then put the cursor in the first paragraph (`M-< C-s Every build RET`) and press `M-q`: it becomes lines of at most 60 characters."
+    demo: 'C-x f ~500 "60" RET ~500 M-< ~300 C-s ~300 "Every build" RET ~500 M-q ~600'
+    conditions:
+      - text: the fill column is 60
+        elisp: '(= (buffer-local-value (quote fill-column) (find-buffer-visiting "/work/writing/draft.md")) 60)'
+        hint: "C-x f asks for the new column at the bottom: type 60 and RET. Typing nothing takes the column the cursor is on."
+      - text: the first paragraph is filled at 60
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/draft.md") (save-excursion (goto-char (point-min)) (and (search-forward "Every build" nil t) (let ((n 0) (ok t)) (beginning-of-line) (while (and (not (eobp)) (not (looking-at "^[ \t]*$"))) (setq n (1+ n)) (when (> (- (line-end-position) (line-beginning-position)) 60) (setq ok nil)) (forward-line 1)) (and ok (>= n 4))))))'
+        hint: "M-q fills the paragraph the cursor is in, so it must be in the one starting Every build. Set the column first: M-q uses the value it finds."
+  - id: count
+    goal: Count the words of the draft
+    detail: "`C-u M-=` counts the whole buffer and shows its lines, words and characters at the bottom: `Buffer has …`. `M-x count-words` does the same while no region is active."
+    demo: 'C-u M-= ~800'
+    conditions:
+      - text: you counted words
+        any:
+          - event: { command: count-words-region }
+          - event: { command: count-words }
+        hint: "Without C-u, M-= counts only from the mark to the cursor: the bottom line then says Region has, not Buffer has. M-= is Alt and the equals sign."
+      - text: draft.md is the current buffer
+        state: { buf: draft.md }
+        hint: "Count in the draft.md window; C-x b draft.md RET goes back to it."

@@ -1,0 +1,91 @@
+id: 08-writing/06-citations
+title: Citations with citar
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input]
+vscode: citation picker
+setup:
+  workspace: fixtures/writing
+  root: writing
+  reset: true
+  open: [writing/refs.bib]
+  layout: single
+  # Build output and notes from an earlier visit would answer the
+  # steps' checks.
+  eval: >-
+    (let ((kill-buffer-query-functions nil))
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (or (string-match-p "\\`\\*.*paper output\\*\\'\\|\\`\\*typst-ts-compilation\\*\\'" (buffer-name b))
+                    (and f (string-prefix-p "/work/writing/notes/" f)))
+            (with-current-buffer b (set-buffer-modified-p nil))
+            (kill-buffer b))))
+      (with-current-buffer (find-buffer-visiting "/work/writing/refs.bib")
+        (goto-char (point-min))
+        (dolist (w (get-buffer-window-list nil nil t))
+          (set-window-point w (point-min)) (set-window-start w (point-min)))))
+preview:
+  tabs: [writing/report.pdf, writing/paper.pdf]
+  follow: { writing/report.typ: writing/report.pdf, writing/paper.tex: writing/paper.pdf }
+steps:
+  - id: tidy
+    goal: Tidy the last entry of refs.bib with C-c C-c
+    detail: "The `gruber2004` entry at the end is squashed onto three lines. Put the cursor anywhere in it (`M->` then `C-p`) and press `C-c C-c`."
+    demo: 'M-> ~300 C-p ~300 C-c C-c ~800'
+    conditions:
+      - text: C-c C-c tidied an entry
+        event: { command: bibtex-clean-entry }
+        hint: "C-c C-c works on the entry around the cursor: anywhere between @misc and its closing brace."
+      - text: gruber2004 has one field per line
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/refs.bib") (save-excursion (goto-char (point-min)) (re-search-forward "^  author += {John Gruber},$" nil t)))'
+        hint: "If the bottom line reports a problem with the entry, undo with C-/ and check that its braces are balanced."
+  - id: typst-cite
+    goal: Cite two references in report.typ
+    detail: "`C-x C-f /work/writing/report.typ RET`. At the end, add the line `#bibliography(\"refs.bib\")`. Then after `kept the median` (`M-< C-s the median RET`), type a space and press `C-c C-x @`: type `knuth`, `TAB`, `lamport`, `TAB`, then `RET`."
+    demo: 'C-x C-f ~400 "/work/writing/report.typ" RET ~800 M-> ~300 RET "#bibliography(\"refs.bib\")" ~400 M-< ~300 C-s ~300 "the median" RET ~400 " " C-c C-x @ ~1000 "knuth" ~400 TAB ~400 "lamport" ~400 TAB ~400 RET ~600'
+    conditions:
+      - text: citar inserted citations
+        event: { command: citar-insert-citation }
+        hint: "C-c C-x @ in report.typ. TAB adds the highlighted reference to the selection (the count at the top goes up); RET inserts them all."
+      - text: report.typ cites two references
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/report.typ") (save-excursion (goto-char (point-min)) (let ((n 0)) (while (re-search-forward "@\\(knuth1984\\|lamport1994\\|stallman2002\\|gruber2004\\)\\_>" nil t) (setq n (1+ n))) (>= n 2))))'
+        hint: "RET alone inserts only the highlighted reference. Press C-c C-x @ again for a second one, or use TAB on each before RET."
+      - text: "report.typ has #bibliography"
+        buffer: { name: report.typ, contains: "#bibliography(" }
+        hint: "Typst needs to know the file: #bibliography(\"refs.bib\") on a line of its own, with the quotes."
+  - id: typst-build
+    goal: Compile the report and see the bibliography
+    detail: "`C-c C-c` in report.typ. The PDF in the preview pane now ends with a Bibliography listing both works, and `[1]` and `[2]` stand where you cited them."
+    demo: 'C-x b ~300 "report.typ" RET ~400 C-c C-c ~2500'
+    conditions:
+      - text: typst compile ran
+        event: { command: typst-ts-compile }
+        hint: "C-c C-c in report.typ. The build output below shows any error, such as a key that is not in refs.bib."
+      - text: the PDF lists two references
+        shell: { run: "test \"$(pdftotext report.pdf - | grep -c '^\\[[0-9]*\\]')\" -ge 2" }
+        hint: "Both citations must be in report.typ when it compiles; a key cited twice still counts once."
+  - id: latex
+    goal: Cite the same two references in paper.tex and build it
+    detail: "`C-x C-f /work/writing/paper.tex RET`. After `no state of its own` in the introduction (`C-s state of its own RET`), type a space and cite `knuth` and `lamport` with `C-c C-x @` as before: citar writes `\\cite{…}`. Then `C-c C-c RET` builds with latexmk, which runs biber for the bibliography."
+    demo: 'C-x C-f ~400 "/work/writing/paper.tex" RET ~800 M-< ~300 C-s ~300 "state of its own" RET ~400 " " C-c C-x @ ~1000 "knuth" ~400 TAB ~400 "lamport" ~400 TAB ~400 RET ~600 C-c C-c ~800 "LaTeXMk" RET ~15000'
+    conditions:
+      - text: paper.tex cites two references
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/paper.tex") (save-excursion (goto-char (point-min)) (let ((n 0)) (while (re-search-forward "\\\\cite[a-z]*{\\([^}]*\\)}" nil t) (setq n (+ n (length (split-string (match-string 1) "," t))))) (>= n 2))))'
+        hint: "C-c C-x @ in paper.tex writes \\cite{...}; with TAB on two references, both keys go into one \\cite."
+      - text: latexmk finished without errors
+        buffer: { name: "*/work/writing/paper output*", process: none, contains: "TeX Output finished" }
+        hint: "C-c C-c, then RET for LaTeXMk. The first build with citations runs pdflatex, biber and pdflatex again: give it a few seconds."
+      - text: the PDF lists two references
+        shell: { run: "test \"$(pdftotext paper.pdf - | grep -c '^\\[[0-9]*\\]')\" -ge 2", timeout: 10 }
+        hint: "The references appear at the end of the PDF once biber has run; latexmk runs it by itself when the citations change."
+  - id: notes
+    goal: Start reading notes on a reference with citar-open
+    detail: "`M-x citar-open RET`, choose `lamport` and `RET`. There are no notes yet, so citar offers `Create Notes`: `RET`. A new Org file, `notes/lamport1994.org`, opens with the reference's title."
+    demo: 'M-x ~400 "citar-open" RET ~800 "lamport" ~400 RET ~800 RET ~1000'
+    conditions:
+      - text: citar-open ran
+        event: { command: citar-open }
+        hint: "M-x citar-open RET works from any buffer of the project: it finds refs.bib next to the file you are in."
+      - text: a notes file is open
+        elisp: '(seq-some (lambda (b) (let ((f (buffer-file-name b))) (and f (string-prefix-p "/work/writing/notes/" f) (not (string-suffix-p "README.md" f))))) (buffer-list))'
+        hint: "After choosing the reference, citar asks what to open: Create Notes is the only choice until the reference has notes, files or links."

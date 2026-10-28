@@ -1,0 +1,96 @@
+id: 08-writing/04-pdf-tools-and-synctex
+title: pdf-tools and SyncTeX
+minutes: 10
+mode: gui
+tags: [gui]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input]
+vscode: PDF viewer
+setup:
+  workspace: fixtures/writing
+  root: writing
+  reset: true
+  # The PDF and its SyncTeX file, built from the fixture (biber unpacks
+  # itself under ~/.cache: /tmp is noexec).
+  run: >-
+    mkdir -p "$HOME/.cache/par" &&
+    PAR_GLOBAL_TMPDIR="$HOME/.cache/par" latexmk -pdf -synctex=1 -interaction=nonstopmode paper.tex >/dev/null 2>&1;
+    test -f paper.pdf
+  open: [writing/paper.tex]
+  layout: single
+  # A PDF buffer from an earlier load may be the text view, made in the
+  # terminal frame: the steps open it again here.
+  eval: >-
+    (let ((kill-buffer-query-functions nil))
+      (dolist (b (buffer-list))
+        (when (string-match-p "\\`\\*Outline paper\\|\\`paper\\.pdf" (buffer-name b))
+          (kill-buffer b)))
+      (with-current-buffer (find-buffer-visiting "/work/writing/paper.tex")
+        (goto-char (point-min))
+        (dolist (w (get-buffer-window-list nil nil t))
+          (set-window-point w (point-min)) (set-window-start w (point-min)))))
+steps:
+  - id: forward
+    goal: Jump from the last sentence of the source to the PDF
+    detail: "In paper.tex, search for `stays small` (`C-s stays small RET`) to reach the last sentence of the Conclusion, then press `C-c C-v`. The PDF opens on the right at page 3, the line flashing."
+    demo: 'M-< ~300 C-s ~300 "stays small" RET ~500 C-c C-v ~2500'
+    conditions:
+      - text: C-c C-v ran
+        event: { command: TeX-view }
+        hint: "C-c C-v works in the LaTeX buffer, paper.tex. If it opened the PDF as text, you are in the terminal frame: GUI lessons need the graphical one."
+      - text: the PDF shows page 3 in pdf-tools
+        elisp: '(let ((b (get-buffer "paper.pdf"))) (and b (eq (buffer-local-value (quote major-mode) b) (quote pdf-view-mode)) (let ((w (get-buffer-window b))) (and w (= (with-current-buffer b (pdf-view-current-page w)) 3)))))'
+        hint: "The cursor must be on the Conclusion's sentence when you press C-c C-v: forward search shows the page of the line the cursor is on."
+  - id: pages
+    goal: Turn the pages of the PDF to the first page
+    detail: "Click the PDF or press `C-x o` to select its window. `p` goes back a page, `n` forward; go to page 1 with `p` (or `M-<`). Try `+` and `-` to zoom on the way."
+    demo: 'C-x o ~500 p ~600 n ~600 p ~600 p ~600'
+    conditions:
+      - text: you turned pages
+        any:
+          - event: { command: pdf-view-previous-page-command }
+          - event: { command: pdf-view-next-page-command }
+          - event: { command: pdf-view-scroll-down-or-previous-page }
+          - event: { command: pdf-view-first-page }
+        hint: "The keys work in the PDF's window: the bright mode line shows which window is selected. In paper.tex, n and p would type letters."
+      - text: the PDF shows page 1
+        elisp: '(let ((b (get-buffer "paper.pdf"))) (and b (let ((w (if (eq (window-buffer (selected-window)) b) (selected-window) (get-buffer-window b)))) (and w (= (with-current-buffer b (pdf-view-current-page w)) 1)))))'
+        hint: "The mode line shows P1/3 on the first page. M-< goes straight there."
+  - id: outline
+    goal: Go to the Measurements section through the outline
+    detail: "In the PDF, press `o`: the outline lists the sections. Move to `Measurements` with `n` or `C-n` and press `M-RET`: the PDF jumps to page 2 and the outline closes. (`RET` jumps too, and leaves the outline open.)"
+    demo: 'o ~1000 C-s ~300 "Measurements" RET ~500 M-RET ~1000'
+    conditions:
+      - text: the outline was used
+        any:
+          - event: { command: pdf-outline-follow-link-and-quit }
+          - event: { command: pdf-outline-follow-link }
+          - event: { command: pdf-outline-mouse-display-link }
+          - event: { command: pdf-outline-display-link }
+        hint: "o works in the PDF window, not in paper.tex: the bright mode line shows which one is selected. In the outline, RET or M-RET on a heading jumps there; q closes it without jumping."
+      - text: the PDF shows page 2
+        elisp: '(let ((b (get-buffer "paper.pdf"))) (and b (let ((w (get-buffer-window b))) (and w (= (with-current-buffer b (pdf-view-current-page w)) 2)))))'
+        hint: "Measurements is section 3, on page 2. If the outline is still open, RET on the heading follows it."
+  - id: search
+    goal: Search the PDF for "spread between"
+    detail: "In the PDF, `C-s spread between`: the match is highlighted on page 2. Keep the search open for the next step, or press `RET` to stop."
+    demo: 'C-s ~400 "spread between" ~800 RET'
+    conditions:
+      - text: you searched in the PDF
+        event: { command: isearch-forward }
+        hint: "C-s in the PDF window searches the PDF's text; in paper.tex it searches the source."
+      - text: the PDF window is selected
+        state: { mode: pdf-view-mode }
+        hint: "Select the PDF window first: click it or C-x o."
+  - id: backward
+    goal: Jump from the PDF back to the source
+    detail: "Double-click the words `spread between` in the PDF. Or, from the keyboard: `C-s spread between`, then `M-s s` while the search is still open. paper.tex comes back with the cursor on that sentence."
+    demo: 'C-s ~400 "spread between" ~800 M-s s ~1500'
+    conditions:
+      - text: a backward search ran
+        any:
+          - event: { command: pdf-isearch-sync-backward }
+          - event: { command: pdf-sync-backward-search-mouse }
+        hint: "M-s s works only while the search is active (I-search at the bottom); after RET, start the search again. A double-click needs the mouse on the words in the graphical frame."
+      - text: the cursor is on that sentence in paper.tex
+        elisp: '(and (eq (window-buffer (selected-window)) (find-buffer-visiting "/work/writing/paper.tex")) (save-excursion (let ((here (line-number-at-pos))) (goto-char (point-min)) (and (search-forward "The spread between" nil t) (<= 0 (- here (line-number-at-pos)) 2)))))'
+        hint: "Jump from the match in the Measurements section, page 2: 'The spread between the five runs'. The source window must end up selected."

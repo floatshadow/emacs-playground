@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200" viewBox="0 0 320 200">
+  <title>Build time by number of notes</title>
+  <rect width="320" height="200" fill="#ffffff"/>
+  <line x1="40" y1="170" x2="300" y2="170" stroke="#333333" stroke-width="2"/>
+  <line x1="40" y1="170" x2="40" y2="20" stroke="#333333" stroke-width="2"/>
+  <rect x="70" y="150" width="50" height="20" fill="#7a58c4"/>
+  <rect x="145" y="110" width="50" height="60" fill="#7a58c4"/>
+  <rect x="220" y="30" width="50" height="140" fill="#7a58c4"/>
+  <text x="95" y="188" font-family="sans-serif" font-size="12" text-anchor="middle">100</text>
+  <text x="170" y="188" font-family="sans-serif" font-size="12" text-anchor="middle">1000</text>
+  <text x="245" y="188" font-family="sans-serif" font-size="12" text-anchor="middle">10000</text>
+  <text x="170" y="16" font-family="sans-serif" font-size="13" text-anchor="middle">Build time by number of notes</text>
+</svg>

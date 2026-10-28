@@ -1,0 +1,110 @@
+id: 08-writing/03-latex
+title: LaTeX with AUCTeX
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input]
+vscode: LaTeX Workshop
+setup:
+  workspace: fixtures/writing
+  root: writing
+  reset: true
+  open: [writing/paper.tex]
+  layout: single
+  # The steps judge this lesson's builds only.
+  eval: >-
+    (let ((kill-buffer-query-functions nil))
+      (dolist (b (buffer-list))
+        (when (string-match-p "\\`\\*.*paper output\\*\\'" (buffer-name b))
+          (kill-buffer b)))
+      (when (get-buffer "*TeX Help*") (kill-buffer "*TeX Help*"))
+      (with-current-buffer (find-buffer-visiting "/work/writing/paper.tex")
+        (goto-char (point-min))
+        (dolist (w (get-buffer-window-list nil nil t))
+          (set-window-point w (point-min)) (set-window-start w (point-min)))))
+preview:
+  tabs: [writing/paper.pdf]
+  follow: { writing/paper.tex: writing/paper.pdf }
+steps:
+  - id: section
+    goal: Add a section called Model before Discussion
+    detail: "Put the cursor at the start of the line `\\section{Discussion}` (`C-s section{Disc RET C-a`), then `C-c C-s`. Press `RET` for the level `section`, type `Model RET` for the title, and `RET` again to accept the label `sec:model`."
+    demo: 'M-< ~300 C-s ~300 "section{Discussion}" RET ~400 C-a ~300 C-c C-s ~600 RET ~500 "Model" RET ~500 RET'
+    conditions:
+      - text: C-c C-s inserted a section
+        event: { command: LaTeX-section }
+        hint: "C-c C-s asks three questions at the bottom: the level (RET keeps section), the title, then the label (RET keeps the one offered)."
+      - text: paper.tex has a sixth section
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/paper.tex") (save-excursion (goto-char (point-min)) (let ((n 0)) (while (re-search-forward "^\\\\section{" nil t) (setq n (1+ n))) (>= n 6))))'
+        hint: "The new \\section line must start at the beginning of a line. If it landed inside a paragraph, undo with C-/ and press C-a first."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "C-c C-s is asking something: Level, then Title, then Label. RET accepts what is offered in brackets; C-g cancels the whole insertion."
+  - id: environment
+    goal: Add an equation environment in the new section
+    detail: "Under the new label, type a sentence such as `Build time grows linearly:`, `RET`, then `C-c C-e`, type `equation` and `RET`. AUCTeX writes `\\begin{equation}`, a label `eq:1` and `\\end{equation}`, with the cursor between them."
+    demo: 'M-< ~300 C-s ~300 "\\section{Discussion}" RET ~400 C-a ~300 C-o ~300 "Build time grows linearly:" RET ~400 C-c C-e ~600 "equation" RET ~600'
+    conditions:
+      - text: C-c C-e inserted an environment
+        event: { command: LaTeX-environment }
+        hint: "At the Environment type prompt, type equation and RET; TAB completes the name. RET on an empty prompt inserts the environment offered in brackets instead."
+      - text: paper.tex has an equation environment
+        buffer: { name: paper.tex, contains: "\\begin{equation}" }
+        hint: "If another environment went in, undo with C-/ and try again: the name is equation, singular."
+  - id: maths
+    goal: "Type t(n) = α + β n with cdlatex"
+    detail: "On the empty line inside the equation, type ``t(n) = `a + `b n``: each backquote and letter becomes a Greek letter, `\\alpha` and `\\beta`."
+    demo: 'M-< ~300 C-s ~300 "\\end{equation}" RET ~400 C-a ~300 C-b ~300 "t(n) = `a + `b n" ~600'
+    conditions:
+      - text: cdlatex inserted a symbol
+        event: { command: cdlatex-math-symbol }
+        hint: "The backquote is the key left of 1 on most keyboards. Press it, then the letter, without holding anything; a pause after the backquote shows the symbol table, where a letter still works."
+      - text: the equation has \alpha and \beta
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/paper.tex") (save-excursion (goto-char (point-min)) (and (search-forward "\\begin{equation}" nil t) (let ((end (save-excursion (search-forward "\\end{equation}" nil t)))) (and end (save-excursion (search-forward "\\alpha" end t)) (search-forward "\\beta" end t))))))'
+        hint: "Type them between \\begin{equation} and \\end{equation}. Outside maths, the backquote is just a backquote."
+  - id: reference
+    goal: Refer to the equation with C-c )
+    detail: "After `\\end{equation}`, start a new line with `Equation ` and press `C-c )`. Press `e` for `\\eqref`; RefTeX lists the equations with the cursor on yours: `RET`."
+    demo: 'M-< ~300 C-s ~300 "\\end{equation}" RET ~400 C-e ~300 RET "Equation " C-c ) ~1000 e ~1200 RET ~600'
+    conditions:
+      - text: RefTeX inserted a reference
+        event: { command: reftex-reference }
+        hint: "C-c ) is Control c, then a closing parenthesis. The first window asks for the format: e is \\eqref, RET is plain \\ref."
+      - text: paper.tex refers to a label
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/paper.tex") (save-excursion (goto-char (point-min)) (re-search-forward "\\\\\\(eq\\|auto\\|page\\)?ref{[^}]+}" nil t)))'
+        hint: "In the *RefTeX Select* list, n and p move between labels and RET picks one; q leaves without inserting."
+  - id: build
+    goal: Build the PDF with C-c C-c
+    detail: "`C-c C-c` offers `LaTeXMk`: `RET`. The first build takes a few seconds while biber runs. The bottom line then ends with the number of pages, and the preview pane shows the new section with its numbered equation."
+    demo: 'C-c C-c ~800 "LaTeXMk" RET ~12000'
+    conditions:
+      - text: C-c C-c ran a command
+        event: { command: TeX-command-master }
+        hint: "If the prompt offers View, the PDF is already newer than the source: type LaTeXMk instead, with TAB to complete."
+      - text: latexmk finished without errors
+        buffer: { name: "*/work/writing/paper output*", process: none, contains: "TeX Output finished" }
+        hint: "Wait for the build to finish: the bottom line names the pages. If it reports errors, C-c ` shows the first one; a blank line inside the equation is one."
+      - text: the PDF shows the numbered equation
+        shell: { run: "pdftotext paper.pdf - | grep -q '(1)'", timeout: 10 }
+        hint: "The equation needs its \\begin{equation} and \\end{equation}; the number (1) comes from the environment."
+  - id: break
+    goal: Break the build with a misspelt command
+    detail: "Inside the equation, on a new line before `\\end{equation}`, type `\\gama` (one m short of `\\gamma`), then build with `C-c C-c RET`. The bottom line reports LaTeX errors."
+    demo: 'M-< ~300 C-s ~300 "\\end{equation}" RET ~400 C-a ~300 C-o ~300 "  + \\gama" ~600 C-c C-c ~800 "LaTeXMk" RET ~10000'
+    conditions:
+      - text: a build ran
+        event: { command: TeX-command-master }
+        hint: "C-c C-c, then RET for LaTeXMk. AUCTeX saves the file first."
+      - text: the build stopped on an error
+        buffer: { name: "*/work/writing/paper output*", process: none, contains: "exited abnormally" }
+        hint: "The misspelt command has to be inside the equation, with its backslash: \\gama. A plain word is just text."
+  - id: fix
+    goal: Jump to the error with C-c ` and fix it
+    detail: "Press ``C-c ` ``: the cursor jumps to the line of the error and `*TeX Help*` explains it. Delete the bad line (`C-a C-k C-k`), then `C-x 1` and build again with `C-c C-c RET`."
+    demo: 'C-c ` ~1500 C-a ~300 C-k ~300 C-k ~300 C-x 1 ~400 C-c C-c ~800 "LaTeXMk" RET ~10000'
+    conditions:
+      - text: C-c ` jumped to the error
+        event: { command: TeX-next-error }
+        hint: "C-c, then the backquote key. It works after a failed build, in paper.tex or in the build output."
+      - text: the last build had no errors
+        buffer: { name: "*/work/writing/paper output*", process: none, contains: "TeX Output finished" }
+        hint: "Build again after the fix: the check reads the latest build. *TeX Help* shows the line LaTeX choked on; C-c ` again goes to the next error."

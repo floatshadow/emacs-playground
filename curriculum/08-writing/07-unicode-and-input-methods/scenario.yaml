@@ -1,0 +1,92 @@
+id: 08-writing/07-unicode-and-input-methods
+title: Unicode and input methods
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input]
+vscode: "unicode input, IME"
+setup:
+  workspace: fixtures/writing
+  root: writing
+  reset: true
+  open: [writing/notation.txt]
+  layout: single
+  # Every buffer starts without an input method, and C-\ starts from TeX.
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (with-current-buffer b
+          (when current-input-method (deactivate-input-method))))
+      (setq input-method-history nil)
+      (when (get-buffer "*Help*") (kill-buffer "*Help*"))
+      (with-current-buffer (find-buffer-visiting "/work/writing/notation.txt")
+        (goto-char (point-min))
+        (dolist (w (get-buffer-window-list nil nil t))
+          (set-window-point w (point-min)) (set-window-start w (point-min)))))
+steps:
+  - id: by-name
+    goal: Insert ≈ by its name on the Bounds line
+    detail: "Go to the end of the `Bounds:` line (`C-s Bounds: RET`) and type ` build time `. Then `C-x 8 RET`, type `almost equal`, check that `ALMOST EQUAL TO (≈)` is highlighted, and `RET`."
+    demo: 'M-< ~300 C-s ~300 "Bounds:" RET ~400 " build time " C-x 8 RET ~800 "almost equal to" ~800 RET'
+    conditions:
+      - text: C-x 8 RET inserted a character
+        event: { command: insert-char }
+        hint: "The list matches every word you type in any order: ALMOST EQUAL TO is highlighted when it is first, or move to it with C-n before RET."
+      - text: the Bounds line has a character from beyond the keyboard
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/notation.txt") (save-excursion (goto-char (point-min)) (and (re-search-forward "^Bounds:.*$" nil t) (string-match-p "[^[:ascii:]]" (match-string 0)))))'
+        hint: "Insert it on the line that starts with Bounds:. C-x 8 RET puts the character where the cursor is."
+    stuck:
+      - when: { minibuffer_seconds: 45 }
+        say: "The Insert character prompt wants a Unicode name: almost equal to. Its code, 2248, works too. C-g gives up."
+  - id: shortcut
+    goal: Type an en dash with C-x 8 _ n
+    detail: "Still on the Bounds line, type ` 2`, then `C-x 8 _ n` for an en dash, then `5 ms per note`. The line reads `build time ≈ 2–5 ms per note`."
+    demo: 'M-< ~300 C-s ~300 "Bounds:" RET ~300 C-e ~300 " 2" C-x 8 _ n ~400 "5 ms per note"'
+    conditions:
+      - text: the Bounds line has an en dash
+        buffer: { name: notation.txt, contains: "–" }
+        hint: "C-x 8, then an underscore, then n: three separate keys. A plain - is a hyphen, shorter than the en dash."
+      - text: the Bounds line ends with ms per note
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/notation.txt") (save-excursion (goto-char (point-min)) (re-search-forward "^Bounds:.*–.*ms" nil t)))'
+        hint: "Put the dash between two numbers on the Bounds line, then the unit."
+  - id: tex
+    goal: Write α + β → γ with the TeX input method
+    detail: "At the end of the `Maths:` line type a space, then turn TeX on with `C-\\` (the mode line shows `\\`). Type `\\alpha + \\beta \\to \\gamma`, and turn it off with `C-\\` again."
+    demo: 'M-< ~300 C-s ~300 "Maths:" RET ~400 " " C-u C-\ ~500 "TeX" RET ~500 "\\alpha + \\beta \\to \\gamma" ~500 C-\'
+    conditions:
+      - text: an input method was switched
+        any:
+          - event: { command: toggle-input-method }
+          - event: { command: set-input-method }
+        hint: "C-\\ is Control and backslash. If the mode line shows PYIM instead of \\, C-u C-\\ TeX RET picks TeX."
+      - text: the Maths line has α and →
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/notation.txt") (save-excursion (goto-char (point-min)) (and (re-search-forward "^Maths:.*$" nil t) (let ((l (match-string 0))) (and (string-match-p "α" l) (string-match-p "→" l))))))'
+        hint: "With TeX on, \\alpha becomes α as you type it and \\to becomes →. If you see the backslashes, the input method was off: undo, C-\\, type again."
+  - id: describe
+    goal: Find out everything about α
+    detail: "Put the cursor on the α: `M-< C-s Maths: RET` stops after the colon, and `C-f` steps over the space onto it. Then `C-u C-x =`. A help window shows its Unicode name, GREEK SMALL LETTER ALPHA, and how to type it. `q` closes it."
+    demo: 'M-< ~300 C-s ~300 "Maths:" RET ~400 C-f ~300 C-u C-x = ~2000 q'
+    conditions:
+      - text: you described a character
+        any:
+          - event: { command: what-cursor-position }
+          - event: { command: describe-char }
+        hint: "C-u first, then C-x =. Without C-u, C-x = gives a one-line summary at the bottom instead of the window."
+      - text: the help shows GREEK SMALL LETTER ALPHA
+        buffer: { name: "*Help*", contains: "GREEK SMALL LETTER ALPHA" }
+        hint: "The cursor must be on the α itself, not after it: the bottom line of C-x = names the character under the cursor. C-f and C-b move it one character."
+  - id: chinese
+    goal: Type 你好世界 with pyim on the Chinese line
+    detail: "At the end of the `Chinese:` line type a space, then `C-u C-\\ pyim RET`. Type `nihao`, `SPC` for 你好, `shijie`, `SPC` for 世界. `C-\\` turns pyim off."
+    demo: 'C-x b ~300 "notation.txt" RET ~300 C-x 1 ~300 M-< ~300 C-s ~300 "Chinese:" RET ~400 " " C-u C-\ ~500 "pyim" RET ~1500 "nihao" ~800 SPC ~400 "shijie" ~800 SPC ~400 C-\'
+    conditions:
+      - text: an input method was switched
+        any:
+          - event: { command: toggle-input-method }
+          - event: { command: set-input-method }
+        hint: "C-u C-\\ asks for the input method: type pyim and RET. The mode line then starts with PYIM."
+      - text: the Chinese line has Chinese characters
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/notation.txt") (save-excursion (goto-char (point-min)) (and (re-search-forward "^Chinese:.*$" nil t) (string-match-p "\\cC.*\\cC" (match-string 0)))))'
+        hint: "Type the pinyin without tones or spaces, then SPC to take candidate 1, or the candidate's number. The candidates show at the bottom while you type."
+    stuck:
+      - when: { idle_seconds: 60 }
+        say: "With pyim on, letters build a pinyin syllable at the bottom; SPC or a digit turns it into characters. C-g drops the syllable, C-\\ turns pyim off."

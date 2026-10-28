@@ -1,0 +1,17 @@
+#+title: Gallery
+
+Figures and a formula for the Lantern report.
+
+* Figures
+
+The photograph for the cover:
+
+[[file:figures/lantern.jpg]]
+
+The chart for the results:
+
+[[file:plot.svg]]
+
+* The formula
+
+The build time grows linearly: $t(n) = a + b\,n$, with $b \approx 1.2$ ms per note.

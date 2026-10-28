@@ -1,0 +1,97 @@
+id: 08-writing/02-typst
+title: Typst with tinymist
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input]
+vscode: Tinymist
+setup:
+  workspace: fixtures/writing
+  root: writing
+  reset: true
+  open: [writing/report.typ]
+  layout: single
+  # No typst watch or build output from an earlier visit: the steps
+  # start them.
+  eval: >-
+    (let ((kill-buffer-query-functions nil))
+      (dolist (name '("*Typst-Watch*" "*typst-ts-compilation*"))
+        (when (get-buffer name) (kill-buffer name)))
+      (with-current-buffer (find-buffer-visiting "/work/writing/report.typ")
+        (when (bound-and-true-p typst-ts-watch-mode)
+          (setq-local typst-ts-watch-mode nil))
+        (goto-char (point-min))
+        (dolist (w (get-buffer-window-list nil nil t))
+          (set-window-point w (point-min)) (set-window-start w (point-min)))))
+preview:
+  tabs: [writing/report.pdf]
+  follow: { writing/report.typ: writing/report.pdf }
+steps:
+  - id: compile
+    goal: Compile report.typ to a PDF
+    detail: "Press `C-c C-c` in report.typ. The build output opens below and says it finished; the preview pane shows report.pdf."
+    demo: 'C-c C-c ~2000'
+    conditions:
+      - text: typst compile ran
+        event: { command: typst-ts-compile }
+        hint: "C-c C-c in the report.typ window, not in the build output below it. C-x o moves between them."
+      - text: report.pdf exists
+        file: { path: writing/report.pdf, exists: true }
+        hint: "Read the build output: an error there names the line. The fixture compiles as it is, so undo any edit with C-/."
+  - id: watch
+    goal: Turn on watch mode
+    detail: "`C-x 1` closes the build output, then `C-c C-w` starts `typst watch` for report.typ. `[Watch]` appears in the mode line. (`C-u C-c C-w` turns it on whatever its state; plain `C-c C-w` switches it on and off.)"
+    demo: 'C-x 1 ~400 C-u C-c C-w ~1500'
+    conditions:
+      - text: watch mode was switched
+        event: { command: typst-ts-watch-mode }
+        hint: "C-c C-w in the report.typ buffer. If the mode line already showed [Watch], your C-c C-w turned it off: press it once more."
+      - text: typst watch is running
+        buffer: { name: "*Typst-Watch*", process: running }
+        hint: "Look for [Watch] in the mode line. Without it, the process stopped: C-c C-w again starts it."
+  - id: table
+    goal: Add a table to the Results section
+    detail: "Below `Builds grow roughly linearly…`, add a blank line and `#table(columns: 2, [Notes], [Seconds], [100], [0.2], [10000], [19])`. Save with `C-x C-s`, or wait a few seconds: watch mode rebuilds the PDF and the preview pane shows the table."
+    demo: 'M-< ~300 C-s ~300 "number of notes." RET ~400 RET RET "#table(columns: 2, [Notes], [Seconds], [100], [0.2], [10000], [19])" ~400 C-x C-s ~1500 C-c C-c ~2000'
+    conditions:
+      - text: report.typ has a table
+        file: { path: writing/report.typ, regex: "#table\\(" }
+        hint: "The table starts with #table( and its cells are in square brackets, separated by commas. Save it (C-x C-s) if the check does not see it yet."
+      - text: report.pdf was rebuilt after the change
+        shell: { run: "test report.pdf -nt report.typ" }
+        hint: "The PDF is older than the source, so the last build failed: the *Typst-Watch* window at the bottom shows why. Without watch mode, C-c C-c builds."
+    stuck:
+      - when: { idle_seconds: 60 }
+        say: "Typst counts the brackets: every [ needs its ], and the table's ( its ). Underlined text and the Flymake counter in the mode line point at the mistake."
+  - id: figure
+    goal: Add the chart as a numbered figure
+    detail: "Below the table, add a blank line and `#figure(image(\"plot.svg\", width: 80%), caption: [Build time by number of notes.])`. When the PDF rebuilds, it shows the chart with `Figure 1` under it."
+    demo: 'M-< ~300 C-s ~300 "[19])" RET ~400 RET RET "#figure(image(\"plot.svg\", width: 80%), caption: [Build time by number of notes.])" ~400 C-x C-s ~1500 C-c C-c ~2000'
+    conditions:
+      - text: report.typ has a figure
+        file: { path: writing/report.typ, regex: "#figure\\(\\s*image\\(" }
+        hint: "#figure( wraps image(\"plot.svg\"): the image call goes inside the figure call, and the caption after a comma."
+      - text: the PDF shows Figure 1
+        shell: { run: "pdftotext report.pdf - | grep -q 'Figure 1'" }
+        hint: "The file name is plot.svg, in /work/writing next to report.typ, in double quotes. The *Typst-Watch* window shows a build error, if any."
+  - id: break
+    goal: Make a mistake on purpose and watch Flymake catch it
+    detail: "On a new line at the end of the file, type `#lantern`: Typst has no variable of that name. Within a second it is underlined and the Flymake counter in the mode line turns from `0` to `1`."
+    demo: 'M-> ~300 RET "#lantern" ~2500'
+    conditions:
+      - text: Flymake reports an error in report.typ
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/report.typ") (and (bound-and-true-p flymake-mode) (seq-some (lambda (d) (eq (flymake-diagnostic-type d) (quote eglot-error))) (flymake-diagnostics))))'
+        hint: "The # matters: without it, lantern is plain text and nothing is wrong. Give tinymist a second after typing."
+      - text: report.typ was edited
+        buffer: { name: report.typ, contains: "#lantern" }
+        hint: "Type it in report.typ, not in another buffer: the mode line names the buffer."
+  - id: fix
+    goal: Jump to the error with M-n and fix it
+    detail: "`M-<` goes to the top, then `M-n` jumps to the first problem and shows its message at the bottom. Delete the line (`C-a C-k C-k`) and the counter goes back to `0`."
+    demo: 'M-< ~400 M-n ~1200 C-a ~300 C-k ~300 C-k ~2500'
+    conditions:
+      - text: M-n jumped to a problem
+        event: { command: flymake-goto-next-error }
+        hint: "M-n is Alt and n. It only works in a buffer with Flymake on, like report.typ; in the build output it means something else."
+      - text: no errors are left in report.typ
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/writing/report.typ") (and (bound-and-true-p flymake-mode) (not (seq-some (lambda (d) (eq (flymake-diagnostic-type d) (quote eglot-error))) (flymake-diagnostics)))))'
+        hint: "Remove #lantern entirely. The counter updates a moment after the edit; C-h . on the underlined word explains what is wrong."
