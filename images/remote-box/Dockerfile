@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.28
 #
 # Remote box image (deployment.md §6): a minimal Debian container with sshd,
 # a `deploy` user and the session image's toolchains, without Emacs. It is

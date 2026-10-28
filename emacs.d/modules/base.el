@@ -295,7 +295,7 @@ stops the daemon itself."
       (if (equal keys [delete]) [deletechar] keys)))
 
   ;; kkp switches itself on only after the terminal answers the kitty
-  ;; protocol query.  tmux 3.5 forwards the keys but never answers, so
+  ;; protocol query.  tmux forwards the keys but never answers, so
   ;; in tmux frames the decoders are installed directly.
   (defun playground--kkp-tmux (&optional _terminal)
     "Decode CSI u keys in a tmux terminal frame."

@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.28
 #
 # Gateway image (deployment.md §1): a static Go binary with the embedded web
 # bundle (frontend.md §15), the built curriculum bundle (backend.md §2.8) and

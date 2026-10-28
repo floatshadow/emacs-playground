@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.28
 #
 # Session image (emacs.md §1): Debian trixie, Emacs 31.1 built from source,
 # toolchains, the Emacs packages pinned in emacs.d/packages.lock, the
@@ -20,9 +20,10 @@
 #   |             | clippy, rustfmt, rust-src in /opt/rust                       |
 #   | python      | uv, basedpyright, ruff in /opt/uv                            |
 #   | fonts       | Iosevka Nerd Font (4 styles)                                 |
-#   | toolchains  | runtime base: Debian packages (tmux 3.5a, TigerVNC Xvnc,     |
-#   |             | xdotool, ripgrep, fd, git, Noto CJK, gcc for native code and |
-#   |             | cargo) plus everything above                                 |
+#   | tmux        | tmux from the release tarball in /usr/local (trixie has 3.5a)|
+#   | toolchains  | runtime base: Debian packages (TigerVNC Xvnc, xdotool,       |
+#   |             | ripgrep, fd, git, Noto CJK, gcc for native code and cargo)   |
+#   |             | plus everything above                                        |
 #   | packages    | the Emacs packages of packages.lock, sha256-checked, byte-   |
 #   |             | and native-compiled into /opt/playground/{elpa,eln-cache}    |
 #   | config      | /opt/playground/emacs.d (pristine config, agent compiled),   |
@@ -208,11 +209,36 @@ RUN . /pins/fonts.env \
       IosevkaNerdFont-Italic.ttf IosevkaNerdFont-BoldItalic.ttf LICENSE.md \
  && rm /tmp/Iosevka.tar.xz
 
+# ---- tmux -------------------------------------------------------------------
+# The terminal frame's tmux (tmux.conf), built because trixie ships 3.5a.
+# runtime-packages.txt names the Debian packages of its shared libraries.
+FROM debian:${DEBIAN}-slim AS tmux
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+ && apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+      ca-certificates curl build-essential pkg-config bison libevent-dev libncurses-dev
+COPY --from=pins /pins/tmux.env /pins/tmux.env
+RUN . /pins/tmux.env \
+ && curl -fsSL -o /tmp/tmux.tar.gz \
+      "https://github.com/tmux/tmux/releases/download/${TMUX_VERSION}/tmux-${TMUX_VERSION}.tar.gz" \
+ && echo "${TMUX_SHA256}  /tmp/tmux.tar.gz" | sha256sum -c - \
+ && tar -xzf /tmp/tmux.tar.gz -C /tmp && cd "/tmp/tmux-${TMUX_VERSION}" \
+ && { ./configure --prefix=/usr/local > configure.log 2>&1 || { tail -30 configure.log; exit 1; }; } \
+ && make -s -j"$(nproc)" && make -s install-strip DESTDIR=/out \
+ && /out/usr/local/bin/tmux -V | grep -qx "tmux ${TMUX_VERSION}" \
+ && for lib in $(ldd /out/usr/local/bin/tmux | awk '/=> \//{print $3}'); do \
+      dpkg -S "$(readlink -f "$lib")" 2>/dev/null || dpkg -S "$lib"; \
+    done | cut -d: -f1 | sort -u > /out/runtime-packages.txt \
+ && cat /out/runtime-packages.txt
+
 # ---- toolchains -------------------------------------------------------------
 FROM debian:${DEBIAN}-slim AS toolchains
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
  && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache
 COPY --from=emacs-build /usr/local/share/emacs/runtime-packages.txt /tmp/emacs-runtime-packages.txt
+COPY --from=tmux /out/runtime-packages.txt /tmp/tmux-runtime-packages.txt
 # gcc, binutils and libc6-dev serve both cargo (linking) and Emacs's
 # native compiler (libgccjit) for packages the learner installs later.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -220,14 +246,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
       ca-certificates curl xz-utils zstd git openssh-client less procps psmisc file jq \
-      tmux tini fontconfig fonts-noto-cjk \
+      tini fontconfig fonts-noto-cjk \
       tigervnc-standalone-server xauth xdotool \
       ripgrep fd-find \
       python3 python3-venv \
       gcc libc6-dev binutils make pkg-config libgccjit0 \
-      $(cat /tmp/emacs-runtime-packages.txt) \
- && rm /tmp/emacs-runtime-packages.txt
+      $(cat /tmp/emacs-runtime-packages.txt /tmp/tmux-runtime-packages.txt) \
+ && rm /tmp/emacs-runtime-packages.txt /tmp/tmux-runtime-packages.txt
 COPY --from=emacs-build /usr/local/ /usr/local/
+COPY --from=tmux /out/usr/local/ /usr/local/
 COPY --from=emacs-build /opt/playground/tree-sitter /opt/playground/tree-sitter
 COPY --from=fonts /out/iosevka-nerd /usr/local/share/fonts/iosevka-nerd
 COPY --from=rust /opt/rust /opt/rust
