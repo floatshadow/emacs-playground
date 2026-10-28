@@ -1,0 +1,97 @@
+id: 12-remote-editing/01-tramp-basics
+title: TRAMP basics
+minutes: 12
+mode: terminal
+tags: [remote]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote]
+vscode: Remote-SSH
+remote: { box: true }
+setup:
+  workspace: fixtures/tramp
+  root: tramp
+  reset: true
+  open: [tramp/README.md]
+  layout: single
+  run: sh setup.sh
+  # Box files are reset by setup.sh; buffers still showing an old copy
+  # would ask "changed on disk; reread?", so they go, with remote shells
+  # (they would satisfy a step at once) and the
+  # connections (a re-created box has new host keys).
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (buffer-live-p b)
+         (with-current-buffer b
+          (when (and (string-match-p "\\`/\\(ssh\\|sudo\\):" default-directory)
+                     (string-match-p "/\\(app\\|greeter\\|site\\|etc/app\\|srv/sidecar\\)\\(/\\|\\'\\)" default-directory)
+                     (or buffer-file-name (derived-mode-p (quote dired-mode) (quote magit-mode) (quote eshell-mode) (quote eat-mode))))
+            (set-buffer-modified-p nil)
+            (let ((kill-buffer-query-functions nil)) (kill-buffer b))))))
+      (when (featurep (quote tramp)) (tramp-cleanup-all-connections)))
+steps:
+  - id: dired
+    goal: Open the box's home folder
+    detail: "`C-x C-f`, type `/ssh:box:/home/deploy/` after the offered path, `RET`. A Dired listing of the box appears."
+    demo: 'C-x C-f ~500 C-a C-k ~300 "/ssh:box:/home/deploy/" ~1500 RET ~2500'
+    conditions:
+      - text: a file prompt or Dired was used
+        any:
+          - event: { command: find-file }
+          - event: { command: dired }
+        hint: "C-x C-f asks for a path; a folder path opens Dired. The bottom line shows the prompt with the current folder already typed: type the box path right after it."
+      - text: a Dired listing of the box's home is shown
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (derived-mode-p (quote dired-mode)) (string-match-p "\\`/ssh:box:\\(~\\|/home/deploy\\)/\\''" default-directory)))'
+        hint: "Method, host, path: /ssh: then box: then /home/deploy/. Two colons around box. If nothing seems to happen, look at the bottom line: TRAMP reports Opening connection while it logs in."
+    stuck:
+      - when: { minibuffer_seconds: 45 }
+        say: "Check the colons: /ssh:box:/home/deploy/ has one after ssh and one after box. RET opens it; C-g cancels and you can start again."
+  - id: open
+    goal: Open app/config.toml on the box
+    detail: "In the listing, put the cursor on `app` and press `RET`, then on `config.toml` and `RET`. `C-x C-f app/config.toml RET` works too: the prompt already starts on the box."
+    demo: 'C-x C-f ~500 C-a C-k ~300 "/ssh:box:~/app/config.toml" ~800 RET ~1500'
+    conditions:
+      - text: config.toml is open
+        buffer: { name: config.toml, contains: "[server]" }
+        hint: "config.toml is inside the app folder. In Dired, RET on app enters it; RET on config.toml opens the file."
+      - text: config.toml from the box is the current buffer
+        state: { file: { regex: "^/ssh:box:(~|/home/deploy)/app/config\\.toml$" } }
+        hint: "Switch to it if another buffer is in front: C-x b config.toml RET. The @ in its mode line says it lives on another machine."
+  - id: edit
+    goal: Change the port to 9090 and save
+    detail: "Edit as usual: find `port = 8080` and make it `port = 9090`. Remote files are not saved for you, so press `C-x C-s`."
+    demo: 'C-x C-f ~500 C-a C-k ~300 "/ssh:box:~/app/config.toml" ~500 RET ~1000 M-< ~300 C-s ~300 "port = " ~500 RET C-k ~300 "9090" ~600 C-x C-s ~2000'
+    conditions:
+      - text: C-x C-s saved the buffer
+        event: { command: save-buffer }
+        hint: "The mode line shows ** while the change exists only in Emacs. C-x C-s writes it to the box; the bottom line says Wrote /ssh:box:..."
+      - text: the file on the box says port = 9090
+        file: { host: box, path: app/config.toml, regex: "(?m)^port = 9090$" }
+        hint: "Exactly port = 9090, with spaces around =, on the line under [server]. Save again after fixing it."
+      - text: config.toml has no unsaved changes
+        elisp: '(seq-some (lambda (b) (and (string-match-p "app/config\\.toml\\''" (or (buffer-file-name b) "")) (not (buffer-modified-p b)))) (buffer-list))'
+        hint: "The mode line still shows **: press C-x C-s in the config.toml window."
+  - id: terminal
+    goal: Check the file from a terminal over ssh
+    detail: "Start from a local buffer, so the terminal is local: `C-x b *scratch* RET`, then `C-u M-x eat`. In the terminal, run `ssh box cat app/config.toml`."
+    demo: 'C-x b ~400 "*scratch*" ~400 RET ~500 C-u M-x ~300 "eat" RET ~2500 "ssh box cat app/config.toml" ~300 RET ~2500'
+    conditions:
+      - text: a new terminal was started
+        event: { command: eat }
+        hint: "M-x eat alone switches to a terminal you already have; C-u M-x eat starts a new one in the current buffer's folder. If it says the process exited, start another."
+      - text: a terminal shows the box's config.toml
+        elisp: '(seq-some (lambda (b) (and (string-match-p "\\`\\*eat\\*" (buffer-name b)) (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "^port = [0-9]+" nil t))))) (buffer-list))'
+        hint: "Run ssh box cat app/config.toml in the terminal. Started from config.toml instead, the terminal runs on the box itself, where cat config.toml shows the same file."
+    stuck:
+      - when: { step_seconds: 150 }
+        say: "In the terminal, type ssh box cat app/config.toml and RET. ssh logs in with the playground's key, runs cat on the box and prints the file."
+  - id: cleanup
+    goal: Close every TRAMP connection
+    detail: "`M-x tramp-cleanup-all-connections`. The connections close; remote buffers stay open and reconnect when you use them again."
+    demo: 'M-x ~400 "tramp-cleanup-all-connections" ~300 RET ~1500'
+    conditions:
+      - text: tramp-cleanup-all-connections ran
+        event: { command: tramp-cleanup-all-connections }
+        hint: "M-x, then tramp-cleanup-all (TAB completes the rest), RET."
+      - text: config.toml is still open
+        elisp: '(seq-some (lambda (b) (string-match-p "\\`/ssh:box:.*app/config\\.toml\\''" (or (buffer-file-name b) ""))) (buffer-list))'
+        hint: "Cleaning up closes connections, not buffers. If you killed config.toml, open it again: C-x C-f /ssh:box:~/app/config.toml."

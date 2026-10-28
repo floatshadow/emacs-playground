@@ -1,0 +1,109 @@
+id: 12-remote-editing/02-remote-compile-and-lsp
+title: "Remote compile, Eshell and LSP"
+minutes: 15
+mode: terminal
+tags: [remote]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote]
+vscode: remote terminal and extensions
+remote: { box: true }
+setup:
+  workspace: fixtures/tramp
+  root: tramp
+  reset: true
+  open: [tramp/README.md]
+  layout: single
+  run: sh setup.sh
+  # Box files are reset by setup.sh; buffers still showing an old copy
+  # would ask "changed on disk; reread?", so they go, with remote shells
+  # (they would satisfy a step at once) and the
+  # connections (a re-created box has new host keys).
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (buffer-live-p b)
+         (with-current-buffer b
+          (when (and (string-match-p "\\`/\\(ssh\\|sudo\\):" default-directory)
+                     (string-match-p "/\\(app\\|greeter\\|site\\|etc/app\\|srv/sidecar\\)\\(/\\|\\'\\)" default-directory)
+                     (or buffer-file-name (derived-mode-p (quote dired-mode) (quote magit-mode) (quote eshell-mode) (quote eat-mode))))
+            (set-buffer-modified-p nil)
+            (let ((kill-buffer-query-functions nil)) (kill-buffer b))))))
+      (when (featurep (quote tramp)) (tramp-cleanup-all-connections))
+      (let ((kill-buffer-query-functions nil)) (when (get-buffer "*compilation*") (kill-buffer "*compilation*"))))
+steps:
+  - id: open
+    goal: Open the greeter crate's main.rs on the box
+    detail: "`C-x C-f /ssh:box:~/greeter/src/main.rs RET`. Eglot starts the box's rust-analyzer in the background."
+    demo: 'C-x C-f ~500 C-a C-k ~300 "/ssh:box:~/greeter/src/main.rs" ~1500 RET ~3000'
+    conditions:
+      - text: main.rs from the box is the current buffer
+        state: { file: { regex: "^/ssh:box:(~|/home/deploy)/greeter/src/main\\.rs$" } }
+        hint: "~ after box: is the box's home, /home/deploy. From a local buffer, type the path right after the offered folder; from a buffer on the box, C-a C-k empties the prompt first."
+      - text: it is a Rust buffer
+        state: { mode: rust-ts-mode }
+        hint: "A buffer named main.rs in Fundamental mode is a new, empty file: the path has a typo. Kill it with C-x k and open the right one."
+  - id: compile
+    goal: Build it on the box
+    detail: "`C-c C-c` runs `cargo build` in the crate's root folder, which is on the box. The build fails on purpose."
+    demo: 'C-x C-f ~500 C-a C-k ~300 "/ssh:box:~/greeter/src/main.rs" ~500 RET ~1500 C-c C-c ~6000'
+    conditions:
+      - text: a build ran
+        any:
+          - event: { command: playground-cargo-build }
+          - event: { command: project-compile }
+          - event: { command: compile }
+        hint: "Press C-c C-c in main.rs: in Rust buffers it runs cargo build. C-x p c (project-compile) with cargo build works too."
+      - text: the build ran on the box and found the error
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (with-current-buffer b (and (file-remote-p default-directory) (save-excursion (goto-char (point-min)) (search-forward "error[E0308]" nil t))))))'
+        hint: "The first line of *compilation* names the folder; it should start with /ssh:box:. A build started from a local buffer runs here, where there is no greeter crate."
+  - id: jump
+    goal: Jump to the error
+    detail: "`M-g M-n` (next-error) opens the remote file at the error line, as for a local build. `C-u M-g M-n` starts over from the first error."
+    demo: 'C-u M-g M-n ~2000'
+    conditions:
+      - text: next-error ran
+        any:
+          - event: { command: next-error }
+          - event: { command: compile-goto-error }
+        hint: "M-g then M-n: with Eglot on, M-g n walks the buffer's diagnostics instead. RET on the error line in *compilation* works too."
+      - text: main.rs is at the error, line 7
+        state: { file: { regex: "^/ssh:box:.*greeter/src/main\\.rs$" }, line: 7 }
+        hint: "The error is the let times line in main. If M-g M-n says it moved past the last error, C-u M-g M-n starts from the first one again."
+  - id: fix
+    goal: Fix the error, save and build again
+    detail: "Make it `let times: usize = 3;` (a number, not a string), `C-x C-s`, then `C-c C-c` (cargo build) in main.rs."
+    demo: 'C-x C-f ~500 C-a C-k ~300 "/ssh:box:~/greeter/src/main.rs" ~500 RET ~1000 M-< ~300 C-s ~300 "times: usize = " ~300 RET C-k ~300 "3; " ~500 C-x C-s ~1500 C-c C-c ~6000'
+    conditions:
+      - text: main.rs is saved
+        elisp: '(seq-some (lambda (b) (and (string-match-p "greeter/src/main\\.rs\\''" (or (buffer-file-name b) "")) (not (buffer-modified-p b)))) (buffer-list))'
+        hint: "Remote files are saved only by C-x C-s. The mode line shows ** until you do."
+      - text: the crate builds on the box
+        shell: { host: box, run: "cd greeter && cargo build -q", timeout: 90 }
+        hint: "\"3\" is a string; usize wants the number 3, without quotes."
+      - text: the last build in *compilation* finished
+        buffer: { name: "*compilation*", contains: "Finished" }
+        hint: "Build again after saving: C-c C-c in main.rs, or g in *compilation*. The box only sees saved files."
+  - id: lsp
+    goal: Ask the box's rust-analyzer where greeting is defined
+    detail: "Wait for `[eglot:greeter]` in the mode line. Put the cursor on `greeting` in main and press `M-.`. `M-,` comes back."
+    demo: 'C-x C-f ~500 C-a C-k ~300 "/ssh:box:~/greeter/src/main.rs" ~500 RET ~1000 M-< ~300 C-s ~300 "greeting(\"box\"" ~300 RET M-b M-b ~3000 M-. ~2500'
+    conditions:
+      - text: Eglot manages main.rs
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (fboundp (quote eglot-current-server)) (eglot-current-server) t))'
+        hint: "Eglot starts by itself in Rust buffers; the first start on the box takes a few seconds. If the mode line never shows eglot, M-x eglot starts it."
+      - text: M-. jumped to the definition
+        event: { command: xref-find-definitions }
+        hint: "The cursor must be on the name greeting, in the call inside main. If Emacs asks for a tags table, Eglot was not ready yet: C-g, wait for [eglot:greeter], try again."
+      - text: the cursor is on fn greeting, line 2
+        state: { file: { regex: "greeter/src/main\\.rs$" }, line: 2 }
+        hint: "The definition is near the top of the same file. M-, goes back to where you were."
+  - id: eshell
+    goal: Open Eshell on the box and ask who you are
+    detail: "`C-u M-x eshell` starts a new Eshell in the buffer's folder, on the box. Run `id -un`, which prints your user name."
+    demo: 'C-x C-f ~500 C-a C-k ~300 "/ssh:box:~/greeter/src/main.rs" ~500 RET ~1000 C-u M-x ~300 "eshell" RET ~2500 "id -un" RET ~2000'
+    conditions:
+      - text: an Eshell runs on the box
+        elisp: '(seq-some (lambda (b) (with-current-buffer b (and (derived-mode-p (quote eshell-mode)) (string-prefix-p "/ssh:box:" default-directory)))) (buffer-list))'
+        hint: "Without C-u, M-x eshell switches to the Eshell you already have, which may be local. The prompt of a remote one starts with /ssh:box:."
+      - text: id -un printed the box's user
+        elisp: '(seq-some (lambda (b) (with-current-buffer b (and (derived-mode-p (quote eshell-mode)) (string-prefix-p "/ssh:box:" default-directory) (save-excursion (goto-char (point-min)) (re-search-forward "^deploy$" nil t))))) (buffer-list))'
+        hint: "On the box you are deploy; a local Eshell says learner. whoami would not do: it is one of Eshell's own Lisp commands, and they run in Emacs, not on the box."

@@ -1,0 +1,75 @@
+id: 12-remote-editing/04-containers
+title: Containers and other hops
+minutes: 10
+mode: terminal
+tags: [remote]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote]
+vscode: Dev Containers
+remote: { box: true }
+setup:
+  workspace: fixtures/tramp
+  root: tramp
+  reset: true
+  open: [tramp/README.md]
+  layout: single
+  run: sh setup.sh
+  # Box files are reset by setup.sh; buffers still showing an old copy
+  # would ask "changed on disk; reread?", so they go, with remote shells
+  # (they would satisfy a step at once) and the
+  # connections (a re-created box has new host keys).
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (buffer-live-p b)
+         (with-current-buffer b
+          (when (and (string-match-p "\\`/\\(ssh\\|sudo\\):" default-directory)
+                     (string-match-p "/\\(app\\|greeter\\|site\\|etc/app\\|srv/sidecar\\)\\(/\\|\\'\\)" default-directory)
+                     (or buffer-file-name (derived-mode-p (quote dired-mode) (quote magit-mode) (quote eshell-mode) (quote eat-mode))))
+            (set-buffer-modified-p nil)
+            (let ((kill-buffer-query-functions nil)) (kill-buffer b))))))
+      (when (featurep (quote tramp)) (tramp-cleanup-all-connections)))
+steps:
+  - id: hop
+    goal: Open the sidecar's health file as www-data
+    detail: "`C-x C-f /ssh:box|sudo:www-data@box:/srv/sidecar/health.txt RET`: ssh to box, become www-data there, open the file."
+    demo: '~1500 C-x C-f ~500 C-a C-k ~300 "/ssh:box|sudo:www-data@box:/srv/sidecar/health.txt" ~1500 RET ~3000'
+    conditions:
+      - text: the file prompt was used
+        event: { command: find-file }
+        hint: "The whole chain goes into one C-x C-f prompt, typed after the offered folder; the first / starts a fresh path."
+      - text: health.txt is open as www-data
+        state: { file: { regex: "sudo:www-data@box:/srv/sidecar/health\\.txt$" } }
+        hint: "Check the separators: ssh:box then | then sudo:www-data@box: then the path. An empty buffer means the path is wrong. From a buffer on the box, C-a C-k empties the prompt first: there a / restarts at the box's root."
+  - id: edit
+    goal: Mark the sidecar healthy
+    detail: "Change `status: starting` to `status: ok` and `C-x C-s`. The file is written as www-data."
+    demo: 'C-x C-f ~500 C-a C-k ~300 "/ssh:box|sudo:www-data@box:/srv/sidecar/health.txt" ~500 RET ~1500 M-< ~300 C-s ~300 "status: " ~300 RET C-k ~300 "ok" ~500 C-x C-s ~2500'
+    conditions:
+      - text: C-x C-s saved it
+        event: { command: save-buffer }
+        hint: "Remote files are saved only by C-x C-s; the mode line shows ** until then."
+      - text: the box's health.txt says status ok and still belongs to www-data
+        shell: { host: box, run: "sudo grep -qx 'status: ok' /srv/sidecar/health.txt && test \"$(sudo stat -c %U /srv/sidecar/health.txt)\" = www-data", timeout: 15 }
+        hint: "The line must read exactly status: ok, with one space after the colon."
+  - id: whoami
+    goal: Run whoami at the end of the chain
+    detail: "In health.txt, `M-!` runs a shell command in the buffer's folder: type `whoami`, `RET`. The answer appears at the bottom of the screen."
+    demo: 'C-x C-f ~500 C-a C-k ~300 "/ssh:box|sudo:www-data@box:/srv/sidecar/health.txt" ~500 RET ~1500 M-! ~400 "whoami" ~300 RET ~2500'
+    conditions:
+      - text: M-! ran a command
+        event: { command: shell-command }
+        hint: "Run it from the health.txt buffer, so the command runs where that file is."
+      - text: the command ran as www-data
+        buffer: { name: "*Shell Command Output*", contains: "www-data" }
+        hint: "From a local buffer, whoami answers learner; from config.toml or Magit on the box, deploy. Switch to health.txt (C-x b) and run it again."
+  - id: cleanup
+    goal: Close the www-data connection only
+    detail: "Still in health.txt: `M-x tramp-cleanup-this-connection`. The ssh connection to the box stays open."
+    demo: 'C-x C-f ~500 C-a C-k ~300 "/ssh:box|sudo:www-data@box:/srv/sidecar/health.txt" ~500 RET ~1500 M-x ~400 "tramp-cleanup-this-connection" ~300 RET ~1500'
+    conditions:
+      - text: tramp-cleanup-this-connection ran
+        event: { command: tramp-cleanup-this-connection }
+        hint: "It closes the connection of the current buffer, so run it in health.txt."
+      - text: health.txt is still open
+        elisp: '(seq-some (lambda (b) (string-match-p "sidecar/health\\.txt\\''" (or (buffer-file-name b) ""))) (buffer-list))'
+        hint: "Cleaning up closes connections, not buffers. If you killed health.txt, open it again with the same path."
