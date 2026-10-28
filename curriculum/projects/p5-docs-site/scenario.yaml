@@ -1,0 +1,211 @@
+id: projects/p5-docs-site
+title: Docs site
+minutes: 75
+mode: terminal
+tags: [project, remote]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui]
+vscode: "Markdown preview, multi-file replace"
+remote: { box: true }
+project: { roots: [docs-site], lapMinutes: 25 }
+preview:
+  follow:
+    docs-site/pages/index.md: docs-site/_site/index.html
+    docs-site/pages/install.md: docs-site/_site/install.html
+    docs-site/pages/usage.md: docs-site/_site/usage.html
+    docs-site/pages/faq.md: docs-site/_site/faq.html
+    docs-site/pages/01-index.md: docs-site/_site/index.html
+    docs-site/pages/02-install.md: docs-site/_site/install.html
+    docs-site/pages/03-usage.md: docs-site/_site/usage.html
+    docs-site/pages/04-faq.md: docs-site/_site/faq.html
+setup:
+  workspace: fixtures/docs-site
+  root: docs-site
+  reset: true
+  repos: ["."]
+  # The box serves /srv/www; it starts empty on every load (checkpoints
+  # do not cover the box), so the first deploy asks no overwrite question.
+  run: "ssh box 'rm -rf /srv/www/* /srv/www/.nav.html'"
+  open: [docs-site/pages/usage.md]
+  layout: single
+  # Only this project's build counts; leftovers of an earlier visit go,
+  # wdired listings included (they would swallow C-x C-q).
+  eval: >-
+    (progn
+      (let ((kill-buffer-query-functions nil))
+        (dolist (b (buffer-list))
+          (when (eq (buffer-local-value 'major-mode b) 'wdired-mode)
+            (with-current-buffer b (wdired-abort-changes))
+            (kill-buffer b))
+          (when (and (buffer-live-p b)
+                     (or (member (buffer-name b) '("*compilation*" "*eww*"))
+                         (string-prefix-p "*Embark Export" (buffer-name b))))
+            (kill-buffer b))))
+      (require 'project)
+      (let ((p (project-current nil "/work/docs-site/")))
+        (when p (project-remember-project p))))
+steps:
+  - id: pages
+    goal: Write the Usage page and preview it
+    detail: "`usage.md` is a stub. Replace its TODO line with a `## ` section heading, a list item and a link to the install page written as `[Install](install.md)`. Turn on the live preview with `C-c C-c l`, then save with `C-x C-s`: the preview below follows every save."
+    demo: 'C-x C-f ~400 "/work/docs-site/pages/usage.md" RET ~600 M-< ~300 C-n C-n ~300 C-k ~400 "## Counting words\n\n- `tally FILE` prints the words, lines and characters of FILE.\n\nInstall it first: [Install](install.md).\n" ~600 C-c C-c l ~2500 C-x C-s ~1500'
+    conditions:
+      - text: usage.md has a section heading
+        file: { path: docs-site/pages/usage.md, regex: "(?m)^## \\S" }
+        hint: "A section heading is a line that starts with two # signs and a space, on a line of its own with a blank line above it."
+      - text: it has a list item and a link to install.md
+        all:
+          - file: { path: docs-site/pages/usage.md, regex: "(?m)^[-*] \\S" }
+          - file: { path: docs-site/pages/usage.md, regex: "\\]\\(install\\.md\\)" }
+        hint: "A list item starts with - and a space. The link is [text](install.md): square brackets, then the file name in round brackets."
+      - text: the TODO line is gone
+        file: { path: docs-site/pages/usage.md, not_contains: "TODO" }
+        hint: "C-a then C-k on the TODO line deletes it."
+      - text: the page was previewed
+        any:
+          - event: { command: markdown-live-preview-mode }
+          - event: { command: markdown-preview }
+          - event: { command: markdown-other-window }
+        hint: "C-c C-c l is three keys: Control c, Control c, then l. The preview opens in a second window and redraws when you save."
+      - text: usage.md is saved
+        buffer: { name: usage.md, modified: false }
+        hint: "The mode line shows ** while there are unsaved edits; after saving it shows -- and the preview window redraws."
+    stuck:
+      - when: { step_seconds: 300, idle_seconds: 40 }
+        say: "Any wording will do: a line starting with ## and a space, a line starting with - and a space, and somewhere [Install](install.md). Then C-c C-c l and C-x C-s."
+  - id: build
+    goal: Build the site, fix the broken link it reports, build again
+    detail: "From a project file or Dired, `C-x p c` runs a build command in the project root. Replace the offered command with `make` (`C-a C-k`, then type it). The build stops at a broken link; `M-g M-n` jumps to it. Fix the link so it names a real page, save, and build again until `*compilation*` says `site built`."
+    demo: 'C-x d ~400 "/work/docs-site/" RET ~800 C-x p c ~500 C-a C-k "make \n" ~3000 M-g M-n ~1000 C-s "instal." RET ~300 C-b "l" ~300 C-x C-s ~800 C-x p c ~500 C-a C-k "make \n" ~5000'
+    conditions:
+      - text: a build ran in compile
+        any:
+          - event: { command: project-compile }
+          - event: { command: compile }
+          - event: { command: recompile }
+        hint: "C-x p c (Control x, p, c) asks for the command in the bottom line. C-a C-k clears what it offers; type make and RET."
+      - text: faq.md links to a page that exists
+        file: { path: docs-site/pages/faq.md, not_contains: "](instal.md)" }
+        hint: "The build named pages/faq.md and a line: M-g M-n (Alt g, then Alt n) puts you on it. The link says instal.md; the page is install.md. Save after fixing it."
+      - text: the last build finished with every page
+        buffer: { name: "*compilation*", contains: "site built: 4 pages" }
+        hint: "Build again after the fix: C-x p c, make, RET, or g inside *compilation*. The last line must say site built: 4 pages."
+      - text: _site has the Usage page
+        file: { path: docs-site/_site/usage.html, exists: true }
+        hint: "The build writes _site/usage.html once no link is broken."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "The prompt is Compile command. C-a goes to its start, C-k deletes the rest, then type make and RET."
+  - id: rename-term
+    goal: Rename .tallyrc to tally.toml on every page at once
+    detail: "The settings file is now `tally.toml`. `M-s r` searches the project with ripgrep: type `tallyrc`. Then `C-.` and `E` export the matches to a buffer. In it, `C-x C-q` makes the lines editable; `M-<`, then `M-%` replaces `.tallyrc` with `tally.toml` (`TAB` moves to the replacement field, `RET` starts, `!` replaces all). `C-c C-c` writes every change to its page and saves it."
+    demo: 'M-s r ~800 "tallyrc" ~2000 C-. ~600 E ~1500 C-x C-q ~600 M-< ~300 M-% ~500 ".tallyrc" ~300 TAB ~300 "tally.toml" ~600 RET ~800 ! ~800 C-c C-c ~1500'
+    conditions:
+      - text: the matches were exported to a buffer
+        any:
+          - event: { command: embark-export }
+          - event: { command: embark-act }
+          - buffer: { name: "*Embark Export: consult-ripgrep - #tallyrc*" }
+        hint: "Run M-s r and type tallyrc; while the matches are listed, press C-. (Control and the full stop), then E. A buffer of matching lines opens at the bottom."
+      - text: the exported lines were edited with wgrep
+        event: { command: wgrep-change-to-wgrep-mode }
+        hint: "Go into the exported buffer (C-x o) and press C-x C-q: its lines become editable. Edits there change the files."
+      - text: no page mentions .tallyrc
+        all:
+          - file: { path: docs-site/pages/index.md, not_contains: "tallyrc" }
+          - file: { path: docs-site/pages/install.md, not_contains: "tallyrc" }
+          - file: { path: docs-site/pages/faq.md, not_contains: "tallyrc" }
+        hint: "Replace in the exported buffer, then C-c C-c. The pages change only when you finish with C-c C-c (C-c C-k throws the edits away)."
+      - text: the new name is on three pages
+        all:
+          - file: { path: docs-site/pages/index.md, contains: "tally.toml" }
+          - file: { path: docs-site/pages/install.md, contains: "tally.toml" }
+          - file: { path: docs-site/pages/faq.md, contains: "tally.toml" }
+        hint: "Replace .tallyrc, dot included, with tally.toml. M-% replaces from the cursor down, so start at the top with M-<."
+    stuck:
+      - when: { minibuffer_seconds: 45 }
+        say: "In the ripgrep list, C-. opens embark's actions for the results; E exports them all. C-g leaves the search."
+  - id: reorganise
+    goal: Number the pages in reading order in wdired
+    detail: "The navigation bar follows file names, so FAQ comes first. Open `pages/` in Dired, press `C-x C-q` and edit the names to `01-index.md`, `02-install.md`, `03-usage.md`, `04-faq.md`. `C-c C-c` renames the files. (`build.sh` drops the number from each URL.)"
+    demo: 'C-x d ~400 "/work/docs-site/pages/" RET ~800 C-x C-q ~600 C-s "index.md" C-r RET "01-" ~300 C-s "install.md" C-r RET "02-" ~300 C-s "usage.md" C-r RET "03-" ~300 M-< C-s "faq.md" C-r RET "04-" ~600 C-c C-c ~1000 C-x k RET ~600'
+    conditions:
+      - text: the listing was edited with wdired
+        any:
+          - event: { command: wdired-change-to-wdired-mode }
+          - event: { command: dired-toggle-read-only }
+        hint: "In the Dired listing of pages/, C-x C-q makes the file names editable; the mode line says Editable."
+      - text: the four pages are numbered
+        all:
+          - file: { path: docs-site/pages/01-index.md, exists: true }
+          - file: { path: docs-site/pages/02-install.md, exists: true }
+          - file: { path: docs-site/pages/03-usage.md, exists: true }
+          - file: { path: docs-site/pages/04-faq.md, exists: true }
+        hint: "Type the number and dash in front of each name; C-c C-c renames, C-c C-k cancels. Text is read-only means the cursor is left of the name, where C-a puts it: only the name is editable, so start on its first letter."
+      - text: no unnumbered page is left
+        all:
+          - file: { path: docs-site/pages/index.md, exists: false }
+          - file: { path: docs-site/pages/install.md, exists: false }
+          - file: { path: docs-site/pages/usage.md, exists: false }
+          - file: { path: docs-site/pages/faq.md, exists: false }
+        hint: "Rename, do not copy: edit the name in place in the editable listing."
+  - id: spelling
+    goal: Fix every misspelling with M-$
+    detail: "Three words are misspelt: two in `04-faq.md`, one in `02-install.md`, each underlined. `M-$` corrects the misspelling nearest the cursor among those on screen (`C-x 1` gives the page the whole frame): pick the suggestion by its digit. `M-$` again fixes the next one. Save both pages."
+    demo: 'C-x C-f ~400 "/work/docs-site/pages/04-faq.md" RET ~600 C-x 1 ~300 M-< ~300 M-$ ~800 1 ~600 M-$ ~800 1 ~600 C-x C-s ~600 C-x C-f ~400 "/work/docs-site/pages/02-install.md" RET ~600 C-x 1 ~300 M-< ~300 M-$ ~800 1 ~600 C-x C-s ~800'
+    conditions:
+      - text: jinx corrected words
+        event: { command: jinx-correct }
+        hint: "M-$ is Alt and the dollar sign (Alt Shift 4). It offers suggestions for the misspelling nearest the cursor; press the digit in front of the right one."
+      - text: 04-faq.md is spelled right
+        all:
+          - file: { path: docs-site/pages/04-faq.md, not_contains: "seperate" }
+          - file: { path: docs-site/pages/04-faq.md, not_contains: "recieve" }
+        hint: "Look for the underlined words in 04-faq.md; save after fixing (C-x C-s)."
+      - text: 02-install.md is spelled right
+        file: { path: docs-site/pages/02-install.md, not_contains: "occurence" }
+        hint: "One more in 02-install.md, in the paragraph under the code block."
+  - id: commits
+    goal: Commit each page on its own in Magit
+    detail: "`C-x g` opens Magit. Each page has two entries: the new numbered file under Untracked and the old name under Unstaged as deleted. Stage both with `s` on each (`TAB` on Untracked files shows them; `s` where no file is under the cursor asks for names, comma-separated), and Magit shows one rename. Then `c c`, a message such as `Usage page`, and `C-c C-c`. Four pages, four commits."
+    demo: 'C-x g ~3000 M-< ~300 s ~800 "pages/01-index.md,pages/index.md" ~300 M-RET ~1500 c c ~1500 "Index page" ~300 C-c C-c ~2500 M-< ~300 s ~800 "pages/02-install.md,pages/install.md" ~300 M-RET ~1500 c c ~1500 "Install page" ~300 C-c C-c ~2500 M-< ~300 s ~800 "pages/03-usage.md,pages/usage.md" ~300 M-RET ~1500 c c ~1500 "Usage page" ~300 C-c C-c ~2500 M-< ~300 s ~800 "pages/04-faq.md,pages/faq.md" ~300 M-RET ~1500 c c ~1500 "FAQ page" ~300 C-c C-c ~2500'
+    conditions:
+      - text: Magit committed
+        event: { command: with-editor-finish }
+        hint: "c c opens a buffer for the message; C-c C-c commits, C-c C-k cancels."
+      - text: four commits, each with one page
+        shell:
+          run: |
+            init=$(git rev-list --max-parents=0 HEAD) || exit 1
+            one=0
+            for c in $(git rev-list HEAD "^$init"); do
+              k=$(git show --name-only --format= -M "$c" | grep '^pages/' | sed 's|^pages/||; s/^[0-9]*-//; s/\.md$//' | sort -u | wc -l)
+              [ "$k" -le 1 ] || exit 1
+              [ "$k" -eq 1 ] && one=$((one + 1))
+            done
+            [ "$one" -ge 4 ]
+        hint: "Stage only one page before each c c: its numbered file and its deleted old name. If a commit took two pages, Reset this task (it undoes the commits) and stage less."
+      - text: nothing in pages/ is left uncommitted
+        shell: { run: "test -z \"$(git --no-optional-locks status --porcelain -- pages)\"" }
+        hint: "g refreshes Magit; every page should be gone from Untracked and Unstaged."
+  - id: deploy
+    goal: Rebuild and copy the site to the box over TRAMP
+    detail: "Build again (`C-x p c`, `make`) so `_site/` has every change. Then open `_site/` in Dired, mark the HTML files with `% m` and `html$`, press `C` and copy them to `/ssh:box:/srv/www/`. The box serves them at `http://box/`."
+    demo: 'C-x d ~400 "/work/docs-site/" RET ~800 C-x p c ~500 C-a C-k "make \n" ~5000 C-x d ~400 "/work/docs-site/_site/" RET ~800 % m ~400 "html$" RET ~500 C ~600 "/ssh:box:/srv/www/" ~500 RET ~5000 y ~1500 y ~1500 y ~1500 y ~1500 y ~1500'
+    conditions:
+      - text: the site was built after the renames
+        file: { path: docs-site/_site/index.html, regex: "href=\"index\\.html\">tally</a> <a href=\"install\\.html\">" }
+        hint: "Build first: C-x p c, make. The navigation bar of index.html then starts with tally, Install."
+      - text: the latest pages are on the box
+        all:
+          - file: { host: box, path: /srv/www/index.html, regex: "href=\"index\\.html\">tally</a> <a href=\"install\\.html\">" }
+          - file: { host: box, path: /srv/www/index.html, contains: "tally.toml" }
+          - file: { host: box, path: /srv/www/install.html, contains: "occurrence" }
+          - file: { host: box, path: /srv/www/usage.html, exists: true }
+          - file: { host: box, path: /srv/www/faq.html, contains: "receive" }
+        hint: "In _site/, % m html$ RET marks the pages; C copies them. As the target type /ssh:box:/srv/www/ after the offered directory (the second / starts over). Copy again after every build, and answer y or ! (all) to the Overwrite question."
+      - text: the box serves them at http://box/
+        shell: { host: box, run: "for p in index install usage faq; do curl -sf -o /dev/null http://localhost/$p.html || exit 1; done" }
+        hint: "The files must sit directly in /srv/www (not in a subdirectory) for http://box/usage.html to work. M-x eww RET http://box/ RET shows the site."
+    stuck:
+      - when: { minibuffer_seconds: 45 }
+        say: "Type the target as /ssh:box:/srv/www/ and RET. TRAMP needs a few seconds for the first connection; the echo area says Tramp: Opening connection."

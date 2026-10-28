@@ -1,0 +1,104 @@
+id: projects/p7-notebook
+title: Literate experiment notebook
+minutes: 75
+mode: terminal
+tags: [project, remote]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui]
+vscode: "Jupyter, loosely"
+remote: { box: true }
+project: { roots: [notebook], lapMinutes: 25 }
+preview:
+  tabs: [notebook/notebook.pdf]
+  follow:
+    notebook/notebook.org: notebook/notebook.html
+setup:
+  workspace: fixtures/notebook
+  root: notebook
+  reset: true
+  # The benchmark is built once here, so running its block takes a
+  # second instead of a release build (Emacs waits while a block runs).
+  run: "cd bench && cargo build -q --release --offline"
+  open: [notebook/notebook.org]
+  layout: single
+  eval: "(goto-char (point-max))"
+steps:
+  - id: skeleton
+    goal: Give the notebook four top-level headings
+    detail: "Below the introduction, add four top-level headings, each a line starting with `* `: `Benchmark`, `Scoring`, `Invariant` and `Results`. They hold the experiment's sections; `TAB` on a heading folds it."
+    demo: 'C-x C-f ~400 "/work/notebook/notebook.org" RET ~600 M-> ~300 "* Benchmark" C-j "* Scoring" C-j "* Invariant" C-j "* Results" C-j ~600 C-x C-s ~600'
+    conditions:
+      - text: the four headings exist, in order
+        file: { path: notebook/notebook.org, regex: "(?ms)^\\* Benchmark *$.*^\\* Scoring *$.*^\\* Invariant *$.*^\\* Results *$" }
+        hint: "A top-level heading is a star and a space at the very start of a line: * Benchmark. Spell them as given; later tasks look for them."
+      - text: notebook.org is saved
+        buffer: { name: notebook.org, modified: false }
+        hint: "C-x C-s saves."
+  - id: benchmark
+    goal: Run the Rust benchmark from a shell block
+    detail: "Under `* Benchmark`, write a code block named `bench` that runs the benchmark in `bench/` and returns a table, then press `C-c C-c` inside it:\n\n```org\n#+name: bench\n#+begin_src shell :dir bench :results table\ncargo run -q --release\n#+end_src\n```\n\nThe output appears below as `#+RESULTS: bench`: sizes and comparison counts. While you type, a completion popup may open; `RET` would take its candidate, so end such a line with `C-j` (a new line the popup leaves alone) or close the popup with `C-g` first."
+    demo: 'M-< ~300 C-s "* Scoring" RET ~300 C-p C-e ~300 C-j "#+name: bench" C-j "#+begin_src shell :dir bench :results table" C-j "cargo run -q --release" C-j "#+end_src" ~1000 C-g ~300 C-c C-c ~4000 C-x C-s ~600'
+    conditions:
+      - text: a shell block named bench runs cargo
+        file: { path: notebook/notebook.org, regex: "(?mi)^#\\+name: *bench *\\n#\\+begin_src (shell|sh|bash)[^\\n]*\\n[^\\n]*cargo run" }
+        hint: "The #+name: bench line goes directly above #+begin_src shell; later blocks refer to the results by that name. A line that reads bench/ or joins the next one means RET went to the completion popup: fix it and use C-j."
+      - text: its results are a table of three sizes
+        file: { path: notebook/notebook.org, regex: "#\\+RESULTS: *bench *\\n\\| *1000 *\\| *10632 *\\|\\n\\| *10000 *\\| *141106 *\\|\\n\\| *100000 *\\| *1751067 *\\|" }
+        hint: "C-c C-c with the cursor inside the block runs it; :dir bench runs it in bench/, :results table makes the output an Org table. Save afterwards."
+    stuck:
+      - when: { step_seconds: 240, idle_seconds: 45 }
+        say: "Type the four lines from the step exactly, then put the cursor on any of them and press C-c C-c."
+  - id: score
+    goal: Score the results in a Python block
+    detail: "Under `* Scoring`, a Python block receives the table with `:var rows=bench` (a list of rows) and returns the average of comparisons ÷ (n log2 n), the number a good sort keeps near 1:\n\n```org\n#+begin_src python :var rows=bench\nimport math\nreturn round(sum(c / (n * math.log2(n)) for n, c in rows) / len(rows), 3)\n#+end_src\n```\n\n`C-c C-c` runs it; save."
+    demo: 'M-< ~300 C-s "* Invariant" RET ~300 C-p C-e ~300 C-j "#+begin_src python :var rows=bench" C-j "import math" C-j "return round(sum(c / (n * math.log2(n)) for n, c in rows) / len(rows), 3)" C-j "#+end_src" ~1000 C-g ~300 C-c C-c ~3000 C-x C-s ~600'
+    conditions:
+      - text: a Python block reads the bench results
+        file: { path: notebook/notebook.org, regex: "(?mi)^#\\+begin_src python[^\\n]*:var [^\\n]*=bench" }
+        hint: ":var rows=bench passes the table named bench to Python as a list of lists, one per row."
+      - text: its result is the score
+        file: { path: notebook/notebook.org, regex: "(?m)^#\\+begin_src python[^\\n]*:var[^\\n]*\\n(?:[^\\n]*\\n)*?#\\+end_src\\n\\n#\\+RESULTS:\\n: 1\\.0[0-9]*\\n" }
+        hint: "In a Python block, return gives the result (it runs as a function body). The result is about 1.06; save after C-c C-c."
+  - id: invariant
+    goal: Check an invariant of the results in OCaml
+    detail: "Under `* Invariant`, an OCaml block checks every row: a sort needs at least n − 1 comparisons and, here, at most 1.5 n log2 n. A table arrives in OCaml as an array of rows:\n\n```org\n#+begin_src ocaml :var t=bench\nArray.for_all\n  (fun r ->\n    let n = float_of_int r.(0) and c = float_of_int r.(1) in\n    c >= n -. 1. && c <= 1.5 *. n *. Float.log2 n)\n  t\n#+end_src\n```\n\n`C-c C-c` runs it in an OCaml toplevel; the result should be `true`. Save."
+    demo: 'M-< ~300 C-s "* Results" RET ~300 C-p C-e ~300 C-j "#+begin_src ocaml :var t=bench" C-j "Array.for_all" C-j "  (fun r ->" C-j "    let n = float_of_int r.(0) and c = float_of_int r.(1) in" C-j "    c >= n -. 1. && c <= 1.5 *. n *. Float.log2 n)" C-j "  t" C-j "#+end_src" ~1000 C-g ~300 C-c C-c ~5000 C-x C-s ~600'
+    conditions:
+      - text: an OCaml block reads the bench results
+        file: { path: notebook/notebook.org, regex: "(?mi)^#\\+begin_src ocaml[^\\n]*:var [^\\n]*=bench" }
+        hint: ":var t=bench gives the block the table as t, an int array array."
+      - text: the invariant holds
+        file: { path: notebook/notebook.org, regex: "(?m)^#\\+begin_src ocaml[^\\n]*\\n(?:[^\\n]*\\n)*?#\\+end_src\\n\\n#\\+RESULTS:\\n: true\\n" }
+        hint: "The result appears below the block. An OCaml error there names the line and character; C-c ' edits the block in tuareg, with types at point (C-c C-t)."
+  - id: table
+    goal: Put the results in a table with a formula
+    detail: "Under `* Results`, type a table with the header `| size | comparisons | ratio |`, `C-c RET` for a rule below it, then the three rows of the benchmark (`TAB` moves between cells and adds rows). In the first ratio cell type `=$2/($1*log($1,2));%.3f` and `TAB`: Org turns it into a column formula (`#+TBLFM:` under the table) and fills the column. `C-u C-c *` recomputes."
+    demo: 'M-> ~300 "|size |comparisons |ratio " ~300 C-c RET ~500 "1000 " TAB "10632 " TAB "=$2/($1*log($1,2));%.3f " TAB ~600 "10000 " TAB "141106 " TAB TAB "100000 " TAB "1751067 " ~300 C-u C-c * ~1000 C-x C-s ~600'
+    conditions:
+      - text: the table has a column formula
+        file: { path: notebook/notebook.org, regex: "(?m)^#\\+TBLFM: *\\$3 *=" }
+        hint: "A cell that starts with = becomes a formula for the whole column when you leave it with TAB. Its #+TBLFM: line goes under the table."
+      - text: the ratio column is computed
+        file: { path: notebook/notebook.org, regex: "\\| *1000 *\\| *10632 *\\| *1\\.067 *\\|[^\\n]*\\n\\| *10000 *\\| *141106 *\\| *1\\.062 *\\|[^\\n]*\\n\\| *100000 *\\| *1751067 *\\| *1\\.054 *\\|" }
+        hint: "A rule (C-c RET under the header) keeps the formula off the header row. C-u C-c * recomputes every row; then save."
+  - id: export
+    goal: Export the notebook to HTML and PDF
+    detail: "`C-c C-e` opens the export menu: `h h` writes `notebook.html`, and `C-c C-e l p` writes `notebook.pdf` through LaTeX. The results are exported as they are (`:eval never-export` at the top keeps the blocks from running again). The preview pane shows the HTML while the notebook is the current buffer, and the PDF in its tab."
+    demo: 'C-c C-e ~800 h ~400 h ~3000 C-c C-e ~800 l ~400 p ~9000 C-l ~6000'
+    conditions:
+      - text: notebook.html exists
+        file: { path: notebook/notebook.html, contains: "1751067" }
+        hint: "C-c C-e, then h (HTML) and h (to a file). The menu lists every key."
+      - text: notebook.pdf exists
+        file: { path: notebook/notebook.pdf, exists: true }
+        hint: "C-c C-e, then l (LaTeX) and p (to PDF). It takes some seconds; a failure leaves notebook.tex and a log buffer."
+  - id: remote-block
+    goal: Run one block on the box
+    detail: "At the end, add a heading `* On the box` with a shell block whose `:dir` is the box: `#+begin_src shell :dir /ssh:box: :results output` with `uname -sm` and `whoami` inside. `C-c C-c` runs it over TRAMP and the result comes back into the notebook. Save."
+    demo: 'M-> ~300 C-j "* On the box" C-j "#+begin_src shell :dir /ssh:box: :results output" C-j "uname -sm" C-j "whoami" C-j "#+end_src" ~1000 C-g ~300 C-c C-c ~6000 C-x C-s ~600'
+    conditions:
+      - text: a block runs on the box
+        file: { path: notebook/notebook.org, regex: "(?mi)^#\\+begin_src (shell|sh|bash)[^\\n]*:dir /ssh:box:" }
+        hint: ":dir /ssh:box: runs the block in the box user's home directory; any path after the second colon picks another directory."
+      - text: its result came from the box
+        file: { path: notebook/notebook.org, regex: "(?m):dir /ssh:box:[^\\n]*\\n(?:[^\\n]*\\n)*?#\\+end_src\\n\\n#\\+RESULTS:\\n(?:[^\\n]*\\n)*?: deploy\\n" }
+        hint: "whoami on the box prints deploy. C-c C-c inside the block, then save; TRAMP's first connection takes a moment."

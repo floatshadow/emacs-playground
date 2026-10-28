@@ -1,0 +1,144 @@
+id: projects/p2-dune-library
+title: A dune library
+minutes: 75
+mode: terminal
+tags: [project]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-ocaml]
+vscode: OCaml Platform
+project: { roots: [dune-lab], lapMinutes: 25 }
+preview:
+  tabs: [dune-lab/README.md]
+  follow: { dune-lab/wordstat/lib/wordstat.ml: dune-lab/wordstat/_build/default/_doc/_html/wordstat/Wordstat/index.html }
+setup:
+  workspace: fixtures/dune-lab
+  root: dune-lab
+  reset: true
+  repos: ["."]
+  open: [dune-lab/README.md]
+  layout: single
+  # utop, shell output, build output and a debugger from an earlier visit go; the
+  # checks read *utop* and *compilation*.
+  eval: >-
+    (progn
+      (when (fboundp 'dape-quit) (ignore-errors (dape-quit)))
+      (let ((kill-buffer-query-functions nil))
+        (dolist (b (buffer-list))
+          (when (or (memq (buffer-local-value 'major-mode b) '(utop-mode compilation-mode shell-mode))
+                    (string-prefix-p "magit" (symbol-name (buffer-local-value 'major-mode b))))
+            (kill-buffer b)))))
+steps:
+  - id: init
+    goal: Make a library with dune init
+    detail: "`M-&` runs a shell command in the background, in the current buffer's directory, /work/dune-lab. Run `dune init proj wordstat --kind=lib --inline-tests --ppx ppx_expect`: `--kind=lib` makes a library without an executable, and the last two options let expect tests live next to the code. The output appears in *Async Shell Command*; `C-x 1` closes it."
+    demo: 'M-& ~600 "dune init proj wordstat --kind=lib --inline-tests --ppx ppx_expect" RET ~4000 C-x 1'
+    conditions:
+      - text: a shell command ran
+        any:
+          - event: { command: async-shell-command }
+          - event: { command: shell-command }
+          - event: { command: eshell-send-input }
+        hint: "M-& (Alt and &, so Alt Shift 7 on most keyboards) asks for the command in the bottom line."
+      - text: the dune project exists in /work/dune-lab/wordstat
+        file: { path: dune-lab/wordstat/dune-project, exists: true }
+        hint: "dune prints Success: initialized project component named wordstat. If it went elsewhere, run M-& from README.md, whose directory is /work/dune-lab."
+      - text: the library runs inline expect tests
+        file: { path: dune-lab/wordstat/lib/dune, contains: ppx_expect }
+        hint: "Without --inline-tests --ppx ppx_expect, lib/dune lacks the test stanza: delete wordstat (or Reset this task) and run the full command."
+  - id: utop
+    goal: A first words, tried in utop beside the source
+    detail: "`C-x C-f /work/dune-lab/wordstat/lib/wordstat.ml` creates the library's module. Write a first, naive version: `let words text = String.split_on_char ' ' text` and save. `C-c C-s` starts utop, OCaml's toplevel, below the code, through `dune utop` so the library is loaded, and moves the cursor there. `C-x o` back to the code, `C-c C-e` sends the definition at point to utop. `C-x o` again, and try it: `words \"the cat  sat\";;` `RET`. The two spaces give an empty word; task 3 fixes that."
+    demo: 'C-x C-f "/work/dune-lab/wordstat/lib/wordstat.ml" RET ~1000 C-x 1 "let words text = String.split_on_char '' '' text" ~300 C-x C-s ~1500 C-c C-s ~7000 C-x o ~400 M-< C-c C-e ~1500 C-x o ~400 M-> "words \"the cat  sat\"" ; ~400 ; ~400 RET ~1500'
+    conditions:
+      - text: lib/wordstat.ml defines words
+        file: { path: dune-lab/wordstat/lib/wordstat.ml, regex: 'let\s+words\b' }
+        hint: "Type the definition in wordstat.ml; files save themselves a few seconds after you stop typing, C-x C-s saves now."
+      - text: utop is running
+        buffer: { name: "*utop*", process: running }
+        hint: "C-c C-s in wordstat.ml. utop takes a few seconds the first time, while dune builds the library."
+      - text: utop is beside the code
+        any:
+          - layout: "(vsplit wordstat.ml *utop*)"
+          - layout: "(hsplit wordstat.ml *utop*)"
+        hint: "Two windows: wordstat.ml and *utop*. C-x 1 in wordstat.ml, then C-c C-z shows utop again beside it."
+      - text: utop answered with a string list
+        buffer: { name: "*utop*", contains: ": string list =" }
+        hint: "utop evaluates when the input ends with ;; and you press RET. A phrase without ;; just waits for more."
+    stuck:
+      - when: { step_seconds: 300 }
+        say: "In utop, type the expression, then two semicolons, then RET: words \"the cat  sat\";; The answer starts with - : string list =."
+  - id: expect-tests
+    goal: Insert the expect tests and write a words that passes them
+    detail: "At the end of wordstat.ml (`M->`), `C-x i` inserts a file: `/work/dune-lab/brief/words_tests.ml`. `C-c C-r` runs `dune runtest`; each failing test shows as a diff in the compile window: `-` what the test expects, `+` what the code printed. Rewrite `words` to lowercase the text, turn every character that is not a letter into a space, split, and drop the empty pieces: `String.lowercase_ascii`, `String.map`, `String.split_on_char`, `List.filter`. The third test has no expectation yet: once its `+` line is right, `C-c C-p` (dune promote) writes it into the file. `C-c C-r` until no diff is left."
+    demo: 'C-x C-f "/work/dune-lab/wordstat/lib/wordstat.ml" RET ~600 C-x 1 M-> RET C-x i ~600 "/work/dune-lab/brief/words_tests.ml" RET ~800 M-< C-k "let words text =\ntext\n|> String.lowercase_ascii\n|> String.map (fun c -> if c >= ''a'' && c <= ''z'' then c else '' '')\n|> String.split_on_char '' ''\n|> List.filter (fun w -> w <> \"\")" ~300 C-x C-s ~2500 C-c C-r ~7000 C-c C-p ~4000 C-c C-r ~6000'
+    conditions:
+      - text: the tests are in wordstat.ml
+        file: { path: dune-lab/wordstat/lib/wordstat.ml, contains: "let%expect_test \"a sentence\"" }
+        hint: "C-x i, then the path of the tests file. TAB completes each directory; the tests go below words, which they use."
+      - text: dune runtest ran in the compile window
+        event: { command: playground-dune-test }
+        hint: "C-c C-r in wordstat.ml runs dune runtest. Each - line is what a test expects, each + line what words printed."
+      - text: the last test has its expected output
+        file: { path: dune-lab/wordstat/lib/wordstat.ml, not_contains: "[%expect {| |}]" }
+        hint: "When the + line of the third test reads emacs|the|extensible|editor, C-c C-p accepts it and the file reloads with it."
+      - text: every expect test passes
+        shell: { run: "mkdir -p $HOME/.cache/pg-check && dune runtest --build-dir $HOME/.cache/pg-check/dune-lab", cwd: dune-lab/wordstat, timeout: 120 }
+        hint: "Map every character that is not between 'a' and 'z' to a space, after lowercasing, then filter out the empty strings that split_on_char leaves between spaces."
+    stuck:
+      - when: { step_seconds: 480 }
+        say: "One way: text |> String.lowercase_ascii |> String.map (fun c -> if c >= 'a' && c <= 'z' then c else ' ') |> String.split_on_char ' ' |> List.filter (fun w -> w <> \"\")."
+  - id: merlin
+    goal: Ask Merlin for a type, then let it write a match
+    detail: "Put the cursor on `words` and `C-c C-t`: the type, `string -> string list`, appears in the echo area (`C-c C-t` again widens to the enclosing expression). At the end of the file add `type summary = Empty | One of string | Many of int` and `let describe (s : summary) = s`. With the cursor on that last `s`, `C-c |` destructs it into a match with one case per constructor, each body a hole `_`. Replace the holes with strings: `\"no words\"`, `\"one word\"`, `\"many words\"`."
+    demo: 'C-x C-f "/work/dune-lab/wordstat/lib/wordstat.ml" RET ~600 C-x 1 M-< C-s "words" RET C-b ~300 C-c C-t ~2000 M-> RET "type summary = Empty | One of string | Many of int\n\nlet describe (s : summary) = s" ~2500 C-b ~300 C-c | ~3000 M-< C-s "-> _" RET DEL "\"no words\"" C-s "-> _" RET DEL "\"one word\"" C-s "-> _" RET DEL "\"many words\"" ~300 C-x C-s ~2500'
+    conditions:
+      - text: C-c C-t showed a type
+        event: { command: ocaml-eglot-type-enclosing }
+        hint: "C-c C-t with the cursor on a name. If it says no config found, save the file once and wait for the build: dune utop built the library already."
+      - text: C-c | destructed a value
+        event: { command: ocaml-eglot-destruct }
+        hint: "The cursor must be on the s after the =, the value to take apart. C-c | replaces it with match s with and every constructor."
+      - text: describe has a string for each case
+        file: { path: dune-lab/wordstat/lib/wordstat.ml, regex: '(?s)let describe.*Empty\s*->\s*"[^"]*".*One\b[^>]*->\s*"[^"]*".*Many\b[^>]*->\s*"[^"]*"' }
+        hint: "Each _ after an arrow is a hole: delete it and type a string in double quotes."
+      - text: the library builds
+        shell: { run: "mkdir -p $HOME/.cache/pg-check && dune build --build-dir $HOME/.cache/pg-check/dune-lab 2>&1", cwd: dune-lab/wordstat, timeout: 120 }
+        hint: "A hole _ left in an expression does not compile; M-n jumps to the error Flymake underlines."
+  - id: format
+    goal: Give the project a house style with .ocamlformat
+    detail: "`C-x C-f /work/dune-lab/wordstat/.ocamlformat` and write two lines: `version = 0.29.0` (it must match the installed ocamlformat) and `margin = 60`. Save. Then `C-x p c` compiles in the project root, /work/dune-lab/wordstat: clear the offered command (`C-a C-k`), type `dune fmt`, `RET`. dune reformats every OCaml file to the narrower margin and open buffers follow. From now on saving an OCaml file formats it with these settings."
+    demo: 'C-x C-f "/work/dune-lab/wordstat/.ocamlformat" RET ~800 "version = 0.29.0\nmargin = 60\n" C-x C-s ~800 C-x p c ~600 C-a C-k "dune fmt" RET ~6000'
+    conditions:
+      - text: .ocamlformat names version 0.29.0
+        file: { path: dune-lab/wordstat/.ocamlformat, regex: '(?m)^\s*version\s*=\s*0\.29\.0\s*$' }
+        hint: "The file goes next to dune-project, in /work/dune-lab/wordstat. ocamlformat refuses a file that names another version."
+      - text: .ocamlformat sets margin = 60
+        file: { path: dune-lab/wordstat/.ocamlformat, regex: '(?m)^\s*margin\s*=\s*60\s*$' }
+        hint: "One setting per line, name = value."
+      - text: every file is formatted
+        shell: { run: "mkdir -p $HOME/.cache/pg-check && dune build @fmt --build-dir $HOME/.cache/pg-check/dune-lab 2>&1", cwd: dune-lab/wordstat, timeout: 120 }
+        hint: "Run dune fmt from the project root with C-x p c: in lib/ (where M-x compile starts from wordstat.ml) dune only formats that directory. Saving an OCaml file formats it too."
+  - id: odoc
+    goal: Document words and build the HTML with odoc
+    detail: "Documentation comments start with `(**`. Put `(** Word statistics. *)` on the first line of wordstat.ml and `(** [words text] is the lowercase words of [text], in order. *)` just above `let words`. `C-x p c`, `dune build @doc` `RET` writes the HTML (from the project root: run in lib/, the `@doc` alias would cover only that directory); the preview shows it while wordstat.ml is the current buffer."
+    demo: 'C-x C-f "/work/dune-lab/wordstat/lib/wordstat.ml" RET ~600 C-x 1 M-< "(** Word statistics. *)\n\n(** [words text] is the lowercase words of [text], in order. *)\n" ~300 C-x C-s ~2500 C-x p c ~600 C-a C-k "dune build @doc" RET ~6000'
+    conditions:
+      - text: words has a documentation comment
+        file: { path: dune-lab/wordstat/lib/wordstat.ml, regex: '\*\)\s*let words\b' }
+        hint: "The comment goes right above let words and starts with two stars: (** ... *)."
+      - text: the HTML documents words
+        file: { path: dune-lab/wordstat/_build/default/_doc/_html/wordstat/Wordstat/index.html, regex: '(?s)id="val-words".*spec-doc' }
+        hint: "C-x p c, then dune build @doc. The page is _build/default/_doc/_html/wordstat/Wordstat/index.html; build again after changing a comment."
+  - id: commit
+    goal: Commit the library with Magit
+    detail: "`C-x g`. The whole wordstat directory is untracked (its _build is ignored through .gitignore): `s` on Untracked files stages it all. `c c`, `Add wordstat`, `C-c C-c`."
+    demo: 'C-x g ~2000 M-< C-s "Untracked files" RET ~300 s ~1000 c c ~2500 "Add wordstat" C-c C-c ~2500'
+    conditions:
+      - text: Magit status was opened
+        event: { command: magit-status }
+        hint: "Magit works on the repository of the current buffer: from a buffer outside /work/dune-lab, such as a shell started elsewhere, it asks which repository. Its first lines name the branch, main."
+      - text: the commit has the library and its tests
+        shell: { run: "git show HEAD:wordstat/lib/wordstat.ml | grep -q 'let%expect_test' && git cat-file -e HEAD:wordstat/dune-project" }
+        hint: "s on the Untracked files heading stages every untracked file; c c opens the message, C-c C-c commits."
+      - text: nothing is left uncommitted
+        shell: { run: "test -z \"$(git status --porcelain)\"" }
+        hint: "Magit lists what is left under Unstaged or Untracked: s stages it, then commit again or amend with c a."

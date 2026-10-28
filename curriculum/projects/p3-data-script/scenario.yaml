@@ -1,0 +1,175 @@
+id: projects/p3-data-script
+title: Data script
+minutes: 75
+mode: terminal
+tags: [project]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-python]
+vscode: "Python extension, Run and Debug"
+project: { roots: [data-lab], lapMinutes: 25 }
+preview:
+  tabs: [data-lab/README.md]
+  follow: { data-lab/stats.py: data-lab/README.md }
+setup:
+  workspace: fixtures/data-lab
+  root: data-lab
+  reset: true
+  # uv init inside a git repository makes no repository of its own.
+  repos: ["."]
+  open: [data-lab/README.md]
+  layout: single
+  # Terminals, Python shells, build output and debugger buffers from an
+  # earlier visit go. pet points dape at the project's Python, which has
+  # no debugpy; the lsp module's debugpy configuration (its own Python
+  # for the adapter, the project's for the program) is the one to use,
+  # so pet's buffer-local dape-command is dropped. dape keeps breakpoints
+  # outside the workspace, and a checkpoint restore (Watch it, then Do it
+  # yourself) would move them to other lines: they go on every load and
+  # whenever a data-lab file is reverted, so C-x C-a b always adds one.
+  eval: >-
+    (progn
+      (defun playground-p3--dape-command () (kill-local-variable 'dape-command))
+      (advice-add 'pet-dape-setup :after #'playground-p3--dape-command)
+      (defun playground-p3--forget-breakpoints ()
+        (when (and buffer-file-name (string-prefix-p "/work/data-lab/" buffer-file-name)
+                   (fboundp 'dape-breakpoint-remove-all))
+          (ignore-errors (dape-breakpoint-remove-all))))
+      (add-hook 'after-revert-hook #'playground-p3--forget-breakpoints)
+      (when (fboundp 'dape-quit) (ignore-errors (dape-quit)))
+      (when (require 'dape nil t) (ignore-errors (dape-breakpoint-remove-all)) (setq dape--breakpoints nil))
+      (let ((kill-buffer-query-functions nil))
+        (dolist (b (buffer-list))
+          (when (or (memq (buffer-local-value 'major-mode b) '(eat-mode inferior-python-mode compilation-mode))
+                    (string-prefix-p "*dape-" (buffer-name b))
+                    (string-prefix-p "magit" (symbol-name (buffer-local-value 'major-mode b))))
+            (kill-buffer b)))))
+steps:
+  - id: init
+    goal: Make a uv project with numpy and pytest, and let pet find its venv
+    detail: "`C-x p t` opens a terminal (eat) in the project root, /work/data-lab. Run `uv init --bare` (only a pyproject.toml), then `uv add numpy` and `uv add --dev pytest`: uv creates the virtual environment `.venv` and installs both from the local cache (warnings about hardlinks are harmless). Then `C-x C-f /work/data-lab/stats.py` `RET`: the mode line shows Pet, which found `.venv`, so the language server, the Python shell and the debugger all use the project's Python."
+    demo: 'C-x p t ~3000 "uv init --bare" RET ~2500 "uv add numpy" RET ~6000 "uv add --dev pytest" RET ~5000 C-x C-f "/work/data-lab/stats.py" RET ~3000'
+    conditions:
+      - text: pyproject.toml depends on numpy
+        file: { path: data-lab/pyproject.toml, regex: '(?s)dependencies = \[.*numpy' }
+        hint: "uv init --bare writes pyproject.toml; uv add numpy adds the dependency and makes .venv. Run them in the terminal at /work/data-lab."
+      - text: pytest is a development dependency
+        file: { path: data-lab/pyproject.toml, regex: '(?s)\[dependency-groups\].*pytest' }
+        hint: "uv add --dev pytest: the --dev puts it in the dev group, installed in .venv but not needed to run the script."
+      - text: stats.py uses the project's .venv through pet
+        elisp: '(let ((b (find-buffer-visiting "/work/data-lab/stats.py"))) (and b (with-current-buffer b (and (bound-and-true-p pet-mode) (string-prefix-p "/work/data-lab/.venv/" (or (ignore-errors (pet-executable-find "python")) ""))))))'
+        hint: "Open stats.py after uv made .venv. If you opened it before, C-x k RET and open it again so that pet looks once more."
+    stuck:
+      - when: { step_seconds: 300 }
+        say: "In the terminal: uv init --bare, then uv add numpy, then uv add --dev pytest, each followed by RET. C-x still works in the terminal, so C-x C-f opens stats.py."
+  - id: write
+    goal: Write load and summarize, and fix what basedpyright reports
+    detail: "In stats.py: `import numpy as np`; `def load(path: str) -> np.ndarray:` returning `np.loadtxt(path, delimiter=\",\", skiprows=1, usecols=1)`; and, as everyone writes it once, `def summarize(temps: np.ndarray) -> dict[str, float]:` returning `{\"mean\": temps.average()}`. Save. basedpyright underlines `average`: `M-n` jumps to the diagnostic and `C-h .` shows it, ndarray has no attribute average. Fix the line: `return {\"mean\": float(temps.mean()), \"max\": float(temps.max()), \"min\": float(temps.min())}`."
+    demo: 'C-x C-f "/work/data-lab/stats.py" RET ~800 C-x 1 M-< "import numpy as np\n\n\ndef load(path: str) -> np.ndarray:\nreturn np.loadtxt(path, delimiter=\",\", skiprows=1, usecols=1)\n\n\ndef summarize(temps: np.ndarray) -> dict[str, float]:\nreturn {\"mean\": temps.average()}\n" ~300 C-x C-s ~5000 M-< C-s "average" RET ~300 C-h . ~2000 M-m C-k "return {\"mean\": float(temps.mean()), \"max\": float(temps.max()), \"min\": float(temps.min())}" ~300 C-x C-s ~5000'
+    conditions:
+      - text: stats.py defines load and summarize
+        all:
+          - file: { path: data-lab/stats.py, regex: '(?m)^def load\(' }
+          - file: { path: data-lab/stats.py, regex: '(?m)^def summarize\(' }
+        hint: "Both functions start at the left margin. After a return line, RET goes back one level by itself; DEL at the start of an indented line goes back one more."
+      - text: you read a diagnostic
+        any:
+          - event: { command: flymake-goto-next-error }
+          - event: { command: flymake-goto-prev-error }
+          - event: { command: display-local-help }
+          - event: { command: eldoc-doc-buffer }
+          - event: { command: playground-doc-at-point }
+          - event: { command: flymake-show-buffer-diagnostics }
+          - event: { command: consult-flymake }
+        hint: "Save first: basedpyright checks what is saved too. Then M-n moves to the next underlined spot and C-h . explains it."
+      - text: basedpyright reports no errors
+        elisp: '(let ((b (find-buffer-visiting "/work/data-lab/stats.py"))) (and b (with-current-buffer b (and (eglot-managed-p) (not (seq-some (lambda (d) (memq (flymake-diagnostic-type d) (quote (eglot-error :error)))) (flymake-diagnostics)))))))'
+        hint: "C-c l d lists every diagnostic of the buffer. ndarray has mean, max and min; float(...) turns numpy's scalar into the float the annotation promises. A return at the left margin is outside the function: TAB indents the line back into it."
+      - text: summarize(load(...)) gives the right numbers
+        shell: { run: "uv run --offline python -c \"import stats; s = stats.summarize(stats.load('data/temps.csv')); assert s['max'] == 31.4 and s['min'] == 18.2 and abs(s['mean'] - 23.64) < 0.01, s\"", timeout: 60 }
+        hint: "The dictionary needs the keys mean, max and min. loadtxt with usecols=1 reads the second column, the temperatures, skipping the header row."
+  - id: repl
+    goal: Explore the data in a Python shell beside the code
+    detail: "`C-c C-p` starts Python, the project's from .venv, below the code, and moves the cursor there. `C-x o` back to stats.py, `C-c C-c` sends the whole buffer to it. `C-x o` again and explore: `t = load(\"data/temps.csv\")`, then `t.max()` and `t.argmax()`. The hottest day is the eighth (index 7)."
+    demo: 'C-x C-f "/work/data-lab/stats.py" RET ~500 C-x 1 C-c C-p ~4000 C-x o ~300 C-c C-c ~1500 C-x o ~300 M-> "t = load(\"data/temps.csv\")" RET ~1000 "t.max()" RET ~800 "t.argmax()" RET ~800'
+    conditions:
+      - text: a Python shell runs for the project
+        buffer: { name: "*Python[data-lab]*", process: running }
+        hint: "C-c C-p in stats.py. The shell is named after the project, *Python[data-lab]*, and runs .venv's Python."
+      - text: stats.py was sent to it
+        any:
+          - event: { command: python-shell-send-buffer }
+          - event: { command: python-shell-send-file }
+          - event: { command: python-shell-send-region }
+          - event: { command: python-shell-send-defun }
+          - event: { command: python-shell-send-statement }
+        hint: "C-c C-c with the cursor in stats.py, not in the shell. The shell then knows load and summarize."
+      - text: the shell showed the hottest temperature
+        buffer: { name: "*Python[data-lab]*", contains: "31.4" }
+        hint: "In the shell, at the >>> prompt: t = load(\"data/temps.csv\") RET, then t.max() RET. NameError means stats.py was not sent yet."
+  - id: ruff
+    goal: Let ruff sort the imports and format the code on save
+    detail: "Under `import numpy as np` add `from pathlib import Path`, and let load take one: `def load(path: str | Path)`. At the end of the file add a careless one-liner: `def hottest(temps:np.ndarray)->float: return float(temps.max())`. Save: ruff (through apheleia) moves the standard-library import above numpy, with a blank line between the groups, and lays hottest out on two lines. The cursor stays where it was."
+    demo: 'C-x C-f "/work/data-lab/stats.py" RET ~500 C-x 1 M-< C-e RET "from pathlib import Path" ~1000 C-g ~300 M-< C-s "path: str" RET " | Path" ~1000 C-g ~300 M-> "\n\ndef hottest(temps:np.ndarray)->float: return float(temps.max())" ~300 C-x C-s ~4000'
+    conditions:
+      - text: Path is imported and load accepts it
+        all:
+          - file: { path: data-lab/stats.py, regex: '(?m)^from pathlib import Path$' }
+          - file: { path: data-lab/stats.py, regex: 'path: str \| Path' }
+        hint: "from pathlib import Path goes at the top with the other imports; where exactly does not matter, ruff puts it in order on save. While the completion popup is open, RET and M-> act on it and may import another name: C-g closes it first."
+      - text: hottest is in the file, formatted
+        file: { path: data-lab/stats.py, regex: 'def hottest\(temps: np\.ndarray\) -> float:\n    return float\(temps\.max\(\)\)' }
+        hint: "Save with C-x C-s. If nothing changes, the file has a syntax error ruff cannot format: Flymake underlines it."
+      - text: ruff has nothing left to fix
+        shell: { run: "ruff check --select I stats.py && ruff format --check stats.py" }
+        hint: "Save once more; ruff formats only what is saved through Emacs. C-c l f formats the buffer without saving."
+  - id: pytest
+    goal: Write a pytest test, run it in the compile window, fix what fails
+    detail: "`C-x C-f /work/data-lab/test_stats.py`: `import numpy as np`, `from stats import summarize`, and a test: `def test_summarize():`, `s = summarize(np.array([1.0, 2.0, 6.0]))`, `assert s[\"mean\"] == 3.0`, `assert s[\"range\"] == 5.0`. `C-x p c`, clear the offered command, `uv run pytest -q` `RET`. The failure line `test_stats.py:9: KeyError` is a link: `M-g M-n` jumps to it (`M-g n`, with one Meta, walks Flymake's underlines in the code instead). summarize has no range yet: add `\"range\": float(temps.max() - temps.min())`, save, and `C-x p c` `RET` again (it offers the last command)."
+    demo: 'C-x C-f "/work/data-lab/test_stats.py" RET ~800 C-x 1 "import numpy as np\n\nfrom stats import summarize\n\n\ndef test_summarize():\ns = summarize(np.array([1.0, 2.0, 6.0]))\nassert s[\"mean\"] == 3.0\nassert s[\"range\"] == 5.0" ~300 C-x C-s ~2500 C-x p c ~600 C-a C-k "uv run pytest -q" RET ~6000 M-g M-n ~800 C-x C-f "/work/data-lab/stats.py" RET ~500 M-< C-s "temps.min())" RET ", \"range\": float(temps.max() - temps.min())" ~300 C-x C-s ~3000 C-x p c ~800 RET ~6000'
+    conditions:
+      - text: test_stats.py tests summarize
+        all:
+          - file: { path: data-lab/test_stats.py, regex: '(?m)^def test_\w+\(' }
+          - file: { path: data-lab/test_stats.py, contains: summarize }
+        hint: "pytest collects functions named test_... in files named test_....py; the file goes next to stats.py."
+      - text: you jumped to the failure from the compile window
+        any:
+          - event: { command: next-error }
+          - event: { command: compile-goto-error }
+        hint: "Run the tests first (C-x p c, uv run pytest -q). Then M-g M-n goes to test_stats.py:9 from wherever you are; keep Meta held for both keys."
+      - text: pytest passes
+        shell: { run: "uv run --offline pytest -q", timeout: 120 }
+        hint: "KeyError: 'range' means summarize returns no range: add \"range\": float(temps.max() - temps.min()) to its dictionary."
+      - text: the compile window shows the passing run
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (and (search-forward " passed" nil t) (not (search-forward "failed" nil t)))))))'
+        hint: "C-x p c RET runs the last command again: the window should end with 1 passed."
+  - id: breakpoint
+    goal: Stop at a breakpoint with dape and look at a value
+    detail: "At the end of stats.py add `if __name__ == \"__main__\":`, `temps = load(\"data/temps.csv\")`, `print(summarize(temps))`. On the print line, `C-x C-a b` sets a breakpoint (B in the margin). `M-x dape` asks for an adapter: `debugpy` `RET` runs the file under the debugger (if the completion popup is open, `RET` first takes its candidate; a second `RET` runs), which stops at the breakpoint; the value of temps appears beside the code. After a dape command single keys drive it: `n` next, `s` step in, `c` continue, and any other key ends that. `M-x dape-repl` `RET` goes to the debugger's console. The key right after it still belongs to the debugger (`t` would pick a thread), so start with a space, which the console sends to the program as it is: ` temps.max()` `RET`."
+    demo: 'C-x C-f "/work/data-lab/stats.py" RET ~500 C-x 1 M-> "\n\nif __name__ == \"__main__\":\ntemps = load(\"data/temps.csv\")\nprint(summarize(temps))" ~300 C-x C-a b ~500 C-x C-s ~3000 M-x ~400 "dape" RET ~800 C-a C-k "debugpy " ~500 RET ~7000 M-x ~400 "dape-repl" RET ~1500 " temps.max()" RET ~2000'
+    conditions:
+      - text: a breakpoint was set
+        event: { command: dape-breakpoint-toggle }
+        hint: "C-x C-a b toggles a breakpoint on the cursor's line; a B appears in the margin. Pressing it again removes it."
+      - text: the program is stopped at the breakpoint
+        elisp: '(and (fboundp (quote dape--live-connection)) (dape--live-connection (quote stopped) t) t)'
+        hint: "M-x dape, debugpy, RET. If the program ran to the end, the breakpoint was not on a line that runs: put it on print(summarize(temps)) and M-x dape again."
+      - text: the debugger's console evaluated temps.max()
+        buffer: { name: "*dape-repl*", contains: "31.4" }
+        hint: "M-x dape-repl RET selects the console. If Select thread appeared at the bottom, the t went to the debugger: C-g, then type a space before temps.max(). Typed in the code instead, single letters are debugger commands."
+    stuck:
+      - when: { step_seconds: 300 }
+        say: "If keys suddenly do debugger things, that is dape's repeat map: after a dape command, n s o c and friends act on the debugger. Any other key, or C-g, ends it."
+  - id: commit
+    goal: Commit the project with Magit
+    detail: "`C-x g`. pyproject.toml, uv.lock, stats.py and test_stats.py are untracked (.venv and caches are ignored through .gitignore): `s` on Untracked files stages them all. `c c`, `Summarise temperatures`, `C-c C-c`."
+    demo: 'C-x g ~2000 M-< C-s "Untracked files" RET ~300 s ~1000 c c ~2500 "Summarise temperatures" C-c C-c ~2500'
+    conditions:
+      - text: Magit status was opened
+        event: { command: magit-status }
+        hint: "Magit works on the repository of the current buffer: from a buffer outside /work/data-lab, such as a shell started elsewhere, it asks which repository. Its first lines name the branch, main."
+      - text: the commit has the script, its test and the lock file
+        shell: { run: "git show HEAD:stats.py | grep -q 'def summarize' && git cat-file -e HEAD:test_stats.py && git cat-file -e HEAD:uv.lock && git show HEAD:pyproject.toml | grep -q numpy" }
+        hint: "s on the Untracked files heading stages every untracked file; c c opens the message, C-c C-c commits."
+      - text: nothing is left uncommitted
+        shell: { run: "test -z \"$(git status --porcelain)\"" }
+        hint: "Magit lists what is left under Unstaged or Untracked: s stages it, then c a amends the commit with it."

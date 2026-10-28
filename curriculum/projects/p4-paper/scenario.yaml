@@ -1,0 +1,180 @@
+id: projects/p4-paper
+title: Paper with citations
+minutes: 75
+mode: terminal
+# Not tagged gui: only tasks 2 and 5 want the GUI frame; their steps say
+# mode: gui (a gui tag would switch on every load).
+tags: [project]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input]
+vscode: "Tinymist, LaTeX Workshop"
+project: { roots: [paper-lab], lapMinutes: 30 }
+preview:
+  tabs: [paper-lab/README.md, paper-lab/paper.pdf, paper-lab/appendix.pdf]
+  follow: { paper-lab/paper.typ: paper-lab/paper.pdf, paper-lab/appendix.tex: paper-lab/appendix.pdf }
+setup:
+  workspace: fixtures/paper-lab
+  root: paper-lab
+  reset: true
+  repos: ["."]
+  open: [paper-lab/README.md]
+  layout: single
+  # A debugger, watch processes, build output, PDF views (a terminal frame's text
+  # view would stay text in the GUI frame), thumbnails and Magit from an
+  # earlier visit go: the tasks start them and their checks read them.
+  # typst watch stops following a file that is replaced, as a checkpoint
+  # restore (Reset, Watch it, then Do it yourself, Go to this step) does.
+  # Once paper.pdf exists (task 1 started the watch), reopening or
+  # restoring paper.typ restarts the watch; closing the buffer stops it.
+  eval: >-
+    (progn
+      (when (fboundp 'dape-quit) (ignore-errors (dape-quit)))
+      (defun playground-p4--paper-p ()
+        (and buffer-file-name (string-equal buffer-file-name "/work/paper-lab/paper.typ")
+             (derived-mode-p 'typst-ts-mode)))
+      (defun playground-p4--kill-watch ()
+        (dolist (p (process-list))
+          (when (string-prefix-p "Typst-Watch" (string-trim (process-name p) "\\*" "\\*"))
+            (delete-process p)))
+        (let ((kill-buffer-query-functions nil))
+          (when (get-buffer "*Typst-Watch*") (kill-buffer "*Typst-Watch*"))))
+      (defun playground-p4--stop-watch ()
+        (when (playground-p4--paper-p) (playground-p4--kill-watch)))
+      (defun playground-p4--start-watch (&optional again)
+        (when (and (playground-p4--paper-p) (file-exists-p "/work/paper-lab/paper.pdf")
+                   (or again (not (get-buffer-process "*Typst-Watch*"))))
+          (playground-p4--stop-watch)
+          (setq-local typst-ts-watch-mode nil)
+          (typst-ts-watch-mode 1)))
+      (defun playground-p4--restart-watch () (playground-p4--start-watch t))
+      (add-hook 'typst-ts-mode-hook #'playground-p4--start-watch 90)
+      (add-hook 'after-revert-hook #'playground-p4--restart-watch)
+      (add-hook 'kill-buffer-hook #'playground-p4--stop-watch)
+      (playground-p4--kill-watch)
+      (let ((kill-buffer-query-functions nil))
+        (dolist (b (buffer-list))
+          (when (or (string-match-p "\\`\\*Typst-Watch\\*\\|\\`\\*typst-ts-compilation\\*\\|\\`\\*.*appendix output\\*\\'\\|\\`\\(paper\\|appendix\\)\\.pdf\\|\\`\\*Outline appendix\\|\\`\\*image-dired" (buffer-name b))
+                    (memq (buffer-local-value 'major-mode b) '(image-dired-thumbnail-mode image-dired-image-mode))
+                    (string-prefix-p "magit" (symbol-name (buffer-local-value 'major-mode b))))
+            (with-current-buffer b (set-buffer-modified-p nil))
+            (kill-buffer b))))
+      (let ((b (find-buffer-visiting "/work/paper-lab/paper.typ")))
+        (when b (with-current-buffer b (setq-local typst-ts-watch-mode nil)))))
+steps:
+  - id: skeleton
+    goal: Write the skeleton of paper.typ and let its PDF follow every save
+    detail: "`C-x C-f /work/paper-lab/paper.typ` `RET` creates the paper. Type a skeleton, each part on its own line with a blank line between: `#set heading(numbering: \"1.\")`, the title `= Lantern build times`, then `== Method`, the sentence `We built three folders of notes and timed each build.`, `== Results` and `== Discussion`. Save, then `C-c C-w` starts `typst watch`: `[Watch]` appears in the mode line, and from now on every save rebuilds paper.pdf, which the preview pane shows. (`C-u C-c C-w` turns watching on whatever its state.)"
+    demo: 'C-x C-f "/work/paper-lab/paper.typ" RET ~1000 C-x 1 "#set heading(numbering: \"1.\")\n\n= Lantern build times\n\n== Method\n\nWe built three folders of notes and timed each build.\n\n== Results\n\n== Discussion\n" ~300 C-x C-s ~1000 C-u C-c C-w ~3000'
+    conditions:
+      - text: paper.typ has a title and three sections
+        all:
+          - file: { path: paper-lab/paper.typ, regex: '(?m)^=\s+\S' }
+          - file: { path: paper-lab/paper.typ, regex: '(?ms)^==\s+\S.*^==\s+\S.*^==\s+\S' }
+        hint: "A heading is = or == at the very start of a line, then a space: = is the title, == a section. Files save themselves a few seconds after you stop typing; C-x C-s saves now."
+      - text: typst watch is running
+        buffer: { name: "*Typst-Watch*", process: running }
+        hint: "C-c C-w in paper.typ. If [Watch] was already in the mode line, your C-c C-w turned it off: press it once more."
+      - text: paper.pdf shows the sections
+        shell: { run: "pdftotext paper.pdf - | grep -q Discussion" }
+        hint: "Watch mode rebuilds on save. If the PDF does not change, the *Typst-Watch* buffer (C-x b) names the line Typst could not read."
+  - id: figures
+    mode: gui
+    goal: Find the bar chart among the drafts with image-dired and make it Figure 1
+    detail: "Thumbnails need images, so the screen switches to the GUI frame for this task (the Frame switch above the screen goes back). `M-x image-dired` `RET`, `/work/paper-lab/figures/` `RET`: the thumbnails appear beside a Dired listing. Move between them with `f` and `b` (or the arrows); `RET` shows the one at point full size. On the bar chart, `w` copies its file name. Back in paper.typ (`C-x C-f /work/paper-lab/paper.typ RET`, `C-x 1`), on a new line under `== Results`, type `#figure(image(\"figures/`, `C-y` the name, and finish with `\"), caption: [Build time by number of notes.])`. Save: Figure 1 appears in the PDF."
+    demo: 'M-x ~400 "image-dired" RET ~800 "/work/paper-lab/figures/" RET ~3000 f ~800 RET ~1500 w ~800 C-x C-f "/work/paper-lab/paper.typ" RET ~600 C-x 1 M-< C-s "== Results" RET ~300 RET RET "#figure(image(\"figures/" C-y "\"), caption: [Build time by number of notes.])" ~300 C-x C-s ~3000'
+    conditions:
+      - text: image-dired showed the figures
+        event: { command: image-dired }
+        hint: "M-x image-dired asks for a folder: /work/paper-lab/figures/. TAB completes each part of the path."
+      - text: a file name was copied from the thumbnails
+        any:
+          - event: { command: image-dired-copy-filename-as-kill }
+          - event: { command: dired-copy-filename-as-kill }
+        hint: "w in the thumbnail window copies the name of the image at point; the bottom line repeats what it copied."
+      - text: paper.typ shows the bar chart as a figure
+        file: { path: paper-lab/paper.typ, regex: '#figure\(\s*image\(\s*"figures/draft-2\.png"' }
+        hint: "The chart is the thumbnail with three purple bars; RET shows a thumbnail full size. A photo or a sketch is the wrong draft: change the name in paper.typ."
+      - text: the PDF has Figure 1
+        shell: { run: "pdftotext paper.pdf - | grep -q 'Figure 1'" }
+        hint: "The path is relative to paper.typ, so it starts with figures/. Look in the *Typst-Watch* buffer for the error if the PDF does not change."
+  - id: citations
+    goal: Cite two references and add the bibliography
+    detail: "At the end of paper.typ add the line `#bibliography(\"refs.bib\")`. In the Method sentence, after `folders of notes`, type a space and `C-c C-x @`: type `gruber`, `RET`. After `timed each build`, again a space, `C-c C-x @`, `knuth`, `RET`. Save: the PDF numbers the citations [1] and [2] and ends with a Bibliography."
+    demo: 'C-x C-f "/work/paper-lab/paper.typ" RET ~600 C-x 1 M-> RET "#bibliography(\"refs.bib\")" ~300 M-< C-s "folders of notes" RET " " C-c C-x @ ~1200 "gruber" ~500 RET ~800 C-s "each build" RET " " C-c C-x @ ~1200 "knuth" ~500 RET ~800 C-x C-s ~3000'
+    conditions:
+      - text: citar inserted a citation
+        event: { command: citar-insert-citation }
+        hint: "C-c C-x @ in paper.typ lists the entries of refs.bib; type part of an author or title, RET inserts the highlighted one."
+      - text: paper.typ cites two references
+        elisp: '(let ((b (find-buffer-visiting "/work/paper-lab/paper.typ"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (let (keys) (while (re-search-forward "@\\(knuth1984\\|lamport1994\\|stallman2002\\|gruber2004\\)\\_>" nil t) (cl-pushnew (match-string 1) keys :test (function equal))) (>= (length keys) 2))))))'
+        hint: "Two different references: one citation after folders of notes, one after timed each build. Citing the same key twice counts once."
+      - text: "paper.typ has #bibliography"
+        file: { path: paper-lab/paper.typ, contains: "#bibliography(\"refs.bib\")" }
+        hint: "Typst needs to know the file: #bibliography(\"refs.bib\") on a line of its own, with the quotes and the #."
+      - text: the PDF lists two references
+        shell: { run: "test \"$(pdftotext paper.pdf - | grep -c '^\\[[0-9]*\\]')\" -ge 2" }
+        hint: "Save so that watch mode rebuilds. A key that is not in refs.bib stops the build; the *Typst-Watch* buffer names it."
+  - id: appendix
+    goal: Add a Model section with an equation and a citation to the LaTeX appendix, and build it
+    detail: "`C-x C-f /work/paper-lab/appendix.tex` `RET`. Put the cursor at the start of the line `\\section{Setup}` (`C-s section{Setup RET C-a`) and `C-c C-s`: `RET` for section, `Model RET` for the title, `RET` for the label. Type `Build time grows linearly:` and `RET`, then `C-c C-e`, `equation`, `RET`, and inside the equation ``t(n) = `a + `b n`` (cdlatex turns `` `a `` into `\\alpha`). After `\\end{equation}`, on a new line, type `The formula is kept short, as advised in ` and cite with `C-c C-x @`, `lamport`, `RET`. Build with `C-c C-c` `RET` (LaTeXMk)."
+    demo: 'C-x C-f "/work/paper-lab/appendix.tex" RET ~800 C-x 1 M-< C-s "section{Setup}" RET C-a ~300 C-c C-s ~600 RET ~500 "Model" RET ~500 RET ~500 "Build time grows linearly:" RET ~300 C-c C-e ~600 "equation" RET ~600 "t(n) = `a + `b n" ~300 C-s "\\end{equation}" RET RET "The formula is kept short, as advised in " C-c C-x @ ~1200 "lamport" ~500 RET ~600 "." RET ~300 C-c C-c ~800 "LaTeXMk" RET ~8000'
+    conditions:
+      - text: C-c C-s inserted a section
+        event: { command: LaTeX-section }
+        hint: "C-c C-s asks three questions at the bottom: the level (RET keeps section), the title, then the label (RET keeps the one offered)."
+      - text: the appendix has an equation with α and β
+        file: { path: paper-lab/appendix.tex, regex: '(?s)\\begin\{equation\}.*\\alpha.*\\beta.*\\end\{equation\}' }
+        hint: "C-c C-e, then equation: the cursor lands between \\begin and \\end. Inside, a backquote then a makes \\alpha; outside maths it is just a backquote."
+      - text: the appendix cites a reference
+        file: { path: paper-lab/appendix.tex, regex: '\\cite[a-z]*\{[^}]+\}' }
+        hint: "C-c C-x @ in appendix.tex writes \\cite{...}: the same refs.bib as the paper, in LaTeX's syntax."
+      - text: latexmk finished without errors
+        buffer: { name: "*/work/paper-lab/appendix output*", process: none, contains: "TeX Output finished" }
+        hint: "C-c C-c, then RET for LaTeXMk; latexmk runs pdflatex, biber and pdflatex again. If it reports an error, C-c ` jumps to it."
+      - text: the PDF shows the numbered equation and the reference
+        shell: { run: "t=$(pdftotext appendix.pdf -) && echo \"$t\" | grep -q '(A\\.1)\\|(1)' && echo \"$t\" | grep -q '^\\[1\\]'", timeout: 10 }
+        hint: "The number comes from the equation environment and the reference list from biber: both appear after a complete latexmk run."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "AUCTeX is asking something at the bottom: for C-c C-s the level, the title, then the label; for C-c C-e the environment's name. RET accepts what is offered in brackets; C-g cancels."
+  - id: synctex
+    mode: gui
+    goal: In the GUI frame, find the typo in the appendix PDF, jump back to the source and fix it
+    detail: "A PDF shows as pages only in the GUI frame, so the screen switches to it for this task. In appendix.tex, build once more with `C-c C-c` `RET`: LaTeX writes the SyncTeX map that links lines and pages, which a restored checkpoint does not keep. Then `C-c C-v` opens appendix.pdf beside the source, at the page of the cursor's line. Select the PDF (click it, or `C-x o`) and search it: `C-s mesurements`; the match lights up on page 2. While the search is still open, `M-s s` jumps back to that line of appendix.tex (a double-click on the word does too). Fix the word, then `C-c C-c` `RET` rebuilds and the PDF beside it reloads."
+    demo: 'C-x C-f "/work/paper-lab/appendix.tex" RET ~800 C-x 1 M-< ~300 C-c C-c ~800 "LaTeXMk" RET ~8000 C-x C-s ~6000 C-c C-v ~3000 C-x b ~300 "appendix.pdf" RET ~800 C-s ~400 "mesurements" ~1000 M-s s ~1500 C-s "mesure" RET M-DEL "measure" ~300 C-c C-c ~800 "LaTeXMk" RET ~8000'
+    conditions:
+      - text: the PDF is open in pdf-tools
+        elisp: '(let ((b (get-buffer "appendix.pdf"))) (and b (eq (buffer-local-value (quote major-mode) b) (quote pdf-view-mode))))'
+        hint: "Text instead of pages means the PDF was opened in the terminal frame: switch to GUI, C-x k appendix.pdf RET, then C-c C-v again in appendix.tex."
+      - text: a backward search ran
+        any:
+          - event: { command: pdf-isearch-sync-backward }
+          - event: { command: pdf-sync-backward-search-mouse }
+        hint: "M-s s works only while the search in the PDF is active (I-search at the bottom); after RET, start the search again. Unable to create synctex scanner means the map is missing: C-c C-c RET in appendix.tex first."
+      - text: the typo is fixed in appendix.tex
+        file: { path: paper-lab/appendix.tex, not_contains: mesurement }
+        hint: "The backward search puts the cursor on the sentence: measurements has an a after the first e."
+      - text: the rebuilt PDF has it right
+        all:
+          - buffer: { name: "*/work/paper-lab/appendix output*", process: none, contains: "TeX Output finished" }
+          - shell: { run: "t=$(pdftotext appendix.pdf -) && echo \"$t\" | grep -q Setup && ! echo \"$t\" | grep -q mesurement", timeout: 10 }
+        hint: "C-c C-c, then RET for LaTeXMk, after the fix: the PDF beside the source reloads when the build finishes."
+    stuck:
+      - when: { step_seconds: 240 }
+        say: "C-c C-v needs the GUI frame to show pages: the Frame switch is above the screen. In the PDF, C-s searches its text; M-s s, while that search is open, goes back to the source line."
+  - id: release
+    goal: Commit everything and tag the release v1.0
+    detail: "`C-x g`. Untracked files lists paper.typ and the two PDFs, Unstaged changes appendix.tex (LaTeX's other build files are ignored through .gitignore). `S` stages the changes to tracked files only; `C-u S` stages everything, untracked files too, after a `y`. `c c`, `Paper v1.0`, `C-c C-c`. Then `t` opens Magit's tag menu: `-a` asks for a message (an annotated tag), and `r` creates a release tag on the new commit. Type `v1.0` `RET`: the message opens in a buffer, proposed as Paper-Lab 1.0, and `C-c C-c` makes the tag, as for a commit."
+    demo: 'C-x g ~2000 C-u S ~800 y ~1500 c c ~2500 "Paper v1.0" C-c C-c ~2500 t ~800 - a ~500 r ~800 "v1.0" RET ~1500 C-c C-c ~1500'
+    conditions:
+      - text: Magit status was opened
+        event: { command: magit-status }
+        hint: "Magit works on the repository of the current buffer: from a buffer outside /work/paper-lab it asks which repository. Its first lines name the branch, main."
+      - text: the commit has the paper, the appendix and both PDFs
+        shell: { run: "git cat-file -e HEAD:paper.pdf && git cat-file -e HEAD:appendix.pdf && git show HEAD:paper.typ | grep -q bibliography && git show HEAD:appendix.tex | grep -q 'section{Model}'" }
+        hint: "Plain S leaves untracked files out: C-u S, then y, stages them too (s on the Untracked files heading does the same). c c then commits what is staged."
+      - text: nothing is left uncommitted
+        shell: { run: "test -z \"$(git status --porcelain)\"" }
+        hint: "Magit lists what is left under Unstaged or Untracked: s stages it, then c a amends the commit with it."
+      - text: v1.0 tags the latest commit
+        shell: { run: "test \"$(git rev-parse -q --verify 'refs/tags/v1.0^{commit}')\" = \"$(git rev-parse HEAD)\"" }
+        hint: "t, then r, after the commit: the tag goes on HEAD. A tag made before the commit points at the old one: in the tag menu, k deletes it, then make it again."

@@ -1,0 +1,170 @@
+id: projects/p6-polyglot
+title: Polyglot service
+minutes: 75
+mode: terminal
+tags: [project, remote]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui]
+vscode: "multi-root workspace, Remote-SSH"
+remote: { box: true }
+project:
+  roots: [polyglot-service/service, polyglot-service/tools, polyglot-service/proof, polyglot-service/report]
+  lapMinutes: 30
+preview:
+  follow:
+    polyglot-service/report/report.typ: polyglot-service/report/report.pdf
+setup:
+  workspace: fixtures/polyglot-service
+  root: polyglot-service
+  reset: true
+  # Four roots, four repositories: each is a project of its own (the
+  # workspace itself is a repository, so report/ needs one to be a
+  # project).
+  repos: [service, tools, proof, report]
+  # The box's /srv/app starts empty on every load (checkpoints do not
+  # cover the box).
+  run: "ssh box 'rm -rf /srv/app/*'"
+  open: [polyglot-service/README.md]
+  layout: single
+  # Only this project's builds count (an earlier typst watch process
+  # would keep watching files a reset replaced); the four roots are known projects
+  # for C-x p p; an earlier "polyglot" layout bookmark goes.
+  eval: >-
+    (progn
+      (let ((kill-buffer-query-functions nil))
+        (dolist (b (buffer-list))
+          (when (or (member (buffer-name b) '("*compilation*" "*eshell*"))
+                    (string-prefix-p "*eshell" (buffer-name b))
+                    (string-prefix-p "*typst-ts-watch" (buffer-name b))
+                    (string-prefix-p "*Typst-Watch*" (buffer-name b)))
+            (kill-buffer b))))
+      (require 'project)
+      (dolist (d '("service" "tools" "proof" "report"))
+        (let ((p (project-current nil (concat "/work/polyglot-service/" d "/"))))
+          (when p (project-remember-project p))))
+      (require 'bookmark)
+      (bookmark-maybe-load-default-file)
+      (dolist (b (copy-sequence bookmark-alist))
+        (when (string-match-p "polyglot" (car b))
+          (bookmark-delete (car b) t))))
+steps:
+  - id: tabs
+    goal: Open each of the four roots in a tab of its own
+    detail: "`C-x p p` picks a known project and opens it in a new tab named after it; then `f` finds a file there. Open `service` (its `src/main.rs`), `tools` (`score.py`), `proof` (`percentile.ml`) and `report` (`report.typ`). The tab bar shows the four names. All four paths contain `polyglot-service/`: type `/service/` with both slashes to pick the service root."
+    demo: 'C-x p p ~600 "/work/polyglot-service/service/" RET ~800 f ~600 "src/main.rs" RET ~1500 C-x p p ~600 "/work/polyglot-service/tools/" RET ~800 f ~600 "score.py" RET ~1500 C-x p p ~600 "/work/polyglot-service/proof/" RET ~800 f ~600 "percentile.ml" RET ~1500 C-x p p ~600 "/work/polyglot-service/report/" RET ~800 f ~600 "report.typ" RET ~1500'
+    conditions:
+      - text: C-x p p was used
+        any:
+          - event: { command: playground-project-tab }
+          - event: { command: project-switch-project }
+        hint: "The prompt lists the projects Emacs knows. All four sit in polyglot-service/, so typing service matches every one of them: type /service/ with both slashes, or move to the line with C-n."
+      - text: a tab per root
+        elisp: '(let ((names (mapcar (lambda (tb) (alist-get (quote name) tb)) (funcall tab-bar-tabs-function)))) (seq-every-p (lambda (n) (member n names)) (quote ("service" "tools" "proof" "report"))))'
+        hint: "Each C-x p p opens a new tab named after the project you pick; picking one that has a tab already switches to it. Pick all four."
+      - text: one file of each root is open
+        elisp: '(seq-every-p (lambda (f) (find-buffer-visiting (concat "/work/polyglot-service/" f))) (quote ("service/src/main.rs" "tools/score.py" "proof/percentile.ml" "report/report.typ")))'
+        hint: "After choosing a project, press f and type the file name: src/main.rs, score.py, percentile.ml, report.typ."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "TAB lists the known projects. After you pick one, a menu asks what to do there: f finds a file."
+  - id: rust-build
+    goal: Fix the Rust build from the compile window
+    detail: "In the `service` tab (`C-x t RET service RET`), `C-c C-c` in `main.rs` runs `cargo build`. It fails with one error; `M-g M-n` puts the cursor on it. Read the error and its `help:` line, fix it, save and build again until `*compilation*` says `Finished`."
+    demo: 'C-x t RET ~500 "service" RET ~600 C-x C-f ~400 "/work/polyglot-service/service/src/main.rs" RET ~800 C-c C-c ~9000 M-g M-n ~1000 "&" ~300 C-x C-s ~800 C-c C-c ~9000'
+    conditions:
+      - text: cargo build ran in compile
+        any:
+          - event: { command: playground-cargo-build }
+          - event: { command: compile }
+          - event: { command: project-compile }
+          - event: { command: recompile }
+        hint: "C-c C-c in a Rust buffer runs cargo build; the output opens at the bottom."
+      - text: the service builds
+        shell: { run: "CARGO_TARGET_DIR=/tmp/pg-check/service cargo build -q --offline", cwd: polyglot-service/service, timeout: 120 }
+        hint: "The error is at the call percentile(samples, 0.99): the function takes a slice, &[f64], and gets the Vec itself. help: says what to add. Save before building again."
+      - text: the last build finished
+        buffer: { name: "*compilation*", contains: "Finished" }
+        hint: "Build again after the fix: C-c C-c in main.rs, or g in *compilation*."
+  - id: score
+    goal: Score the service with the Python tool from Eshell
+    detail: "In the `tools` tab, `C-x p e` opens Eshell in the tools root. Run the service and pipe its output into the scorer, saving the result: `cargo run -q --manifest-path ../service/Cargo.toml -- ../service/samples.txt | python3 score.py > score.txt`. Then `cat score.txt`."
+    demo: 'C-x t RET ~500 "tools" RET ~600 C-x p e ~1500 "cargo run -q --manifest-path ../service/Cargo.toml -- ../service/samples.txt | python3 score.py > score.txt \n" ~6000 "cat score.txt \n" ~1000'
+    conditions:
+      - text: Eshell runs in the tools root
+        buffer: { name: "*tools-eshell*", mode: eshell-mode }
+        hint: "C-x p e (Control x, p, e) from a file in tools/ opens an Eshell named after the project, in its root."
+      - text: tools/score.txt has the score
+        file: { path: polyglot-service/tools/score.txt, regex: "score: \\d+/100" }
+        hint: "Eshell redirects with > like any shell: … | python3 score.py > score.txt. If it is empty, the service did not build: finish task 2 first."
+    stuck:
+      - when: { idle_seconds: 60, step_seconds: 120 }
+        say: "The whole command: cargo run -q --manifest-path ../service/Cargo.toml -- ../service/samples.txt | python3 score.py > score.txt"
+  - id: proof
+    goal: Make the OCaml invariants hold with dune
+    detail: "In the `proof` tab, `C-c C-r` in `percentile.ml` runs `dune runtest`. The check fails with an exception; the backtrace names the line in `percentile.ml`. Ranks are 1-based and `List.nth` is 0-based: clamp the index to `0 … n - 1` the way `main.rs` does, save and run the tests again."
+    demo: 'C-x t RET ~500 "proof" RET ~600 C-x C-f ~400 "/work/polyglot-service/proof/percentile.ml" RET ~800 C-c C-r ~6000 M-< ~300 C-s "nth sorted rank" RET ~400 M-DEL ~300 "(max 0 (min (n - 1) (rank - 1)))" ~600 C-x C-s ~800 C-c C-r ~6000'
+    conditions:
+      - text: dune runtest ran in compile
+        any:
+          - event: { command: playground-dune-test }
+          - event: { command: compile }
+          - event: { command: project-compile }
+          - event: { command: recompile }
+        hint: "C-c C-r in an OCaml buffer runs dune runtest (C-c C-c is dune build)."
+      - text: the invariants hold
+        shell: { run: "mkdir -p /work/.playground/pg-check && dune test --force --build-dir=/work/.playground/pg-check/proof --root . 2>&1 | grep -q 'all invariants hold'", cwd: polyglot-service/proof, timeout: 120 }
+        hint: "Failure(\"nth\") means List.nth got an index past the end: with q = 1.0 the rank is n. Use rank - 1, kept between 0 and n - 1."
+  - id: report
+    goal: Fill in the Typst report with its live preview
+    detail: "In the `report` tab, `C-c C-w` in `report.typ` starts `typst watch`: every save rebuilds `report.pdf`, and the preview pane beside the screen shows it. Replace the three `TBD` cells with the numbers from `score.txt` (`14.0 ms`, `240.0 ms`, `90/100`) and save. `C-c C-w` toggles watching: the echo area says Start Watch or Stop Watch. (The demo first stops any earlier watch with `C-u - C-c C-w`.)"
+    demo: 'C-x t RET ~500 "report" RET ~600 C-x C-f ~400 "/work/polyglot-service/report/report.typ" RET ~800 C-u - C-c C-w ~600 C-c C-w ~2000 M-< ~300 C-s "TBD" RET M-DEL "14.0 ms" ~300 C-s "TBD" RET M-DEL "240.0 ms" ~300 C-s "TBD" RET M-DEL "90/100" ~600 C-x C-s ~4000'
+    conditions:
+      - text: typst watch is running
+        any:
+          - event: { command: typst-ts-watch-mode }
+          - elisp: '(seq-find (lambda (p) (string-match-p "typst" (mapconcat (function identity) (process-command p) " "))) (process-list))'
+        hint: "C-c C-w (Control c, Control w) in report.typ turns watch mode on; the PDF then follows every save."
+      - text: no TBD is left in report.typ
+        file: { path: polyglot-service/report/report.typ, not_contains: "TBD" }
+        hint: "C-s TBD finds each cell. The numbers are in tools/score.txt."
+      - text: the PDF shows the p99 and the score
+        elisp: '(with-temp-buffer (and (eql 0 (call-process "pdftotext" nil t nil "/work/polyglot-service/report/report.pdf" "-")) (progn (goto-char (point-min)) (search-forward "240" nil t)) (progn (goto-char (point-min)) (search-forward "90" nil t)) (progn (goto-char (point-min)) (not (search-forward "TBD" nil t)))))'
+        hint: "Save report.typ: typst watch rebuilds report.pdf a moment later, and a Typst error opens the watch buffer instead. No rebuild at all means watching is off, or lost track of the file after Reset this task: press C-c C-w until the echo area says Start Watch (after a reset, twice), then save again."
+  - id: compile-per-root
+    goal: Give the report root its own build command
+    detail: "`.dir-locals.el` at the top of `polyglot-service` sets `compile-command` for each root; report's is empty. Type `typst compile report.typ` between its quotes and save. Buffers read the file when they visit a file, so in `report.typ` press `C-x x g` (revert) and then `C-x p c`: the prompt now offers the report's command. `RET` runs it."
+    demo: 'C-x C-f ~400 "/work/polyglot-service/.dir-locals.el" RET ~800 M-< ~300 C-s "\"report/\"" RET ~300 C-s ". \"\"" RET ~300 C-b "typst compile report.typ" ~300 C-x C-s ~800 C-x C-f ~400 "/work/polyglot-service/report/report.typ" RET ~800 C-x x g ~1000 C-x p c ~800 RET ~4000'
+    conditions:
+      - text: report has a build command in .dir-locals.el
+        file: { path: polyglot-service/.dir-locals.el, regex: "\"report/\"[^\\n]*compile-command \\. \"typst compile" }
+        hint: "The report line ends with (compile-command . \"\"). Put typst compile report.typ between the two quotes, then save."
+      - text: C-x p c ran the report's command
+        buffer: { name: "*compilation*", contains: "typst compile report.typ" }
+        hint: "The file must read .dir-locals.el again: C-x x g in report.typ, then C-x p c. The prompt should offer typst compile report.typ."
+      - text: the report build finished
+        buffer: { name: "*compilation*", contains: "finished" }
+        hint: "A Typst error stops the build; *compilation* names the line."
+  - id: deploy
+    goal: Build a release and copy it to the box over TRAMP
+    detail: "In `service`, `C-x p c` with `cargo build --release` builds an optimised binary into `target/release/`. Open that directory in Dired, put the cursor on `latency`, press `C` and copy it to `/ssh:box:/srv/app/`. TRAMP copies it over SSH and keeps it executable."
+    demo: 'C-x t RET ~500 "service" RET ~600 C-x C-f ~400 "/work/polyglot-service/service/src/main.rs" RET ~800 C-x p c ~600 C-a C-k "cargo build --release \n" ~9000 C-l ~6000 C-x d ~400 "/work/polyglot-service/service/target/release/" RET ~1000 M-< C-s "latency" RET ~400 C ~600 "/ssh:box:/srv/app/" ~500 RET ~6000 y ~5000'
+    conditions:
+      - text: a release build exists
+        file: { path: polyglot-service/service/target/release/latency, exists: true }
+        hint: "C-x p c, C-a C-k, then cargo build --release and RET. It takes a few seconds longer than a debug build."
+      - text: the binary runs on the box
+        shell: { host: box, run: "printf '10\\n20\\n30\\n' | /srv/app/latency | grep -qx 'p99 30.0'" }
+        hint: "In Dired on target/release/, C on the latency line copies it; type /ssh:box:/srv/app/ as the target (the second / starts over) and RET. TRAMP connects first, which takes a moment."
+    stuck:
+      - when: { minibuffer_seconds: 45 }
+        say: "Type the target as /ssh:box:/srv/app/ and RET. The echo area says Tramp: Opening connection while it connects."
+  - id: layout
+    goal: Save a three-window layout with burly
+    detail: "Lay out `main.rs` on the left, `score.py` top right and `report.typ` below it (`C-x 1`, `C-x 3`, `C-x o`, `C-x 2`; `C-x b` or `C-x C-f` in each). Then `M-x burly-bookmark-windows` and name it `polyglot`: `C-x r b Burly: polyglot` brings the layout back any time, files and positions included."
+    demo: 'C-x 1 ~400 C-x C-f ~400 "/work/polyglot-service/service/src/main.rs" RET ~600 C-x 3 ~400 C-x o ~400 C-x C-f ~400 "/work/polyglot-service/tools/score.py" RET ~600 C-x 2 ~400 C-x o ~400 C-x C-f ~400 "/work/polyglot-service/report/report.typ" RET ~800 M-x ~400 "burly-bookmark-windows" RET ~600 "polyglot" RET ~800'
+    conditions:
+      - text: main.rs left; score.py above report.typ right
+        layout: "(hsplit main.rs (vsplit score.py report.typ))"
+        hint: "C-x 3 splits side by side, C-x 2 one above the other; C-x o moves to the next window."
+      - text: a layout bookmark called polyglot exists
+        elisp: '(progn (require (quote bookmark)) (seq-find (lambda (b) (string-match-p "polyglot" (car b))) bookmark-alist))'
+        hint: "M-x burly-bookmark-windows; the name prompt starts with Burly: already; type polyglot after it."

@@ -1,0 +1,154 @@
+id: projects/p8-refactor
+title: Repository-wide refactor
+minutes: 75
+mode: terminal
+tags: [project]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui]
+vscode: "multi-file replace, refactor preview"
+project: { roots: [shelf], lapMinutes: 25 }
+setup:
+  workspace: fixtures/shelf
+  root: shelf
+  reset: true
+  repos: ["."]
+  # A debugging line someone forgot, left uncommitted on purpose: task 6
+  # takes it out again with ediff.
+  run: "grep -q 'debug:' src/main.rs || sed -i 's|^    println!(\"{} users\", db.len());$|&\\n    eprintln!(\"debug: {} rows\", db.len());|' src/main.rs"
+  open: [shelf/README.md]
+  layout: single
+  # A listing left in wdired by an earlier attempt would swallow C-x C-q.
+  eval: >-
+    (let ((kill-buffer-query-functions nil))
+      (dolist (b (buffer-list))
+        (when (eq (buffer-local-value 'major-mode b) 'wdired-mode)
+          (with-current-buffer b (wdired-abort-changes))
+          (kill-buffer b))
+        (when (and (buffer-live-p b)
+                   (or (member (buffer-name b) '("*compilation*" "*Ediff Control Panel*"))
+                       (string-prefix-p "*Embark Export" (buffer-name b))))
+          (kill-buffer b))))
+steps:
+  - id: find
+    goal: Find every use of get_usr and jump to its definition
+    detail: "`M-s r` searches the project with ripgrep as you type: `get_usr` lists eight matches in Rust and Python. After the search text, `#` starts a second filter over the results: `get_usr#pub fn` keeps only the Rust definition. `RET` jumps there."
+    demo: 'M-s r ~800 "get_usr" ~1500 "#pub fn" ~1000 RET ~800'
+    conditions:
+      - text: the project was searched with ripgrep
+        event: { command: consult-ripgrep }
+        hint: "M-s r is Alt s, then r. The prompt names the project, shelf."
+      - text: the cursor is on the definition in usr.rs
+        all:
+          - state: { file: /work/shelf/src/usr.rs }
+          - elisp: '(with-current-buffer (window-buffer (selected-window)) (string-match-p "fn get_usr" (or (thing-at-point (quote line) t) "")))'
+        hint: "Move to the line src/usr.rs … pub fn get_usr in the list (C-n, or narrow it with #pub fn) and RET."
+  - id: wgrep
+    goal: Rename get_usr to get_user everywhere through wgrep
+    detail: "`M-s r get_usr`, then `C-.` `E` exports the matches to a buffer. `C-x C-q` makes it editable; from the top (`M-<`), `M-%` replaces `get_usr` with `get_user` (`TAB` between the fields, `RET`, then `!` for all). `C-c C-c` writes the four files and saves them."
+    demo: 'M-s r ~800 "get_usr" ~2000 C-. ~600 E ~1500 C-x C-q ~600 M-< ~300 M-% ~500 "get_usr" ~300 TAB ~300 "get_user" ~600 RET ~800 ! ~800 C-c C-c ~1500'
+    conditions:
+      - text: the exported matches were edited with wgrep
+        event: { command: wgrep-change-to-wgrep-mode }
+        hint: "Export first: in the ripgrep list press C-. then E. Then C-x C-q in the exported buffer (C-x o gets you there)."
+      - text: get_usr is gone from every file
+        shell: { run: "! grep -rq --exclude-dir=target --exclude-dir=.git get_usr ." }
+        hint: "C-c C-c applies the edits to the files (C-c C-k throws them away). Eight matches in four files."
+      - text: get_user is defined and used in Rust and Python
+        all:
+          - file: { path: shelf/src/usr.rs, contains: "pub fn get_user" }
+          - file: { path: shelf/src/main.rs, contains: "get_user(&db" }
+          - file: { path: shelf/scripts/usr_report.py, contains: "def get_user" }
+          - file: { path: shelf/scripts/test_report.py, contains: "import get_user" }
+        hint: "Replace get_usr with get_user exactly; M-% works on the exported lines like on any buffer."
+    stuck:
+      - when: { minibuffer_seconds: 45 }
+        say: "In the ripgrep list, C-. opens embark's actions; E exports every match into a buffer you can edit."
+  - id: wdired
+    goal: Rename usr.rs and usr_report.py in wdired
+    detail: "Open `src/` in Dired, `C-x C-q`, change `usr.rs` to `user.rs`, `C-c C-c`. Do the same in `scripts/` for `usr_report.py` → `user_report.py`. Nothing else changes yet: the code still says `usr`, which the build will tell you in task 5."
+    demo: 'C-x d ~400 "/work/shelf/src/" RET ~800 C-x C-q ~500 M-< C-s "usr.rs" C-r RET ~300 M-d "user" ~400 C-c C-c ~800 C-x k RET ~600 C-x d ~400 "/work/shelf/scripts/" RET ~800 C-x C-q ~500 M-< C-s "usr_report" C-r RET ~300 M-d "user" ~400 C-c C-c ~800 C-x k RET ~600'
+    conditions:
+      - text: a listing was edited with wdired
+        any:
+          - event: { command: wdired-change-to-wdired-mode }
+          - event: { command: dired-toggle-read-only }
+        hint: "C-x C-q in a Dired listing makes the names editable; C-c C-c renames, C-c C-k cancels."
+      - text: src/user.rs and scripts/user_report.py exist
+        all:
+          - file: { path: shelf/src/user.rs, exists: true }
+          - file: { path: shelf/scripts/user_report.py, exists: true }
+          - file: { path: shelf/src/usr.rs, exists: false }
+          - file: { path: shelf/scripts/usr_report.py, exists: false }
+        hint: "Two listings: src/ for usr.rs, scripts/ for usr_report.py; C-c C-c in each. Only the names are editable: Text is read-only means the cursor is left of the name (where C-a puts it)."
+  - id: macro
+    goal: Rewrite forty add_usr calls with one keyboard macro
+    detail: "In `src/seed.rs`, every `add_usr(&mut db, \"alice\", 31);` should read `db.push(User::new(\"alice\", 31));`. Record one line with `F3` … `F4` (for example: `M-m`, `M-z (` deletes up to the bracket, type `db.push(User::new(`, `M-z ,` and `C-d` delete `&mut db, `, `C-e C-b` and type `)`, `C-n`), then `C-u 39 F4` runs it on the other 39."
+    demo: 'C-x C-f ~400 "/work/shelf/src/seed.rs" RET ~800 M-< ~300 C-s "add_usr(&mut" RET ~300 C-a ~300 <f3> ~300 M-m M-z "(" "db.push(User::new(" M-z "," C-d C-e C-b ")" C-n ~300 <f4> ~600 C-u "39" <f4> ~1500 C-x C-s ~800'
+    conditions:
+      - text: a keyboard macro ran
+        any:
+          - event: { command: kmacro-end-or-call-macro }
+          - event: { command: kmacro-end-and-call-macro }
+          - event: { command: kmacro-call-macro }
+          - event: { command: apply-macro-to-region-lines }
+        hint: "F3 starts recording and F4 ends it; F4 again runs it once, and C-u 39 F4 runs it 39 times."
+      - text: all forty calls use User::new
+        all:
+          - file: { path: shelf/src/seed.rs, not_contains: "add_usr(&mut db" }
+          - shell: { run: "test \"$(grep -c '^    db.push(User::new(\"[a-z]*\", [0-9]*));$' src/seed.rs)\" -eq 40" }
+        hint: "End the recording on the next line (C-n before F4), so each run starts where the last one stopped. C-/ undoes a run that went wrong; save when done."
+  - id: walk-errors
+    goal: Build, walk the errors and fix each one
+    detail: "`C-x p c` with `make` builds the Rust program and runs the Python test. The renamed files break it: `M-g M-n` jumps to each problem in turn: a missing module, two imports, then, once Rust builds, two warnings (the old `add_usr` is unused now: delete its import and the function) and a Python import in a traceback. Fix each, save, and build again until `make` finishes. A completion popup left open by your typing takes `M-g M-n` for itself; `C-g` closes it."
+    demo: 'C-x C-f ~400 "/work/shelf/src/main.rs" RET ~600 C-x p c ~600 C-a C-k "make \n" ~9000 M-g M-n ~1000 C-e C-b M-DEL "user" ~300 C-x C-s ~600 C-x p c ~600 C-a C-k "make \n" ~9000 M-g M-n ~1000 M-d "user" ~1000 C-g ~300 C-x C-s ~400 M-g M-n ~1000 M-d "user" ~1000 C-g ~300 C-x C-s ~600 C-x p c ~600 C-a C-k "make \n" ~9000 M-g M-n ~1000 C-a C-k "use crate::user::User" ; ~1000 C-g ~300 C-x C-s ~400 M-g M-n ~1000 C-p C-a C-u 5 C-k ~300 C-x C-s ~400 M-g M-n ~1000 C-s "usr_" RET M-DEL "user_" ~300 C-x C-s ~600 C-x p c ~600 C-a C-k "make \n" ~9000'
+    conditions:
+      - text: errors were visited from the build
+        any:
+          - event: { command: next-error, min: 3 }
+          - event: { command: compile-goto-error, min: 3 }
+        hint: "M-g M-n jumps to the next error from any window. If it shows a candidate's location instead, a completion popup was still open after your typing: C-g closes it, then M-g M-n again."
+      - text: the Rust program builds without warnings and the Python test passes
+        shell: { run: "CARGO_TARGET_DIR=/tmp/pg-check/shelf cargo build -q --offline 2>&1 | grep -q . && exit 1; PYTHONDONTWRITEBYTECODE=1 python3 scripts/test_report.py", timeout: 120 }
+        hint: "mod usr becomes mod user; use usr:: and crate::usr:: become user:: and crate::user::; add_usr goes from the import and from user.rs; in test_report.py the module is now user_report."
+      - text: the last make finished
+        buffer: { name: "*compilation*", contains: "Compilation finished" }
+        hint: "Build again after the last fix: C-x p c, make."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "C-a C-k clears the offered command; type make and RET."
+  - id: ediff
+    goal: Review main.rs against the start in ediff and drop the debug line
+    detail: "Someone left a debugging `eprintln!` in `main.rs`. In `main.rs`, `M-x vc-ediff` shows the committed version (A, how the project started) beside your working file (B). In the control window at the bottom `n` and `p` step through the differences; on the `debug:` one, `a` copies A's version over B's, which deletes the line. `w b` saves B, `q` and `y` end the session."
+    demo: 'C-x C-f ~400 "/work/shelf/src/main.rs" RET ~600 M-x ~400 "vc-ediff" RET ~2500 n ~600 n ~600 n ~800 a ~600 w b ~600 q ~400 y ~800'
+    conditions:
+      - text: ediff copied a difference from A
+        event: { command: ediff-copy-A-to-B }
+        hint: "The control window at the bottom takes the ediff keys: n next difference, a takes A's text into B. Its mode line says which difference is current."
+      - text: the debug line is gone, the refactor kept
+        all:
+          - file: { path: shelf/src/main.rs, not_contains: "debug:" }
+          - file: { path: shelf/src/main.rs, contains: "mod user;" }
+        hint: "Use a only on the debug: difference; on another one it undoes part of the refactor (rb in the control window restores that region of B). w b saves main.rs."
+      - text: the ediff session is over
+        elisp: '(not (get-buffer "*Ediff Control Panel*"))'
+        hint: "q in the control window, then y."
+  - id: commit
+    goal: Commit the refactor in two commits, hunk by hunk
+    detail: "In Magit (`C-x g`), `M-4` shows every hunk. `seed.rs` has two: the import (part of the rename) and the forty calls. Put the cursor in the forty-call hunk, `s` stages that hunk only; `c c`, `Seed users with User::new`, `C-c C-c`. Then stage the rest (`S` stages every tracked change, `s` on Untracked files the new files) and commit it as `Rename usr to user`."
+    demo: 'C-x g ~1500 M-4 ~600 M-< C-s "db.push(User::new(\"alice\"" RET ~300 s ~1500 c c ~1500 "Seed users with User::new" ~300 C-c C-c ~2500 S ~1500 M-< C-s "Untracked files" RET ~300 s ~1500 c c ~1500 "Rename usr to user" ~300 C-c C-c ~2500'
+    conditions:
+      - text: Magit committed
+        event: { command: with-editor-finish }
+        hint: "Nothing staged means nothing to commit: Magit then offers to stage everything. Stage the hunk first, then c c, a message on the first line, C-c C-c."
+      - text: two commits, the seed calls apart from the rename
+        shell:
+          run: |
+            init=$(git rev-list --max-parents=0 HEAD) || exit 1
+            [ "$(git rev-list --count HEAD "^$init")" -ge 2 ] || exit 1
+            for c in $(git rev-list HEAD "^$init"); do
+              p=$(git show "$c")
+              if echo "$p" | grep -q '^+.*User::new("' && echo "$p" | grep -q '^+.*user'; then exit 1; fi
+            done
+        hint: "Stage only the hunk with the db.push lines first (s with the cursor inside it), commit, then the rest. If a commit mixed both, Reset this task: it undoes the commits."
+      - text: nothing is left uncommitted
+        shell: { run: "test -z \"$(git --no-optional-locks status --porcelain)\"" }
+        hint: "g refreshes Magit. Untracked files need s on their section; S stages tracked changes only, and asks Stage all changes? once something is staged already (y is fine)."

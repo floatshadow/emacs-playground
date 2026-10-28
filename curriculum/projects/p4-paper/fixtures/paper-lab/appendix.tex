@@ -1,0 +1,56 @@
+\documentclass[12pt]{article}
+\usepackage[a5paper,margin=2cm]{geometry}
+\usepackage{lmodern}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage[style=numeric,backend=biber]{biblatex}
+\usepackage{hyperref}
+\addbibresource{refs.bib}
+
+\title{Lantern build times: appendix}
+\author{A. Learner}
+\date{}
+
+\begin{document}
+\maketitle
+\appendix
+
+\section{Every run}
+\label{sec:runs}
+
+The paper reports the median of five builds for each folder. The table
+below lists all fifteen builds, in seconds, in the order they ran.
+
+\begin{table}[h]
+  \centering
+  \begin{tabular}{rrrrrr}
+    \hline
+    Notes & Run 1 & Run 2 & Run 3 & Run 4 & Run 5 \\
+    \hline
+    100 & 0.21 & 0.20 & 0.20 & 0.19 & 0.20 \\
+    1000 & 1.93 & 1.88 & 1.90 & 1.91 & 1.87 \\
+    10000 & 19.6 & 19.4 & 19.2 & 19.4 & 19.5 \\
+    \hline
+  \end{tabular}
+  \caption{Build time of every run, in seconds.}
+  \label{tab:runs}
+\end{table}
+
+\section{Setup}
+\label{sec:setup}
+
+All builds ran on one laptop with four cores and sixteen gigabytes of
+memory, plugged in, with the network disconnected so that no
+background update could start in the middle of a run.
+
+Before the first build of each folder, every note was read once, so
+that the files were in the operating system's cache for all five runs.
+Without that, the first run of the largest folder took almost twice as
+long as the others, which says more about the disk than about Lantern.
+
+The mesurements were taken with the shell's own timer, which reports
+the wall-clock time of the whole command, from start-up to the last
+page written.
+
+\printbibliography
+\end{document}

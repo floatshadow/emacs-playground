@@ -1,0 +1,153 @@
+id: projects/p1-hello-cargo
+title: "Hello, cargo"
+minutes: 75
+mode: terminal
+tags: [project]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust]
+vscode: "rust-analyzer, Tasks, Source Control"
+project: { roots: [cargo-lab], lapMinutes: 25 }
+preview:
+  tabs: [cargo-lab/README.md]
+  follow: { cargo-lab/tempconv/src/main.rs: cargo-lab/README.md }
+setup:
+  workspace: fixtures/cargo-lab
+  root: cargo-lab
+  reset: true
+  # cargo new inside a git repository makes no repository of its own:
+  # cargo-lab is the repository, tempconv a directory in it.
+  repos: ["."]
+  open: [cargo-lab/README.md]
+  layout: single
+  # Shells, build output and a debugger from an earlier visit go: task 1 starts a
+  # fresh Eshell, and the build checks read *compilation*.
+  eval: >-
+    (progn
+      (when (fboundp 'dape-quit) (ignore-errors (dape-quit)))
+      (let ((kill-buffer-query-functions nil))
+        (dolist (b (buffer-list))
+          (when (or (memq (buffer-local-value 'major-mode b) '(eshell-mode compilation-mode))
+                    (string-prefix-p "magit" (symbol-name (buffer-local-value 'major-mode b))))
+            (kill-buffer b)))))
+steps:
+  - id: scaffold
+    goal: Scaffold the crate with cargo new from Eshell, and commit the scaffold
+    detail: "`C-x p e` opens Eshell in the project root, /work/cargo-lab. Type `cargo new tempconv` and `RET`. Then commit the untouched scaffold, so that later diffs show only your own code: `git add tempconv` `RET`, then `git commit -m scaffold` `RET`. When a completion popup is open, `RET` first takes its highlighted candidate; a second `RET` runs the line."
+    demo: 'C-x p e ~1500 "cargo new tempconv " RET ~3000 "git add tempconv " RET ~1000 "git commit -m scaffold " RET ~1500'
+    conditions:
+      - text: Eshell is open
+        any:
+          - event: { command: project-eshell }
+          - event: { command: eshell }
+        hint: "C-x p e, from README.md: the prompt that appears reads /work/cargo-lab $. M-x eshell works too."
+      - text: the crate exists in /work/cargo-lab/tempconv
+        file: { path: cargo-lab/tempconv/Cargo.toml, exists: true }
+        hint: "Eshell prints Creating binary (application) `tempconv` package. If the prompt shows another directory, cd /work/cargo-lab first."
+      - text: the scaffold is committed
+        shell: { run: "git cat-file -e HEAD:tempconv/src/main.rs" }
+        hint: "git add tempconv, then git commit -m scaffold. Eshell passes both to git like any shell; git status shows what is left."
+    stuck:
+      - when: { step_seconds: 240 }
+        say: "In Eshell, type each command and press RET: cargo new tempconv, git add tempconv, git commit -m scaffold. Eshell is a shell written in Emacs Lisp, so cd, ls and git work as usual."
+  - id: layout
+    goal: "Open main.rs and run it: code above, output below"
+    detail: "Eshell runs Emacs commands as if they were programs: `find-file tempconv/src/main.rs` `RET` opens the file in place of the shell (`C-x C-f` does too). Then `C-c C-r` runs `cargo run`; the output window opens below the code, a third of the frame high, and the cursor stays in the code."
+    demo: 'C-x C-f "/work/cargo-lab/tempconv/src/main.rs" RET ~800 C-x 1 ~300 C-c C-r ~6000'
+    conditions:
+      - text: main.rs is the current buffer
+        state: { file: /work/cargo-lab/tempconv/src/main.rs }
+        hint: "In Eshell, find-file tempconv/src/main.rs; TAB completes each part of the path."
+      - text: cargo run printed Hello, world!
+        buffer: { name: "*compilation*", contains: "Hello, world!" }
+        hint: "C-c C-r in main.rs (the lang-rust module's cargo run). The first build takes a few seconds."
+      - text: code above, output below
+        layout: "(vsplit main.rs *compilation*)"
+        hint: "If Eshell still shares the frame, C-x 1 in main.rs, then C-c C-r again: the output opens below by itself."
+  - id: write
+    goal: Write c_to_f and a loop over the arguments, with rust-analyzer's help
+    detail: "Above `fn main` write `fn c_to_f(c: f64) -> f64 { c * 9.0 / 5.0 + 32.0 }`. Replace the body of main with `let args: Vec<String> = std::env::args().skip(1).collect();` and a loop: `for arg in args {` `let c: f64 = arg.parse().expect(\"not a number\");` `println!(\"{c} C = {} F\", c_to_f(c));` `}`. As you type `std::env::ar`, pause: the popup offers `args`; `RET` takes it. Save, then `M-x compile` `RET`, replace the offered `cargo build` with `cargo run -- 100 -40`, `RET`."
+    demo: 'C-x C-f "/work/cargo-lab/tempconv/src/main.rs" RET ~500 C-x 1 M-< "fn c_to_f(c: f64) -> f64 {\nc * 9.0 / 5.0 + 32.0\n}\n\n" C-n C-a C-k "let args: Vec<String> = std::env::ar" ~2500 RET "().skip(1).collect()" ; RET "for arg in args {\nlet c: f64 = arg.parse().expect(\"not a number\")" ; RET "println!(\"{c} C = {} F\", c_to_f(c))" ; RET "}" ~300 C-x C-s ~1500 M-x ~400 "compile" RET ~500 C-a C-k "cargo run -- 100 -40" RET ~8000'
+    conditions:
+      - text: Eglot (rust-analyzer) manages main.rs
+        elisp: '(let ((b (find-buffer-visiting "/work/cargo-lab/tempconv/src/main.rs"))) (and b (with-current-buffer b (eglot-managed-p))))'
+        hint: "The mode line of main.rs should show [eglot:tempconv]. If it does not, move the cursor once in main.rs; Eglot starts after the first command."
+      - text: a completion was accepted from the popup
+        any:
+          - event: { command: corfu-insert }
+          - event: { command: corfu-complete }
+          - event: { command: completion-at-point }
+        hint: "Type std::env::ar and wait half a second without typing: rust-analyzer's candidates pop up, args first. RET or TAB inserts it."
+      - text: c_to_f exists and main calls it in a loop over std::env::args()
+        all:
+          - file: { path: cargo-lab/tempconv/src/main.rs, regex: 'fn\s+c_to_f\s*\(\s*c\s*:\s*f64\s*\)\s*->\s*f64' }
+          - file: { path: cargo-lab/tempconv/src/main.rs, regex: '(?s)std::env::args\(\).*for\s.*c_to_f\(' }
+        hint: "c_to_f goes above fn main; main collects std::env::args() into args and loops with for arg in args. Files save themselves a few seconds after you stop typing; C-x C-s saves now."
+      - text: cargo run -- 100 -40 printed 100 C = 212 F
+        buffer: { name: "*compilation*", contains: "100 C = 212 F" }
+        hint: "M-x compile RET offers cargo build: C-a C-k clears it, type cargo run -- 100 -40, RET. Errors are underlined in main.rs; M-n jumps to the next one."
+    stuck:
+      - when: { step_seconds: 420 }
+        say: "Type the code as the step shows it; indentation does not matter, rustfmt fixes it when the file is saved. If the popup gets in the way, C-g closes it and you can keep typing."
+  - id: borrow-error
+    goal: Print the count, then fix the borrow error from the compile window
+    detail: "After the loop, before main's last `}`, add `println!(\"converted {} values\", args.len());`. `C-c C-c` builds: the compile window reports `error[E0382]: borrow of moved value: args`. `M-g M-n` jumps to the error in the code (`RET` on the error line in the compile window does too; in the code, `M-g n` without the second Meta walks Flymake's underlines instead). The `for` loop took ownership of `args`; make it borrow instead: `for arg in &args`. `C-c C-c` again until the build says Finished."
+    demo: 'C-x C-f "/work/cargo-lab/tempconv/src/main.rs" RET ~500 C-x 1 M-> C-p C-a "println!(\"converted {} values\", args.len())" ; RET C-x C-s ~1500 C-c C-c ~6000 M-g M-n ~800 C-r "args {" RET "&" C-x C-s ~1500 C-c C-c ~6000'
+    conditions:
+      - text: main prints args.len()
+        file: { path: cargo-lab/tempconv/src/main.rs, regex: 'args\.len\(\)' }
+        hint: "The println! goes after the loop's closing brace and before main's own, so args is still in scope."
+      - text: you jumped to an error from the compile window
+        any:
+          - event: { command: next-error }
+          - event: { command: compile-goto-error }
+          - event: { command: flymake-goto-next-error }
+        hint: "Build with C-c C-c first; once the compile window shows the error, M-g M-n puts the cursor on it in main.rs. The arrow in the compile window's margin marks the error you are on."
+      - text: cargo build succeeds
+        shell: { run: "cargo build -q --offline", cwd: cargo-lab/tempconv, timeout: 120 }
+        hint: "The error's help line says consider iterating over a slice: write &args after in, so the loop borrows and args survives it."
+      - text: the compile window shows the clean build
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (and (search-forward "Finished" nil t) (not (search-forward "error" nil t)))))))'
+        hint: "C-c C-c once more, after saving the fix: the compile window ends with Finished and Compilation finished."
+  - id: test
+    goal: Add a test with the test snippet and run cargo test
+    detail: "Tests usually go at the end of a file; this one goes above main, which keeps the last task simple. Put the cursor at the start of the `fn main` line and `C-o` `C-o` opens two lines above it. `M-+` `test` `RET` inserts a test skeleton (a tempel snippet) with the cursor in the name field: type `boiling`, then `TAB` moves into the body (also with a completion popup open). Type `assert_eq!(c_to_f(100.0), 212.0);`. `C-c C-t` runs `cargo test` in the compile window."
+    demo: 'C-x C-f "/work/cargo-lab/tempconv/src/main.rs" RET ~500 C-x 1 M-< C-s "fn main" RET C-a C-o C-o M-+ ~600 "test" RET ~600 "boiling" ~300 TAB "assert_eq!(c_to_f(100.0), 212.0)" ; C-x C-s ~1500 C-c C-t ~8000'
+    conditions:
+      - text: main.rs has a test that calls c_to_f
+        all:
+          - file: { path: cargo-lab/tempconv/src/main.rs, contains: "#[test]" }
+          - file: { path: cargo-lab/tempconv/src/main.rs, regex: 'assert(_eq)?!\s*\(\s*c_to_f\(' }
+        hint: "M-+ asks for a snippet name: test. Type the name, TAB to the body, then the assert_eq! line. If the name field is gone, the snippet ended early: C-/ undoes it, M-+ test RET starts again."
+      - text: cargo test passes
+        shell: { run: "cargo test -q --offline", cwd: cargo-lab/tempconv, timeout: 120 }
+        hint: "100 C is 212 F, so assert_eq!(c_to_f(100.0), 212.0) holds. The compile window shows which assertion failed and its line."
+      - text: the compile window shows test result ok
+        buffer: { name: "*compilation*", contains: "test result: ok" }
+        hint: "C-c C-t in main.rs runs cargo test in the compile window."
+  - id: format
+    goal: Write f_to_c on one line and let rustfmt format it on save
+    detail: "Below c_to_f, write the reverse in one line, without spaces: `fn f_to_c(f:f64)->f64{(f-32.0)*5.0/9.0}`. Save with `C-x C-s`: rustfmt rewrites it into three tidy lines and the cursor stays where it was. `C-c l f` formats without saving."
+    demo: 'C-x C-f "/work/cargo-lab/tempconv/src/main.rs" RET ~500 C-x 1 M-< C-s "32.0" RET C-n C-e RET RET "fn f_to_c(f:f64)->f64{(f-32.0)*5.0/9.0}" ~300 C-x C-s ~3000'
+    conditions:
+      - text: f_to_c is in the file, formatted
+        file: { path: cargo-lab/tempconv/src/main.rs, regex: 'fn f_to_c\(f: f64\) -> f64 \{\n +\(f - 32\.0\) \* 5\.0 / 9\.0\n\}' }
+        hint: "Save with C-x C-s; the formatter runs after the save and the buffer reloads with the tidy version. A syntax error stops rustfmt: check the braces."
+      - text: rustfmt finds nothing left to change
+        shell: { run: "cargo fmt --check", cwd: cargo-lab/tempconv, timeout: 60 }
+        hint: "Another part of main.rs is not formatted yet: C-c l f formats the whole buffer, then C-x C-s."
+  - id: commit
+    goal: "Commit with Magit: the code first, then the test"
+    detail: "`C-x g` opens Magit. On `tempconv/src/main.rs` under Unstaged changes, `s` stages the whole file. Then take the test back out: under Staged changes, `TAB` on main.rs shows its diff (one hunk, because cargo new's three lines were rewritten); put the cursor on `+#[test]`, `C-SPC`, move down to the test's closing `+}` and `u` unstages only the selected lines. `c c`, type `Convert temperatures`, `C-c C-c`. Then stage the rest, `s` on main.rs and `s` on Untracked files (Cargo.lock): `c c`, `Test c_to_f`, `C-c C-c`."
+    demo: 'C-x g ~2000 M-< C-s "src/main.rs" RET ~300 s ~1000 M-< C-s "Staged changes" RET C-n ~300 TAB ~800 C-s "+#[test]" RET C-a C-SPC C-n C-n C-n C-e ~500 u ~1000 c c ~2500 "Convert temperatures" C-c C-c ~2500 M-< C-s "src/main.rs" RET s ~800 M-< C-s "Untracked files" RET s ~800 c c ~2500 "Test c_to_f" C-c C-c ~2500'
+    conditions:
+      - text: Magit status was opened
+        event: { command: magit-status }
+        hint: "C-x g, anywhere in the project. The status buffer lists Unstaged changes; TAB on a file shows its diff."
+      - text: a commit has the conversion code without the test
+        shell: { run: "for c in $(git rev-list HEAD); do f=$(git show $c:tempconv/src/main.rs 2>/dev/null) || continue; if echo \"$f\" | grep -q c_to_f && ! echo \"$f\" | grep -q '#\\[test\\]'; then exit 0; fi; done; exit 1" }
+        hint: "Select the test's four lines in the staged diff, from +#[test] to its +}, and press u: they go back to Unstaged changes. What stays staged is the code; commit it with c c, a message, C-c C-c."
+      - text: the latest commit adds the test and nothing is left in src
+        shell: { run: "git show HEAD:tempconv/src/main.rs | grep -q '#\\[test\\]' && git diff --quiet HEAD -- tempconv/src && test -z \"$(git status --porcelain tempconv/src)\"" }
+        hint: "s on main.rs stages what is left; c c, a message, C-c C-c. In the message buffer C-c C-k cancels instead of committing."
+    stuck:
+      - when: { step_seconds: 300 }
+        say: "Partial staging: in a diff, C-SPC starts a selection; extend it over the lines you want and press s to stage or u to unstage only those. Staged changes is what c c commits."

@@ -1,0 +1,15 @@
+(library
+ (name percentile)
+ (modules percentile))
+
+; OCAMLRUNPARAM=b prints where an exception was raised.
+
+(test
+ (name check)
+ (modules check)
+ (libraries percentile)
+ (action
+  (setenv
+   OCAMLRUNPARAM
+   b
+   (run %{test}))))
