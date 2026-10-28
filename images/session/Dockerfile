@@ -54,7 +54,7 @@
 # compressed; a cold build takes about 9 minutes, a config-only change about
 # 15 seconds.
 
-ARG GO_VERSION=1.26.10
+ARG GO_VERSION=1.27.3
 ARG DEBIAN=trixie
 
 # ---- pins -------------------------------------------------------------------

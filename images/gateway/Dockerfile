@@ -9,7 +9,7 @@
 # Stages: web (pnpm build) → go (gateway and playctl, -tags embedweb) →
 # curriculum (playctl curriculum build) → final.
 
-ARG GO_VERSION=1.26.10
+ARG GO_VERSION=1.27.3
 ARG NODE_VERSION=24
 
 # ---- web: build web/dist -------------------------------------------------
