@@ -1,0 +1,100 @@
+id: 11-everything-is-a-buffer/09-capstone
+title: "Capstone: a pipeline with no new package"
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/workbench
+  root: workbench
+  reset: true
+  repos: ["."]
+  # A debugging line left in the working tree, not committed: it must stay out of the commit.
+  run: |
+    grep -q DEBUG polyglot/src/lib.rs || \
+      sed -i 's|^    format!("Hello, {name}!")$|    eprintln!("DEBUG greet({name})");\n&|' polyglot/src/lib.rs
+  open: [workbench/polyglot/README.md]
+  layout: single
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (and (buffer-live-p b)
+                   (with-current-buffer b (derived-mode-p 'grep-mode 'compilation-mode 'magit-mode)))
+          (let ((kill-buffer-query-functions nil)) (kill-buffer b))))
+      (goto-char (point-min)))
+steps:
+  - id: search
+    goal: Find every p99 in the polyglot project and export the matches
+    detail: "The README asks for p99 to become tail in every language. Search the project from README.md and keep the matches as a grep buffer."
+    demo: 'M-s r ~800 "p99" ~1500 C-. ~600 E ~1500'
+    conditions:
+      - text: the search was exported
+        any:
+          - event: { command: embark-export }
+          - event: { command: embark-act }
+        hint: "M-s r searches the project of the current file; C-. E keeps the matches (lesson 11.4)."
+      - text: the grep buffer lists matches in six files
+        elisp: '(seq-some (lambda (w) (with-current-buffer (window-buffer w) (and (derived-mode-p (quote grep-mode)) (let (files) (save-excursion (goto-char (point-min)) (while (re-search-forward "^\\([^:\n]+\\):[0-9]+:" nil t) (unless (member (match-string 1) files) (push (match-string 1) files)))) (>= (length files) 6))))) (window-list))'
+        hint: "Start from a file in /work/workbench/polyglot, so the search covers that project: Rust, Python, JSON, Typst and the README."
+  - id: rename
+    goal: Rename p99 to tail in all of them
+    detail: "Edit the grep buffer and apply, as in lesson 11.4."
+    demo: 'C-x C-f ~400 "/work/workbench/polyglot/README.md" RET ~500 M-s r ~800 "p99" ~1500 C-. ~600 E ~1500 C-x C-q ~500 M-< ~300 M-% ~500 "p99" ~300 TAB ~300 "tail" ~300 RET ~500 ! ~800 C-c C-c ~1500'
+    conditions:
+      - text: wgrep was used
+        event: { command: wgrep-change-to-wgrep-mode }
+        hint: "C-x C-q in the grep buffer, replace, then C-c C-c. After Reset this step, search and export again first."
+      - text: no p99 is left in the project
+        shell: { run: "! grep -rq p99 --exclude-dir=target .", cwd: workbench/polyglot }
+        hint: "! replaces every remaining match at once. The files change on C-c C-c, and wgrep saves them."
+  - id: build
+    goal: "Edit and build: main.rs above, the build below"
+    detail: "Open `/work/workbench/polyglot/src/main.rs`, keep only its window (`C-x 1`) and build with `C-c C-c`: the first recipe of lesson 3.8. The build fails three times on the same mistake, which has nothing to do with the rename."
+    demo: 'C-x C-f ~400 "/work/workbench/polyglot/src/main.rs" RET ~600 C-x 1 ~400 C-c C-c ~6000'
+    conditions:
+      - text: main.rs above, the build output below
+        layout: "(vsplit main.rs *compilation*)"
+        hint: "C-x 1 in main.rs first, then C-c C-c: the output takes the bottom third by itself."
+      - text: the build finished with three errors
+        buffer: { name: "*compilation*", contains: "due to 3 previous errors", process: none }
+        hint: "Wait for could not compile at the end of the output. If it says something else, the rename broke a name: M-g M-n shows where."
+  - id: macro
+    goal: Fix the three errors with one macro over next-error
+    detail: "Each error is `describe(rust)` where `describe(&rust)` is wanted, and `M-g M-n` puts the cursor right on the argument. Record `F3`, `M-g M-n`, type `&`, `F4`; then `F4` twice. `C-c C-c` builds again."
+    demo: 'C-c C-c ~6000 <f3> ~400 M-g M-n ~600 "&" ~400 <f4> ~800 <f4> ~800 <f4> ~800 C-c C-c ~6000'
+    conditions:
+      - text: a macro was recorded
+        any:
+          - event: { command: kmacro-start-macro-or-insert-counter }
+          - event: { command: kmacro-start-macro }
+        hint: "F3 starts recording; the macro is M-g M-n and the & you type."
+      - text: main.rs borrows all three samples
+        file: { path: workbench/polyglot/src/main.rs, regex: "(?s)describe\\(&rust\\).*describe\\(&python\\).*describe\\(&ocaml\\)" }
+        hint: "If an & landed in the wrong place, the macro started after the first error had already been visited: C-/ the edits, C-c C-c to build again, and record from there."
+      - text: the project builds
+        shell: { run: "cargo build -q", cwd: workbench/polyglot, timeout: 180 }
+        hint: "Save main.rs (C-x C-s) and build again with C-c C-c. The check runs cargo build in the background."
+    stuck:
+      - when: { step_seconds: 240 }
+        say: "Build first so the error list is fresh (C-c C-c), then F3, M-g M-n, type &, F4, and F4 two more times. M-g M-n lands on the argument that needs the &."
+  - id: stage
+    goal: Stage the rename and the fix, but not the DEBUG line
+    detail: "`C-x g`. `src/lib.rs` has two hunks: the rename and an `eprintln!(\"DEBUG …\")` someone left behind. Stage everything with `S`, then expand lib.rs under Staged changes with `TAB`, put the cursor in the DEBUG hunk and `u` unstages just that hunk (or stage file by file with `s` and the rename hunk alone)."
+    demo: 'C-x g ~1500 S ~800 M-< ~300 C-s ~300 "polyglot/src/lib.rs" ~300 RET ~300 TAB ~600 C-s ~300 "DEBUG" ~300 RET ~300 u ~1000'
+    conditions:
+      - text: the rename and the fix are staged in all six files
+        shell: { run: "test $(git diff --cached --name-only -- polyglot | wc -l) = 6 && git diff --cached -- polyglot/src/main.rs | grep -q 'describe(&ocaml)'" }
+        hint: "README.md, data/latency.json, docs/report.typ, src/lib.rs, src/main.rs and tools/score.py all belong in the commit. In the status buffer s stages the file or hunk under the cursor."
+      - text: the DEBUG line is not staged
+        shell: { run: "! git diff --cached -- polyglot/src/lib.rs | grep -q DEBUG && git diff -- polyglot/src/lib.rs | grep -q DEBUG" }
+        hint: "TAB on lib.rs shows its hunks. u on the DEBUG hunk under Staged changes unstages it; k on it under Unstaged changes would delete it, which also keeps it out but loses it."
+  - id: commit
+    goal: Commit
+    detail: "`c c`, a one-line message, `C-c C-c`."
+    demo: 'c ~500 c ~1500 "Rename p99 to tail and borrow samples" ~400 C-c C-c ~1500'
+    conditions:
+      - text: the commit has the rename and the fix
+        shell: { run: "! git grep -q p99 HEAD -- polyglot && test $(git show HEAD:polyglot/src/main.rs | grep -c 'describe(&') = 3" }
+        hint: "c c commits what is staged. If something was missing, stage it and c c again, or c a to amend."
+      - text: the DEBUG line stayed out of it
+        shell: { run: "! git show HEAD:polyglot/src/lib.rs | grep -q DEBUG" }
+        hint: "If it went in, delete the line, stage that change and amend the commit with c a."

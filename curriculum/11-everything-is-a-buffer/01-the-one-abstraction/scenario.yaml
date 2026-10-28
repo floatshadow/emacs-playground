@@ -1,0 +1,113 @@
+id: 11-everything-is-a-buffer/01-the-one-abstraction
+title: The one abstraction
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/workbench
+  root: workbench
+  reset: true
+  repos: ["."]
+  # A short history for the Magit log (fixed dates: the same hashes on every load).
+  run: |
+    if [ "$(git rev-list --count HEAD)" = 1 ]; then
+      c() { GIT_AUTHOR_DATE="$1" GIT_COMMITTER_DATE="$1" git commit -q --allow-empty -m "$2"; }
+      c 2026-03-02T09:00:00+00:00 "Add the icons and the banner"
+      c 2026-03-03T10:30:00+00:00 "Fix the logo colour"
+      c 2026-03-04T14:00:00+00:00 "Write the release checklist"
+      c 2026-03-05T16:45:00+00:00 "Tidy the photos folder"
+    fi
+  open: [workbench/notes/release.md]
+  layout: single
+  # Dired on the left, the checklist on the right with the cursor at its end.
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (and (buffer-live-p b) (memq (buffer-local-value 'major-mode b) '(magit-status-mode magit-log-mode magit-revision-mode magit-diff-mode)))
+          (kill-buffer b)))
+      (delete-other-windows)
+      (let ((right (split-window-right)))
+        (with-selected-window right
+          (switch-to-buffer (find-buffer-visiting "/work/workbench/notes/release.md"))
+          (goto-char (point-max))))
+      (dired "/work/workbench/assets/")
+      (goto-char (point-min))
+      (dired-next-line 3))
+steps:
+  - id: search-dired
+    goal: Find logo.svg in the listing with C-s
+    detail: "The left window is a Dired listing, but it is text in a buffer, so `C-s` searches it like a file. Type `logo`, then `RET` to stop the search with the cursor on that line."
+    demo: 'C-s ~400 "logo" ~500 RET'
+    conditions:
+      - text: C-s was used in the listing
+        event: { command: isearch-forward }
+        hint: "Make sure the cursor is in the left window (C-x o moves it there) before C-s, or the search runs in the checklist."
+      - text: the cursor is on the logo.svg line, search finished
+        all:
+          - state: { isearch: false }
+          - elisp: '(let ((w (seq-find (lambda (w) (with-current-buffer (window-buffer w) (derived-mode-p (quote dired-mode)))) (window-list)))) (and w (with-current-buffer (window-buffer w) (save-excursion (goto-char (window-point w)) (string-match-p "logo\\.svg" (buffer-substring-no-properties (line-beginning-position) (line-end-position)))))))'
+        hint: "RET ends the search where the match is. If the search still shows in the bottom line, press RET; if it went past, C-r searches back."
+  - id: macro-names
+    goal: Copy three file names into the checklist with one macro
+    detail: "On a file line, `w` copies its name, Dired's own version of `M-w`. Record: `F3`, `w`, `C-x o`, `C-y`, `RET`, `C-x o`, `n` (next line), `F4`. Then `F4` twice replays the whole round on the next two lines."
+    demo: 'M-< ~300 C-s ~300 "banner" ~300 RET ~400 <f3> ~400 w ~300 C-x o ~300 C-y ~300 RET ~300 C-x o ~300 n ~300 <f4> ~700 <f4> ~700 <f4>'
+    conditions:
+      - text: a macro was recorded
+        any:
+          - event: { command: kmacro-start-macro-or-insert-counter }
+          - event: { command: kmacro-start-macro }
+        hint: "F3 starts recording (Recording... and Def in the mode line); F4 stops. Everything typed in between is the macro."
+      - text: recording has stopped
+        state: { macro: false }
+        hint: "Def in the mode line means Emacs is still recording; F4 stops it. The first F4 only stops, the next ones replay."
+      - text: release.md lists three file names from assets
+        elisp: '(let ((b (find-buffer-visiting "/work/workbench/notes/release.md")) (seen nil)) (when b (with-current-buffer b (save-excursion (goto-char (point-min)) (while (re-search-forward "^\\([^ \n]+\\)$" nil t) (when (file-regular-p (expand-file-name (match-string 1) "/work/workbench/assets/")) (unless (member (match-string 1) seen) (push (match-string 1) seen))))))) (>= (length seen) 3))'
+        hint: "Three different names, each on a line of its own. The macro ends with n, so start on a line with two more files below it. If C-y pasted a whole line of the listing, the macro copied with M-w instead of w; C-/ undoes in the checklist, then record again."
+    stuck:
+      - when: { step_seconds: 180 }
+        say: "Start on a file line in the listing. F3, then w (the name goes to the kill ring), C-x o, C-y, RET, C-x o, n, F4. Press F4 two more times. If a round went wrong, C-/ in release.md undoes it."
+  - id: open-log
+    goal: Open the history with Magit
+    detail: "`C-x g` opens Magit's status of the repository in the window you are in; `l l` there shows the log of the current branch. The log is a buffer too: one commit per line, the short hash first."
+    demo: 'C-x g ~1500 l ~500 l ~1200'
+    conditions:
+      - text: Magit's status was opened
+        event: { command: magit-status }
+        hint: "Run C-x g with the cursor in the left window, so the checklist stays visible on the right."
+      - text: the log is shown next to the checklist
+        all:
+          - state: { "windows.mode": magit-log-mode }
+          - layout: "(hsplit * release.md)"
+        hint: "In the status buffer press l, then l again in the menu that opens. If the log took the right window, C-x o and C-x b release.md RET there."
+  - id: search-log
+    goal: Find the "Fix the logo colour" commit with C-s
+    detail: "The same `C-s` searches the log. Type `logo`, `RET`."
+    demo: 'M-< ~300 C-s ~400 "logo" ~500 RET'
+    conditions:
+      - text: C-s was used in the log
+        event: { command: isearch-forward }
+        hint: "The cursor must be in the log window. Search for a word of the commit message."
+      - text: the cursor is on that commit, search finished
+        all:
+          - state: { isearch: false }
+          - elisp: '(let ((w (seq-find (lambda (w) (with-current-buffer (window-buffer w) (derived-mode-p (quote magit-log-mode)))) (window-list)))) (and w (with-current-buffer (window-buffer w) (save-excursion (goto-char (window-point w)) (string-match-p "logo colour" (buffer-substring-no-properties (line-beginning-position) (line-end-position)))))))'
+        hint: "Two commits mention the logo? No: only one says logo colour. RET stops on it; C-s again goes to the next match."
+  - id: macro-hashes
+    goal: Copy three short hashes into the checklist with one macro
+    detail: "Magit has its own copy key too, but plain text keys work here. Record: `F3`, `C-a`, `C-SPC`, `M-f` (the hash is the first word), `M-w`, `C-x o`, `C-y`, `RET`, `C-x o`, `n`, `F4`; then `F4` twice."
+    demo: 'M-< ~300 C-s ~300 "logo" ~300 RET ~400 <f3> ~400 C-a ~300 C-SPC ~300 M-f ~300 M-w ~300 C-x o ~300 C-y ~300 RET ~300 C-x o ~300 n ~300 <f4> ~700 <f4> ~700 <f4>'
+    conditions:
+      - text: a new macro was recorded
+        any:
+          - event: { command: kmacro-start-macro-or-insert-counter }
+          - event: { command: kmacro-start-macro }
+        hint: "F3 starts a fresh recording; the macro from the last step is replaced."
+      - text: recording has stopped
+        state: { macro: false }
+        hint: "F4 once to stop, then F4 for each further commit. Def in the mode line means it is still recording."
+      - text: release.md lists three short hashes
+        elisp: '(let ((b (find-buffer-visiting "/work/workbench/notes/release.md")) (seen nil)) (when b (with-current-buffer b (save-excursion (goto-char (point-min)) (while (re-search-forward "^[0-9a-f]\\{7,40\\}$" nil t) (unless (member (match-string 0) seen) (push (match-string 0) seen)))))) (>= (length seen) 3))'
+        hint: "Three different hashes, each alone on its line; start at least two commits above the bottom of the log. M-f stops after the hash; if it copied more, the region started in the wrong place: C-a goes to the start of the line first."
+    stuck:
+      - when: { step_seconds: 180 }
+        say: "In the log, on a commit line: F3, C-a, C-SPC, M-f, M-w, C-x o, C-y, RET, C-x o, n, F4, then F4 twice more. The keys are the same ones that copy a word in any file."

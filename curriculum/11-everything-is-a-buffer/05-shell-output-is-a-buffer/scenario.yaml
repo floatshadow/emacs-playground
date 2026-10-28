@@ -1,0 +1,98 @@
+id: 11-everything-is-a-buffer/05-shell-output-is-a-buffer
+title: Shell output is a buffer
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/workbench
+  root: workbench
+  reset: true
+  open: [workbench/checks/src/lib.rs]
+  layout: single
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (and (buffer-live-p b)
+                   (with-current-buffer b (derived-mode-p 'compilation-mode 'occur-mode)))
+          (let ((kill-buffer-query-functions nil)) (kill-buffer b))))
+      (goto-char (point-min)))
+steps:
+  - id: run
+    goal: Run the tests
+    detail: "`C-c C-t` in a Rust buffer runs `cargo test` through compile. Three of the six tests fail."
+    demo: "C-c C-t ~7000"
+    conditions:
+      - text: cargo test ran
+        any:
+          - event: { command: playground-cargo-test }
+          - event: { command: compile }
+          - event: { command: project-compile }
+          - event: { command: recompile }
+        hint: "C-c C-t with the cursor in lib.rs. M-x compile RET cargo test RET does the same."
+      - text: the run finished with failures
+        buffer: { name: "*compilation*", contains: "test result: FAILED", process: none }
+        hint: "Wait until the output ends; the first build of a crate takes a few seconds."
+  - id: jump
+    goal: Jump to a failing assertion from the output
+    detail: "Each failure prints `panicked at src/lib.rs:LINE:COL`. compile recognises those as locations, so `M-g M-n` jumps to the first one (or `RET` on that line in the output)."
+    demo: "M-g M-n ~1000"
+    conditions:
+      - text: you visited a location from the output
+        any:
+          - event: { command: next-error }
+          - event: { command: compile-goto-error }
+        hint: "M-g M-n works from lib.rs too: it follows the latest list, which is the test run."
+      - text: the cursor is on a failing assertion in lib.rs
+        all:
+          - state: { file: /work/workbench/checks/src/lib.rs }
+          - state: { line: { in: [49, 59, 69] } }
+        hint: "The assertions that fail are on lines 49, 59 and 69. If you landed elsewhere, M-g M-n moves to the next panic."
+  - id: occur
+    goal: List the failing tests with occur on the output
+    detail: "Move into the output (`C-x o`). `M-s o` works there as in any buffer: `FAILED$` finds the lines that end in FAILED, one per failing test."
+    demo: 'C-x b ~400 "*compilation*" ~600 RET ~400 M-s o ~500 "FAILED$" ~300 RET ~800'
+    conditions:
+      - text: occur ran on the test output
+        elisp: '(let ((b (get-buffer "*Occur*"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (looking-at ".*in buffer: \\*compilation\\*")))))'
+        hint: "Run M-s o with the cursor in *compilation*; in lib.rs it searches the source instead."
+      - text: three failing tests are listed
+        elisp: '(let ((b (get-buffer "*Occur*"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (looking-at "3 matches")))))'
+        hint: "FAILED$ (with the dollar) skips the summary line, test result: FAILED. 3 passed, where FAILED is not at the end."
+  - id: copy
+    goal: Copy the whole output into a new file, FAILING.md
+    detail: "In `*compilation*`, `C-x h` selects everything and `M-w` copies it. Then `C-x C-f /work/workbench/checks/FAILING.md RET` makes a new file, `C-y` pastes and `C-x C-s` writes it."
+    demo: 'C-x b ~400 "*compilation*" ~600 RET ~400 C-x h ~300 M-w ~400 C-x C-f ~400 "/work/workbench/checks/FAILING.md" ~300 RET ~600 C-y ~400 C-x C-s ~600'
+    conditions:
+      - text: FAILING.md is open
+        state: { file: /work/workbench/checks/FAILING.md }
+        hint: "A file that does not exist yet opens as an empty buffer; it is written on the first save."
+      - text: it holds the test output, saved
+        file: { path: workbench/checks/FAILING.md, contains: "test result: FAILED" }
+        hint: "Copy in *compilation* (C-x h, M-w), then C-y in FAILING.md and C-x C-s. The output is plain text once it is copied."
+  - id: filter
+    goal: Keep only the failing lines, sorted, with grep and sort
+    detail: "`C-x h` selects the buffer; `C-u M-|` pipes the region through a shell command and replaces it with the output: `grep 'FAILED$' | sort`, `RET`."
+    demo: "C-x C-f ~400 \"/work/workbench/checks/FAILING.md\" RET ~500 C-x h ~300 C-u M-| ~500 \"grep 'FAILED$' | sort\" ~300 RET ~800"
+    conditions:
+      - text: the region went through a shell command
+        event: { command: shell-command-on-region }
+        hint: "Without C-u, M-| shows the output elsewhere and leaves the buffer as it was."
+      - text: FAILING.md holds the three FAILED lines, sorted
+        elisp: '(let ((b (find-buffer-visiting "/work/workbench/checks/FAILING.md"))) (and b (with-current-buffer b (string-match-p "\\`test tests::bracketed_handles_empty_input \\.\\.\\. FAILED\ntest tests::truncate_fits_the_limit \\.\\.\\. FAILED\ntest tests::word_count_ignores_extra_spaces \\.\\.\\. FAILED\n*\\''" (buffer-substring-no-properties (point-min) (point-max))))))'
+        hint: "The whole buffer must be selected (C-x h) before C-u M-|. If the result is wrong, C-/ undoes the whole replacement."
+  - id: checklist
+    goal: Turn the lines into a Markdown checklist with a macro, and save
+    detail: "Each line should read `- [ ] name`. From the first line: `F3`, `C-a`, `C-s :: RET` (after the module name), `C-SPC C-a C-w` (cut the start), type `- [ ] `, `C-s SPC RET C-b C-k` (cut the tail), `C-n`, `F4`. Then `F4 F4`, and `C-x C-s`."
+    demo: 'C-x C-f ~400 "/work/workbench/checks/FAILING.md" RET ~500 M-< ~300 <f3> ~300 C-a ~200 C-s ~200 "::" ~200 RET ~200 C-SPC ~200 C-a ~200 C-w ~200 "- [ ] " ~200 C-s ~200 " " ~200 RET ~200 C-b ~200 C-k ~200 C-n ~300 <f4> ~600 <f4> ~600 <f4> ~600 C-x C-s ~600'
+    conditions:
+      - text: a macro was recorded
+        any:
+          - event: { command: kmacro-start-macro-or-insert-counter }
+          - event: { command: kmacro-start-macro }
+        hint: "F3 starts recording, F4 stops, F4 again replays. Def in the mode line means it is still recording."
+      - text: FAILING.md on disk is the checklist
+        file: { path: workbench/checks/FAILING.md, regex: "\\A- \\[ \\] bracketed_handles_empty_input\\n- \\[ \\] truncate_fits_the_limit\\n- \\[ \\] word_count_ignores_extra_spaces\\n*$" }
+        hint: "Every line reads - [ ] and the test name, nothing else, and the file is saved (C-x C-s). If a round went wrong, C-/ undoes it; record the macro on a line that is still untouched."
+    stuck:
+      - when: { step_seconds: 240 }
+        say: "The macro, from the start of an untouched line: F3 C-a C-s :: RET C-SPC C-a C-w, type - [ ] and a space, C-s SPC RET C-b C-k C-n F4. Then F4 for each remaining line, and C-x C-s."

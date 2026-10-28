@@ -1,0 +1,92 @@
+id: 11-everything-is-a-buffer/03-one-list-of-locations
+title: One list of locations
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/workbench
+  root: workbench
+  reset: true
+  open: [workbench/broken/src/main.rs]
+  layout: single
+  # Only this lesson's lists: no build, grep or diagnostics buffers from before.
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (and (buffer-live-p b)
+                   (with-current-buffer b (derived-mode-p 'compilation-mode 'grep-mode 'occur-mode 'flymake-diagnostics-buffer-mode 'flymake-project-diagnostics-mode 'xref--xref-buffer-mode)))
+          (let ((kill-buffer-query-functions nil)) (kill-buffer b))))
+      (setq next-error-last-buffer nil)
+      (goto-char (point-min)))
+steps:
+  - id: build
+    goal: Build the crate and see it fail
+    detail: "`C-c C-c` in a Rust buffer runs `cargo build`. The output opens below: two errors, each with a file, a line and a column."
+    demo: "C-c C-c ~6000"
+    conditions:
+      - text: cargo build ran
+        any:
+          - event: { command: playground-cargo-build }
+          - event: { command: compile }
+          - event: { command: project-compile }
+          - event: { command: recompile }
+        hint: "The cursor must be in main.rs for C-c C-c to mean cargo build. M-x compile RET with cargo build works too."
+      - text: the build finished with errors
+        buffer: { name: "*compilation*", contains: "could not compile", process: none }
+        hint: "Wait for the output to end with could not compile. The first build of a crate takes a few seconds."
+  - id: walk-build
+    goal: Walk the errors with M-g M-n, then back with M-g M-p
+    detail: "`M-g M-n` (next-error) jumps to the next location in the list and puts the cursor on it, wherever you are. Press it twice to reach the second error, then `M-g M-p` to go back to the first."
+    demo: "M-g M-n ~1000 M-g M-n ~1000 M-g M-p ~800"
+    conditions:
+      - text: M-g M-n was used twice
+        event: { command: next-error, min: 2 }
+        hint: "Meta g, then Meta n. In the compile window itself plain n only moves the cursor in the list; M-g M-n also opens the location."
+      - text: M-g M-p went back
+        event: { command: previous-error }
+        hint: "Meta g, then Meta p."
+      - text: the cursor is on the first error, main.rs line 10
+        state: { file: /work/workbench/broken/src/main.rs, line: 10 }
+        hint: "M-g M-p after the second error lands on line 10, where celcius is misspelt. If you went further, M-g M-n and M-g M-p move one location at a time."
+  - id: grep
+    goal: Search for TODO and export the matches
+    detail: "`M-s r` searches the crate; type `TODO`. `C-.` then `E` (embark-export) turns the matches into a grep buffer, and the cursor moves into it."
+    demo: 'M-s r ~800 "TODO" ~1500 C-. ~600 E ~1200'
+    conditions:
+      - text: the search was exported
+        any:
+          - event: { command: embark-export }
+          - event: { command: embark-act }
+        hint: "Wait for the three matches under the prompt, then C-. and E. RET would visit one match instead."
+      - text: a grep buffer lists the three TODOs
+        elisp: '(seq-some (lambda (w) (with-current-buffer (window-buffer w) (and (derived-mode-p (quote grep-mode)) (= 3 (how-many "TODO" (point-min) (point-max)))))) (window-list))'
+        hint: "The search runs in the crate of the file you were in, broken/. If it found other things, the search text is not TODO."
+  - id: walk-grep
+    goal: Walk the TODOs with the same two keys
+    detail: "With the cursor in the grep buffer, `M-g M-n` twice. next-error follows the list you used last, so it now walks the TODOs instead of the build errors."
+    demo: "M-g M-n ~1000 M-g M-n ~1000"
+    conditions:
+      - text: M-g M-n was used in the grep list
+        all:
+          - event: { command: next-error, min: 2 }
+          - elisp: '(and (buffer-live-p next-error-last-buffer) (with-current-buffer next-error-last-buffer (derived-mode-p (quote grep-mode))))'
+        hint: "Start with the cursor in the grep buffer; from main.rs, M-g M-n would carry on through the build errors. C-x o moves to the grep window."
+      - text: the cursor is on a TODO in the crate
+        elisp: '(let ((w (selected-window))) (with-current-buffer (window-buffer w) (and buffer-file-name (string-prefix-p "/work/workbench/broken/src/" buffer-file-name) (save-excursion (goto-char (window-point w)) (beginning-of-line) (looking-at ".*TODO")))))'
+        hint: "Each M-g M-n opens the next match in its file, with the cursor on the TODO line."
+  - id: flymake
+    goal: Open Flymake's diagnostics and walk them too
+    detail: "Back in main.rs (`C-x b main.rs RET`), `M-<`, `C-x 1`, then `C-c l d` lists the language server's diagnostics for the file. Move into that list (`C-x o`) and press `M-g M-n`: the third kind of list, the same key."
+    demo: 'C-x b ~400 "main.rs" ~600 RET ~400 M-< ~300 C-x 1 ~400 C-c l d ~1500 C-x o ~500 M-g M-n ~800'
+    conditions:
+      - text: the diagnostics list is open
+        state: { "windows.mode": flymake-diagnostics-buffer-mode }
+        hint: "C-c l d in main.rs. If it says Wrong number of arguments, the cursor sits where two diagnostics overlap (an Emacs 31.1 bug): M-< and C-c l d again. If the list is empty, give rust-analyzer a few seconds to read the crate (the mode line shows its progress), then g in the list refreshes it."
+      - text: M-g M-n walked the diagnostics
+        all:
+          - event: { command: next-error }
+          - elisp: '(and (buffer-live-p next-error-last-buffer) (with-current-buffer next-error-last-buffer (derived-mode-p (quote flymake-diagnostics-buffer-mode))))'
+        hint: "Press M-g M-n with the cursor in the diagnostics list, so it becomes the list next-error follows."
+      - text: the cursor is on a diagnostic in main.rs
+        state: { file: /work/workbench/broken/src/main.rs }
+        hint: "M-g M-n from the list opens the location in main.rs. RET on a line of the list does the same for that one."

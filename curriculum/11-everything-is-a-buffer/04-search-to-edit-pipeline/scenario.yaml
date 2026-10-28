@@ -1,0 +1,78 @@
+id: 11-everything-is-a-buffer/04-search-to-edit-pipeline
+title: The search-to-edit pipeline
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/workbench
+  root: workbench
+  reset: true
+  repos: ["."]
+  open: [workbench/tally/src/lib.rs]
+  layout: single
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (and (buffer-live-p b)
+                   (with-current-buffer b (derived-mode-p 'grep-mode 'compilation-mode 'magit-mode)))
+          (let ((kill-buffer-query-functions nil)) (kill-buffer b))))
+      (goto-char (point-min)))
+steps:
+  - id: search
+    goal: Find every "bucket" in the crate and export the matches
+    detail: "`M-s r` runs ripgrep over the crate as you type: `bucket`. Ripgrep ignores case while the pattern is all lower case, so `Bucket` and `make_buckets` match too. Then `C-.` and `E` keep the matches as a grep buffer."
+    demo: 'M-s r ~800 "bucket" ~1500 C-. ~600 E ~1500'
+    conditions:
+      - text: the search was exported
+        any:
+          - event: { command: embark-export }
+          - event: { command: embark-act }
+        hint: "C-. while the matches are listed, then E. If you pressed RET, you only visited one match: M-s r again."
+      - text: the grep buffer lists matches in four files
+        elisp: '(seq-some (lambda (w) (with-current-buffer (window-buffer w) (and (derived-mode-p (quote grep-mode)) (let (files) (save-excursion (goto-char (point-min)) (while (re-search-forward "^\\([^:\n]+\\):[0-9]+:" nil t) (unless (member (match-string 1) files) (push (match-string 1) files)))) (>= (length files) 4))))) (window-list))'
+        hint: "The search covers the crate of the file you are in, tally/. Typing Bucket with a capital would make the search case-sensitive and miss the rest."
+  - id: rename
+    goal: Rename bucket to bin in all of them at once
+    detail: "`C-x C-q` (wgrep), `M-<`, then `M-%`: `bucket`, `TAB`, `bin`, `RET`, `!`. Replace keeps the case of each match, so `Bucket` becomes `Bin` and `make_buckets` becomes `make_bins`. `C-c C-c` writes the changes and saves the files."
+    demo: 'C-x C-f ~400 "/work/workbench/tally/src/lib.rs" RET ~500 M-s r ~800 "bucket" ~1500 C-. ~600 E ~1500 C-x C-q ~500 M-< ~300 M-% ~500 "bucket" ~300 TAB ~300 "bin" ~300 RET ~500 ! ~800 C-c C-c ~1500'
+    conditions:
+      - text: wgrep was used
+        event: { command: wgrep-change-to-wgrep-mode }
+        hint: "The cursor must be in the grep buffer when you press C-x C-q; the export put it there. After Reset this step the export is gone: M-s r bucket, C-. E again."
+      - text: no bucket is left in the crate
+        shell: { run: "! grep -rqi bucket --exclude-dir=target src tests README.md docs", cwd: workbench/tally }
+        hint: "Type the search text in lower case so the replace matches every case, and press ! to replace them all. The files change only on C-c C-c."
+      - text: the struct is now called Bin
+        file: { path: workbench/tally/src/lib.rs, contains: "pub struct Bin {" }
+        hint: "With case-replace on (the default), bucket → bin turns Bucket into Bin by itself. If you see bin with a small b in the struct, the replacement was typed in capitals or the search was."
+    stuck:
+      - when: { step_seconds: 200 }
+        say: "In the grep buffer: C-x C-q, M-<, M-%, type bucket, TAB, bin, RET, then !. Finish with C-c C-c; wgrep saves every file it changed."
+  - id: review
+    goal: Review the change in lib.rs with diff-hl
+    detail: "Open `src/lib.rs` from the grep buffer (`RET` on one of its lines). The margin marks changed lines. `C-x v n` jumps to the next changed hunk; rust-analyzer, which re-reads saved files, should report no errors."
+    demo: 'C-x C-f ~400 "/work/workbench/tally/src/lib.rs" RET ~600 M-< ~300 C-x v n ~800 C-x v n ~800'
+    conditions:
+      - text: C-x v n jumped to a changed hunk
+        event: { command: diff-hl-next-hunk }
+        hint: "Control x, v, then n, in lib.rs. The changed lines have a mark in the left margin."
+      - text: Flymake reports no errors in lib.rs
+        elisp: '(let ((b (find-buffer-visiting "/work/workbench/tally/src/lib.rs"))) (and b (with-current-buffer b (and (bound-and-true-p flymake-mode) (not (seq-some (lambda (d) (eq (flymake-diagnostic-type d) :error)) (flymake-diagnostics)))))))'
+        hint: "An error after a rename usually means a half-renamed name. M-g n jumps to it; fix it by hand and save."
+      - text: the crate builds and its tests pass
+        shell: { run: "cargo test -q", cwd: workbench/tally, timeout: 180 }
+        hint: "This runs cargo test in the background and takes a few seconds the first time. If it fails, the tests still use an old name somewhere."
+  - id: commit
+    goal: Commit the rename with Magit
+    detail: "`C-x g` opens the status: the four files are under Unstaged changes. `S` stages them all, `c c` opens the commit message: type one line, then `C-c C-c` commits."
+    demo: 'C-x g ~1500 S ~800 c ~500 c ~1500 "Rename bucket to bin" ~400 C-c C-c ~1500'
+    conditions:
+      - text: a commit was made
+        shell: { run: "test \"$(git log -1 --format=%s)\" != 'Initial commit'" }
+        hint: "c c opens a buffer for the message; type it at the top, then C-c C-c. C-c C-k would cancel."
+      - text: it contains the whole rename
+        shell: { run: "! git grep -qi bucket HEAD -- tally && git show --stat HEAD | grep -q lib.rs" }
+        hint: "S stages every changed file; s stages only the one under the cursor. If some changes were left out, stage them and commit again (c c)."
+      - text: nothing is left uncommitted in tally
+        shell: { run: "test -z \"$(git status --porcelain -- tally)\"" }
+        hint: "Magit's status lists what is left under Unstaged or Staged changes."

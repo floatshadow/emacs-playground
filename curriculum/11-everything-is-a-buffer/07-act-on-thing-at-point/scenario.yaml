@@ -1,0 +1,107 @@
+id: 11-everything-is-a-buffer/07-act-on-thing-at-point
+title: Act on the thing at point
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/workbench
+  root: workbench
+  reset: true
+  repos: ["."]
+  # The newest commit's message carries a link (fixed date: the same hash on every load).
+  run: |
+    if [ "$(git rev-list --count HEAD)" = 1 ]; then
+      GIT_AUTHOR_DATE=2026-03-06T11:00:00+00:00 GIT_COMMITTER_DATE=2026-03-06T11:00:00+00:00 \
+        git commit -q --allow-empty -m "Publish the release notes" -m "The notes for tally 0.1.0 are at
+    file:///work/workbench/tally/docs/release.html"
+    fi
+  open: [workbench/tally/src/main.rs]
+  layout: single
+  compile: "sh report.sh"
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (and (buffer-live-p b)
+                   (with-current-buffer b (derived-mode-p 'grep-mode 'magit-mode 'eww-mode 'help-mode 'helpful-mode)))
+          (let ((kill-buffer-query-functions nil)) (kill-buffer b))))
+      (goto-char (point-min)))
+steps:
+  - id: path
+    goal: Open the file named in the build output
+    detail: "The output below ends with `Sorted sample written to out/summary.txt`. Put the cursor on that path (`C-x o`, then `C-s out/ RET`) and press `C-.`: Embark sees a file and offers file actions. `RET` takes the default one, opening it."
+    demo: '~1000 C-x b ~400 "*compilation*" ~600 RET ~400 M-< ~300 C-s ~300 "out/" ~300 RET ~400 C-. ~800 RET ~800'
+    conditions:
+      - text: Embark acted on the path
+        event: { command: embark-act }
+        hint: "C-. is Control and the full stop. The cursor must be on the path itself; on another word Embark offers actions for that word."
+      - text: out/summary.txt is open
+        state: { file: /work/workbench/tally/out/summary.txt }
+        hint: "In Embark's menu RET is the default action, which for a file is to open it. If the build output is gone, M-x compile RET sh report.sh RET brings it back."
+  - id: symbol
+    goal: Jump to the definition of render from main.rs
+    detail: "In `/work/workbench/tally/src/main.rs`, put the cursor on `render` (last line of main) and `C-.` again. For a symbol in code, `RET` asks the language server for its definition, like `M-.`."
+    demo: 'C-x C-f ~400 "/work/workbench/tally/src/main.rs" RET ~600 M-> ~300 C-r ~300 "render" ~300 RET ~400 C-. ~800 RET ~1500'
+    conditions:
+      - text: Embark acted on the symbol
+        event: { command: embark-act }
+        hint: "Put the cursor inside the word render, then C-. and RET."
+      - text: the cursor is on render in lib.rs
+        state: { file: /work/workbench/tally/src/lib.rs, line: 33 }
+        hint: "The definition is pub fn render in src/lib.rs. If nothing happens, rust-analyzer is still reading the crate: wait for eglot in the mode line and try again."
+  - id: commit
+    goal: Open the newest commit in Magit
+    detail: "`C-x g`, then under Recent commits put the cursor on the top commit, Publish the release notes, and press `RET`. Its message has a link."
+    demo: 'C-x g ~1500 M-< ~300 C-s ~300 "Publish" ~300 RET ~400 RET ~1500'
+    conditions:
+      - text: Magit's status was opened
+        event: { command: magit-status }
+        hint: "C-x g opens Magit for the repository of the current file."
+      - text: the commit is shown
+        state: { "windows.mode": magit-revision-mode }
+        hint: "RET on a commit line shows the commit with its message and diff. The line starts with a short hash."
+  - id: url
+    goal: Browse the link in the commit message
+    detail: "In the commit buffer, put the cursor on the `file:///…/release.html` link and `C-.`: a URL target, whose default action browses it. The playground browses with eww, a web browser inside Emacs."
+    demo: 'C-x b ~400 "magit-revision" ~600 RET ~400 M-< ~300 C-s ~300 "file:" ~300 RET ~400 C-. ~800 RET ~1500'
+    conditions:
+      - text: Embark acted on the URL
+        event: { command: embark-act }
+        hint: "Move into the commit window (C-x o) and onto the link before C-."
+      - text: eww shows the release notes
+        elisp: '(seq-some (lambda (b) (with-current-buffer b (and (derived-mode-p (quote eww-mode)) (string-match-p "release\\.html" (or (plist-get eww-data :url) ""))))) (buffer-list))'
+        hint: "RET in Embark's menu runs browse-url, which opens eww here. q leaves eww."
+  - id: grep-dired
+    goal: From a grep match, open the file's folder in Dired
+    detail: "`M-s r`, `fn render`, then `C-.` `E` to export. In the grep buffer put the cursor at the start of a match line, on its file name, and `C-.` then `j` (embark-dired-jump): Dired opens on that file's folder, with the cursor on the file."
+    demo: 'C-x C-f ~400 "/work/workbench/tally/src/main.rs" RET ~500 M-s r ~800 "fn render" ~1500 C-. ~600 E ~1500 M-< ~300 C-s ~300 "src/" ~300 RET ~300 C-a ~300 C-. ~800 j ~1200'
+    conditions:
+      - text: Embark acted on the grep line
+        any:
+          - event: { command: embark-dired-jump }
+          - event: { command: embark-act }
+        hint: "On the file name part of a grep line Embark sees a file; j is jump to it in Dired. On the matched text it sees a symbol instead."
+      - text: Dired shows tally/src/ with the cursor on lib.rs
+        elisp: '(let ((w (selected-window))) (with-current-buffer (window-buffer w) (and (derived-mode-p (quote dired-mode)) (equal (expand-file-name default-directory) "/work/workbench/tally/src/") (save-excursion (goto-char (window-point w)) (string-match-p "lib\\.rs" (buffer-substring-no-properties (line-beginning-position) (line-end-position)))))))'
+        hint: "The match for fn render is in src/lib.rs. If Dired opened elsewhere, the cursor was on a different line of the grep buffer."
+  - id: help
+    goal: Read the help for a function used in tally.el
+    detail: "Open `/work/workbench/tally/tally.el`, put the cursor on `shell-command-on-region` and `C-.`: in Emacs Lisp a symbol is a target with help actions. `h` describes it."
+    demo: 'C-x C-f ~400 "/work/workbench/tally/tally.el" RET ~500 M-< ~300 C-s ~300 "shell-command-on" ~300 RET ~400 C-. ~800 h ~1200'
+    conditions:
+      - text: Embark acted on the symbol
+        event: { command: embark-act }
+        hint: "Put the cursor inside the word shell-command-on-region, then C-."
+      - text: the help for shell-command-on-region is shown
+        elisp: '(seq-some (lambda (w) (with-current-buffer (window-buffer w) (and (derived-mode-p (quote help-mode) (quote helpful-mode)) (save-excursion (goto-char (point-min)) (search-forward "shell-command-on-region" nil t))))) (window-list))'
+        hint: "h in the menu is describe-symbol. q closes the help afterwards."
+  - id: ffap
+    goal: Open the path mentioned in README.md without typing it
+    detail: "Open `/work/workbench/tally/README.md` and put the cursor on `docs/release.html`. `C-x C-f` then `M-n`: the prompt fills in the file name at point (Emacs looks ahead in the history for it). `RET` opens it."
+    demo: 'C-x C-f ~400 "/work/workbench/tally/README.md" RET ~500 M-> ~300 C-r ~300 "docs/" ~300 RET ~400 C-x C-f ~600 M-n ~600 RET ~800'
+    conditions:
+      - text: the find-file prompt was used
+        event: { command: find-file }
+        hint: "The cursor must be on the path in README.md when you press C-x C-f, or M-n offers something else."
+      - text: docs/release.html is open
+        state: { file: /work/workbench/tally/docs/release.html }
+        hint: "M-n replaces the prompt's text with the name at point. If it shows something else, press M-n again or C-g and move onto the path."

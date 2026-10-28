@@ -1,0 +1,89 @@
+id: 11-everything-is-a-buffer/06-narrow-and-indirect
+title: Narrow and indirect buffers
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/workbench
+  root: workbench
+  reset: true
+  open: [workbench/docs/guide.md]
+  layout: single
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (and (buffer-live-p b)
+                   (or (buffer-base-buffer b)
+                       (string-match-p "\\`\\*\\(edit-indirect\\|Org Src\\)" (buffer-name b))))
+          (let ((kill-buffer-query-functions nil))
+            (with-current-buffer b (set-buffer-modified-p nil))
+            (kill-buffer b))))
+      (dolist (b (buffer-list))
+        (when (buffer-file-name b)
+          (with-current-buffer b (widen))))
+      (with-current-buffer (find-buffer-visiting "/work/workbench/docs/guide.md")
+        (goto-char (point-min))))
+steps:
+  - id: fence
+    goal: Open the Rust block of guide.md in its own buffer
+    detail: "Move into the fenced block (`C-s pub fn RET`), then `C-c '` (markdown-edit-code-block). The block opens in a new window, in a buffer of its own in rust-ts-mode."
+    demo: "M-< ~300 C-s ~300 \"pub fn\" ~300 RET ~400 C-c ' ~1200"
+    conditions:
+      - text: C-c ' opened the block
+        event: { command: markdown-edit-code-block }
+        hint: "The cursor must be inside the block, between the two lines of backticks. Outside a block, C-c ' says so."
+      - text: the block is in a Rust buffer of its own
+        elisp: '(let ((w (selected-window))) (with-current-buffer (window-buffer w) (and (string-prefix-p "*edit-indirect" (buffer-name)) (derived-mode-p (quote rust-ts-mode)))))'
+        hint: "Its name starts with *edit-indirect and the mode line says Rust. The cursor moves into it; C-x o if it did not."
+  - id: fix
+    goal: Fix the type error and put the block back
+    detail: "The function promises a `u32` but returns an `f64`: add ` as u32` after `.ceil()`. `C-c C-c` copies the buffer back into guide.md and closes it; `C-x C-s` saves guide.md."
+    demo: "C-x C-f ~400 \"/work/workbench/docs/guide.md\" RET ~500 M-< ~300 C-s ~300 \"pub fn\" ~300 RET ~400 C-c ' ~1000 M-< ~300 C-s ~300 \"ceil()\" ~300 RET ~300 \" as u32\" ~400 C-c C-c ~800 C-x C-s ~600"
+    conditions:
+      - text: the block compiles
+        shell: { run: "sed -n '/^```rust$/,/^```$/p' docs/guide.md | sed '1d;$d' > /tmp/pg-guide.rs && rustc --edition 2024 --crate-type lib --emit=metadata -o /tmp/pg-guide.rmeta /tmp/pg-guide.rs", timeout: 60 }
+        hint: "The check compiles the block saved in guide.md. (span / n as f64).ceil() is an f64; append as u32 to that line in the edit-indirect buffer (in guide.md the block is read-only while it is open), then C-c C-c and C-x C-s."
+      - text: the edit buffer is closed
+        elisp: '(not (seq-some (lambda (b) (string-prefix-p "*edit-indirect" (buffer-name b))) (buffer-list)))'
+        hint: "C-c C-c in the edit buffer commits the block and closes it. C-c C-k would throw the edit away."
+  - id: org
+    goal: Fix the Python block in notes/plan.org the same way
+    detail: "Open `/work/workbench/notes/plan.org`, go into the source block (`C-s print RET`) and press `C-c '` (org-edit-special): a Python buffer. Change `print(sum(samples))` to `print(sum(samples) / len(samples))`, `C-c '` again to go back, `C-x C-s` to save."
+    demo: "C-x C-f ~400 \"/work/workbench/notes/plan.org\" RET ~600 M-< ~300 C-s ~300 \"print(\" ~300 RET ~300 C-c ' ~1200 C-e ~300 C-b ~200 \" / len(samples)\" ~300 C-c ' ~800 C-x C-s ~600"
+    conditions:
+      - text: C-c ' opened the block
+        event: { command: org-edit-special }
+        hint: "In Org, C-c ' works on the line inside the block. On the #+begin_src line it works too."
+      - text: plan.org computes the mean
+        file: { path: workbench/notes/plan.org, contains: "print(sum(samples) / len(samples))" }
+        hint: "Type / len(samples) before the last closing parenthesis, go back with C-c ' and save with C-x C-s."
+      - text: the Python buffer is closed
+        elisp: '(not (seq-some (lambda (b) (string-prefix-p "*Org Src" (buffer-name b))) (buffer-list)))'
+        hint: "In the Python buffer, C-c ' puts the code back and closes it."
+  - id: narrow
+    goal: Narrow tally/src/lib.rs to one function
+    detail: "Open `/work/workbench/tally/src/lib.rs` and put the cursor in `fill` (`C-s fn fill RET`). `C-x n d` narrows to that function: the rest of the file is hidden, not gone, and Eglot keeps working because this is still the file's own buffer."
+    demo: 'C-x C-f ~400 "/work/workbench/tally/src/lib.rs" RET ~800 M-< ~300 C-s ~300 "fn fill" ~300 RET ~400 C-x n d ~600'
+    conditions:
+      - text: lib.rs is narrowed
+        state: { file: /work/workbench/tally/src/lib.rs, narrowed: true }
+        hint: "Narrow appears in the mode line. C-x n d needs the cursor inside a function; C-x n w widens again."
+      - text: it shows the fill function
+        elisp: '(let ((w (selected-window))) (with-current-buffer (window-buffer w) (and (buffer-narrowed-p) (save-excursion (goto-char (point-min)) (search-forward "fn fill" nil t)) (not (save-excursion (goto-char (point-min)) (search-forward "fn render" nil t))))))'
+        hint: "Narrowing follows the function the cursor is in. C-x n w, move into fill, C-x n d again."
+  - id: clone
+    goal: Keep a narrowed clone of tally.el beside the whole file
+    detail: "Open `/work/workbench/tally/tally.el` and `C-x 4 c`: a second buffer, `tally.el<2>`, shares the text and opens in the other window with the cursor in it. Narrowing belongs to each buffer, so `C-s (defun tally-region RET` and `C-x n d` there narrow the clone only; the original beside it still shows the whole file."
+    demo: 'C-x 1 ~300 C-x C-f ~400 "/work/workbench/tally/tally.el" RET ~600 C-x n w ~300 M-< ~300 C-x 4 c ~800 C-s ~300 "(defun tally-region" ~300 RET ~400 C-x n d ~800'
+    conditions:
+      - text: an indirect clone of tally.el is selected
+        elisp: '(let ((w (selected-window))) (with-current-buffer (window-buffer w) (and (buffer-base-buffer) (eq (buffer-base-buffer) (find-buffer-visiting "/work/workbench/tally/tally.el")))))'
+        hint: "C-x 4 c in tally.el makes the clone and moves the cursor into it; the mode line shows tally.el<2>."
+      - text: the clone is narrowed to tally-region
+        all:
+          - state: { narrowed: true }
+          - elisp: '(let ((w (selected-window))) (with-current-buffer (window-buffer w) (save-excursion (goto-char (point-min)) (and (search-forward "defun tally-region" nil t) (not (search-forward "provide" nil t))))))'
+        hint: "C-x n d needs the cursor inside the function. C-x n w widens; move into tally-region and C-x n d again."
+      - text: the original beside it shows the whole file
+        elisp: '(let ((b (find-buffer-visiting "/work/workbench/tally/tally.el"))) (and (get-buffer-window b) (with-current-buffer b (not (buffer-narrowed-p)))))'
+        hint: "If both are narrowed, C-x n d ran in the original: C-x n w there. If the original is not shown, C-x 4 c again from tally.el."

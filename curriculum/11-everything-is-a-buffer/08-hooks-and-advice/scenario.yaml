@@ -1,0 +1,132 @@
+id: 11-everything-is-a-buffer/08-hooks-and-advice
+title: Hooks and advice as glue
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/workbench
+  root: workbench
+  reset: true
+  open:
+  - workbench/report/report.typ
+  layout: single
+  eval: |-
+    (progn
+      (dolist (hook '((after-save-hook . "typst compile") (compilation-finish-functions . "*typst*")))
+        (dolist (f (default-value (car hook)))
+          (when (and (functionp f) (string-search (cdr hook) (prin1-to-string (if (symbolp f) (symbol-function f) f))))
+            (remove-hook (car hook) f))))
+      (setq display-buffer-alist
+            (seq-remove (lambda (r) (and (stringp (car-safe r)) (string-match-p (car r) "*typst*"))) display-buffer-alist))
+      (dolist (n '("*typst*" "glue.el" ".dir-locals.el"))
+        (when (get-buffer n)
+          (let ((kill-buffer-query-functions nil))
+            (with-current-buffer n (set-buffer-modified-p nil))
+            (kill-buffer n))))
+      (make-directory "/work/emacs.d/user-lisp/" t)
+      (with-temp-file "/work/emacs.d/user-lisp/glue.el" (insert ";;; glue.el --- connect packages with hooks  -*- lexical-binding: t; -*-\n\n;; Lesson 11.8.  Each form you write below connects packages that know\n;; nothing about each other.  Write it under its comment, then\n;; M-x eval-buffer.  Emacs byte-compiles user-lisp/ at startup but only\n;; runs forms that follow an ;;;###autoload line, so this glue lasts\n;; until Emacs restarts.\n\n;; 1. After a Typst file is saved, compile it to PDF in a buffer *typst*.\n\n;; 2. When the *typst* build finishes, say how it ended in the echo area.\n\n;; 3. Never give *typst* a window: the message is enough.\n\n(provide 'glue)\n;;; glue.el ends here\n"))
+      (delete-other-windows)
+      (find-file "/work/emacs.d/user-lisp/glue.el")
+      (goto-char (point-min)))
+steps:
+- id: hook
+  goal: 'Compile Typst on every save: write form 1'
+  detail: Under comment 1 in glue.el, write a function that runs `typst compile` on the file when the buffer is in typst-ts-mode, and add it to `after-save-hook`. Type `RET` between lines and let Emacs indent; `M-x eval-buffer` runs the file. The demo shows the exact code.
+  demo: 'C-x b ~400 "glue.el" ~500 RET ~400 M-< ~300 C-s ~300 "1. " ~300 RET ~300 C-e ~300 RET ~300 "(defun glue-typst-compile ()\n(when (derived-mode-p ''typst-ts-mode)\n(let ((compilation-buffer-name-function (lambda (_) \"*typst*\")))\n(compile (concat \"typst compile \" (file-name-nondirectory buffer-file-name))))))\n(add-hook ''after-save-hook #''glue-typst-compile)" ~500 C-x C-s ~500 M-x ~500 "eval-buffer" ~300 RET ~800'
+  conditions:
+  - text: the code was evaluated
+    any:
+    - event:
+        command: eval-buffer
+    - event:
+        command: eval-defun
+    - event:
+        command: eval-last-sexp
+    - event:
+        command: elisp-eval-region-or-buffer
+    hint: M-x eval-buffer RET in glue.el. C-M-x evaluates just the form around the cursor, which works too.
+  - text: after-save-hook runs a typst compile
+    elisp: (seq-some (lambda (f) (and (functionp f) (string-search "typst compile" (prin1-to-string (if (symbolp f) (symbol-function f) f))))) (default-value (quote after-save-hook)))
+    hint: 'The function must call compile with a command starting typst compile, and add-hook must name after-save-hook. An error in the echo area when evaluating usually means a missing parenthesis: the mode line''s position and C-M-f help find it.'
+  stuck:
+  - when:
+      step_seconds: 300
+    say: 'Watch it shows the code; you can also type it exactly as the demo does. (defun NAME () (when (derived-mode-p ''typst-ts-mode) (let ((compilation-buffer-name-function (lambda (_) "*typst*"))) (compile (concat "typst compile " (file-name-nondirectory buffer-file-name)))))) and (add-hook ''after-save-hook #''NAME).'
+- id: save-typ
+  goal: Save report.typ and watch it compile
+  detail: Open `/work/workbench/report/report.typ`, add a line at the end and `C-x C-s`. The hook runs `typst compile`; its output appears in a window `*typst*` at the bottom, and `report.pdf` appears next to the source.
+  demo: C-x C-f ~400 "/work/workbench/report/report.typ" RET ~600 M-> ~300 "\nUpdated every Monday." ~400 C-x C-s ~4000
+  conditions:
+  - text: the *typst* build ran and finished
+    buffer:
+      name: '*typst*'
+      contains: typst compile
+      process: none
+    hint: The hook acts only in typst-ts-mode buffers, so the save must be in report.typ. If nothing happened, evaluate glue.el again.
+  - text: report.pdf was written
+    file:
+      path: workbench/report/report.pdf
+      exists: true
+    hint: 'Look at *typst*: if it shows an error, the Typst source has a typo in the line you added.'
+- id: finish
+  goal: 'Report the result in the echo area: write form 2'
+  detail: Under comment 2, write a function of two arguments, the buffer and a status string, that shows a message when the buffer is `*typst*`, and add it to `compilation-finish-functions`. `M-x eval-buffer` again.
+  demo: 'C-x b ~400 "glue.el" ~500 RET ~400 M-< ~300 C-s ~300 "2. " ~300 RET ~300 C-e ~300 RET ~300 "(defun glue-typst-done (buffer status)\n(when (equal (buffer-name buffer) \"*typst*\")\n(message \"Typst: %s\" (string-trim status))))\n(add-hook ''compilation-finish-functions #''glue-typst-done)" ~500 C-x C-s ~500 M-x ~500 "eval-buffer" ~300 RET ~800'
+  conditions:
+  - text: the code was evaluated
+    any:
+    - event:
+        command: eval-buffer
+    - event:
+        command: eval-defun
+    - event:
+        command: eval-last-sexp
+    - event:
+        command: elisp-eval-region-or-buffer
+    hint: M-x eval-buffer RET in glue.el.
+  - text: compilation-finish-functions reports *typst* builds
+    elisp: (seq-some (lambda (f) (and (functionp f) (string-search "*typst*" (prin1-to-string (if (symbolp f) (symbol-function f) f))))) (default-value (quote compilation-finish-functions)))
+    hint: 'compile calls these functions with two arguments: the build''s buffer and a string such as finished. Compare the buffer''s name with *typst* so other builds stay quiet.'
+- id: rule
+  goal: 'Keep *typst* out of sight: write form 3'
+  detail: Under comment 3, add a rule to `display-buffer-alist` (lesson 3.5) that matches `*typst*` and uses `display-buffer-no-window`, with `(allow-no-window . t)`. In the pattern, `\\*` matches a literal star. `M-x eval-buffer`.
+  demo: C-x b ~400 "glue.el" ~500 RET ~400 M-< ~300 C-s ~300 "3. " ~300 RET ~300 C-e ~300 RET ~300 "(add-to-list 'display-buffer-alist '(\"\\\\*typst\\\\*\" (display-buffer-no-window) (allow-no-window . t)))" ~500 C-x C-s ~500 M-x ~500 "eval-buffer" ~300 RET ~800
+  conditions:
+  - text: the code was evaluated
+    any:
+    - event:
+        command: eval-buffer
+    - event:
+        command: eval-defun
+    - event:
+        command: eval-last-sexp
+    - event:
+        command: elisp-eval-region-or-buffer
+    hint: M-x eval-buffer RET in glue.el.
+  - text: a rule hides *typst*
+    elisp: (seq-some (lambda (r) (and (stringp (car-safe r)) (string-match-p (car r) "*typst*") (memq (quote display-buffer-no-window) (ensure-list (cadr r))))) display-buffer-alist)
+    hint: 'The rule is a list: the regexp string, then (display-buffer-no-window), then (allow-no-window . t), all quoted with one ''. Inside the string, each * is written \\*.'
+- id: quiet
+  goal: 'Save again: no window, just the message'
+  detail: Back in report.typ, close the old build window (`C-x 1`), change the text and `C-x C-s`. The build runs out of sight and the echo area says how it ended. Three packages (files, compile, the window manager) now work as one, through ten lines and no package that knows the others.
+  demo: C-x C-f ~400 "/work/workbench/report/report.typ" RET ~600 C-x 1 ~400 M-> ~300 " Checked by hand." ~400 C-x C-s ~4000
+  conditions:
+  - text: the build reported itself in the echo area
+    elisp: (with-current-buffer "*Messages*" (save-excursion (goto-char (point-max)) (re-search-backward "[Tt]ypst.*finished" (max (point-min) (- (point-max) 2000)) t)))
+    hint: Save report.typ (not glue.el). The message appears when the build ends, a moment after the save.
+  - text: no window shows *typst*
+    elisp: (not (get-buffer-window "*typst*" t))
+    hint: The rule only decides where new windows go. Close the one left from before with C-x 1 in report.typ, or q in it.
+- id: dir-locals
+  goal: Give the scripts folder its own formatter with .dir-locals.el
+  detail: 'Open `/work/workbench/scripts/clean.py`. `M-x add-dir-local-variable`: the mode (`RET` accepts python-ts-mode), the variable `apheleia-formatter`, the value `ruff`. Emacs writes `scripts/.dir-locals.el` and opens it; `C-x C-s` saves it. From now on, Python files in that folder are formatted with ruff alone, without the import sorting the playground adds elsewhere.'
+  demo: C-x C-f ~400 "/work/workbench/scripts/clean.py" RET ~1200 M-x ~500 "add-dir-local-variable" ~300 RET ~600 RET ~500 "apheleia-formatter" ~300 RET ~500 "ruff" ~300 RET ~800 C-x C-s ~600
+  conditions:
+  - text: scripts/.dir-locals.el sets the formatter
+    file:
+      path: workbench/scripts/.dir-locals.el
+      regex: python-ts-mode[^)]*\(apheleia-formatter \. ruff\)
+    hint: 'The mode must be python-ts-mode, the mode clean.py is in. If the file says something else, edit it as text: it is a plain list, ((python-ts-mode . ((apheleia-formatter . ruff)))).'
+  - text: it is saved
+    elisp: (let ((b (find-buffer-visiting "/work/workbench/scripts/.dir-locals.el"))) (or (not b) (not (buffer-modified-p b))))
+    hint: add-dir-local-variable leaves .dir-locals.el open in a window, with ** in its mode line until it is saved. Save that buffer, not clean.py.

@@ -1,0 +1,10 @@
+#+title: Release plan
+
+* Numbers for the release notes
+The block below computes the mean of the sample run.  It prints the
+sum instead: fix it in its own Python buffer.
+
+#+begin_src python :results output
+samples = [12, 15, 11, 18, 14]
+print(sum(samples))
+#+end_src

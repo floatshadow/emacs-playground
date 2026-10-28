@@ -1,0 +1,122 @@
+id: 11-everything-is-a-buffer/02-edit-the-read-only-view
+title: "C-x C-q: edit the read-only view"
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/workbench
+  root: workbench
+  reset: true
+  repos: ["."]
+  open: [workbench/README.md]
+  layout: single
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (when (and (buffer-live-p b)
+                   (or (memq (buffer-local-value 'major-mode b) '(grep-mode occur-mode occur-edit-mode tar-mode archive-mode))
+                       (bound-and-true-p tar-superior-buffer)
+                       (string-match-p "(site\\.tar)\\'" (buffer-name b))))
+          (let ((kill-buffer-query-functions nil))
+            (with-current-buffer b (set-buffer-modified-p nil))
+            (kill-buffer b))))
+      (delete-other-windows)
+      (dired "/work/workbench/photos/")
+      (goto-char (point-min)))
+steps:
+  - id: rename
+    goal: Rename the six photos by editing the listing
+    detail: "The listing shows six camera names, `IMG_0001.JPG` to `IMG_0006.JPG`. `C-x C-q` toggles read-only in any buffer; in Dired it switches to :jargon[wdired], where the names become text. From the top (`M-<`), `C-M-%` replaces a regular expression: `IMG_\\([0-9]+\\)\\.JPG`, `RET`, then `trip-\\1.jpg`, `RET`, and `!` for every match (`\\1` is the number the group caught). Nothing moves on disk until `C-c C-c` renames the files as edited and makes the listing read-only again."
+    demo: 'C-x d ~400 "/work/workbench/photos/" RET ~600 C-x C-q ~500 M-< ~300 C-M-% ~500 "IMG_\\([0-9]+\\)\\.JPG" ~300 RET ~400 "trip-\\1.jpg" ~300 RET ~500 ! ~800 C-c C-c ~800'
+    conditions:
+      - text: C-x C-q made the listing editable
+        any:
+          - event: { command: dired-toggle-read-only }
+          - event: { command: wdired-change-to-wdired-mode }
+        hint: "Control x, then Control q, with the cursor in the photos listing. The mode line then says Editable."
+      - text: six trip-*.jpg files exist
+        shell: { run: "test $(ls photos | grep -c '^trip-000[1-6]\\.jpg$') = 6" }
+        hint: "Start the replace from the top with M-<, or it only sees the names below the cursor. The group is backslash, open paren; in the replacement, backslash 1 puts the number back. The files change only at C-c C-c."
+      - text: no IMG_ files are left
+        shell: { run: "! ls photos | grep -q IMG_" }
+        hint: "A name you did not change keeps its old file. C-x C-q again, edit it, C-c C-c."
+      - text: the listing is read-only again
+        state: { mode: { not: wdired-mode } }
+        hint: "C-c C-c applies the edits and the mode line says Dired again. C-c ESC would throw them away."
+    stuck:
+      - when: { step_seconds: 180 }
+        say: "Type the pattern exactly: IMG_\\([0-9]+\\)\\.JPG. The replacement is trip-\\1.jpg. If only some names changed, C-/ undoes the replace inside wdired; M-< and try again, then C-c C-c."
+  - id: grep
+    goal: Search the workbench for "recieve" and export the results
+    detail: "The docs misspell receive. `M-s r` (consult-ripgrep) searches the whole project; type `recieve`. Then `C-.` and `E` (embark-export) turn the candidates into a grep buffer, the same kind `M-x grep` makes."
+    demo: 'M-s r ~800 "recieve" ~1500 C-. ~600 E ~1200'
+    conditions:
+      - text: the search was exported
+        any:
+          - event: { command: embark-export }
+          - event: { command: embark-act }
+        hint: "Wait for the matches to appear under the prompt, then C-. (Control and the full stop) and E (capital e)."
+      - text: a grep buffer lists the matches
+        elisp: '(seq-some (lambda (w) (with-current-buffer (window-buffer w) (and (derived-mode-p (quote grep-mode)) (save-excursion (goto-char (point-min)) (search-forward "recieve" nil t))))) (window-list))'
+        hint: "The export opens below, in grep-mode. If you pressed RET instead, M-s r again: RET visits one match and drops the rest."
+  - id: wgrep
+    goal: Fix all four typos from the grep buffer
+    detail: "The export leaves the cursor in the grep buffer. `C-x C-q` again: now wgrep makes the matched lines editable. `M-<`, then `M-%`, type `recieve`, `TAB`, `receive`, `RET`, and `!` to replace all. `C-c C-c` writes every change into its file and saves it."
+    demo: 'C-x C-f ~400 "/work/workbench/README.md" RET ~500 M-s r ~800 "recieve" ~1500 C-. ~600 E ~1200 C-x C-q ~500 M-< ~300 M-% ~500 "recieve" ~300 TAB ~300 "receive" ~300 RET ~500 ! ~800 C-c C-c ~1000'
+    conditions:
+      - text: C-x C-q started wgrep
+        event: { command: wgrep-change-to-wgrep-mode }
+        hint: "Press C-x C-q with the cursor in the grep buffer (C-x o moves it there); in the photos listing it would start wdired instead. After Reset this step the export is gone: M-s r recieve, C-. E again."
+      - text: the docs say receive everywhere
+        shell: { run: "! grep -rq recieve docs" }
+        hint: "Replace in the grep buffer, then C-c C-c: the files change only when you finish. The prefix of each line (file and line number) stays read-only."
+      - text: wgrep has finished
+        elisp: '(seq-every-p (lambda (b) (with-current-buffer b (or (not (derived-mode-p (quote grep-mode))) buffer-read-only))) (buffer-list))'
+        hint: "C-c C-c applies and leaves editing; C-c C-k would drop the edits."
+  - id: occur
+    goal: List the open tasks in notes/todo.md with occur
+    detail: "Open `/work/workbench/notes/todo.md`. `M-s o` lists every line that matches a regular expression: type `\\[ \\]` (brackets are special in a regexp, so each gets a backslash) and `RET`. The list appears below."
+    demo: 'C-x C-f ~400 "/work/workbench/notes/todo.md" RET ~500 M-s o ~500 "\\[ \\]" ~300 RET ~800'
+    conditions:
+      - text: occur ran on todo.md
+        event: { command: occur }
+        hint: "M-s o reads a regular expression, so the brackets need backslashes: \\[ \\]. Plain [ ] matches a single space."
+      - text: the occur list shows the five open tasks
+        elisp: '(let ((b (get-buffer "*Occur*"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (looking-at "5 matches")))))'
+        hint: "The first line of *Occur* counts the matches. Five lines start with - [ ]; the [x] line is done already."
+  - id: occur-edit
+    goal: Tick them all from the occur list
+    detail: "In `*Occur*` press `e`: the lines become editable (the mode line says Occur-Edit) and every change goes straight into todo.md. `M-<`, `M-%`, `[ ]`, `TAB`, `[x]`, `RET`, `!`. Then `C-c C-c` makes the list read-only again."
+    demo: 'C-x C-f ~400 "/work/workbench/notes/todo.md" RET ~400 C-x 1 ~300 M-s o ~500 "\\[ \\]" ~300 RET ~800 C-x o ~400 e ~500 M-< ~300 M-% ~500 "[ ]" ~300 TAB ~300 "[x]" ~300 RET ~500 ! ~800 C-c C-c ~600'
+    conditions:
+      - text: the occur list was made editable
+        event: { command: occur-edit-mode }
+        hint: "Occur is the one listing here whose edit key is e, not C-x C-q. If the mode line says (Occur) while you type, the edits stay in the list: C-x C-q back, then e."
+      - text: todo.md has no open tasks left
+        elisp: '(let ((b (find-buffer-visiting "/work/workbench/notes/todo.md"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (and (not (search-forward "[ ]" nil t)) (progn (goto-char (point-min)) (= 6 (how-many "^- \\[x\\]"))))))))'
+        hint: "M-% in the occur list is a literal replace, so type [ ] without backslashes. If some were skipped, ! was not pressed; M-< and replace again."
+      - text: the list is read-only again
+        elisp: '(let ((b (get-buffer "*Occur*"))) (and b (with-current-buffer b (eq major-mode (quote occur-mode)))))'
+        hint: "C-c C-c in *Occur* stops editing; the changes stay in todo.md."
+  - id: tar-open
+    goal: Open site/index.md inside site.tar
+    detail: "Open `/work/workbench/site.tar`. A tarball opens as a listing in tar-mode, much like Dired. Put the cursor on `site/index.md` and press `RET`: the member opens as a normal buffer, nothing is extracted to disk."
+    demo: 'C-x C-f ~400 "/work/workbench/site.tar" RET ~800 M-< ~300 C-s ~300 "index" ~300 RET ~400 RET ~800'
+    conditions:
+      - text: site.tar is open as a listing
+        buffer: { name: site.tar, mode: tar-mode }
+        hint: "Find it like any file: C-x C-f, then the path. Emacs picks tar-mode from the name."
+      - text: index.md from the archive is the current buffer
+        state: { buf: { regex: "^index\\.md \\(site\\.tar\\)" } }
+        hint: "RET opens the member on the cursor's line; its buffer name says index.md (site.tar). On the site/ line RET shows nothing useful."
+  - id: tar-fix
+    goal: Fix "teh" and save it back into the tarball
+    detail: "Change `teh` to `the`. `C-x C-s` in the member saves it into the archive's buffer. Then `C-x k RET` closes the member, and `C-x C-s` in the listing writes site.tar to disk."
+    demo: 'C-x C-f ~400 "/work/workbench/site.tar" RET ~600 M-< ~300 C-s ~300 "index" ~300 RET ~400 RET ~600 M-< ~300 C-s ~300 "teh " ~300 RET ~300 C-b ~200 M-DEL ~300 "the" ~400 C-x C-s ~800 C-x k ~400 RET ~800 C-x C-s ~800'
+    conditions:
+      - text: the fixed member was saved into the archive buffer
+        elisp: '(or (let ((b (seq-find (lambda (b) (string-prefix-p "index.md (site.tar)" (buffer-name b))) (buffer-list)))) (and b (with-current-buffer b (and (not (buffer-modified-p)) (save-excursion (goto-char (point-min)) (search-forward "Welcome to the tally" nil t)))))) (with-temp-buffer (call-process "tar" nil t nil "-xOf" "/work/workbench/site.tar" "site/index.md") (goto-char (point-min)) (search-forward "Welcome to the tally" nil t)))'
+        hint: "C-x C-s in the index.md (site.tar) buffer copies it into the archive's buffer; the echo area says so, and site.tar shows ** until it is saved."
+      - text: site.tar on disk has the fix
+        shell: { run: "tar -xOf site.tar site/index.md | grep -q 'Welcome to the tally'" }
+        hint: "The listing shows ** in its mode line until you save it: C-x C-s there (C-x b site.tar RET gets you back to it)."
