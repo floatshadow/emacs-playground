@@ -132,7 +132,7 @@ workspace/  artifacts/  .dev/   (git-ignored)
 
 ## 10. Roadmap
 
-Slice 1 delivers M1 to M3 and the GUI and preview panes. The slice-2 platform adds M0 for every toolchain and module, project scenarios with laps, and the per-session remote box; curriculum Parts 4–14 and P1–P8 are being authored on it (M4–M6). The server-mode docker backend is experimental and OIDC answers 501.
+Slice 1 delivers M1 to M3 and the GUI and preview panes. The slice-2 platform adds M0 for every toolchain and module, project scenarios with laps, and the per-session remote box; curriculum Parts 4–14 and P1–P8 run on it (M4–M6). The server-mode docker backend is experimental and OIDC answers 501.
 
 | Milestone | Deliverable | Done when |
 |---|---|---|

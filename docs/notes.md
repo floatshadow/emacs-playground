@@ -45,7 +45,7 @@ Go 1.27.3 from go.dev into `~/.local/go` (`go1.27.3.linux-amd64.tar.gz`, sha256 
 
 ## 5. Scope
 
-Session image with Emacs 31.1, every toolchain and all eighteen modules (emacs.md); all of sessiond (backend.md §3) with projects, laps and the remote box; gateway local mode, docker backend experimental, OIDC 501; playctl; every web screen; curriculum Parts 0 to 3 ready, Parts 4–14 and P1–P8 in authoring. Everything else is a `TODO` with its doc section (DESIGN.md §10).
+Session image with Emacs 31.1, every toolchain and all eighteen modules (emacs.md); all of sessiond (backend.md §3) with projects, laps and the remote box; gateway local mode, docker backend experimental, OIDC 501; playctl; every web screen; curriculum Parts 0 to 14 with P1–P8 ready. Everything else is a `TODO` with its doc section (DESIGN.md §10).
 
 ## 6. Known limitations
 
@@ -54,7 +54,6 @@ Open decisions and unscheduled work are in DESIGN.md §12; what a checkpoint res
 - Lesson 3.5: "Go to this step" on `try`/`hide` lacks the learner's `*Help*` rule (the hint says to re-evaluate `popups.el`); Watch it on `rule` leaves the demo's rule active.
 - Lesson 3.1's `close` demo is relative to the selected window.
 - Fast-forwarded steps show as "Later"; Continue on an all-watched lesson stays on its last step.
-- A focus-in report once reached a file as `[I`; it was never reproduced (tmux `escape-time 10` keeps split sequences together).
 - The terminal's WebGL skip at a device pixel ratio above 1 was verified only under Chrome's emulated scale factor, not on HiDPI hardware.
 
 ## 7. Curriculum authoring pitfalls
@@ -73,4 +72,10 @@ The rules are CURRICULUM.md B.3 (demo strings, authoring rules) and B.4 (exit ro
 - **Setups never ask** (`inhibit-interaction`): bind `kill-buffer-query-functions` to nil when killing a buffer with a process. A window that pops up (build output) is not the learner's split.
 - **Write the keys out.** Keys in the lesson or step text silence habit cards; paraphrased ones do not. `:try` clicks count as the learner's own input.
 - **Command names:** the agent reports `real-this-command`; keep older names (`kill-region` for `C-k`) as alternatives, and `M-y` is `consult-yank-pop` only from lesson 4.2.
-- **Check:** `playctl curriculum play` and `play -watch`, `-repeat 2`, on a fresh workspace (`make curriculum-play`, `make curriculum-watch`).
+- **Test with every module on:** with a language server, imenu positions can land on doc comments and corfu's popup opens inside snippet fields.
+- **Demos never type a newline right after a symbol** in code buffers: corfu-auto with cape-dabbrev can take the RET as a candidate.
+- **Magit** buffers survive restores, and Magit keeps each repository's open sections after its buffer is killed: setups clear `magit-repository-local-cache`, demos fold first (`M-2`, `M-4`). Opening a conflicted file puts point in its first conflict, so `C-c ^ n` goes to the second.
+- **setup.run rebuilding `.git`** races with git run by the previous lesson's buffers (diff-hl, Magit): retry `rm`, `add` and `commit`. Box state comes from setup.run; checkpoints do not cover the box.
+- **No TRAMP calls from timers or process callbacks:** one that runs inside another TRAMP operation on the same connection breaks it.
+- **Lessons that edit `emacs.d/modules`** (13.1, 13.6) cannot be replayed on a stack that mounts the modules read-only.
+- **Check:** `playctl curriculum play` and `play -watch`, `-repeat 2`, on a fresh workspace (`make curriculum-play`, `make curriculum-watch`); `play all` in course order too, since what learners set in Part 13 (a 2 s auto-save) stays on for the projects.

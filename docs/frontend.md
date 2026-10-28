@@ -20,7 +20,7 @@ React 19, TypeScript, Vite, TanStack Query (server state), Zustand (live state),
 
 The connection layer sits above the router, so navigation keeps the WebSockets open.
 
-Loading a lesson (`useLesson`) calls `rpc('scenario', {lessonId, stepId})` unless the engine's active step is already in this lesson. The step is the URL's, else `resumeStep`: the first step neither done nor skipped (this visit's outcome, else saved progress; a watched step is resumed for practice), chosen from freshly fetched progress so another tab's reset never resumes a stale step. A `dropped` event clears the active step and the lesson's outcomes and triggers a new load. GUI lessons (`mode: gui` or tag `gui`) switch to the GUI frame after loading.
+Loading a lesson (`useLesson`) calls `rpc('scenario', {lessonId, stepId})` unless the engine's active step is already in this lesson. The step is the URL's, else `resumeStep`: the first step neither done nor skipped (this visit's outcome, else saved progress; a watched step is resumed for practice), chosen from freshly fetched progress so another tab's reset never resumes a stale step. A `dropped` event clears the active step and the lesson's outcomes and triggers a new load. GUI lessons (`mode: gui` or tag `gui`) switch to the GUI frame after loading, a step with `mode: gui` when it becomes active.
 
 ## 3. State
 
