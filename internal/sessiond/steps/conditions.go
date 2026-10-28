@@ -42,6 +42,8 @@ type ShellResult struct {
 	// Output is stdout truncated to MaxShellOutput (or the cap given to
 	// RunCapped).
 	Output string
+	// Stderr is the end of stderr (for setup.run's error message).
+	Stderr string
 	Err    error
 }
 
@@ -97,11 +99,11 @@ func (s ExecShell) RunCapped(ctx context.Context, dir, script string, timeout ti
 		return nil
 	}
 	cmd.WaitDelay = time.Second
-	var out bytes.Buffer
+	var out, stderr bytes.Buffer
 	cmd.Stdout = &capWriter{b: &out, max: maxOutput}
-	cmd.Stderr = io.Discard
+	cmd.Stderr = &capWriter{b: &stderr, max: 4096}
 	err := cmd.Run()
-	res := ShellResult{Output: out.String(), ExitCode: -1}
+	res := ShellResult{Output: out.String(), Stderr: stderr.String(), ExitCode: -1}
 	switch {
 	case ctx.Err() == context.DeadlineExceeded:
 		res.TimedOut = true

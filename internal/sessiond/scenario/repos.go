@@ -112,7 +112,11 @@ func (l *Loader) runSetup(ctx context.Context, sc *protocol.Scenario) error {
 	case res.Err != nil:
 		return fmt.Errorf("setup.run: %w", res.Err)
 	case !res.OK:
-		return fmt.Errorf("setup.run failed: %s", strings.TrimSpace(res.Output))
+		msg := strings.TrimSpace(res.Stderr)
+		if msg == "" {
+			msg = strings.TrimSpace(res.Output)
+		}
+		return fmt.Errorf("setup.run failed (exit %d): %s", res.ExitCode, msg)
 	}
 	return nil
 }

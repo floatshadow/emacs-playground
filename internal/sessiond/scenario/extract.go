@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"syscall"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -88,7 +89,10 @@ func prune(root *os.Root, dest string, seen map[string]bool) (int, error) {
 				continue
 			}
 			if !seen[child] {
-				if err := root.RemoveAll(dest + "/" + child); err != nil {
+				// EBUSY: on NFS a file a process still holds open becomes
+				// .nfsXXXX and cannot be removed until it is closed (an
+				// epdfinfo serving a removed PDF); everything else is gone.
+				if err := root.RemoveAll(dest + "/" + child); err != nil && !errors.Is(err, syscall.EBUSY) {
 					return fmt.Errorf("fixtures: removing %s: %w", child, err)
 				}
 				removed++

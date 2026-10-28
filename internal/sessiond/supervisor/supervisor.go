@@ -500,6 +500,7 @@ func (s *Supervisor) heartbeat() {
 	t := time.NewTicker(s.opt.PingInterval / 2)
 	defer t.Stop()
 	limit := time.Duration(MissedPings) * s.opt.PingInterval
+	signalled := false
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -525,13 +526,28 @@ func (s *Supervisor) heartbeat() {
 					s.log.Warn("signalling the busy daemon", "signal", s.opt.BusySignal, "err", err)
 				} else {
 					s.log.Info("emacs is unresponsive; sent the debug signal", "signal", s.opt.BusySignal)
+					signalled = true
 				}
 			}
 		} else {
 			s.emit(&protocol.EmacsEvent{Event: protocol.EmacsResponsive})
+			if signalled {
+				// Emacs's handler for the debug signal also sets
+				// debug-on-quit, after which every C-g in a prompt opens
+				// *Backtrace*.
+				signalled = false
+				ctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
+				if err := s.opt.Agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: ResetDebugForm}, 2*time.Second, nil); err != nil {
+					s.log.Warn("resetting debug-on-quit", "err", err)
+				}
+				cancel()
+			}
 		}
 	}
 }
+
+// ResetDebugForm undoes what the debug signal (SIGUSR2) leaves set.
+const ResetDebugForm = "(setq debug-on-quit nil)"
 
 // Unresponsive reports missed heartbeats.
 func (s *Supervisor) Unresponsive() bool {
@@ -803,6 +819,14 @@ const leaveGUIForm = `(progn
           (error (push (format "%s: %s" d (error-message-string err)) failed))))
       (if failed (mapconcat #'identity failed "; ") "closed"))))`
 
+// restartLoopForm makes Emacs's command loop start waiting for keys again.
+// After the GUI frame's terminal is gone, the loop that was waiting for a
+// key from it swallows the next input event from the terminal frame (a
+// key, or the ESC of an escape sequence, whose rest is then typed as text:
+// "[I", "[<35;43;15M"); a top-level from a timer restarts the wait on the
+// terminal frame first.
+const restartLoopForm = "(progn (run-at-time 0 nil #'top-level) t)"
+
 // SetMode switches the frame shown to the browser (rpc mode, architecture.md
 // §3.5).
 func (s *Supervisor) SetMode(ctx context.Context, mode protocol.FrameKind) (protocol.FrameKind, error) {
@@ -890,6 +914,13 @@ func (s *Supervisor) leaveGUI(ctx context.Context) {
 		s.xvnc.Stop(2 * time.Second)
 	}
 	s.setFrame(protocol.FrameGUI, false, "")
+	if s.opt.Agent != nil && s.opt.Agent.Connected() {
+		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
+		if err := s.opt.Agent.Call(cctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: restartLoopForm}, 2*time.Second, nil); err != nil {
+			s.log.Warn("restarting the command loop after the GUI frame", "err", err)
+		}
+		cancel()
+	}
 }
 
 func waitTCP(ctx context.Context, addr string, timeout time.Duration) error {

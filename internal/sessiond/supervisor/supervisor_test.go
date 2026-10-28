@@ -524,18 +524,22 @@ func TestSupervisorGUIMode(t *testing.T) {
 		t.Fatalf("mode callbacks %v", modes)
 	}
 	// The GUI frame is deleted inside Emacs (an eval) before Xvnc stops,
-	// and an intentional switch emits no frame-closed event.
+	// then the command loop is restarted on the terminal frame (a second
+	// eval); an intentional switch emits no frame-closed event.
 	h.mu.Lock()
 	evalsAfter := strings.Count(strings.Join(h.calls, ","), "eval")
 	h.mu.Unlock()
-	if evalsAfter != evalsBefore+1 {
-		t.Fatalf("agent calls %v: want one eval deleting the GUI frame", h.calls)
+	if evalsAfter != evalsBefore+2 {
+		t.Fatalf("agent calls %v: want an eval deleting the GUI frame and one restarting the command loop", h.calls)
 	}
 	h.mu.Lock()
-	form := h.evalForms[len(h.evalForms)-1]
+	form, restart := h.evalForms[len(h.evalForms)-2], h.evalForms[len(h.evalForms)-1]
 	h.mu.Unlock()
 	if !strings.Contains(form, "delete-frame") || !strings.Contains(form, "x-close-connection") {
 		t.Fatalf("the eval must delete the X frames and close the display: %s", form)
+	}
+	if restart != restartLoopForm {
+		t.Fatalf("the second eval must restart the command loop: %s", restart)
 	}
 	want := []string{"frame-opened:gui", "mode:gui", "mode:terminal"}
 	got := h.evs.emacs()
@@ -718,6 +722,20 @@ while :; do sleep 0.05; done`
 	// Once Emacs answers again, Rescue offers nothing.
 	fake.SetSilent(false)
 	h.evs.waitFor(t, "responsive")
+	// The signal left debug-on-quit set; the supervisor clears it.
+	for deadline := time.Now().Add(3 * time.Second); ; {
+		found := false
+		for _, c := range fake.Calls() {
+			found = found || (c.Op == protocol.AgentOpEval && strings.Contains(string(c.Args), "debug-on-quit nil"))
+		}
+		if found {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no eval resetting debug-on-quit after the debug signal")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	errorsBefore := strings.Count(strings.Join(h.evs.emacs(), ","), "error")
 	if err := h.sup.Interrupt(ctx); err != nil {
 		t.Fatal(err)
