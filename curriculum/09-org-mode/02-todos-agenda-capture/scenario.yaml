@@ -1,0 +1,175 @@
+id: 09-org-mode/02-todos-agenda-capture
+title: "TODOs, scheduling, the agenda and capture"
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org]
+vscode: Todo Tree
+setup:
+  workspace: fixtures/org
+  root: org
+  reset: true
+  open: [org/drafts/about.md, org/drafts/nginx.conf, org/blog.org]
+  layout: single
+  eval: >-
+    (progn
+      (let ((kill-buffer-query-functions nil))
+        (dolist (b (buffer-list))
+          (when (with-current-buffer b (derived-mode-p (quote org-agenda-mode))) (kill-buffer b))))
+      (switch-to-buffer (find-buffer-visiting "/work/org/blog.org"))
+      (goto-char (point-min)))
+steps:
+  - id: todo
+    goal: Make "Write the about page" a TODO
+    detail: "`C-c C-t` on a heading cycles its state: nothing, TODO, DONE. Put the cursor on the line of the about page and press it once."
+    demo: 'M-< ~300 C-s "Write the about" RET ~400 C-c C-t'
+    conditions:
+      - text: C-c C-t changed a state
+        event: { command: org-todo }
+        hint: "Control c, then Control t, with the cursor anywhere on the heading line. Pressed twice, it goes on to DONE; once more clears it."
+      - text: the about page is a TODO
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/blog.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^\\*+ \\(?:[A-Z]+ \\)?Write the about page" nil t) (equal (org-get-todo-state) "TODO"))))
+        hint: "The heading should read *** TODO Write the about page. If it says DONE, C-c C-t twice more brings it round to TODO."
+  - id: done
+    goal: Mark "Draw a logo" DONE with S-<right>
+    detail: "`S-<right>` (Shift and the right arrow) on a heading steps to the next state and `S-<left>` back. Org notes when it was done on a CLOSED: line."
+    demo: 'M-< ~300 C-s "Draw a logo" RET ~400 S-<right>'
+    conditions:
+      - text: S-<right> or C-c C-t changed the state
+        any:
+          - event: { command: org-shiftright }
+          - event: { command: org-todo }
+        hint: "Shift and the right arrow, on the heading line itself. Elsewhere in an Org file, and in other buffers, Shift and an arrow moves to the next window instead."
+      - text: Draw a logo is DONE, with a CLOSED time
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/blog.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^\\*+ \\(?:[A-Z]+ \\)?Draw a logo" nil t)
+                   (equal (org-get-todo-state) "DONE") (org-entry-get nil "CLOSED"))))
+        hint: "Check the line under the heading: CLOSED: [date time]. If the state went past DONE to nothing, S-<left> steps back."
+  - id: tag
+    goal: Tag the about page with writing
+    detail: "`C-c C-q` sets the tags of the heading at the cursor. Type `writing` and `RET`; the tag appears at the end of the line between colons."
+    demo: 'M-< ~300 C-s "Write the about" RET ~400 C-c C-q ~500 "writing" RET'
+    conditions:
+      - text: C-c C-q set tags
+        any:
+          - event: { command: org-set-tags-command }
+          - event: { command: org-ctrl-c-ctrl-c }
+        hint: "Control c, Control q on the about page's heading. The prompt says Tags: and completes the tags this file already uses."
+      - text: the about page has the tag writing
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/blog.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^\\*+ \\(?:[A-Z]+ \\)?Write the about page" nil t)
+                   (member "writing" (org-get-tags nil t)))))
+        hint: "The heading must end with :writing:. Several tags are separated by commas in the prompt."
+  - id: capture
+    goal: Capture a task from about.md
+    detail: "Capture works from any buffer. Switch to `about.md` with `C-x b`, then `C-c c` and `t` for a Task. Type `Add a team photo` and press `C-c C-c` to file it into `inbox.org`. The task remembers where you were: it links back to about.md."
+    demo: 'C-x b ~400 "about.md" RET ~600 C-c c ~800 t ~800 "Add a team photo" ~600 C-c C-c'
+    conditions:
+      - text: a capture was filed
+        event: { command: org-capture-finalize }
+        hint: "C-c c shows a menu of templates: press t. Type the task in the capture window, then C-c C-c files it (C-c C-k throws it away)."
+      - text: inbox.org has a task that links to about.md
+        elisp: >-
+          (let ((b (find-buffer-visiting "/work/org/inbox.org")))
+            (and b (with-current-buffer b
+              (seq-some (function identity)
+                (org-map-entries (lambda () (save-excursion (re-search-forward "about\\.md" (org-entry-end-position) t)))
+                                 "TODO=\"TODO\"" (quote file))))))
+        hint: "Start the capture from the about.md buffer: the link under the task points at the buffer you were in when you pressed C-c c."
+    stuck:
+      - when: { step_seconds: 90 }
+        say: "Org fills in the task's link from the buffer you were in when you pressed C-c c. Captured from blog.org, it links to blog.org: C-x b about.md first."
+  - id: capture-more
+    goal: Capture two more tasks, one from nginx.conf
+    detail: "Switch to `nginx.conf` and capture `Turn on gzip`. Then capture one more from any buffer, for example `Ask Sam for a logo sketch`. Each `C-c C-c` takes you back to where you were."
+    demo: 'C-x b ~400 "nginx.conf" RET ~600 C-c c ~800 t ~800 "Turn on gzip" ~600 C-c C-c ~1000 C-c c ~800 t ~800 "Ask Sam for a logo sketch" ~600 C-c C-c'
+    conditions:
+      - text: inbox.org has three tasks
+        elisp: >-
+          (let ((b (find-buffer-visiting "/work/org/inbox.org")))
+            (and b (with-current-buffer b (>= (length (org-map-entries (lambda () t) "TODO=\"TODO\"" (quote file))) 3))))
+        hint: "Count the TODO headings under Tasks in inbox.org (C-x b inbox.org shows it). Each C-c c t ... C-c C-c adds one."
+      - text: the gzip task links to nginx.conf
+        elisp: >-
+          (let ((b (find-buffer-visiting "/work/org/inbox.org")) (case-fold-search t))
+            (and b (with-current-buffer b
+              (seq-some (function identity)
+                (org-map-entries (lambda () (and (string-match-p "gzip" (org-get-heading t t t t))
+                                                 (save-excursion (re-search-forward "nginx\\.conf" (org-entry-end-position) t))))
+                                 "TODO=\"TODO\"" (quote file))))))
+        hint: "Switch to nginx.conf (C-x b nginx.conf RET) before C-c c, so the task links to it, and give it a name with gzip in it."
+  - id: schedule
+    goal: Schedule the three tasks in the coming week
+    detail: "Open `inbox.org` (`C-x b inbox.org`). On each task, `C-c C-s` asks for a date and shows a calendar: `+1` means tomorrow, `+3` in three days, `fri` the next Friday; `RET` accepts. A SCHEDULED: line appears under the task."
+    demo: 'C-x b ~400 "inbox.org" RET ~500 M-< C-s "TODO" RET ~300 C-c C-s ~800 "+1" ~500 RET ~600 C-s "TODO" RET ~300 C-c C-s ~800 "+2" ~500 RET ~600 C-s "TODO" RET ~300 C-c C-s ~800 "+4" ~500 RET'
+    conditions:
+      - text: C-c C-s scheduled a task
+        event: { command: org-schedule }
+        hint: "Control c, Control s, with the cursor on the task's heading line. The calendar window closes when you press RET."
+      - text: three tasks are scheduled within the next seven days
+        elisp: >-
+          (let ((b (find-buffer-visiting "/work/org/inbox.org")))
+            (and b (with-current-buffer b
+              (>= (length (delq nil (org-map-entries
+                                     (lambda () (let ((s (org-get-scheduled-time (point))))
+                                                  (and s (<= 0 (- (time-to-days s) (time-to-days nil)) 6))))
+                                     "TODO=\"TODO\"" (quote file))))
+                  3))))
+        hint: "Each task needs its own SCHEDULED: line with a date less than a week away. In the date prompt, S-<right> and S-<left> move the calendar a day; +7 would be too far."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "In the date prompt, type +1 for tomorrow or a weekday name such as fri, then RET. C-g cancels."
+  - id: deadline
+    goal: Give the about page a deadline in five days
+    detail: "`C-c C-d` adds a DEADLINE: line the same way. Go back to `blog.org`, put the cursor on Write the about page and answer `+5`."
+    demo: 'C-x b ~400 "blog.org" RET ~500 M-< C-s "Write the about" RET ~400 C-c C-d ~800 "+5" ~500 RET'
+    conditions:
+      - text: C-c C-d set a deadline
+        event: { command: org-deadline }
+        hint: "Control c, Control d on the heading line of the about page in blog.org."
+      - text: the about page is due in five days
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/blog.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^\\*+ \\(?:[A-Z]+ \\)?Write the about page" nil t)
+                   (let ((d (org-get-deadline-time (point)))) (and d (= (- (time-to-days d) (time-to-days nil)) 5))))))
+        hint: "The DEADLINE: date must be five days from today: answer +5 in the prompt. Running C-c C-d again replaces the date."
+  - id: agenda
+    goal: Read the week in the agenda
+    detail: "`C-c a` opens the agenda menu; `a` shows this week, day by day: everything scheduled, with deadlines coming up. It collects every Org file in /work/org."
+    demo: "C-c a ~800 a"
+    conditions:
+      - text: C-c a opened the agenda menu
+        event: { command: org-agenda }
+        hint: "Control c, then a plain a. It works from any buffer, not only Org files."
+      - text: the week agenda is on screen
+        all:
+          - state: { mode: org-agenda-mode }
+          - buffer: { name: "*Org Agenda*", mode: org-agenda-mode, contains: "Scheduled:" }
+        hint: "In the menu, a is the week agenda (t would list TODOs instead). If the week shows no tasks, they have no SCHEDULED: dates yet."
+  - id: agenda-done
+    goal: Mark the gzip task DONE from the agenda, then close it
+    detail: "In the agenda, `n` and `p` move between lines, `RET` visits an item, and `t` changes its state in its file. Put the cursor on Turn on gzip, press `t`, then `q`."
+    demo: 'C-c a ~600 a ~800 C-s "gzip" RET ~400 t ~800 q'
+    conditions:
+      - text: t changed a state from the agenda
+        event: { command: org-agenda-todo }
+        hint: "The cursor must be on the task's line in the agenda, not on a day heading. The line then reads DONE."
+      - text: the gzip task is DONE in inbox.org
+        elisp: >-
+          (let ((b (find-buffer-visiting "/work/org/inbox.org")) (case-fold-search t))
+            (and b (with-current-buffer b
+              (seq-some (function identity)
+                (org-map-entries (lambda () (string-match-p "gzip" (org-get-heading t t t t))) "TODO=\"DONE\"" (quote file))))))
+        hint: "If another task got DONE instead, t on it again cycles it back to TODO; then move to the gzip line."
+      - text: the agenda was closed
+        all:
+          - event: { command: org-agenda-quit }
+          - state: { mode: { not: org-agenda-mode } }
+        hint: "q in the agenda closes it and puts your windows back."

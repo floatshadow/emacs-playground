@@ -1,0 +1,90 @@
+id: 09-org-mode/05-babel-remote
+title: Babel on a remote host
+minutes: 10
+mode: terminal
+tags: [remote]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org]
+vscode: "Remote - SSH, a notebook on a remote kernel"
+remote: { box: true }
+setup:
+  workspace: fixtures/org
+  root: org
+  reset: true
+  open: [org/remote.org]
+  layout: single
+  run: |
+    ssh box 'mkdir -p /tmp/site && cd /tmp/site && touch index.html about.html posts.html feed.xml && cd /tmp && for s in 200 200 200 404 200 304 200 200 404 200 304 200; do printf "10.0.0.7 - - [28/Oct/2026:10:00:00 +0000] \"GET / HTTP/1.1\" %s 512\n" $s; done > access.log'
+  eval: >-
+    (progn
+      (let ((kill-buffer-query-functions nil))
+        (when (get-buffer "*box*") (kill-buffer "*box*")))
+      (with-current-buffer (find-buffer-visiting "/work/org/remote.org") (goto-char (point-min)) (dolist (w (get-buffer-window-list nil nil t)) (set-window-point w (point-min)))))
+steps:
+  - id: dir
+    goal: Run the status-code block on the box
+    detail: "Add `:dir /ssh:box:/tmp` to the `#+begin_src sh` line under Status codes and press `C-c C-c`. The block now runs in /tmp on the box over SSH (TRAMP), where access.log is, and the table comes back into this file."
+    demo: 'M-< ~300 C-s "begin_src sh :results table" RET ~400 " :dir /ssh:box:/tmp" ~500 C-c C-c ~3000'
+    conditions:
+      - text: the block runs in /ssh:box:/tmp
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/remote.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (re-search-forward "^[ \t]*#\\+begin_src sh :results table.*:dir +/ssh:box:/tmp" nil t)))
+        hint: "Type it on the #+begin_src sh line itself, after :results table: a space, :dir, a space, /ssh:box:/tmp."
+      - text: "#+RESULTS: codes counts 8 requests with status 200"
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/remote.org")
+            (org-with-wide-buffer
+              (let ((p (org-babel-find-named-block "codes")))
+                (and p (save-excursion (goto-char p)
+                         (let ((r (org-babel-where-is-src-block-result)))
+                           (and r (let ((end (progn (goto-char r) (org-babel-result-end))))
+                                    (goto-char r) (re-search-forward "| *8 *| *200 *|" end t)))))))))
+        hint: "Without :dir the block runs here, where there is no access.log, and the result is empty. The first connection to the box takes a second or two."
+    stuck:
+      - when: { step_seconds: 120 }
+        say: "While TRAMP connects, the echo area says Tramp: Opening connection; the block waits until it is done. An empty result means the block ran here: :dir has to be on the #+begin_src line itself, not on a line of its own."
+  - id: tabulate
+    goal: Turn the box's counts into shares, here
+    detail: "The Python block under Share of requests has no `:dir`, so it runs here, on the table the box sent back. `C-c C-c` in it."
+    demo: 'M-< ~300 C-s "begin_src python" RET ~400 C-c C-c'
+    conditions:
+      - text: C-c C-c ran a block
+        any:
+          - event: { command: org-ctrl-c-ctrl-c }
+          - event: { command: org-babel-execute-src-block }
+        hint: "Inside the Python block under Share of requests, not on its heading: C-c C-c on a heading sets tags."
+      - text: the result has a code, requests and share for each status
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/remote.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^[ \t]*#\\+begin_src python" nil t)
+                   (let ((r (org-babel-where-is-src-block-result)))
+                     (and r (let ((end (progn (goto-char r) (org-babel-result-end))))
+                              (goto-char r)
+                              (and (re-search-forward "| *share *|" end t) (re-search-forward "| *200 *| *8 *| *67% *|" end t))))))))
+        hint: "C-c C-c inside the Python block. It reads codes, so Babel runs the box block again first; an error about codes means that block failed."
+  - id: session
+    goal: Keep one shell on the box for both blocks
+    detail: "Each block normally starts a fresh shell, so `cd site` is forgotten before `ls` runs. Add `:session *box*` to both `#+begin_src sh` lines under A shell that stays, then run the first and then the second: they share one shell on the box, in the buffer *box*."
+    demo: 'M-< ~300 C-s "cd site" RET ~300 C-p C-e ~300 " :session *box*" ~500 C-c C-c ~3000 C-s "ls | wc" RET ~300 C-p C-e ~300 " :session *box*" ~500 C-c C-c ~2000'
+    conditions:
+      - text: both blocks use the session *box*
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/remote.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (= 2 (how-many "^[ \t]*#\\+begin_src sh :dir /ssh:box:/tmp.*:session +\\*box\\*" (point-min) (point-max)))))
+        hint: "Both #+begin_src sh lines under A shell that stays need :session *box*, spelled the same, so they share one shell."
+      - text: the shell on the box is running
+        buffer: { name: "*box*", process: running }
+        hint: "Running a block with :session starts the shell in a buffer named *box*; C-x b *box* shows it."
+      - text: "#+RESULTS: count shows the 4 files in /tmp/site"
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/remote.org")
+            (org-with-wide-buffer
+              (let ((p (org-babel-find-named-block "count")))
+                (and p (save-excursion (goto-char p)
+                         (let ((r (org-babel-where-is-src-block-result)))
+                           (and r (let ((end (progn (goto-char r) (org-babel-result-end))))
+                                    (goto-char r) (re-search-forward "^[:| ]*4 *|?$" end t)))))))))
+        hint: "Run the cd block first, then the count block: in the shared shell the second runs where the first left off. Another number means the count ran in a fresh shell in /tmp."

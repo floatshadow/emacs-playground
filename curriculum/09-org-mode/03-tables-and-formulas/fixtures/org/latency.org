@@ -1,0 +1,12 @@
+#+title: Latency before and after the cache
+
+Milliseconds at the 95th percentile, measured on the box before and
+after the page cache went in.
+
+| endpoint | before | after | change % |
+|-
+| /index | 120 | 48 |
+| /posts | 210 | 63 |
+| /about | 95 | 38 |
+|-
+| mean |

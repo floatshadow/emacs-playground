@@ -1,0 +1,28 @@
+#+title: Team blog: launch plan
+#+author: The blog team
+#+options: toc:nil num:nil
+
+* Why a team blog
+We build developer tools. The blog shows how we work: our editors,
+our build pipeline, and how we keep notes in plain text.
+
+* Design
+- A light theme that reads well on a phone
+- A logo, simple enough for a favicon
+
+* Content
+| Post                  | Owner | Ready |
+|-----------------------+-------+-------|
+| Why we moved to Emacs | Sam   | yes   |
+| Our build pipeline    | Ana   | no    |
+| A week of Org         | Lee   | no    |
+
+* Server
+The site is static: publishing is one command.
+
+#+begin_src sh
+rsync -a public/ deploy@box:/srv/www/
+#+end_src
+
+* Launch day
+Friday. Announce it on the team channel and watch the access log.

@@ -1,0 +1,142 @@
+id: 09-org-mode/03-tables-and-formulas
+title: Tables and spreadsheet formulas
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org]
+vscode: "Markdown tables, a spreadsheet"
+setup:
+  workspace: fixtures/org
+  root: org
+  reset: true
+  open: [org/latency.org]
+  layout: single
+  eval: '(with-current-buffer (find-buffer-visiting "/work/org/latency.org") (goto-char (point-min)) (dolist (w (get-buffer-window-list nil nil t)) (set-window-point w (point-min))))'
+steps:
+  - id: align
+    goal: Align the table with TAB
+    detail: "Put the cursor anywhere in the table and press `TAB`. Org lines the columns up, fills in the missing cells, turns `|-` into a full rule, and moves the cursor to the next cell."
+    demo: 'M-< ~300 C-s "/posts" RET ~400 TAB'
+    conditions:
+      - text: TAB moved through the table
+        any:
+          - event: { command: org-cycle }
+          - event: { command: org-table-next-field }
+          - event: { command: org-table-align }
+        hint: "The cursor has to be inside the table, on a line that starts with |. Elsewhere TAB folds headings."
+      - text: every line of the table has the same width
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/latency.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^[ \t]*|" nil t)
+                   (= 1 (length (delete-dups (mapcar (function length)
+                          (split-string (buffer-substring-no-properties (org-table-begin) (org-table-end)) "\n" t))))))))
+        hint: "One more TAB inside the table aligns it again; Org also realigns after each edit when you leave the cell."
+  - id: row
+    goal: Add a row for /feed, 300 before and 90 after
+    detail: "`RET` in a table goes to the cell below, in the same column, and opens a new row when the next line is a rule. Put the cursor in the /about cell itself (`C-s /about RET`), press `RET`, then type `/feed`, `TAB`, `300`, `TAB`, `90`, `TAB`. Typing right after `TAB` or `RET` replaces what the cell held."
+    demo: 'M-< ~300 C-s "/about" RET ~400 RET ~400 "/feed" TAB ~300 "300" TAB ~300 "90" TAB'
+    conditions:
+      - text: RET or TAB moved through the table
+        any:
+          - event: { command: org-return }
+          - event: { command: org-table-next-row }
+          - event: { command: org-cycle }
+          - event: { command: org-table-next-field }
+        hint: "With the cursor in the /about row, RET goes down and opens a new row above the rule. TAB then moves from cell to cell."
+      - text: the table has a /feed row with 300 and 90 above the mean
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/latency.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^[ \t]*|" nil t)
+                   (let* ((all (org-table-to-lisp)) (rows (seq-filter (function consp) all)) (r (assoc "/feed" rows)))
+                     (and r (equal (nth 1 r) "300") (equal (nth 2 r) "90")
+                          (< (cl-position r all) (cl-position (assoc "mean" rows) all)))))))
+        hint: "RET keeps the column you were in: from the 95 cell, /feed lands in the before column. M-S-<up> deletes the current row; start again from the /about cell. The row must stay above the rule and the mean row."
+  - id: coordinates
+    goal: Show the cell coordinates
+    detail: "Formulas name cells by row and column: `@3$2` is row 3, column 2; rules do not count as rows. `C-c }` shows these numbers around the table; press it again to hide them."
+    demo: "M-< ~300 C-s \"/posts\" RET ~400 C-c } ~1500 C-c }"
+    conditions:
+      - text: C-c } showed the coordinates
+        event: { command: org-table-toggle-coordinate-overlays }
+        hint: "Control c, then the closing brace } (Shift and ]), with the cursor in the table. Row numbers appear at the left, $ column numbers above."
+      - text: C-c } again hid them
+        all:
+          - event: { command: org-table-toggle-coordinate-overlays, min: 2 }
+          - elisp: "(not (bound-and-true-p org-table-overlay-coordinates))"
+        hint: "The same keys toggle them off. They are only an overlay: nothing in the file changes."
+  - id: mean
+    goal: Compute the mean of before and after
+    detail: "A cell that starts with `:=` holds a formula for that cell alone. In the mean row, type `:=vmean(@I..@II)` in the before cell and press `TAB`; do the same in the after cell. `@I..@II` is everything between the first and the second rule, in the same column."
+    demo: 'M-< ~300 C-s "mean" RET ~400 TAB ~300 ":=vmean(@I..@II)" ~400 TAB ~600 ":=vmean(@I..@II)" ~400 TAB'
+    conditions:
+      - text: the mean row holds the mean of each column
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/latency.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^[ \t]*|" nil t)
+                   (let* ((rows (seq-filter (function consp) (org-table-to-lisp)))
+                          (data (seq-filter (lambda (r) (not (member (car r) (quote ("endpoint" "mean"))))) rows))
+                          (m (assoc "mean" rows))
+                          (avg (lambda (i) (/ (apply (function +) (mapcar (lambda (r) (string-to-number (nth i r))) data)) (float (length data))))))
+                     (and m (= (length data) 4)
+                          (< (abs (- (string-to-number (nth 1 m)) (funcall avg 1))) 0.01)
+                          (< (abs (- (string-to-number (nth 2 m)) (funcall avg 2))) 0.01))))))
+        hint: "The formulas go in the mean row, columns 2 and 3. After TAB the cell shows a number and a #+TBLFM: line appears under the table. A cell showing #ERROR has a typo: C-c ' edits all formulas."
+      - text: the formulas are stored in a TBLFM line
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/org/latency.org") (org-with-wide-buffer (goto-char (point-min)) (re-search-forward "^[ \t]*#\\+TBLFM:.*vmean" nil t)))'
+        hint: "Start the cell with := (colon, equals); a plain = would make a formula for the whole column."
+  - id: change
+    goal: Fill the change % column with one column formula
+    detail: "`C-c =` in a cell asks for a formula for its whole column. In any change % cell press `C-c =`, type `100*($3-$2)/$2;%.0f` and `RET`: `$2` and `$3` are this row's before and after, and `;%.0f` rounds. The formula fills only that cell at first; `C-u C-c *` runs it in every row."
+    demo: 'M-< ~300 C-s "/posts" RET ~400 TAB TAB TAB ~400 C-c = ~600 "100*($3-$2)/$2;%.0f" ~400 RET ~800 C-u C-c *'
+    conditions:
+      - text: C-c = installed a column formula for change %
+        all:
+          - any:
+              - event: { command: org-table-eval-formula }
+              - event: { command: org-table-edit-formulas }
+              - event: { command: org-cycle }
+          - elisp: '(with-current-buffer (find-buffer-visiting "/work/org/latency.org") (org-with-wide-buffer (goto-char (point-min)) (re-search-forward "^[ \t]*#\\+TBLFM:.*\\$4=" nil t)))'
+        hint: "The cursor must be in column 4 (change %) when you press C-c =; the prompt then reads $4=."
+      - text: every row's change is right, the mean row too
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/latency.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^[ \t]*|" nil t)
+                   (let ((rows (cdr (seq-filter (function consp) (org-table-to-lisp)))))
+                     (and (= (length rows) 5)
+                          (cl-every (lambda (r) (let ((a (string-to-number (nth 1 r))) (b (string-to-number (nth 2 r))) (c (nth 3 r)))
+                                                  (and (> a 0) (string-match-p "[0-9]" c)
+                                                       (< (abs (- (string-to-number c) (* 100 (/ (- b a) (float a))))) 1.01))))
+                                    rows))))))
+        hint: "Only one cell filled? C-u C-c * runs the formulas in every row. Wrong numbers? In Calc, a/b*c means a/(b*c): write 100*($3-$2)/$2, and C-c = again replaces the column formula."
+    stuck:
+      - when: { step_seconds: 150 }
+        say: "C-c = makes a formula for the column the cursor is in. Pressed in the after column, it overwrites the after numbers: C-/ undoes, then move to change % (TAB from after) and press C-c = there."
+  - id: recalc
+    goal: Correct /posts to 70 and recalculate everything
+    detail: "Formulas do not rerun on their own when a number changes. Change the after value of /posts from 63 to 70, then `C-u C-c *` recalculates every formula in the table."
+    demo: 'M-< ~300 C-s "/posts" RET ~400 TAB TAB ~300 "70" ~400 C-u C-c *'
+    conditions:
+      - text: /posts after is 70
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/latency.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^[ \t]*|" nil t)
+                   (equal (nth 2 (assoc "/posts" (org-table-to-lisp))) "70"))))
+        hint: "TAB twice from the /posts cell lands on its after value; typing right after TAB replaces the old number."
+      - text: the mean and the changes match the new number
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/latency.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^[ \t]*|" nil t)
+                   (let* ((rows (seq-filter (function consp) (org-table-to-lisp)))
+                          (data (seq-filter (lambda (r) (not (member (car r) (quote ("endpoint" "mean"))))) rows))
+                          (m (assoc "mean" rows)) (p (assoc "/posts" rows)))
+                     (and m p
+                          (< (abs (- (string-to-number (nth 2 m))
+                                     (/ (apply (function +) (mapcar (lambda (r) (string-to-number (nth 2 r))) data)) (float (length data)))))
+                             0.01)
+                          (< (abs (- (string-to-number (nth 3 p)) (* 100 (/ (- 70 210) 210.0)))) 1.01))))))
+        hint: "The mean still shows the old value until the formulas run again: C-u C-c * with the cursor in the table. Without C-u, C-c * recalculates only the current row."

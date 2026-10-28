@@ -1,0 +1,86 @@
+id: 09-org-mode/06-export
+title: Export
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org]
+vscode: "Markdown PDF, Marp"
+setup:
+  workspace: fixtures/org
+  root: org
+  reset: true
+  open: [org/plan.org]
+  layout: single
+  eval: >-
+    (progn
+      (let ((kill-buffer-query-functions nil))
+        (dolist (b (buffer-list))
+          (when (with-current-buffer b (derived-mode-p (quote eww-mode))) (kill-buffer b))))
+      (with-current-buffer (find-buffer-visiting "/work/org/plan.org")
+        (when (bound-and-true-p org-present-mode) (org-present-quit))))
+steps:
+  - id: html
+    goal: Export the plan to HTML and look at it
+    detail: "`C-c C-e` opens the export menu. `h` is HTML; `o` writes plan.html and opens it, here in eww, Emacs's web browser. Read it, then `q` closes eww and brings plan.org back."
+    demo: "C-c C-e ~1000 h ~700 o ~2500 q"
+    conditions:
+      - text: C-c C-e opened the export menu
+        event: { command: org-export-dispatch }
+        hint: "Control c, Control e, in plan.org. A menu appears; each letter in brackets is a choice."
+      - text: plan.html has the plan, table and all
+        file: { path: org/plan.html, regex: "(?s)<table.*Launch day" }
+        hint: "In the menu, h then o (or h then h to write the file without opening it)."
+      - text: plan.org is back on screen
+        state: { buf: plan.org }
+        hint: "q in eww closes it; C-x b plan.org RET works from anywhere."
+  - id: pdf
+    goal: Export the plan to PDF
+    detail: "`C-c C-e l p` writes plan.tex and runs LaTeX on it to make plan.pdf. Emacs waits a few seconds while LaTeX runs. (`l o` would also open the PDF.)"
+    demo: "C-c C-e ~1000 l ~700 p ~6000"
+    conditions:
+      - text: C-c C-e opened the export menu
+        event: { command: org-export-dispatch }
+        hint: "Control c, Control e with plan.org selected. In eww or another buffer the keys mean something else."
+      - text: plan.pdf was made
+        shell: { run: "test -s plan.pdf && test plan.pdf -nt plan.org" }
+        hint: "C-c C-e, then l (LaTeX), then p (PDF). If LaTeX fails, the echo area says so and the log is in plan.tex's *Org PDF LaTeX Output* buffer."
+    stuck:
+      - when: { step_seconds: 120 }
+        say: "The export menu acts on the buffer you are in. If eww or another buffer is in front, C-x b plan.org RET first, then C-c C-e l p; Emacs is busy for a few seconds while LaTeX runs."
+  - id: beamer
+    goal: Export the plan as Beamer slides
+    detail: "Beamer is LaTeX's slide class: each top heading becomes a slide. `C-c C-e l b` writes the slides to plan.tex (`l P` would build their PDF)."
+    demo: "C-c C-e ~1000 l ~700 b ~1500"
+    conditions:
+      - text: C-c C-e opened the export menu
+        event: { command: org-export-dispatch }
+        hint: "Control c, Control e with plan.org selected. In eww or another buffer the keys mean something else."
+      - text: plan.tex is a Beamer document
+        file: { path: org/plan.tex, regex: "\\\\documentclass(\\[[^]]*\\])?\\{beamer\\}" }
+        hint: "In the LaTeX part of the menu, the Beamer choices are b, B, P and O; lower-case b writes the .tex file."
+  - id: markdown
+    goal: Export the plan to Markdown
+    detail: "`C-c C-e m m` writes plan.md, for a README or a site that wants Markdown."
+    demo: "C-c C-e ~1000 m ~700 m ~1000"
+    conditions:
+      - text: C-c C-e opened the export menu
+        event: { command: org-export-dispatch }
+        hint: "Control c, Control e with plan.org selected. In eww or another buffer the keys mean something else."
+      - text: plan.md has the plan's headings
+        file: { path: org/plan.md, regex: "(?m)^#+ Launch day" }
+        hint: "m opens the Markdown part of the menu, and the second m writes the file. Without the second key nothing happens yet."
+  - id: present
+    goal: Present the plan, then stop
+    detail: "`M-x org-present` shows one top heading at a time, in big text. `SPC` or the right arrow goes to the next slide, the left arrow back, and `C-c C-q` ends the presentation."
+    demo: 'M-x ~500 "org-present" ~400 RET ~1500 SPC ~1500 SPC ~1500 <left> ~1500 C-c C-q'
+    conditions:
+      - text: M-x org-present started the slides
+        event: { command: org-present }
+        hint: "M-x, type org-present, RET, in plan.org. The first heading fills the window."
+      - text: you went through some slides
+        event: { command: org-present-next, min: 2 }
+        hint: "SPC goes to the next slide. If SPC types a space instead, the slides are not running: M-x org-present again."
+      - text: the presentation is over
+        all:
+          - event: { command: org-present-quit }
+          - elisp: '(not (buffer-local-value (quote org-present-mode) (find-buffer-visiting "/work/org/plan.org")))'
+        hint: "C-c C-q leaves the slides and shows the whole file again."

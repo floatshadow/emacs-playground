@@ -1,0 +1,31 @@
+#+title: What the box served
+
+The blog runs on the box, and its access log stays there: the code
+blocks below can run on the box instead of copying the log here.
+
+* Status codes
+
+#+name: codes
+#+begin_src sh :results table
+awk '{ print $9 }' access.log | sort | uniq -c | sort -rn
+#+end_src
+
+* Share of requests
+
+This block runs here, on the table the box produced.
+
+#+begin_src python :var codes=codes :results table
+total = sum(n for n, _ in codes)
+return [["code", "requests", "share"], None] + [[c, n, f"{100 * n / total:.0f}%"] for n, c in codes]
+#+end_src
+
+* A shell that stays
+
+#+begin_src sh :dir /ssh:box:/tmp
+cd site
+#+end_src
+
+#+name: count
+#+begin_src sh :dir /ssh:box:/tmp
+ls | wc -l
+#+end_src

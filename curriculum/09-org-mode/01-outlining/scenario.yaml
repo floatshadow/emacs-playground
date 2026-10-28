@@ -1,0 +1,120 @@
+id: 09-org-mode/01-outlining
+title: Outlining and structure editing
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org]
+vscode: "Markdown outline, folding"
+setup:
+  workspace: fixtures/org
+  root: org
+  reset: true
+  open: [org/plan.org]
+  layout: single
+  eval: '(with-current-buffer (find-buffer-visiting "/work/org/plan.org") (goto-char (point-min)) (dolist (w (get-buffer-window-list nil nil t)) (set-window-point w (point-min))))'
+steps:
+  - id: views
+    goal: Fold and unfold the plan
+    detail: "`S-TAB` (Shift and Tab) folds the whole file to its top headings, then shows the headings only, then everything: press it three times in a row and watch. `C-c C-n` moves to the next heading. `TAB` on a heading cycles just that heading: folded, its children, everything below it. Leave everything visible."
+    demo: "S-TAB ~900 S-TAB ~900 S-TAB ~900 C-c C-n ~500 TAB ~900 TAB ~900 TAB"
+    conditions:
+      - text: S-TAB cycled the whole file's views
+        event: { command: org-shifttab, min: 3 }
+        hint: "Hold Shift and press Tab, three times in a row. The echo area names each view: OVERVIEW, CONTENTS, SHOW ALL."
+      - text: C-c C-n went to a heading
+        event: { command: org-next-visible-heading }
+        hint: "Control c, then Control n. It skips body text and stops on the next line that starts with stars."
+      - text: TAB folded or unfolded one heading
+        event: { command: org-cycle }
+        hint: "TAB works on the heading the cursor is on; on the first heading it folds the whole launch, because everything is below it."
+      - text: nothing is folded now
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/plan.org")
+            (save-excursion (save-restriction (widen) (goto-char (point-min))
+              (let ((ok t)) (while (and ok (not (eobp))) (when (invisible-p (point)) (setq ok nil)) (forward-line 1)) ok))))
+        hint: "A heading ending in ... has folded text under it. TAB on it shows more; C-u C-u C-u TAB anywhere shows everything at once."
+  - id: tasks
+    goal: Push the six tasks one level down
+    detail: "Server, Content and Design are the areas; the lines between them are their tasks. Put the cursor on a task heading and press `M-<right>` (Alt and the right arrow): it gains a star and becomes a child of the area above it. Do it for each of the six tasks; `C-c C-n` hops from heading to heading."
+    demo: 'M-< ~300 C-s "Set up nginx" RET ~300 M-<right> ~500 C-s "Write the about" RET ~300 M-<right> ~500 C-s "Point the domain" RET ~300 M-<right> ~500 C-s "First three" RET ~300 M-<right> ~500 C-s "Pick a theme" RET ~300 M-<right> ~500 C-s "Draw a logo" RET ~300 M-<right>'
+    conditions:
+      - text: M-<right> demoted a heading
+        any:
+          - event: { command: org-metaright }
+          - event: { command: org-do-demote }
+          - event: { command: org-demote-subtree }
+        hint: "Alt and the right arrow, with the cursor anywhere on the heading line. M-<left> undoes it."
+      - text: launch, areas and tasks are on levels 1, 2 and 3
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/plan.org")
+            (let ((o (org-map-entries (lambda () (cons (org-current-level) (org-get-heading t t t t))) t (quote file))))
+              (and (= (length o) 10)
+                   (cl-every (lambda (e) (= (car e) (cond ((equal (cdr e) "Launch the team blog") 1)
+                                                          ((member (cdr e) (quote ("Server" "Content" "Design"))) 2)
+                                                          (t 3))))
+                             o))))
+        hint: "Count the stars: one for the launch, two for Server, Content and Design, three for everything else. A heading with too many stars goes back with M-<left>."
+    stuck:
+      - when: { step_seconds: 120 }
+        say: "Selecting several headings and pressing M-<right> demotes them all, but only when the selection starts at the very beginning of the first heading's line. One heading at a time always works."
+  - id: reorder
+    goal: Put the areas in the order Design, Content, Server
+    detail: "`M-<up>` and `M-<down>` move the heading at the cursor, with everything under it, past its neighbour. Move Design up to the top of the areas, then Server down below Content."
+    demo: 'M-< ~300 C-s "* Design" RET ~300 M-<up> ~700 M-<up> ~700 C-s "* Server" RET ~300 M-<down>'
+    conditions:
+      - text: M-<up> or M-<down> moved a subtree
+        any:
+          - event: { command: org-metaup }
+          - event: { command: org-metadown }
+          - event: { command: org-move-subtree-up }
+          - event: { command: org-move-subtree-down }
+        hint: "Put the cursor on the area's own line (two stars), not on one of its tasks: M-<up> on a task only swaps it with the task above."
+      - text: Design, Content, Server, each with its tasks
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/plan.org")
+            (equal (org-map-entries (lambda () (cons (org-current-level) (org-get-heading t t t t))) t (quote file))
+                   (quote ((1 . "Launch the team blog") (2 . "Design") (3 . "Pick a theme") (3 . "Draw a logo")
+                           (2 . "Content") (3 . "Write the about page") (3 . "Point the domain at the box") (3 . "First three posts")
+                           (2 . "Server") (3 . "Set up nginx on the box")))))
+        hint: "A heading only moves past headings of its own level, so Design jumps over the whole Content subtree at once. Two M-<up> on Design, then one M-<down> on Server."
+  - id: move-task
+    goal: Move "Point the domain at the box" under Server
+    detail: "`C-c C-x C-w` cuts the subtree at the cursor; `C-c C-x C-y` pastes it, adjusting its level to the heading before the cursor. Cut the task, go to the end of the file with `M->` (the line below Server's last task), and paste."
+    demo: 'M-< ~300 C-s "Point the domain" RET ~400 C-c C-x C-w ~700 M-> ~500 C-c C-x C-y'
+    conditions:
+      - text: the task was cut or refiled
+        any:
+          - event: { command: org-cut-special }
+          - event: { command: org-cut-subtree }
+          - event: { command: org-refile }
+          - event: { command: kill-region }
+        hint: "With the cursor on the task's heading line: Control c, Control x, Control w. The task and its body disappear into the kill ring."
+      - text: the plan has its final shape
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/plan.org")
+            (equal (org-map-entries (lambda () (cons (org-current-level) (org-get-heading t t t t))) t (quote file))
+                   (quote ((1 . "Launch the team blog") (2 . "Design") (3 . "Pick a theme") (3 . "Draw a logo")
+                           (2 . "Content") (3 . "Write the about page") (3 . "First three posts")
+                           (2 . "Server") (3 . "Set up nginx on the box") (3 . "Point the domain at the box")))))
+        hint: "Paste on the empty last line, below Set up nginx: the pasted task takes three stars from the heading above it. Pasted on a heading line it lands before that heading, at its level."
+      - text: no text was lost on the way
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/plan.org")
+            (save-restriction (widen)
+              (cl-every (lambda (s) (save-excursion (goto-char (point-min)) (search-forward s nil t)))
+                        (quote ("Serve the site from /srv/www." "Who we are" "A week of Org" "reads well on a phone")))))
+        hint: "A body line is missing. C-/ undoes the last change; or reset this step."
+  - id: narrow
+    goal: Narrow to Content, then widen again
+    detail: "`C-x n s` narrows the buffer to the subtree at the cursor: the rest of the file is still there, just out of sight, and Narrow appears in the mode line. `C-x n w` widens it back."
+    demo: 'M-< ~300 C-s "* Content" RET ~400 C-x n s ~1500 C-x n w'
+    conditions:
+      - text: C-x n s narrowed to a subtree
+        any:
+          - event: { command: org-narrow-to-subtree }
+          - event: { command: org-toggle-narrow-to-subtree }
+        hint: "On the Content line: Control x, then n, then s. Only Content and its tasks stay on screen."
+      - text: C-x n w showed the whole file again
+        all:
+          - event: { command: widen }
+          - state: { narrowed: false }
+        hint: "Control x, n, w. The word Narrow leaves the mode line."

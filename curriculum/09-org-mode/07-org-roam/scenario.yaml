@@ -1,0 +1,78 @@
+id: 09-org-mode/07-org-roam
+title: Notes with org-roam
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org]
+vscode: Foam
+setup:
+  workspace: fixtures/org
+  root: org
+  reset: true
+  open: [org/roam/20261001120000-emacs.org]
+  layout: single
+  eval: >-
+    (progn
+      (let ((kill-buffer-query-functions nil))
+        (dolist (b (buffer-list))
+          (when (string-prefix-p "*org-roam" (buffer-name b)) (kill-buffer b))))
+      (require (quote org-roam))
+      (org-roam-db-sync))
+steps:
+  - id: find
+    goal: Make a note called Tree-sitter
+    detail: "`C-c n f` finds a note by title, or makes one when none matches. Type `Tree-sitter` and `RET`. A capture window opens on the new note: write a line, for example `Parses code into a syntax tree.`, then `C-c C-c` saves it."
+    demo: 'C-c n f ~800 "Tree-sitter" ~500 RET ~1200 "Parses code into a syntax tree." ~500 C-c C-c'
+    conditions:
+      - text: C-c n f was used
+        event: { command: org-roam-node-find }
+        hint: "Control c, then n, then f. The prompt lists the notes you already have."
+      - text: roam/ has a note titled Tree-sitter
+        shell: { run: "grep -qil '^#+title: *tree-sitter$' roam/*.org" }
+        hint: "Type a title no note has yet and RET makes a new note. If an existing note is highlighted, M-RET takes what you typed instead. C-c C-c finishes the capture and saves the file."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "RET takes the highlighted note. When what you typed also matches an existing title, M-RET makes a note with your text as typed. C-g gives up."
+  - id: insert
+    goal: Link the Emacs note from the Tree-sitter note
+    detail: "In the Tree-sitter note, put the cursor at the end of your line and press `C-c n i`: pick `Emacs` and `RET`. A link to it appears, shown as the word Emacs. Save with `C-x C-s`."
+    demo: 'C-c n f ~800 "Tree-sitter" ~500 RET ~600 M-> ~300 " See " C-c n i ~800 "Emacs" ~500 RET ~600 C-x C-s'
+    conditions:
+      - text: C-c n i inserted a link
+        event: { command: org-roam-node-insert }
+        hint: "Control c, n, i, with the cursor where the link should go in the Tree-sitter note."
+      - text: the Tree-sitter note links to Emacs
+        shell: { run: "t=$(grep -il '^#+title: *tree-sitter$' roam/*.org) && grep -qi 'id:0b7e2a54-6c1f-4f0e-9a51-2d8a3c6f0e01' $t" }
+        hint: "The link must be in the Tree-sitter note and the note saved (C-x C-s). In the file it reads [[id:...][Emacs]]."
+  - id: insert-new
+    goal: Link a new note, Eglot, from the same place
+    detail: "`C-c n i` with a title that does not exist yet makes the note first. In the Tree-sitter note press `C-c n i`, type `Eglot`, `RET`, write a line in the capture window and `C-c C-c`: the new note is saved and the link lands where you were. `C-x C-s` saves the Tree-sitter note."
+    demo: 'C-c n f ~800 "Tree-sitter" ~500 RET ~600 M-> ~300 " and " C-c n i ~800 "Eglot" ~500 RET ~1200 "The language server client built into Emacs." ~500 C-c C-c ~1000 C-x C-s'
+    conditions:
+      - text: roam/ has a note titled Eglot
+        shell: { run: "grep -qil '^#+title: *eglot$' roam/*.org" }
+        hint: "Type Eglot in the C-c n i prompt and RET; the capture window is the new note. C-c C-c saves it."
+      - text: the Tree-sitter note links to Eglot
+        shell: { run: "id=$(sed -n 's/^:ID: *//p' $(grep -il '^#+title: *eglot$' roam/*.org) | head -1) && test -n \"$id\" && grep -q \"id:$id\" $(grep -il '^#+title: *tree-sitter$' roam/*.org)" }
+        hint: "Start C-c n i from the Tree-sitter note so the link goes there, then save that note with C-x C-s."
+  - id: backlinks
+    goal: See who links to Emacs
+    detail: "Open the Emacs note (`C-c n f Emacs RET`) and press `C-c n l`. A side window lists its backlinks: the notes that link to it, Org mode and now Tree-sitter. `RET` on one visits it."
+    demo: 'C-c n f ~800 "Emacs" ~500 RET ~800 C-c n l ~1500'
+    conditions:
+      - text: the backlinks window is open
+        state: { "windows.buf": "*org-roam*" }
+        hint: "C-c n l toggles the window: pressed twice, it closes again."
+      - text: it lists Tree-sitter as a backlink of Emacs
+        buffer: { name: "*org-roam*", contains: "Tree-sitter" }
+        hint: "The window shows the note in the selected window: open Emacs first. A missing backlink means the Tree-sitter note was not saved."
+  - id: daily
+    goal: Write today's daily note
+    detail: "`C-c n d` opens the note for today in roam/daily/, made if needed. Write a line about what you linked and save with `C-x C-s`."
+    demo: 'C-c n d ~1200 M-> ~300 "\nLinked Tree-sitter to Emacs and Eglot." ~500 C-x C-s'
+    conditions:
+      - text: C-c n d opened today's note
+        event: { command: org-roam-dailies-goto-today }
+        hint: "Control c, n, d. The file is named after today's date."
+      - text: today's note has a line of yours, saved
+        shell: { run: "f=roam/daily/$(date +%F).org && test -f $f && grep -v '^[#:]' $f | grep -q '[[:alpha:]]'" }
+        hint: "Write below the #+title: line, not in the :PROPERTIES: drawer above it, and save: the file on disk is what counts."

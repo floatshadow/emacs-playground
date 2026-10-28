@@ -1,0 +1,20 @@
+#+title: My Org settings
+#+author: me
+
+A literate configuration: the prose says why, the blocks are the code.
+C-c C-v t writes every block, in order, to my-org.el.
+
+* Header
+The first line of the file, and the name other files can require.
+
+#+begin_src emacs-lisp
+;;; my-org.el --- my Org settings  -*- lexical-binding: t; -*-
+(provide 'my-org)
+#+end_src
+
+* Tags
+Keep tags right after the heading text instead of in a far column.
+
+#+begin_src emacs-lisp
+(setq org-tags-column 0)
+#+end_src

@@ -1,0 +1,24 @@
+#+title: From numbers to a verdict
+
+Three languages in one document: the shell measures, Python scores,
+Rust writes the verdict. Each block reads the result of the one
+before it.
+
+* Measure
+
+#+name: samples
+#+begin_src sh :results table
+awk '{ sub("ms", "", $3); print $2, $3 }' latency.log
+#+end_src
+
+* Score
+
+Pages slower than 60 ms are slow.
+
+#+name: scores
+#+begin_src python :results table
+return [[page, ms, "slow" if ms > 60 else "fast"] for page, ms in rows]
+#+end_src
+
+* Verdict
+

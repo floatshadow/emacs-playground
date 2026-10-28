@@ -1,0 +1,21 @@
+#+title: Team blog: launch plan
+
+Typed in a hurry at a meeting: every line is a heading at the same
+level. It needs three: the launch, its areas, and the tasks in each.
+
+* Launch the team blog
+** Server
+** Set up nginx on the box
+Serve the site from /srv/www.
+** Content
+** Write the about page
+Who we are, what we write about, how to reach us.
+** Point the domain at the box
+** First three posts
+- Why we moved to Emacs
+- Our build pipeline
+- A week of Org
+** Design
+** Pick a theme
+Something light that reads well on a phone.
+** Draw a logo

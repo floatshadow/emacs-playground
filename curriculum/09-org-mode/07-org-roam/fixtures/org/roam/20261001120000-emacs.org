@@ -1,0 +1,7 @@
+:PROPERTIES:
+:ID:       0b7e2a54-6c1f-4f0e-9a51-2d8a3c6f0e01
+:END:
+#+title: Emacs
+
+The editor this course runs in. Everything in it is a buffer, and
+every key runs a command you can look up.

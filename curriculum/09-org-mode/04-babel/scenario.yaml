@@ -1,0 +1,132 @@
+id: 09-org-mode/04-babel
+title: "Babel: run code, pass results between languages"
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org]
+vscode: Jupyter
+setup:
+  workspace: fixtures/org
+  root: org
+  reset: true
+  open: [org/pipeline.org]
+  layout: single
+  eval: >-
+    (progn
+      (let ((kill-buffer-query-functions nil))
+        (dolist (b (buffer-list))
+          (when (string-match-p "\\`\\*\\(Org Src\\|Org-Babel Error\\)" (buffer-name b)) (kill-buffer b))))
+      (with-current-buffer (find-buffer-visiting "/work/org/pipeline.org") (goto-char (point-min)) (dolist (w (get-buffer-window-list nil nil t)) (set-window-point w (point-min)))))
+steps:
+  - id: run-shell
+    goal: Run the shell block
+    detail: "Put the cursor anywhere in the `sh` block under Measure and press `C-c C-c`. The block runs in this file's directory, and its output appears under it as a table: `:results table` asked for one."
+    demo: 'M-< ~300 C-s "begin_src sh" RET ~500 C-c C-c'
+    conditions:
+      - text: C-c C-c ran a block
+        any:
+          - event: { command: org-ctrl-c-ctrl-c }
+          - event: { command: org-babel-execute-src-block }
+        hint: "The cursor must be between #+begin_src and #+end_src, or on one of those lines. On a heading, C-c C-c sets tags instead."
+      - text: "#+RESULTS: samples holds a table of four pages"
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/pipeline.org")
+            (org-with-wide-buffer
+              (let ((p (org-babel-find-named-block "samples")))
+                (and p (save-excursion (goto-char p)
+                         (let ((r (org-babel-where-is-src-block-result)))
+                           (and r (progn (goto-char r) (forward-line 1) (looking-at "[ \t]*|.*/index.*48")))))))))
+        hint: "The result goes right under the block, after a #+RESULTS: samples line. Running the block again replaces it."
+  - id: var
+    goal: Feed the samples to Python and run it
+    detail: "The Python block expects a variable `rows`. Add `:var rows=samples` to its `#+begin_src python` line: the result of the block named samples becomes a Python list of lists. Then `C-c C-c` in it."
+    demo: 'M-< ~300 C-s "begin_src python :results table" RET ~400 " :var rows=samples" ~500 C-c C-c'
+    conditions:
+      - text: the Python block takes rows from samples
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/pipeline.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (re-search-forward "^[ \t]*#\\+begin_src python.*:var +rows=samples" nil t)))
+        hint: "Type it on the #+begin_src python line itself, after :results table, separated by a space."
+      - text: "#+RESULTS: scores lists slow and fast pages"
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/pipeline.org")
+            (org-with-wide-buffer
+              (let ((p (org-babel-find-named-block "scores")))
+                (and p (save-excursion (goto-char p)
+                         (let ((r (org-babel-where-is-src-block-result)))
+                           (and r (let ((end (progn (goto-char r) (org-babel-result-end))))
+                                    (goto-char r)
+                                    (and (re-search-forward "| *slow" end t) (progn (goto-char r) (re-search-forward "| *fast" end t)))))))))))
+        hint: "C-c C-c inside the Python block. An error about rows means the :var did not take: check the spelling, rows=samples with no spaces around =."
+  - id: block
+    goal: Insert a Rust block under Verdict
+    detail: "Go to the empty line at the end (`M->`). `C-c C-,` offers block templates; `s` makes a source block and leaves the cursor after `#+begin_src`. Type `rust :var scores=scores`."
+    demo: 'M-> ~400 C-c C-, ~800 s ~600 "rust :var scores=scores"'
+    conditions:
+      - text: a rust block takes scores
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/pipeline.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^[ \t]*#\\+begin_src rust.*:var +scores=scores" nil t)
+                   (re-search-forward "^[ \t]*#\\+end_src" nil t))))
+        hint: "C-c C-, shows a menu: press s for src. Then type on the #+begin_src line: rust, a space, :var scores=scores."
+      - text: it sits under the Verdict heading
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/pipeline.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^\\* Verdict" nil t) (re-search-forward "^[ \t]*#\\+begin_src rust" nil t))))
+        hint: "M-> goes to the empty line at the end of the file, under Verdict. A block elsewhere can be cut (C-w) and yanked there."
+  - id: edit
+    goal: Write the Rust code in a Rust buffer
+    detail: "In the block, `C-c '` opens its code in a buffer of its own, in rust-ts-mode: Rust's indentation and colours. Type the two lines below, then `C-c '` puts them back into the Org file.\n\n`let slow: Vec<&str> = scores.iter().filter(|r| r[2] == \"slow\").map(|r| r[0]).collect();`\n\n`println!(\"{} of {} pages are slow: {}\", slow.len(), scores.len(), slow.join(\", \"));`"
+    demo: 'M-< ~300 C-s "begin_src rust" RET ~400 C-c '' ~1000 "let slow: Vec<&str> = scores.iter().filter(|r| r[2] == \"slow\").map(|r| r[0]).collect(); \nprintln!(\"{} of {} pages are slow: {}\", slow.len(), scores.len(), slow.join(\", \")); " ~800 C-c '''
+    conditions:
+      - text: C-c ' opened the block in its own buffer
+        event: { command: org-edit-special }
+        hint: "The cursor must be inside the rust block, or on its #+begin_src line. The new buffer's name starts with *Org Src."
+      - text: C-c ' put the code back
+        all:
+          - event: { command: org-edit-src-exit }
+          - not:
+              buffer: { name: "*Org Src pipeline.org[ rust ]*" }
+        hint: "In the *Org Src* buffer, C-c ' (the apostrophe) again. C-c C-k would throw the edits away."
+      - text: the rust block prints its verdict
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/pipeline.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^[ \t]*#\\+begin_src rust" nil t)
+                   (re-search-forward "println!" (save-excursion (re-search-forward "^[ \t]*#\\+end_src" nil t)) t))))
+        hint: "The code belongs between #+begin_src rust and #+end_src. Without fn main, the playground wraps it in one."
+  - id: run-rust
+    goal: Run the Rust block
+    detail: "`C-c C-c` in the Rust block. Babel runs the Python block for `scores` (and the shell block for its samples), passes the table to Rust as a constant, compiles and runs. It takes a second or two."
+    demo: 'M-< ~300 C-s "begin_src rust" RET ~400 C-c C-c ~3000'
+    conditions:
+      - text: C-c C-c ran a block
+        any:
+          - event: { command: org-ctrl-c-ctrl-c }
+          - event: { command: org-babel-execute-src-block }
+        hint: "The cursor must be inside the rust block or on its #+begin_src line; C-c C-c in the *Org Src* buffer would run cargo instead."
+      - text: the Rust block's result names the slow pages
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/org/pipeline.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^[ \t]*#\\+begin_src rust" nil t)
+                   (let ((r (org-babel-where-is-src-block-result)))
+                     (and r (let ((end (progn (goto-char r) (org-babel-result-end))))
+                              (goto-char r) (re-search-forward "/posts" end t)))))))
+        hint: "A compile error opens a buffer with rustc's message: C-c ' on the block fixes the code. The two slow pages are /posts and /feed."
+    stuck:
+      - when: { step_seconds: 120 }
+        say: "rustc's message is in the *Org-Babel Error Output* window: a missing bracket or quote in the two lines is the usual cause. C-c ' on the block shows the code in rust-ts-mode, where unbalanced brackets stand out; C-x 1 closes the error window."
+  - id: tangle
+    goal: Tangle the shell block to measure.sh
+    detail: "Add `:tangle measure.sh` to the `#+begin_src sh` line, then `C-c C-v t` writes every block with a `:tangle` header to its file."
+    demo: 'M-< ~300 C-s "begin_src sh :results table" RET ~400 " :tangle measure.sh" ~500 C-c C-v t'
+    conditions:
+      - text: C-c C-v t tangled the file
+        event: { command: org-babel-tangle }
+        hint: "Control c, Control v, then a plain t. The echo area says how many blocks it wrote."
+      - text: measure.sh prints the four samples
+        shell: { run: "test \"$(sh measure.sh | wc -l)\" -eq 4" }
+        hint: "The :tangle header goes on the shell block's #+begin_src line; the file is written next to pipeline.org."

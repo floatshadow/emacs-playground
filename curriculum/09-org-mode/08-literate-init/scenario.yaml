@@ -1,0 +1,81 @@
+id: 09-org-mode/08-literate-init
+title: A literate init.org
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org]
+vscode: "settings.json with comments"
+setup:
+  workspace: fixtures/dotfiles
+  root: dotfiles
+  reset: true
+  open: [dotfiles/my-org.el, dotfiles/init.org]
+  layout: "(hsplit dotfiles/init.org dotfiles/my-org.el)"
+  eval: >-
+    (let ((w (get-buffer-window (find-buffer-visiting "/work/dotfiles/init.org"))))
+      (when w (select-window w)))
+steps:
+  - id: property
+    goal: Make every Emacs Lisp block tangle to my-org.el
+    detail: "Under the `#+author:` line, add `#+PROPERTY: header-args:emacs-lisp :tangle my-org.el` and press `C-c C-c` on it. The header now applies to every emacs-lisp block in the file; `C-c C-c` on a `#+` line makes Org read it again."
+    demo: 'M-< ~300 C-s "#+author" RET ~300 C-e RET ~300 "#+PROPERTY: header-args:emacs-lisp :tangle my-org.el" ~500 C-c C-c'
+    conditions:
+      - text: the PROPERTY line is in init.org
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/dotfiles/init.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (let ((case-fold-search t))
+                (re-search-forward "^#\\+property: *header-args:emacs-lisp +:tangle +my-org\\.el *$" nil t))))
+        hint: "One line, near the top, spelled exactly: #+PROPERTY: header-args:emacs-lisp :tangle my-org.el"
+      - text: Org has read it (C-c C-c on the line)
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/dotfiles/init.org")
+            (string-match-p ":tangle +my-org\\.el" (or (cdr (assoc "header-args:emacs-lisp" org-keyword-properties)) "")))
+        hint: "Org reads #+ lines when it opens a file. Press C-c C-c with the cursor on the new line: the echo area says the local setup was refreshed."
+  - id: section
+    goal: Move the table-of-contents setting into a section of its own
+    detail: "At the end of init.org (`M->`), add a heading `* Exports`, a line saying why, then a block: `C-c C-,` `s` and `emacs-lisp`. In the block, `C-c '` opens an Emacs Lisp buffer: type `(setq org-export-with-toc nil)` and `C-c '` again."
+    demo: 'M-> ~400 "\n* Exports\nNo table of contents in exports.\n\n" ~500 C-c C-, ~800 s ~600 "emacs-lisp" ~500 C-c '' ~1000 "(setq org-export-with-toc nil)" ~600 C-c '''
+    conditions:
+      - text: an emacs-lisp block in init.org sets org-export-with-toc
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/dotfiles/init.org")
+            (let (found)
+              (org-babel-map-src-blocks nil
+                (when (and (equal lang "emacs-lisp") (string-match-p "org-export-with-toc" body)) (setq found t)))
+              found))
+        hint: "The code must be between #+begin_src emacs-lisp and #+end_src. C-c ' in the block edits it in emacs-lisp-mode; C-c ' again puts it back."
+      - text: the block is under a heading after Tags
+        elisp: >-
+          (with-current-buffer (find-buffer-visiting "/work/dotfiles/init.org")
+            (org-with-wide-buffer (goto-char (point-min))
+              (and (re-search-forward "^\\* Tags" nil t) (re-search-forward "^\\*+ " nil t) (search-forward "org-export-with-toc" nil t))))
+        hint: "Blocks tangle in the order they appear: put the new heading after the Tags section, at the end of the file."
+  - id: tangle
+    goal: Tangle init.org to my-org.el
+    detail: "`C-c C-v t` writes every emacs-lisp block, in order, to my-org.el, replacing the hand-written file. Watch the window on the right change."
+    demo: "C-c C-v t ~1500"
+    conditions:
+      - text: C-c C-v t tangled the file
+        event: { command: org-babel-tangle }
+        hint: "Control c, Control v, then a plain t, in init.org. The echo area says how many blocks it wrote."
+      - text: my-org.el is now made from init.org's blocks
+        all:
+          - file: { path: dotfiles/my-org.el, not_contains: "Written by hand" }
+          - file: { path: dotfiles/my-org.el, regex: "(?s)lexical-binding.*org-tags-column 0.*org-export-with-toc nil" }
+        hint: "If my-org.el did not change, Org does not know where to tangle: check the #+PROPERTY line and press C-c C-c on it, then tangle again."
+  - id: load
+    goal: Load the tangled file
+    detail: "`M-x load-file` and the path `/work/dotfiles/my-org.el` runs it now. (On your own machine, init.el would load it at every start.)"
+    demo: 'M-x ~500 "load-file" ~400 RET ~600 "/work/dotfiles/my-org.el" ~400 RET'
+    conditions:
+      - text: M-x load-file ran a file
+        any:
+          - event: { command: load-file }
+          - event: { command: eval-buffer }
+        hint: "M-x load-file asks for a file: type /work/dotfiles/my-org.el right after the directory it offers (the second / starts over from the root) and RET."
+      - text: my-org.el's settings are on
+        elisp: "(and (featurep (quote my-org)) (boundp (quote org-export-with-toc)) (null org-export-with-toc))"
+        hint: "Load the tangled /work/dotfiles/my-org.el, not init.org: load-file reads Emacs Lisp only."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "The prompt starts in the directory of the buffer you are in. From init.org it already shows /work/dotfiles/: type my-org.el and RET."

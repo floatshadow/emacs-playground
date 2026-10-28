@@ -1,0 +1,6 @@
+#+title: Inbox
+
+Captures land here (C-c c). Empty it into blog.org with C-c C-w.
+
+* Tasks
+* Notes

@@ -1,0 +1,18 @@
+#+title: Team blog
+
+* Launch the team blog
+** Design
+*** DONE Pick a theme
+Something light that reads well on a phone.
+*** TODO Draw a logo
+** Content
+*** Write the about page
+Who we are, what we write about, how to reach us.
+*** TODO First three posts
+- Why we moved to Emacs
+- Our build pipeline
+- A week of Org
+** Server
+*** TODO Set up nginx on the box
+Serve the site from /srv/www.
+*** Point the domain at the box

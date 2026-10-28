@@ -1,0 +1,7 @@
+:PROPERTIES:
+:ID:       0b7e2a54-6c1f-4f0e-9a51-2d8a3c6f0e02
+:END:
+#+title: Org mode
+
+Outlines, tasks, tables and code blocks in plain text, built into
+[[id:0b7e2a54-6c1f-4f0e-9a51-2d8a3c6f0e01][Emacs]].

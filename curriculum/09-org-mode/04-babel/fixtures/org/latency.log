@@ -1,0 +1,4 @@
+GET /index 48ms
+GET /posts 70ms
+GET /about 38ms
+GET /feed 90ms
