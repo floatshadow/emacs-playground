@@ -25,7 +25,7 @@ Roles, licenses and caveats of external dependencies. Versions live in `go.mod`,
 
 ## 3. Emacs packages
 
-GPL-3.0+ unless noted, from GNU ELPA, NonGNU ELPA, MELPA and MELPA Stable. `emacs.d/packages.el` maps modules to packages (modules: emacs.md); `packages.lock` pins version, archive and SHA-256, MELPA tarballs are vendored in `emacs.d/vendor/`, and the image installs exactly the lock. Packages whose last stable tag predates Emacs 30 come from MELPA snapshots (`:prefer-snapshot`).
+GPL-3.0+ unless noted, from GNU ELPA, NonGNU ELPA, MELPA and MELPA Stable. `emacs.d/packages.el` maps modules to packages (modules: emacs.md); `packages.lock` pins version, archive and SHA-256, every locked tarball is vendored in `emacs.d/vendor/`, and the image installs exactly the lock. Packages whose last stable tag predates Emacs 30 come from MELPA snapshots (`:prefer-snapshot`).
 
 *Planned:* forge, vterm (needs cmake, libvterm), wgrep, rime (librime); writing: typst-ts-mode, auctex, cdlatex, pdf-tools (builds `epdfinfo` against poppler and cairo), citar, jinx (compiles against enchant); OCaml: tuareg, dune, utop, merlin-eldoc; org-roam, org-present, ob-rust. dape needs debug adapters on PATH.
 

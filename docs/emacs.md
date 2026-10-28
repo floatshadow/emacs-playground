@@ -63,7 +63,7 @@ After a daemon restart sessiond re-applies its latest `snapshot` (taken every 30
 
 ## 8. Packages and pinning
 
-Sources, preferred first: GNU ELPA, NonGNU ELPA, MELPA Stable, MELPA. `packages.el` lists top-level packages per module; `tools/lock.el` resolves them into `packages.lock` (version, archive, file, sha256), skipping what Emacs ships. MELPA tarballs are vendored in `vendor/` (MELPA keeps no old snapshots). The image installs exactly the lock with no archive configured, failing on any hash mismatch. Pinned packages are read-only in `/opt/playground/elpa`; the learner's own go to `/work/emacs.d/elpa` (Part 12). 
+Sources, preferred first: GNU ELPA, NonGNU ELPA, MELPA Stable, MELPA. `packages.el` lists top-level packages per module; `tools/lock.el` resolves them into `packages.lock` (version, archive, file, sha256), skipping what Emacs ships. Every locked tarball is vendored in `vendor/`: GNU and NonGNU ELPA drop superseded releases and MELPA keeps no old snapshots, so a build never depends on an archive still serving a pinned version. The image installs exactly the lock with no archive configured, failing on any hash mismatch. Pinned packages are read-only in `/opt/playground/elpa`; the learner's own go to `/work/emacs.d/elpa` (Part 12). 
 
 ## 9. Prefetched project dependencies
 

@@ -8,8 +8,8 @@
 ;;     EMACS_D ELPA_DIR ELN_DIR
 ;;
 ;; For each line of the lock, in order, the file is taken from
-;; EMACS_D/vendor/ when it is vendored there (MELPA packages, see
-;; tools/lock.el) or downloaded from its archive, and its sha256 must
+;; EMACS_D/vendor/ when it is vendored there (every locked file is, see
+;; tools/lock.el) or else downloaded from its archive, and its sha256 must
 ;; equal the lock's; any difference, missing file or failed install
 ;; stops the build with a non-zero exit.  `package-archives' is empty
 ;; while installing, so package.el cannot fetch anything the lock does
