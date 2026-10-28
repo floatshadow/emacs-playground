@@ -28,7 +28,7 @@
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs
                '((python-ts-mode python-mode) . ("basedpyright-langserver" "--stdio"))))
-(add-hook 'python-ts-mode-hook #'eglot-ensure)
+(add-hook 'python-ts-mode-hook #'playground-eglot-ensure)
 
 ;;;; ruff on save
 

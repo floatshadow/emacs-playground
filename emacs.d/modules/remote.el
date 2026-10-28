@@ -21,8 +21,9 @@
 ;;   12.2  M-x compile and M-x eshell in a remote directory;
 ;;         Eglot starts the box's rust-analyzer for remote Rust files
 ;;   12.3  C-x g in a remote directory; /ssh:box|sudo::/etc/nginx/nginx.conf
-;;   12.4  /docker:NAME:/ and /podman:NAME:/ (tramp-container), when a
-;;         container runtime is reachable
+;;   12.4  /ssh:box|sudo:www-data@box:/srv/sidecar/ (a hop to another user);
+;;         M-x tramp-cleanup-this-connection; /docker:NAME:/ and
+;;         /podman:NAME:/ (tramp-container) need a container runtime
 
 ;;;; Lesson 12.1  TRAMP basics
 
@@ -46,12 +47,33 @@
 (with-eval-after-load 'tramp
   (add-to-list 'tramp-remote-path 'tramp-own-remote-path))
 
+;; Processes that talk through a pipe, such as Eglot's language
+;; servers, start as their own `ssh box COMMAND' (TRAMP's direct async
+;; processes) with no tty on the box, so bytes pass unchanged.  Started
+;; the classic way, from a remote shell, rust-analyzer often lost the
+;; first kilobytes of Eglot's `initialize' request and Eglot timed out.
+;; Terminals and builds want a tty on the box and keep the classic way.
+(with-eval-after-load 'tramp
+  (connection-local-set-profile-variables
+   'playground-remote-direct-async '((tramp-direct-async-process . t)))
+  (connection-local-set-profiles
+   '(:application tramp :protocol "ssh") 'playground-remote-direct-async)
+  (add-to-list 'tramp-connection-properties
+               (list (regexp-quote "/ssh:") "direct-async" t))
+  (define-advice tramp-direct-async-process-p
+      (:around (orig &rest args) playground-pipes-only)
+    "Use a direct async process only for a pipe connection."
+    (and (eq (plist-get (if (keywordp (car args)) args (car args))
+                        :connection-type)
+             'pipe)
+         (apply orig args))))
+
 ;;;; Lesson 12.3  Magit over TRAMP and sudo
 
 ;; Nothing to set: /ssh:box|sudo::/etc/... chains ssh to the box and
 ;; then sudo on it, and Magit runs git on the box through TRAMP.
 
-;;;; Lesson 12.4  Containers
+;;;; Lesson 12.4  Containers and other hops
 
 ;; tramp-container (built in, autoloaded) adds /docker:, /podman: and
 ;; /kubernetes:; each needs its runtime's command on this side, which

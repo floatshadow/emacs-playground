@@ -373,9 +373,11 @@ there, the window that was selected when it was entered."
   (and playground--last-pong (- (float-time) playground--last-pong)))
 
 (defun playground--drain ()
-  "Process input already waiting on the socket (pongs, calls) without blocking."
+  "Process input already waiting on the socket (pongs, calls) without blocking.
+An integer JUST-THIS-ONE runs no timers: a timer that throws (setup's
+`top-level') would otherwise unwind the caller, the ping timer included."
   (when (process-live-p playground--process)
-    (accept-process-output playground--process 0 nil t)))
+    (accept-process-output playground--process 0 nil 0)))
 
 (defun playground--stalled-p ()
   "Non-nil when sessiond has stopped answering pings for a while.
@@ -498,17 +500,23 @@ dropped) or `ping' (never queued).  While the peer is stalled (see
            (playground--schedule-reconnect)))))
 
 (defun playground--ping ()
-  "Send a ping; drop a connection whose peer stopped answering."
-  (when playground--connected
-    ;; A pong may be waiting unread if Emacs was busy; read it first.
-    (when (and playground--last-pong
-               (> (playground--peer-silent-for) playground-agent-ping-interval))
-      (playground--drain))
-    (if (and playground--last-pong
-             (> (playground--peer-silent-for) playground-agent-peer-timeout))
-        (progn (playground--log "peer silent, reconnecting")
-               (playground--disconnected))
-      (playground--send-line "{\"t\":\"ping\"}" 'ping))))
+  "Send a ping; drop a connection whose peer stopped answering.
+A quit or throw out of a repeating timer leaves it marked as
+triggered, and Emacs never runs it again: no pings, no pongs, and
+every reply would wait in the queue.  The unwind form clears the mark."
+  (unwind-protect
+      (when playground--connected
+        ;; A pong may be waiting unread if Emacs was busy; read it first.
+        (when (and playground--last-pong
+                   (> (playground--peer-silent-for) playground-agent-ping-interval))
+          (playground--drain))
+        (if (and playground--last-pong
+                 (> (playground--peer-silent-for) playground-agent-peer-timeout))
+            (progn (playground--log "peer silent, reconnecting")
+                   (playground--disconnected))
+          (playground--send-line "{\"t\":\"ping\"}" 'ping)))
+    (when (timerp playground--ping-timer)
+      (setf (timer--triggered playground--ping-timer) nil))))
 
 (defun playground--send-hello ()
   "Send the hello message."
@@ -737,8 +745,13 @@ buffer when it is the minibuffer, else `minibuffer-prompt'."
   "Why the current buffer is read-only, or :null."
   (cond ((not buffer-read-only) :null)
         ((bound-and-true-p view-mode) "view-mode")
+        ((bound-and-true-p magit-blame-read-only-mode) "magit-blame")
         ((derived-mode-p 'special-mode) "special-mode")
         ((derived-mode-p 'dired-mode) "dired-mode")
+        ;; No TRAMP calls here: state runs from a timer, which may
+        ;; interrupt another TRAMP operation on the same connection.
+        ((and buffer-file-name (file-remote-p buffer-file-name))
+         "file is write-protected")
         ((and buffer-file-name (file-exists-p buffer-file-name)
               (not (file-writable-p buffer-file-name)))
          "file is write-protected")

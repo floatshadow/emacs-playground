@@ -22,9 +22,14 @@
   (setq-default eglot-workspace-configuration
                 (plist-put (default-value 'eglot-workspace-configuration)
                            :rust-analyzer '(:check (:command "clippy")))))
-(add-hook 'rust-ts-mode-hook #'eglot-ensure)
+(add-hook 'rust-ts-mode-hook #'playground-eglot-ensure)
 
 ;;;; Cargo through compile
+
+;; compile runs commands in a pseudo-terminal, where cargo-nextest draws
+;; a progress bar that swallows its report; a counter prints plain lines.
+(with-eval-after-load 'compile
+  (add-to-list 'compilation-environment "NEXTEST_SHOW_PROGRESS=counter"))
 
 (defun playground-cargo (subcommand)
   "Run cargo SUBCOMMAND in the crate's root through `compile'."
@@ -49,7 +54,11 @@
   (keymap-set rust-ts-mode-map "C-c C-t" #'playground-cargo-test)
   (keymap-set rust-ts-mode-map "C-c C-k" #'playground-cargo-clippy))
 
-;; rustfmt on save: apheleia (lsp module) already maps rust-ts-mode to
-;; rustfmt, using the edition from Cargo.toml.
+;; rustfmt on save: apheleia (lsp module) maps rust-ts-mode to rustfmt,
+;; which reads stdin without a Cargo.toml, so it is told the edition the
+;; course's crates use (cargo fmt would read it from Cargo.toml).
+(with-eval-after-load 'apheleia
+  (setf (alist-get 'rustfmt apheleia-formatters)
+        '("rustfmt" "--quiet" "--emit" "stdout" "--edition" "2024")))
 
 ;;; lang-rust.el ends here

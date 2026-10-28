@@ -18,7 +18,9 @@
 ;;        in the minibuffer C-; does the default action; C-h B lists
 ;;        every binding
 ;;   4.4  TAB completes in buffers, M-SPC separates orderless terms in
-;;        the popup, M-+ inserts a snippet, M-* completes a snippet name
+;;        the popup, M-+ inserts a snippet, M-* completes a snippet name,
+;;        TAB and S-TAB move between a snippet's fields, even with the
+;;        popup open
 
 ;;;; Lesson 4.1  The minibuffer, upgraded
 
@@ -58,6 +60,11 @@
   (keymap-global-set "M-s d" #'consult-fd)
   (keymap-global-set "M-s g" #'consult-grep)
   (keymap-set minibuffer-local-map "M-r" #'consult-history)
+  ;; consult-line searches, but its default prompt "Go to line: " reads
+  ;; like M-g g's, which asks for a number.  (consult-customize is a
+  ;; macro of consult, not autoloaded.)
+  (with-eval-after-load 'consult
+    (eval '(consult-customize consult-line :prompt "Search lines: ") t))
   (setq consult-narrow-key "<"
         register-preview-function #'consult-register-format
         xref-show-xrefs-function #'consult-xref
@@ -116,6 +123,23 @@
 (playground-with-package tempel
   (setq tempel-path (expand-file-name "templates" playground-config-dir))
   (keymap-global-set "M-+" #'tempel-insert)
-  (keymap-global-set "M-*" #'tempel-complete))
+  (keymap-global-set "M-*" #'tempel-complete)
+  ;; Inside a snippet TAB moves to the next field and S-TAB back, as in
+  ;; VS Code; after the last field TAB leaves the snippet.
+  (with-eval-after-load 'tempel
+    (keymap-set tempel-map "TAB" #'tempel-next)
+    (keymap-set tempel-map "<backtab>" #'tempel-previous))
+  ;; The popup opens while a field is typed (a language server offers
+  ;; f64 for f64), and its TAB would complete instead: in a field TAB
+  ;; still moves on, and RET takes a candidate.
+  (with-eval-after-load 'corfu
+    (keymap-set corfu-map "TAB"
+                `(menu-item "" corfu-complete
+                            :filter ,(lambda (cmd)
+                                       (if (and (bound-and-true-p tempel--active)
+                                                (fboundp 'tempel--find-overlay)
+                                                (tempel--find-overlay 'tempel--field))
+                                           #'tempel-next
+                                         cmd))))))
 
 ;;; completion.el ends here

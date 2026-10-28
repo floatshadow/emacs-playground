@@ -13,6 +13,14 @@
 ;; Keys added here:
 ;;   C-h f / C-h v / C-h k / C-h x   helpful versions of describe-*
 ;;   C-c C-d   helpful documentation of the symbol at point
+;;
+;; Commands, by lesson:
+;;   13.1  the learner turns breadcrumb-mode off below, as the
+;;         "edit a module" way of changing a setting
+;;   13.5  M-x ef-themes-select, M-x modus-themes-toggle (the pair is
+;;         modus-themes-to-toggle), C-x C-+ / C-x C-- / C-x C-0,
+;;         M-x nerd-icons-completion-mode, M-x doom-modeline-mode,
+;;         M-x global-ligature-mode (GUI frame)
 
 ;;;; Icons
 
@@ -68,6 +76,21 @@
       (global-ligature-mode 1)))
   (add-hook 'after-make-frame-functions #'playground--ligatures-for-gui)
   (when (display-graphic-p) (playground--ligatures-for-gui)))
+
+;;;; Themes
+
+;; ef-themes 2.2.1 autoloads its commands as plain functions, so M-x
+;; does not offer them until the package is loaded; declare them as
+;; commands.
+(playground-with-package ef-themes
+  (dolist (cmd '(ef-themes-toggle
+                 ef-themes-rotate ef-themes-select
+                 ef-themes-select-dark ef-themes-select-light
+                 ef-themes-load-random ef-themes-load-random-dark
+                 ef-themes-load-random-light ef-themes-list-colors
+                 ef-themes-list-colors-current))
+    (when (or (not (fboundp cmd)) (autoloadp (symbol-function cmd)))
+      (autoload cmd "ef-themes" nil t))))
 
 ;;;; The mode line
 

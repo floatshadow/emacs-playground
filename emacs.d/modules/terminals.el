@@ -8,7 +8,8 @@
 ;; shell commands.
 ;;
 ;; Keys added here, by lesson:
-;;   6.1  M-x compile, M-g n / M-g p (next-error), g in *compilation*
+;;   6.1  C-c C-c  cargo build (Rust buffers);  M-x compile;
+;;        M-g M-n / M-g M-p and C-x ` (next-error), g in *compilation*
 ;;   6.2  C-x p t   eat in the project's root;  M-x eat;  M-x vterm
 ;;   6.3  C-x p e   Eshell in the project (built in);  M-x eshell
 ;;   6.4  M-&       async shell command;  & and ! in dired
@@ -21,6 +22,18 @@
       next-error-message-highlight t)
 (add-hook 'compilation-filter-hook #'ansi-color-compilation-filter)
 
+;; C-c C-c builds a Rust crate without asking, like VS Code's Run Build
+;; Task; M-x compile asks for the command.  lang-rust (Part 7) defines
+;; the same command and adds run, test and clippy.
+(defun playground-cargo-build ()
+  "cargo build in the crate's root, through `compile'."
+  (interactive)
+  (let ((default-directory (or (locate-dominating-file default-directory "Cargo.toml")
+                               default-directory)))
+    (compile "cargo build")))
+(with-eval-after-load 'rust-ts-mode
+  (keymap-set rust-ts-mode-map "C-c C-c" #'playground-cargo-build))
+
 ;; Error locations in *compilation*: Emacs knows cargo's (rust,
 ;; rust-panic) and OCaml's and dune's File "x.ml", line 3, characters
 ;; 4-9 (python-tracebacks-and-caml); pytest's "tests/test_x.py:12: in
@@ -29,6 +42,18 @@
   (setf (alist-get 'pytest compilation-error-regexp-alist-alist)
         '("^\\([^ \t\n:]+\\.py\\):\\([0-9]+\\): \\(?:in \\|[A-Za-z]*Error\\)" 1 2))
   (add-to-list 'compilation-error-regexp-alist 'pytest))
+
+;; cargo and dune name files from the project's root (src/count.rs), so
+;; M-x compile started in src/ would ask where each file is: errors are
+;; also looked up from the nearest Cargo.toml, dune-project or
+;; pyproject.toml.  (A start hook: compilation-start sets the search
+;; path after the mode hooks.)
+(defun playground--compilation-search-root (_process)
+  "Let this compilation's file names resolve from the project root too."
+  (when-let* ((root (seq-some (lambda (marker) (locate-dominating-file default-directory marker))
+                              '("Cargo.toml" "dune-project" "pyproject.toml"))))
+    (setq-local compilation-search-path (list nil root))))
+(add-hook 'compilation-start-hook #'playground--compilation-search-root)
 
 ;;;; Lesson 6.2  eat: a terminal in a buffer
 
@@ -58,6 +83,15 @@
       eshell-hist-ignoredups t
       eshell-banner-message
       "Eshell: a shell inside Emacs.  Emacs commands work here too (try: find-file README.md).\n\n")
+
+;; In shells and REPLs (Eshell, M-x shell, the Python shell) completion
+;; pops up only on TAB: an automatic popup would take the RET that
+;; should run the command line.
+(defun playground--no-auto-completion ()
+  "Complete only on request (TAB) in this buffer."
+  (setq-local corfu-auto nil))
+(add-hook 'eshell-mode-hook #'playground--no-auto-completion)
+(add-hook 'comint-mode-hook #'playground--no-auto-completion)
 
 ;;;; Lesson 6.4  Async shell commands and Dired integration
 

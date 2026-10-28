@@ -1679,5 +1679,32 @@ and lose the side window."
         (message "post-command median %.3f ms (%s)" median (if compiled "compiled" "interpreted"))
         (should (< median (if compiled 0.3 3.0)))))))
 
+;; A throw out of the repeating ping timer would leave it marked as
+;; triggered, and Emacs would never run it again (no pings, every reply
+;; queued behind a "stalled" peer).
+(ert-deftest pg-agent/ping-timer-survives-a-throw ()
+  (let ((playground--ping-timer (timer-create))
+        (playground--connected t)
+        (playground--last-pong nil))
+    (setf (timer--triggered playground--ping-timer) t)
+    (cl-letf (((symbol-function 'playground--send-line)
+               (lambda (&rest _) (throw 'pg-test-out nil))))
+      (catch 'pg-test-out (playground--ping)))
+    (should-not (timer--triggered playground--ping-timer))))
+
+(ert-deftest pg-agent/remote-read-only-without-tramp ()
+  "The read-only reason of a remote file asks the file name handler nothing
+but whether the name is remote (no I/O on the connection)."
+  (let ((file-name-handler-alist
+         `(("\\`/ssh:" . ,(lambda (op &rest args)
+                              (if (eq op 'file-remote-p)
+                                  "/ssh:box:"
+                                (error "TRAMP call %s %S" op args)))))))
+    (with-temp-buffer
+      (setq buffer-file-name "/ssh:box:/etc/app/app.env"
+            buffer-read-only t)
+      (should (equal (playground--read-only-reason) "file is write-protected"))
+      (setq buffer-file-name nil))))
+
 (provide 'agent-test)
 ;;; agent-test.el ends here

@@ -11,7 +11,7 @@
 ;; Keys added here, by lesson:
 ;;   5.1  C-x g   Magit status (TAB s u S U k c c ? inside)
 ;;        C-c g   Magit commands for the repository; C-c f for this file
-;;   5.2  l l, l a, b (blame), C-x v = (built in)
+;;   5.2  l l, l a, c a, C-c f b (blame), C-x v = (built in)
 ;;   5.4  smerge keys in conflicted files: C-c ^ (built in)
 ;;   5.5  C-x v n / C-x v p   next / previous changed hunk (diff-hl;
 ;;        C-x v ] and C-x v [ too), C-x v r  revert the hunk at point,
@@ -30,6 +30,20 @@
 ;; Commit messages are edited in a normal buffer: C-c C-c commits,
 ;; C-c C-k cancels (with-editor, part of Magit).
 
+;;;; Lesson 5.4  Merge conflicts with smerge
+
+;; Visiting a conflicted file turns on smerge and stages the file once it
+;; is saved without markers (vc-git).  A buffer reverted to a conflicted
+;; version (a merge in Magit, a lesson's Reset) gets the same.
+(defun playground-git-refresh-conflicts ()
+  "Turn on smerge and resolve-on-save if the buffer has conflict markers."
+  (when (and buffer-file-name
+             (save-excursion
+               (goto-char (point-min))
+               (re-search-forward "^<<<<<<< " nil t)))
+    (vc-refresh-state)))
+(add-hook 'after-revert-hook #'playground-git-refresh-conflicts)
+
 ;;;; Lesson 5.5  diff-hl and git-timemachine
 
 (playground-with-package diff-hl
@@ -38,6 +52,18 @@
   (diff-hl-margin-mode 1)
   (diff-hl-flydiff-mode 1)
   (add-hook 'dired-mode-hook #'diff-hl-dired-mode)
+  ;; diff-hl-dired marks a listing's files from a background `git
+  ;; status' in a scratch buffer.  Two updates in a row (g right after a
+  ;; command changed the files, or a step's restore) kill the first one's
+  ;; buffer while its process runs, which would ask whether to kill it
+  ;; and swallow the next keys: never ask.
+  (with-eval-after-load 'diff-hl-dired
+    (defun playground--diff-hl-dired-quiet (&rest _)
+      "Let this listing's diff-hl scratch buffer be killed without asking."
+      (when (buffer-live-p diff-hl-dired-process-buffer)
+        (with-current-buffer diff-hl-dired-process-buffer
+          (setq-local kill-buffer-query-functions nil))))
+    (advice-add 'diff-hl-dired-update :after #'playground--diff-hl-dired-quiet))
   ;; Lesson 5.5's keys under C-x v: n and p move between hunks, r
   ;; reverts one (diff-hl's own n is revert, which surprises).
   (with-eval-after-load 'diff-hl

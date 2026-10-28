@@ -11,8 +11,9 @@
 ;; from the image's opam switch (/opt/opam/default, on PATH).
 ;;
 ;; Keys in OCaml buffers, by lesson:
-;;   7.5  C-c C-c  dune build          C-c C-t  type at point (C-c C-t
-;;                                              again: the enclosing one)
+;;   7.5  C-c C-c  dune build          C-c C-t  type at point (then
+;;                                              C-<up> / C-<down>: the
+;;                                              enclosing / inner one)
 ;;        C-c C-s  start utop          C-c C-e  send the phrase to utop
 ;;        C-c C-b  send the buffer     C-c C-z  go to utop
 ;;        C-c |    destruct: fill a match with every case (P2)
@@ -30,7 +31,7 @@
 (with-eval-after-load 'eglot
   (add-to-list 'eglot-server-programs
                '((tuareg-mode :language-id "ocaml") . ("ocamllsp"))))
-(add-hook 'tuareg-mode-hook #'eglot-ensure)
+(add-hook 'tuareg-mode-hook #'playground-eglot-ensure)
 
 ;; ocaml-eglot speaks Merlin's extra requests through ocamllsp.
 ;; Its " OCaml-eglot" lighter is left out: the mode line already says
@@ -90,7 +91,10 @@
     (setq-local utop-command (playground-utop-command))
     (utop-minor-mode 1))
   (add-hook 'tuareg-mode-hook #'playground--utop-setup)
-  (setq utop-edit-command nil))
+  (setq utop-edit-command nil)
+  ;; As in other REPLs (terminals module), completion waits for TAB so
+  ;; RET always evaluates the phrase.
+  (add-hook 'utop-mode-hook (lambda () (setq-local corfu-auto nil))))
 
 ;;;; Formatting
 

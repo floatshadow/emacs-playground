@@ -18,7 +18,8 @@
 ;;   9.4  C-c C-c on a code block runs it without asking; C-c ' edits
 ;;        it in its language's mode
 ;;   9.6  C-c C-e export (h o HTML, l p PDF, l b Beamer, m m Markdown);
-;;        M-x org-present, then n / p between slides, q to stop
+;;        M-x org-present, then SPC or <right> / <left> between
+;;        slides, C-c C-q to stop
 ;;   9.7  C-c n f find or make a note, C-c n i link one here,
 ;;        C-c n l backlinks, C-c n d today's daily note
 ;;   8.5  C-c C-x C-v inline images, C-c C-x C-l LaTeX previews (GUI)
@@ -57,6 +58,29 @@
 
 (keymap-global-set "C-c a" #'org-agenda)
 (keymap-global-set "C-c c" #'org-capture)
+
+;; windmove (lesson 3.2) puts S-<arrows> on window motion everywhere.
+;; In Org buffers, the agenda and Org's date prompt, Org's own
+;; S-<arrows> (TODO states, priorities, dates) win; they still move
+;; between windows where Org has nothing to change.
+(defun playground--org-shift-keys ()
+  "Let Org's S-<arrow> keys shadow windmove's in this buffer."
+  (setq-local minor-mode-overriding-map-alist
+              (cons (cons 'windmove-mode (make-sparse-keymap))
+                    minor-mode-overriding-map-alist)))
+(add-hook 'org-mode-hook #'playground--org-shift-keys)
+(add-hook 'org-agenda-mode-hook #'playground--org-shift-keys)
+(advice-add 'org-read-date :around
+            (lambda (read &rest args)
+              (defvar windmove-mode)
+              (let ((windmove-mode nil)) (apply read args)))
+            '((name . playground-org-shift-keys)))
+(with-eval-after-load 'org
+  (when (fboundp 'windmove-up)
+    (add-hook 'org-shiftup-final-hook #'windmove-up)
+    (add-hook 'org-shiftdown-final-hook #'windmove-down)
+    (add-hook 'org-shiftleft-final-hook #'windmove-left)
+    (add-hook 'org-shiftright-final-hook #'windmove-right)))
 
 (setq org-log-done 'time
       org-agenda-span 'week
@@ -131,12 +155,16 @@ lists) becomes a slice of slices; mixed cells become strings."
         (cons "&[&str]" (format "&[%s]" (mapconcat #'str value ", ")))))
      (t (cons "&str" (str value))))))
 
+;; Org's macro, so this file indents the same (on save) before ob-core loads.
+(put 'org-babel-result-cond 'lisp-indent-function 1)
+
 (defun org-babel-execute:rust (body params)
   "Compile the Rust block BODY with rustc and run it; PARAMS are its headers.
 :var NAME=VALUE becomes a constant NAME visible to the block; a block
 without `fn main' is wrapped in one.  The output is the result."
   (let* ((src (org-babel-temp-file "ob-rust-" ".rs"))
-         (bin (org-babel-temp-file "ob-rust-bin-"))
+         ;; Not in /tmp: the session mounts it noexec.
+         (bin (make-temp-name (playground-var "ob-rust/bin-")))
          (vars (mapconcat
                 (lambda (pair)
                   (pcase-let ((`(,type . ,literal) (playground-ob-rust--literal (cdr pair))))
@@ -151,12 +179,15 @@ without `fn main' is wrapped in one.  The output is the result."
     (org-babel-eval (format "rustc --edition 2024 -o %s %s"
                             (shell-quote-argument bin) (shell-quote-argument src))
                     "")
-    (let ((output (org-babel-eval (shell-quote-argument bin) "")))
-      (org-babel-result-cond (cdr (assq :result-params params))
-        output
-        (let ((tmp (org-babel-temp-file "ob-rust-out-")))
-          (with-temp-file tmp (insert output))
-          (org-babel-import-elisp-from-file tmp))))))
+    ;; A compile error is already shown (*Org-Babel Error Output*).
+    (when (file-exists-p bin)
+      (let ((output (unwind-protect (org-babel-eval (shell-quote-argument bin) "")
+                      (delete-file bin))))
+        (org-babel-result-cond (cdr (assq :result-params params))
+          output
+          (let ((tmp (org-babel-temp-file "ob-rust-out-")))
+            (with-temp-file tmp (insert output))
+            (org-babel-import-elisp-from-file tmp)))))))
 
 (defun org-babel-prep-session:rust (_session _params)
   "Rust blocks have no sessions."
@@ -231,6 +262,17 @@ without `fn main' is wrapped in one.  The output is the result."
     "Make `org-roam-directory' before org-roam needs it."
     (make-directory org-roam-directory t))
   (advice-add 'org-roam-db-sync :before #'playground--org-roam-directory)
+  (defun playground--org-roam-dailies-directory (&rest _)
+    "Make the daily notes' directory: C-c n d fails without it."
+    (make-directory (expand-file-name org-roam-dailies-directory org-roam-directory) t))
+  (advice-add 'org-roam-dailies--capture :before #'playground--org-roam-dailies-directory)
+  ;; Notes also change behind Emacs's back (a checkpoint restore, a git
+  ;; checkout): bring the database up to date before offering notes.
+  ;; With a few hundred notes this takes well under a second.
+  (defun playground--org-roam-sync (&rest _)
+    "Update the org-roam database from the files."
+    (org-roam-db-sync))
+  (advice-add 'org-roam-node-read :before #'playground--org-roam-sync)
   (keymap-global-set "C-c n f" #'org-roam-node-find)
   (keymap-global-set "C-c n i" #'org-roam-node-insert)
   (keymap-global-set "C-c n l" #'org-roam-buffer-toggle)

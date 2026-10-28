@@ -108,7 +108,7 @@
   (should (eq (pg-all--key 'ocaml-eglot-mode-map "C-c C-t") 'ocaml-eglot-type-enclosing))
   (should (eq (pg-all--key 'ocaml-eglot-mode-map "C-c |") 'ocaml-eglot-destruct))
   (should-not (pg-all--key 'ocaml-eglot-mode-map "C-c C-p"))
-  (should (memq 'eglot-ensure tuareg-mode-hook))
+  (should (memq 'playground-eglot-ensure tuareg-mode-hook))
   (should (memq 'ocaml-eglot-mode tuareg-mode-hook)))
 
 (ert-deftest pg-all/writing-keys ()

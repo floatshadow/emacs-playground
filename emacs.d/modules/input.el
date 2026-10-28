@@ -4,7 +4,7 @@
 ;;
 ;; Characters that are not on the keyboard: C-x 8 RET inserts any
 ;; character by name, C-x 8 followed by a short sequence types common
-;; ones (C-x 8 - - is an en dash, C-x 8 ' e is é).  An input method
+;; ones (C-x 8 _ n is an en dash, C-x 8 ' e is é).  An input method
 ;; turns what you type into other characters while it is on: C-\
 ;; toggles the default one, TeX (\alpha gives α, \to gives →), and
 ;; C-u C-\ picks another, such as pyim for Chinese (type pinyin, then
@@ -13,6 +13,7 @@
 ;;
 ;; Keys, lesson 8.7:
 ;;   C-x 8 RET  insert a character by name     C-\  input method on/off
+;;   C-x 8 _ n  en dash (C-x 8 then a short sequence, C-x 8 C-h lists them)
 ;;   C-u C-\    choose an input method (TeX, pyim, ...)
 ;;   C-u C-x =  everything about the character at point
 

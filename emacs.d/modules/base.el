@@ -153,7 +153,7 @@
 ;;;; Lesson 2.3  Opening files, saving
 
 ;; Files save themselves 5 s after you stop typing
-;; (auto-save-visited-mode), so nothing is lost when a frame or the
+;; (auto-save-visited-mode, without format on save), so nothing is lost when a frame or the
 ;; daemon goes away.  No backup~ files, #auto-save# files or .#lock
 ;; files appear next to your files: the workspace is a git repository
 ;; and the playground takes checkpoints.
@@ -171,13 +171,19 @@
 (setq auto-save-visited-predicate
       (lambda () (verify-visited-file-modtime (current-buffer))))
 
+(defvar playground-auto-saving nil
+  "Non-nil while `auto-save-visited-mode' saves buffers.
+Format on save (lsp module) skips these saves, as VS Code's does with
+auto save: a formatter rewriting the buffer while you type moves text
+under the cursor.")
+
 (defun playground--quiet-auto-save (orig &optional arg pred)
   "Around advice for `save-some-buffers' (ORIG with ARG and PRED).
 `auto-save-visited-mode' calls it with ARG `:no-prompt'; those saves
 are silent so the echo area does not say \"Wrote ...\" every few
 seconds."
   (if (eq arg :no-prompt)
-      (let ((save-silently t) (inhibit-message t))
+      (let ((save-silently t) (inhibit-message t) (playground-auto-saving t))
         (funcall orig arg pred))
     (funcall orig arg pred)))
 (advice-add 'save-some-buffers :around #'playground--quiet-auto-save)

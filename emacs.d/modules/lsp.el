@@ -14,7 +14,8 @@
 ;;   7.1  M-. M-, M-?  definition, back, references (built in);
 ;;        C-c l r rename, C-c l a code actions, C-c l f format,
 ;;        C-c l s workspace symbols, C-c l h documentation at point
-;;   7.2  M-n / M-p  next / previous diagnostic (in Flymake buffers);
+;;   7.2  M-g n / M-g p (also M-n / M-p)  next / previous diagnostic
+;;        (in Flymake buffers; M-g M-n stays next-error);
 ;;        C-c l d   all diagnostics of the buffer;  C-h .  the one here
 ;;   7.3  formatting on save (apheleia), C-c l f formats now
 ;;   7.7  M-x dape; C-x C-a b breakpoint; in a session n s o c
@@ -26,6 +27,34 @@
       eglot-events-buffer-config '(:size 0 :format full)
       eglot-report-progress t
       eglot-sync-connect 1)
+
+;; Rename applies at once, as F2 does in VS Code, even in files that are
+;; not open (they are saved by auto-save-visited-mode); other edits a
+;; server proposes still show a summary first when they reach such files.
+(setq eglot-confirm-server-edits '((eglot-rename . nil) (t . maybe-summary)))
+
+;; `eglot-ensure' connects after the first command in the buffer.  Lesson
+;; setups and restores open files without one, so the server (and its
+;; diagnostics) would wait for the learner's first key: the language
+;; modules use this instead, which runs that pending connection half a
+;; second later unless a command already did.
+(defun playground-eglot-ensure ()
+  "Start Eglot for this buffer soon, as `eglot-ensure' does on a command."
+  (let ((before (and (local-variable-p 'post-command-hook) post-command-hook)))
+    (eglot-ensure)
+    (when-let* ((pending (and (local-variable-p 'post-command-hook)
+                              ;; t only means "run the global hook too".
+                              (seq-remove (lambda (f) (or (eq f t) (memq f before)))
+                                          post-command-hook))))
+      (run-with-timer 0.5 nil #'playground--eglot-connect-pending (current-buffer) pending))))
+
+(defun playground--eglot-connect-pending (buffer fns)
+  "Run `eglot-ensure''s connection FNS in BUFFER if no command has run them."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (dolist (f fns)
+        (when (memq f post-command-hook)
+          (funcall f))))))
 
 ;; These commands are not autoloaded by their packages; declaring them
 ;; lets C-c l work before the first Eglot buffer loads the library.
@@ -51,19 +80,51 @@
 (defun playground-doc-at-point ()
   "Show the documentation of the thing at point.
 In the GUI frame it pops up next to point (eldoc-box); in the terminal
-frame it opens the *eldoc* buffer."
+frame it shows the *eldoc* buffer in another window, asking the sources
+afresh (`eldoc-doc-buffer' alone fails before eldoc has shown anything)."
   (interactive)
   (if (and (display-graphic-p) (fboundp 'eldoc-box-help-at-point))
       (eldoc-box-help-at-point)
-    (eldoc-doc-buffer t)))
+    (eldoc t)))
 
 ;;;; Lesson 7.2  Flymake and diagnostics
 
 (with-eval-after-load 'flymake
   (keymap-set flymake-mode-map "M-n" #'flymake-goto-next-error)
   (keymap-set flymake-mode-map "M-p" #'flymake-goto-prev-error)
+  ;; M-g n / M-g p walk this buffer's diagnostics too; M-g M-n stays
+  ;; next-error, for build output and search results (lesson 6.1).
+  (keymap-set flymake-mode-map "M-g n" #'flymake-goto-next-error)
+  (keymap-set flymake-mode-map "M-g p" #'flymake-goto-prev-error)
   (setq flymake-mode-line-lighter "Flymake"
         flymake-show-diagnostics-at-end-of-line nil))
+
+;; A buffer reverted to new contents on disk (a lesson's Reset, a step's
+;; checkpoint, a git checkout) keeps its modes, and Eglot closes and
+;; reopens the document around the revert.  basedpyright then never
+;; reports on that file again, and checks that run on save (clippy, for
+;; rust-analyzer) keep the old file's results.  So the document stays
+;; open: the new text goes as one full change, followed by a save.
+(defun playground--eglot-close-before-revert ()
+  "Close the document before a revert that will reset the modes."
+  (unless revert-buffer-preserve-modes
+    (eglot--signal-textDocument/didClose)))
+
+(defun playground--eglot-resync-after-revert ()
+  "Send a reverted buffer's text as a full change, then didSave."
+  (when (and revert-buffer-preserve-modes (bound-and-true-p eglot--managed-mode))
+    (cl-incf eglot--docver)
+    (setq eglot--recent-changes :emacs-messup)
+    (eglot--signal-textDocument/didSave)))
+
+(defun playground--eglot-revert-setup ()
+  "Replace Eglot's close and reopen around reverts in this buffer."
+  (when (bound-and-true-p eglot--managed-mode)
+    (remove-hook 'before-revert-hook #'eglot--signal-textDocument/didClose t)
+    (remove-hook 'after-revert-hook #'eglot--after-revert-hook t)
+    (add-hook 'before-revert-hook #'playground--eglot-close-before-revert nil t)
+    (add-hook 'after-revert-hook #'playground--eglot-resync-after-revert nil t)))
+(add-hook 'eglot-managed-mode-hook #'playground--eglot-revert-setup)
 
 ;;;; Lesson 7.3  Format on save with apheleia
 
@@ -72,6 +133,18 @@ frame it opens the *eldoc* buffer."
   ;; line, which reads (Rust Eglot) as lesson 0.1 describes.  M-x
   ;; apheleia-mode still toggles it per buffer.
   (setq apheleia-mode-lighter nil)
+  ;; ws-butler (editing module) puts back, after each save, trailing
+  ;; whitespace it kept out of the file.  apheleia drops its result when
+  ;; the buffer changes while the formatter runs, so it must start after
+  ;; ws-butler: last in after-save-hook, behind the global functions.
+  ;; (apheleia-mode is defined by the autoloads, before apheleia.el.)
+  (define-advice apheleia-mode (:after (&rest _) playground-format-last)
+    (when apheleia-mode
+      (remove-hook 'after-save-hook #'apheleia-format-after-save 'local)
+      (add-hook 'after-save-hook #'apheleia-format-after-save 90 'local)))
+  ;; Only saves you make format: not auto-save-visited's (base module).
+  (define-advice apheleia-format-after-save (:before-until (&rest _) playground-not-auto-save)
+    (bound-and-true-p playground-auto-saving))
   (apheleia-global-mode 1))
 
 (defun playground-format-buffer ()
@@ -110,7 +183,7 @@ frame it opens the *eldoc* buffer."
                             (re-search-forward "^name *= *\"\\([^\"]+\\)\"" nil t))
                    (match-string 1)))))
     (expand-file-name (concat "target/debug/" (or name (file-name-nondirectory
-                                                         (directory-file-name root))))
+                                                        (directory-file-name root))))
                       root)))
 
 (defun playground-project-python ()
