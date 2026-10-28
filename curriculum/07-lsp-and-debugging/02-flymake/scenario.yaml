@@ -1,0 +1,81 @@
+id: 07-lsp-and-debugging/02-flymake
+title: Flymake and diagnostics
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python]
+vscode: "Problems, lightbulb"
+setup:
+  workspace: fixtures/lsp
+  root: lsp
+  reset: true
+  open: [lsp/shapes/src/main.rs]
+  layout: single
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/lsp/" f)))
+            (kill-buffer b))))
+      (dolist (b (buffer-list))
+        (when (string-prefix-p "*Flymake diagnostics" (buffer-name b))
+          (kill-buffer b))))
+steps:
+  - id: list
+    goal: List the file's diagnostics with C-c l d
+    detail: "Once the mode line shows `Flymake[2 1 3]` (the server needs a few seconds to check the crate), `C-c l d` opens the list of this file's problems below."
+    demo: '~8000 C-c l d ~1500'
+    conditions:
+      - text: C-c l d was used
+        any:
+          - event: { command: flymake-show-buffer-diagnostics }
+          - event: { command: flymake-show-project-diagnostics }
+        hint: "Control c, l, then d, in main.rs."
+      - text: the list shows the problems
+        elisp: '(seq-find (lambda (b) (and (eq (buffer-local-value (quote major-mode) b) (quote flymake-diagnostics-buffer-mode)) (get-buffer-window b) (with-current-buffer b (> (count-lines (point-min) (point-max)) 2)))) (buffer-list))'
+        hint: "If the list is empty, the server had not finished its first check: wait for Flymake[2 1 3] in the mode line; the list fills by itself."
+  - id: next
+    goal: Walk to a problem with M-g n and read it with C-h .
+    detail: "In main.rs, `M-<` then `M-g n` moves to the first diagnostic, the unused variable `perimeter`; press it again to see the next. `C-h .` opens the *eldoc* window with the full messages at point."
+    demo: 'C-x 1 ~300 M-< ~300 M-g n ~1000 M-g n ~1000 C-h . ~1200'
+    conditions:
+      - text: M-g n was used
+        any:
+          - event: { command: flymake-goto-next-error }
+          - event: { command: flymake-goto-prev-error }
+        hint: "Alt g, then a plain n, with the cursor in main.rs (not in the list)."
+      - text: C-h . was used
+        any:
+          - event: { command: eldoc-doc-buffer }
+          - event: { command: display-local-help }
+          - event: { command: eldoc }
+          - event: { command: playground-doc-at-point }
+        hint: "Control h, then the full stop, after M-g n has put the cursor on a problem. The *eldoc* window opens below; q closes it."
+  - id: import
+    goal: Fix the missing HashMap with a code action
+    detail: "Put the cursor on `HashMap` on line 8 and press `C-c l a`. The first action, *Import `std::collections::HashMap`*, is the default: `RET` applies it, adding a `use` line at the top."
+    demo: 'M-< ~300 C-s ~300 "HashMap" RET ~300 M-b ~400 C-c l a ~1500 RET ~1500 C-x C-s ~1500'
+    conditions:
+      - text: a code action was used
+        any:
+          - event: { command: eglot-code-actions }
+          - event: { command: eglot-code-action-quickfix }
+          - event: { command: eglot-code-action-organize-imports }
+        hint: "Control c, l, a, with the cursor on HashMap."
+      - text: main.rs imports HashMap
+        elisp: '(let ((b (find-buffer-visiting "/work/lsp/shapes/src/main.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "^use std::collections::HashMap;" nil t)))))'
+        hint: "Pick Import, not Qualify: Qualify writes the full path at this one place instead of a use line at the top."
+      - text: the import is saved
+        file: { path: lsp/shapes/src/main.rs, contains: "use std::collections::HashMap;" }
+        hint: "Files save themselves a few seconds after you stop typing; C-x C-s saves at once."
+  - id: clean
+    goal: Clear the last two problems
+    detail: "The variable `perimeter` is never used: delete its line, or rename it `_perimeter`. `area` returns an `f64`, so `total` cannot be an `i32`: write `f64`. When the file is saved, the mode line shows `Flymake[0 0]`."
+    # C-g first: a completion popup left open would take M-<.
+    demo: '~1500 C-g ~300 M-< ~300 C-s ~300 "let perimeter" RET ~300 C-a ~200 C-k C-k ~400 C-s ~300 "i32" RET ~300 DEL DEL DEL ~200 "f64" ~300 C-g ~200 C-x C-s ~6000'
+    conditions:
+      - text: cargo clippy reports nothing
+        shell: { run: "cargo clippy -q -- -D warnings", cwd: lsp/shapes, timeout: 120 }
+        hint: "Save first (C-x C-s, or wait a few seconds): the check reads the file on disk. M-g n shows what is left."
+      - text: Flymake shows no problem in main.rs
+        elisp: '(let ((b (find-buffer-visiting "/work/lsp/shapes/src/main.rs"))) (and b (with-current-buffer b (and (not (buffer-modified-p)) (null (flymake-diagnostics))))))'
+        hint: "The server checks again after each save. If a note remains, read it with C-h .; C-c l a may offer the fix."

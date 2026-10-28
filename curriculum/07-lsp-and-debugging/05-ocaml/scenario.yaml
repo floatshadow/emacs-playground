@@ -1,0 +1,101 @@
+id: 07-lsp-and-debugging/05-ocaml
+title: OCaml
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python]
+vscode: OCaml Platform
+setup:
+  workspace: fixtures/lsp
+  root: lsp
+  reset: true
+  open: [lsp/wordfreq/lib/wordfreq.ml]
+  layout: single
+  # merlin reads the project's configuration from dune's build
+  # directory, which a fresh workspace does not have yet.
+  run: "cd wordfreq && dune build 2>/dev/null; true"
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/lsp/" f)))
+            (kill-buffer b))))
+      (dolist (n (quote ("*utop*" "*compilation*")))
+        (when (get-buffer n)
+          (let ((kill-buffer-query-functions nil)) (kill-buffer n)))))
+steps:
+  - id: type
+    goal: Ask for the type of split_on_char with C-c C-t
+    detail: "Once the mode line shows `[eglot:wordfreq]`, put the cursor on `split_on_char` (line 4) and press `C-c C-t`. The echo area shows its type, `char -> string -> string list`."
+    demo: '~2500 M-< ~300 C-s ~300 "split_on_char" RET ~300 M-b ~300 C-c C-t ~1500'
+    conditions:
+      - text: C-c C-t was used
+        any:
+          - event: { command: ocaml-eglot-type-enclosing }
+          - event: { command: ocaml-eglot-type-expression }
+        hint: "Control c, Control t. If it says the server is not ready, wait for [eglot:wordfreq] in the mode line."
+      - text: the cursor is on split_on_char
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (equal (thing-at-point (quote symbol) t) "split_on_char"))'
+        hint: "M-< then C-s split_on_char RET finds it (C-s searches forward from the cursor); the cursor must be on the name itself when you press C-c C-t."
+  - id: utop
+    goal: Start utop beside the source with C-c C-s
+    detail: "`C-c C-s` starts utop in a window below, through `dune utop`, which builds the library first, and moves the cursor there. Wait for the prompt `utop[0]>`."
+    demo: 'C-c C-s ~8000'
+    conditions:
+      - text: utop was started
+        event: { command: utop }
+        hint: "Control c, Control s, in wordfreq.ml."
+      - text: utop is running and ready
+        buffer: { name: "*utop*", process: running, contains: "utop[0]>" }
+        hint: "dune builds the library before utop starts, which takes a few seconds. If the window shows a build error, the source does not compile: fix it and try again."
+  - id: send
+    goal: Send the words function to utop with C-c C-e
+    detail: "`C-c C-z` in utop goes back to wordfreq.ml. Put the cursor anywhere in `let words ...` and press `C-c C-e`: utop answers `val words : string -> string list = <fun>`, and the cursor moves on to the next phrase."
+    demo: 'C-x 1 ~300 C-x C-f ~400 "/work/lsp/wordfreq/lib/wordfreq.ml" RET ~400 M-< ~200 C-s ~300 "let words" RET ~300 C-c C-e ~2000'
+    conditions:
+      - text: a phrase was sent
+        any:
+          - event: { command: utop-eval-phrase }
+          - event: { command: utop-eval-region }
+          - event: { command: utop-eval-buffer }
+        hint: "Control c, Control e, with the cursor inside the let words phrase in the source buffer, not in utop."
+      - text: utop knows words
+        buffer: { name: "*utop*", contains: "val words : string -> string list" }
+        hint: "Send the phrase that defines words. If utop shows an error, the phrase was cut short: put the cursor on the let and try again."
+  - id: explore
+    goal: Try words in utop
+    detail: "`C-c C-z` in the source moves to utop (`C-x o` too). Type `List.length (words \"the cat  sat\");;` and `RET`: `- : int = 3`, even with two spaces. That is the function you need."
+    demo: 'C-x b ~300 "*utop*" RET ~400 M-> ~400 "List.length (words \"the cat  sat\");; " ~400 RET ~1500'
+    conditions:
+      - text: you evaluated a phrase in utop
+        any:
+          - event: { command: utop-eval-input-or-newline }
+          - event: { command: utop-eval-input }
+        hint: "In the *utop* window, end the phrase with ;; and press RET. If Emacs says the text is read-only, the cursor is above the prompt: M-> goes to the end."
+      - text: utop printed an int
+        buffer: { name: "*utop*", contains: "- : int = " }
+        hint: "List.length (words \"the cat  sat\");; returns an int. Forgot the ;;? Type it and RET again."
+  - id: implement
+    goal: Write count_words
+    detail: "In wordfreq.ml, replace the line `let count_words _line = failwith ...` with `let count_words line = List.length (words line)`."
+    demo: 'C-x C-f ~400 "/work/lsp/wordfreq/lib/wordfreq.ml" RET ~400 M-< ~200 C-s ~300 "let count_words" RET ~300 C-a ~200 C-k ~300 "let count_words line = List.length (words line)" ~300 C-x C-s ~1500'
+    conditions:
+      - text: count_words no longer fails
+        elisp: '(let ((b (find-buffer-visiting "/work/lsp/wordfreq/lib/wordfreq.ml"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (and (re-search-forward "^let count_words +\\([a-z_]+\\) *=" nil t) (not (equal (match-string 1) "_line")) (not (search-forward "TODO" nil t)))))))'
+        hint: "The whole definition is one line: let count_words line = List.length (words line). The parameter is called line now, without the underscore, since it is used."
+      - text: the new definition is saved
+        file: { path: lsp/wordfreq/lib/wordfreq.ml, not_contains: "TODO" }
+        hint: "C-x C-s, or wait a few seconds; dune reads the file on disk. ocamlformat may rearrange the line when it saves."
+  - id: test
+    goal: Run the expect test with C-c C-r
+    detail: "`C-c C-r` runs `dune runtest`. When the output matches `[%expect {| 6 |}]`, dune prints nothing but *Compilation finished*."
+    demo: 'C-c C-r ~6000'
+    conditions:
+      - text: dune runtest ran
+        any:
+          - event: { command: playground-dune-test }
+          - event: { command: compile }
+          - event: { command: recompile }
+        hint: "Control c, Control r, in wordfreq.ml."
+      - text: the expect test passes
+        shell: { run: "dune runtest 2>&1", cwd: lsp/wordfreq, timeout: 120 }
+        hint: "A diff in *compilation* shows what the test printed (+) against what it expects (-). The test counts the words of the cat  sat on the mat: 6."

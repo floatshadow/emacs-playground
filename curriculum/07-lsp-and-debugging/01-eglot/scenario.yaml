@@ -1,0 +1,105 @@
+id: 07-lsp-and-debugging/01-eglot
+title: Eglot
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python]
+vscode: "IntelliSense, F12, Shift+F12, F2"
+setup:
+  workspace: fixtures/lsp
+  root: lsp
+  reset: true
+  open: [lsp/greeter/src/main.rs]
+  layout: single
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/lsp/" f)))
+            (kill-buffer b))))
+      (dolist (n (quote ("*eldoc*" "*xref*" "*compilation*")))
+        (when (get-buffer n)
+          (let ((kill-buffer-query-functions nil)) (kill-buffer n)))))
+steps:
+  - id: connect
+    goal: Let Eglot connect, then put the cursor on greet
+    detail: "Within a few seconds the mode line shows `[eglot:greeter]`: rust-analyzer manages this crate. Then move to `greet` on line 2, for example with `M-<` and `C-s ::greet RET`."
+    demo: '~4000 M-< ~300 C-s ~300 "::greet(" ~300 RET ~300 M-b ~1500'
+    conditions:
+      - text: Eglot manages main.rs
+        state: { minors: { contains: eglot--managed-mode } }
+        hint: "Wait for [eglot:greeter] in the mode line. If it never appears, M-x eglot RET starts the server by hand."
+      - text: the cursor is on greet in main.rs
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and buffer-file-name (string-suffix-p "/greeter/src/main.rs" buffer-file-name) (equal (thing-at-point (quote symbol) t) "greet")))'
+        hint: "The cursor must be on the word greet itself, not on greeter:: before it. M-< then C-s ::greet RET lands just after it (C-s searches forward from the cursor); M-b goes back onto it."
+  - id: docs
+    goal: Read greet's documentation with C-c l h
+    detail: "`C-c l h` opens an *eldoc* window with what the server knows: the signature `pub fn greet(name: &str) -> String` and the doc comment."
+    demo: "C-c l h ~1500"
+    conditions:
+      - text: the documentation was asked for
+        any:
+          - event: { command: playground-doc-at-point }
+          - event: { command: eldoc }
+          - event: { command: eldoc-doc-buffer }
+        hint: "Control c, l, then h, with the cursor on greet."
+      - text: "*eldoc* shows greet's signature"
+        buffer: { name: "*eldoc*", contains: "pub fn greet(" }
+        hint: "If the window shows nothing useful, the server was still reading the project: wait for the mode line to settle and press C-c l h again."
+  - id: definition
+    goal: Jump to the definition with M-. and back with M-,
+    detail: "`M-.` opens `src/lib.rs` on `pub fn greet`. `M-,` brings you back to where you were in `main.rs`."
+    demo: 'C-x 1 ~300 M-. ~1500 M-, ~800'
+    conditions:
+      - text: M-. was used
+        event: { command: xref-find-definitions }
+        hint: "Alt and the full stop, with the cursor on greet. If Emacs asks for a tags table, Eglot was not connected yet: C-g, wait, try again."
+      - text: M-, was used
+        any:
+          - event: { command: xref-go-back }
+          - event: { command: xref-pop-marker-stack }
+        hint: "Alt and the comma goes back after M-. ."
+      - text: you are back in main.rs
+        state: { file: /work/lsp/greeter/src/main.rs }
+        hint: "M-, returns to the place M-. left. Press it once more if you jumped twice."
+  - id: references
+    goal: Find every use with M-? and visit the one in the test
+    detail: "`M-?` lists every place `greet` appears, the definition included, grouped by file, and previews the one you are on. Type `tests` to narrow the list to the test file and press `RET`."
+    demo: 'C-x C-f ~400 "/work/lsp/greeter/src/main.rs" RET ~400 M-< ~200 C-s ~300 "::greet(" RET ~200 M-b ~300 M-? ~2500 C-n ~600 C-n ~600 "tests" ~800 RET'
+    conditions:
+      - text: M-? was used
+        event: { command: xref-find-references }
+        hint: "Alt and the question mark (Alt Shift / on most keyboards), with the cursor on greet."
+      - text: tests/greet.rs is open at the use
+        all:
+          - state: { file: /work/lsp/greeter/tests/greet.rs }
+          - elisp: '(with-current-buffer (window-buffer (selected-window)) (string-match-p "greeter::greet(" (or (thing-at-point (quote line) t) "")))'
+        hint: "The list under Go to xref is grouped by file; typing part of a file name or line narrows it, C-n and C-p move and preview, RET visits."
+  - id: rename
+    goal: Rename greet to welcome everywhere with C-c l r
+    detail: "On any use of `greet`, `C-c l r` asks for the new name: type `welcome`, `RET`. lib.rs, main.rs and the test change at once; `greet_all` keeps its name."
+    demo: 'C-x 1 ~300 C-x C-f ~400 "/work/lsp/greeter/src/lib.rs" RET ~400 M-< ~200 C-s ~300 "fn greet(" RET ~200 M-b ~300 C-c l r ~500 "welcome" ~300 RET ~6000'
+    conditions:
+      - text: C-c l r was used
+        event: { command: eglot-rename }
+        hint: "Control c, l, r, with the cursor on greet (not on greet_all)."
+      - text: the three files say welcome
+        all:
+          - file: { path: lsp/greeter/src/lib.rs, contains: "pub fn welcome(" }
+          - file: { path: lsp/greeter/src/lib.rs, not_contains: "greet(" }
+          - file: { path: lsp/greeter/src/main.rs, contains: "greeter::welcome(" }
+          - file: { path: lsp/greeter/tests/greet.rs, contains: "greeter::welcome(" }
+        hint: "Changed files are saved a few seconds after the rename. If one still says greet, C-x s saves every buffer."
+      - text: the crate still builds and passes its tests
+        shell: { run: "cargo test -q", cwd: lsp/greeter, timeout: 120 }
+        hint: "The rename should leave the crate building. If it does not, C-/ in each file undoes it; then rename again."
+  - id: symbols
+    goal: Jump to greet_all by name with C-c l s
+    detail: "`C-c l s` searches every symbol of the project. Type `greet_all` and `RET`: the cursor goes to its definition in lib.rs."
+    demo: 'C-c l s ~1200 "greet_all" ~1500 RET ~600'
+    conditions:
+      - text: C-c l s was used
+        event: { command: consult-eglot-symbols }
+        hint: "Control c, l, s. The list fills as you type; the server answers after the first letters."
+      - text: the cursor is on greet_all's definition
+        state: { file: /work/lsp/greeter/src/lib.rs, line: 9 }
+        hint: "Pick the entry for the function greet_all (it is marked Function), not a use of it."

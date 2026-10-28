@@ -1,0 +1,102 @@
+id: 07-lsp-and-debugging/06-python
+title: Python
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python]
+vscode: Python extension
+setup:
+  workspace: fixtures/lsp
+  root: lsp
+  reset: true
+  open: [lsp/tips/tips.py]
+  layout: single
+  # The project's virtual environment, offline from the image's wheels.
+  run: "cd tips && uv sync -q"
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/lsp/" f)))
+            (kill-buffer b))))
+      (dolist (b (buffer-list))
+        (when (or (member (buffer-name b) (quote ("*pet info*" "*compilation*")))
+                  (eq (buffer-local-value (quote major-mode) b) (quote inferior-python-mode)))
+          (let ((kill-buffer-query-functions nil)) (kill-buffer b)))))
+steps:
+  - id: venv
+    goal: See which environment pet found
+    detail: "`M-x pet-verify-setup RET` lists what pet found for tips.py: the virtual environment `/work/lsp/tips/.venv/` and its interpreter. The list opens in another window and the cursor stays in tips.py; `C-x 1` closes it."
+    demo: 'M-x ~300 "pet-verify-setup" RET ~1500 C-x 1'
+    conditions:
+      - text: pet-verify-setup ran
+        event: { command: pet-verify-setup }
+        hint: "Alt x, type pet-verify-setup, RET, with tips.py as the current buffer."
+      - text: pet found the project's .venv
+        buffer: { name: "*pet info*", contains: "/work/lsp/tips/.venv/" }
+        hint: "Run it from tips.py: pet looks for the environment of the current buffer's project."
+  - id: import
+    goal: Add the missing import with a code action
+    detail: "`math` on line 11 is underlined: it is used but never imported. Put the cursor on it and press `C-c l a`; the default action, *import math*, adds the import at the top. `RET` takes it."
+    demo: '~3000 M-< ~200 C-s ~300 "math." RET ~300 M-b ~300 C-c l a ~1500 RET ~1500'
+    conditions:
+      - text: a code action was used
+        any:
+          - event: { command: eglot-code-actions }
+          - event: { command: eglot-code-action-quickfix }
+        hint: "Control c, l, a, with the cursor on math. If nothing is offered, wait until the mode line shows [eglot:tips]."
+      - text: tips.py imports math
+        elisp: '(let ((b (find-buffer-visiting "/work/lsp/tips/tips.py"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "^import math$" nil t)))))'
+        hint: "Pick import math, the first action. The ignore comments only silence the warning."
+  - id: repl
+    goal: Start a Python REPL with C-c C-p
+    detail: "In tips.py, `C-c C-p` starts Python from the project's `.venv` in another window, with a `>>>` prompt."
+    demo: 'C-x 1 ~300 C-c C-p ~2500'
+    conditions:
+      - text: the REPL was started
+        event: { command: run-python }
+        hint: "Control c, Control p, in tips.py."
+      - text: a Python REPL from .venv is running
+        elisp: '(seq-find (lambda (b) (and (eq (buffer-local-value (quote major-mode) b) (quote inferior-python-mode)) (let ((p (get-buffer-process b))) (and p (process-live-p p) (string-match-p "/work/lsp/tips/\\.venv/" (mapconcat (function identity) (process-command p) " ")))))) (buffer-list))'
+        hint: "Start it from tips.py so pet chooses the interpreter. A REPL started elsewhere runs the system Python."
+  - id: explore
+    goal: Send the file with C-c C-c and try with_tip
+    detail: "Back in tips.py (`C-x o`), `C-c C-c` sends the whole file to the REPL. Then, in the REPL, type `with_tip(100)` and `RET`: 1600.0, not 115. The percentage is used as if it were a fraction."
+    demo: 'C-x b ~300 "tips.py" RET ~400 C-c C-c ~1200 C-c C-z ~500 M-> ~300 "with_tip(100)" ~300 RET ~1200'
+    conditions:
+      - text: the buffer was sent
+        any:
+          - event: { command: python-shell-send-buffer }
+          - event: { command: python-shell-send-file }
+          - event: { command: python-shell-send-region }
+        hint: "Send from the tips.py buffer: in the REPL itself, C-c C-c interrupts Python instead of sending anything."
+      - text: you ran with_tip in the REPL
+        elisp: '(seq-find (lambda (b) (and (eq (buffer-local-value (quote major-mode) b) (quote inferior-python-mode)) (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "with_tip(100)\n1600" nil t))))) (buffer-list))'
+        hint: "C-c C-z moves to the REPL. Type with_tip(100) and RET; if it says NameError, the file was not sent yet: C-c C-c in tips.py first."
+  - id: fix
+    goal: Fix with_tip
+    detail: "In tips.py, a tip of 15 per cent is `total * percent / 100`: add `/ 100` at the end of the `return` line in `with_tip`. `C-c C-c` and `with_tip(100)` in the REPL now give 115.0."
+    demo: 'C-x b ~300 "tips.py" RET ~400 M-< ~200 C-s ~300 "total * percent" RET ~300 " / 100" ~300 C-x C-s ~1500'
+    conditions:
+      - text: with_tip divides by 100
+        elisp: '(let ((b (find-buffer-visiting "/work/lsp/tips/tips.py"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "return total \\+ total \\* percent / 100\\(\\.0\\)?$" nil t)))))'
+        hint: "The line should read return total + total * percent / 100. Dividing the whole sum by 100 gives the wrong answer too; check it in the REPL."
+      - text: the fix is saved
+        file: { path: lsp/tips/tips.py, contains: "percent / 100" }
+        hint: "pytest reads the file on disk: C-x C-s, or wait a few seconds."
+  - id: pytest
+    goal: Run pytest with M-x compile
+    detail: "`M-x compile`, replace the offered command (`C-a C-k`) with `uv run pytest -q`, `RET`. Both tests pass: *2 passed*."
+    demo: 'M-x ~300 "compile" RET ~400 C-a ~200 C-k ~300 "uv run pytest -q" RET ~5000'
+    conditions:
+      - text: compile ran
+        any:
+          - event: { command: compile }
+          - event: { command: project-compile }
+          - event: { command: recompile }
+        hint: "M-x compile, from tips.py so it runs in the project folder."
+      - text: both tests pass
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (not (get-buffer-process b)) (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "2 passed" nil t)))))'
+        hint: "If a test fails, M-g M-n jumps to the assertion. Both fixes are needed: the import and the division."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "C-a then C-k clears the offered command; type uv run pytest -q and RET."

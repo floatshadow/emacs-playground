@@ -1,0 +1,67 @@
+id: 07-lsp-and-debugging/03-format-on-save
+title: Format on save with apheleia
+minutes: 8
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python]
+vscode: format on save
+setup:
+  workspace: fixtures/lsp
+  root: lsp
+  reset: true
+  open: [lsp/tidy/src/main.rs]
+  layout: single
+  eval: >-
+    (dolist (b (buffer-list))
+      (let ((f (buffer-file-name b)))
+        (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/lsp/" f)))
+          (kill-buffer b))))
+steps:
+  - id: rust
+    goal: Save main.rs and watch rustfmt tidy it
+    detail: "Saving an unchanged file does nothing, so change something first: `M->` and `RET` adds an empty line at the end. Then `C-x C-s`. rustfmt puts every statement on its own line and the spaces where they belong."
+    demo: 'M-> ~300 RET ~300 C-x C-s ~2500'
+    conditions:
+      - text: the file was saved
+        any:
+          - event: { command: save-buffer }
+          - event: { command: save-some-buffers }
+        hint: "Control x, Control s. If the echo area says No changes need to be saved, type something first."
+      - text: main.rs is formatted
+        shell: { run: "cargo fmt --check", cwd: lsp/tidy, timeout: 60 }
+        hint: "The formatter runs after the save and answers within a second. A syntax error stops rustfmt: C-/ undoes what you typed."
+  - id: ocaml
+    goal: Format shapes.ml now with C-c l f
+    detail: "Open `/work/lsp/tidy/shapes.ml`. Without changing anything, `C-c l f` runs ocamlformat at once: the match gets one case per line."
+    demo: 'C-x C-f ~400 "/work/lsp/tidy/shapes.ml" RET ~1500 C-c l f ~2500'
+    conditions:
+      - text: C-c l f was used
+        any:
+          - event: { command: playground-format-buffer }
+          - event: { command: apheleia-format-buffer }
+          - event: { command: eglot-format-buffer }
+        hint: "Control c, l, f, in the shapes.ml buffer."
+      - text: shapes.ml is formatted on disk
+        shell: { run: "ocamlformat --enable-outside-detected-project --check shapes.ml", cwd: lsp/tidy, timeout: 60 }
+        hint: "Formatting changes the buffer; it reaches the disk with the next save, automatic after a few seconds or C-x C-s."
+  - id: python
+    goal: Save report.py and let ruff format it
+    detail: "Open `/work/lsp/tidy/report.py`, add an empty line at the end (`M-> RET`) and save. ruff sorts the imports (`os` before `sys`), indents by four spaces and fixes the spacing."
+    demo: 'C-x C-f ~400 "/work/lsp/tidy/report.py" RET ~1200 M-> ~300 RET ~300 C-x C-s ~2500'
+    conditions:
+      - text: the imports are sorted
+        shell: { run: "ruff check --select I report.py", cwd: lsp/tidy, timeout: 60 }
+        hint: "Change the buffer before saving, or use C-c l f and then save: ruff sorts the imports first, so import os comes before import sys."
+      - text: report.py is formatted
+        shell: { run: "ruff format --check report.py", cwd: lsp/tidy, timeout: 60 }
+        hint: "Four spaces of indentation, no spaces inside the parentheses, two blank lines around the function: ruff writes all of that on save."
+  - id: toggle
+    goal: Turn formatting off for report.py
+    detail: "`M-x apheleia-mode RET` in report.py. The echo area says *Apheleia mode disabled in current buffer*; from now on this buffer keeps your layout when saved. (Running it again turns it back on.)"
+    demo: 'M-x ~300 "apheleia-mode" RET ~1200'
+    conditions:
+      - text: report.py is the current buffer
+        state: { file: /work/lsp/tidy/report.py }
+        hint: "The switch is per buffer: run it in report.py. C-x b report.py RET goes back there."
+      - text: apheleia-mode was toggled
+        event: { command: apheleia-mode }
+        hint: "Alt x, then apheleia-mode (not apheleia-global-mode, which switches every buffer), RET. It toggles: if the echo area says enabled (Watch it had already turned it off), run it once more."

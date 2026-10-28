@@ -1,0 +1,75 @@
+id: 07-lsp-and-debugging/04-rust
+title: Rust
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python]
+vscode: rust-analyzer
+setup:
+  workspace: fixtures/lsp
+  root: lsp
+  reset: true
+  open: [lsp/temps/src/lib.rs]
+  layout: single
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/lsp/" f)))
+            (kill-buffer b))))
+      (when (get-buffer "*compilation*")
+        (let ((kill-buffer-query-functions nil)) (kill-buffer "*compilation*"))))
+steps:
+  - id: add-test
+    goal: Add a test for to_fahrenheit
+    detail: "At the end of the `tests` module, after `average_of_two`, write a test that water boils at 212 °F:\n\n```rust\n#[test]\nfn boiling_point() {\n    assert_eq!(to_fahrenheit(100.0), 212.0);\n}\n```"
+    demo: 'M-> ~300 C-r ~300 "    }" RET ~300 C-e ~300 RET RET ~200 "#[test]" RET ~200 "fn boiling_point() {" RET ~200 "assert_eq!(to_fahrenheit(100.0), 212.0); " RET ~200 "}" ~300 C-x C-s ~1500'
+    conditions:
+      - text: lib.rs has a test that calls to_fahrenheit
+        elisp: '(let ((b (find-buffer-visiting "/work/lsp/temps/src/lib.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "#\\[test\\][ \t\n]*fn [a-z_0-9]+()[ \t\n]*{[^}]*to_fahrenheit(" nil t)))))'
+        hint: "The test needs #[test] on the line above fn, inside mod tests (before its last closing brace). Flymake underlines it if something is off."
+      - text: the test is saved
+        file: { path: lsp/temps/src/lib.rs, contains: "to_fahrenheit(100.0)" }
+        hint: "C-x C-s, or wait a few seconds: cargo test reads the file on disk."
+  - id: run
+    goal: Run the tests with C-c C-t
+    detail: "`C-c C-t` runs `cargo test` in the compile window. Three tests now, all passing: *test result: ok. 3 passed*."
+    demo: 'C-c C-t ~6000'
+    conditions:
+      - text: cargo test ran
+        any:
+          - event: { command: playground-cargo-test }
+          - event: { command: compile }
+          - event: { command: recompile }
+        hint: "Control c, Control t, in lib.rs. M-x compile RET cargo test works too."
+      - text: three tests passed
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (not (get-buffer-process b)) (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "3 passed; 0 failed" nil t)))))'
+        hint: "If a test failed, M-g M-n jumps to the line that panicked. A test that does not compile shows as an error first."
+  - id: clippy
+    goal: Run clippy with C-c C-k, jump to its warning and fix it
+    detail: "`C-c C-k` runs `cargo clippy`. Its one warning, *unneeded `return` statement*, is a link: `M-g M-n` jumps to it. The last expression of a function is its value, so write `celsius <= 0.0` without `return` and without the semicolon."
+    demo: 'C-c C-k ~7000 M-g M-n ~800 M-d ~200 C-d ~200 C-e ~200 DEL ~300 C-x C-s ~2000'
+    conditions:
+      - text: C-c C-k was used
+        any:
+          - event: { command: playground-cargo-clippy }
+          - event: { command: compile }
+        hint: "Control c, Control k, in a Rust buffer of the crate."
+      - text: clippy has nothing more to say
+        shell: { run: "cargo clippy -q -- -D warnings", cwd: lsp/temps, timeout: 120 }
+        hint: "The line in is_freezing must read celsius <= 0.0 alone: no return, no semicolon. Save, then C-c C-k again to check."
+  - id: nextest
+    goal: Run the tests with cargo-nextest
+    detail: "`M-x compile`, clear the offered `cargo build` with `C-a C-k`, type `cargo nextest run`, `RET`. The summary line says *3 tests run: 3 passed*."
+    demo: 'M-x ~300 "compile" RET ~400 C-a ~200 C-k ~300 "cargo nextest run" RET ~8000'
+    conditions:
+      - text: compile ran
+        any:
+          - event: { command: compile }
+          - event: { command: project-compile }
+        hint: "M-x compile asks for any command; the offer is the buffer's usual build."
+      - text: nextest ran the three tests
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (not (get-buffer-process b)) (with-current-buffer b (save-excursion (goto-char (point-min)) (re-search-forward "3 tests run: 3 passed" nil t)))))'
+        hint: "The command is cargo nextest run (nextest, not next). The first run builds the tests first."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "C-a goes to the start of the offered command, C-k deletes it; type cargo nextest run and RET."

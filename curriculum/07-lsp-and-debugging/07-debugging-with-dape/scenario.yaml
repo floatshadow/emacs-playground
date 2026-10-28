@@ -1,0 +1,118 @@
+id: 07-lsp-and-debugging/07-debugging-with-dape
+title: Debugging with dape
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python]
+vscode: Run and Debug
+setup:
+  workspace: fixtures/lsp
+  root: lsp
+  reset: true
+  open: [lsp/temps/src/main.rs]
+  layout: single
+  # dape keeps breakpoints, watches and sessions outside the workspace:
+  # start without any, so the toggles below always add.
+  eval: >-
+    (progn
+      (dolist (b (buffer-list))
+        (let ((f (buffer-file-name b)))
+          (when (and f (not (buffer-modified-p b)) (not (string-prefix-p "/work/lsp/" f)))
+            (kill-buffer b))))
+      (when (get-buffer "*compilation*")
+        (let ((kill-buffer-query-functions nil)) (kill-buffer "*compilation*")))
+      (require (quote dape))
+      (ignore-errors (dape-breakpoint-remove-all))
+      (setq dape--watched nil)
+      (when (dape--live-connections) (ignore-errors (dape-quit))))
+steps:
+  - id: build
+    goal: Build the program with C-c C-c
+    detail: "The debugger runs the compiled program, `target/debug/temps`. `C-c C-c` in main.rs builds it."
+    demo: 'C-c C-c ~5000'
+    conditions:
+      - text: a build ran
+        any:
+          - event: { command: playground-cargo-build }
+          - event: { command: compile }
+          - event: { command: recompile }
+        hint: "Control c, Control c, in main.rs."
+      - text: the build finished
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (not (get-buffer-process b)) (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "Finished `dev` profile" nil t)))))'
+        hint: "Wait for Finished in the compile window; the mode line says exit [0]."
+  - id: breakpoint
+    goal: Put a breakpoint on the line that reads the numbers
+    detail: "In main.rs, go to line 5, `let readings = temps::parse_readings(&text);`, and press `C-x C-a b`. A `B` appears in the margin."
+    demo: 'C-x 1 ~300 C-x C-f ~400 "/work/lsp/temps/src/main.rs" RET ~400 M-< ~200 C-s ~300 "let readings" RET ~300 C-x C-a B ~400 C-x C-a b ~800'
+    conditions:
+      - text: C-x C-a b was used
+        event: { command: dape-breakpoint-toggle }
+        hint: "Control x, Control a, then a plain b, with the cursor on line 5."
+      - text: main.rs has a breakpoint on line 5
+        elisp: '(and (boundp (quote dape--breakpoints)) (seq-find (lambda (bp) (and (dape--source-breakpoint-p bp) (let ((s (dape--breakpoint-source bp))) (equal (if (bufferp s) (buffer-file-name s) s) "/work/lsp/temps/src/main.rs")) (eql (dape--breakpoint-line bp) 5))) dape--breakpoints))'
+        hint: "C-x C-a b toggles: if the B went away, press it once more. A breakpoint on another line is removed the same way."
+  - id: start
+    goal: Start debugging with M-x dape
+    detail: "`M-x dape` offers `codelldb-rust` with its settings below it; `RET` runs it. The program stops at your breakpoint: `=>` marks line 5, and the variables appear on the right."
+    # A debug session is not part of a checkpoint: from here on each demo
+    # starts its own, stopped at the breakpoint on line 5.
+    demo: 'C-x C-a q ~1500 C-x 1 ~300 C-x C-f ~400 "/work/lsp/temps/src/main.rs" RET ~400 M-< ~200 C-s ~300 "let readings" RET ~300 C-x C-a B ~400 C-x C-a b ~600 M-x ~300 "dape" RET ~1500 RET ~7000'
+    conditions:
+      - text: M-x dape was used
+        event: { command: dape }
+        hint: "Alt x, dape, RET; then RET again to accept codelldb-rust."
+      - text: the program is stopped at line 5 of main.rs
+        elisp: '(and (fboundp (quote dape--live-connection)) (let ((c (dape--live-connection (quote stopped) t))) (and c (let ((f (dape--current-stack-frame c))) (and (eql (plist-get f :line) 5) (equal (plist-get (plist-get f :source) :path) "/work/lsp/temps/src/main.rs"))))))'
+        hint: "Starting takes a few seconds. If the program ran to the end without stopping, the breakpoint is missing: C-x C-a q, put it back on line 5, and M-x dape again."
+    stuck:
+      - when: { minibuffer_seconds: 30 }
+        say: "The prompt already holds codelldb-rust: press RET. If it asks whether to kill a running session, answer y."
+  - id: step
+    goal: Step into parse_readings and out again
+    detail: "`C-x C-a s` steps into `parse_readings` in lib.rs. `C-x C-a o` runs it to the end and returns to main.rs: on the right, `[return value]` says *size=3*. Four readings went in."
+    demo: 'C-x C-a q ~1500 C-x 1 ~300 C-x C-f ~400 "/work/lsp/temps/src/main.rs" RET ~400 M-< ~200 C-s ~300 "let readings" RET ~300 C-x C-a B ~400 C-x C-a b ~600 M-x ~300 "dape" RET ~1500 RET ~7000 C-x C-a s ~2000 C-x C-a o ~2000'
+    conditions:
+      - text: you stepped in
+        event: { command: dape-step-in }
+        hint: "Control x, Control a, s: the arrow moves into lib.rs."
+      - text: you stepped out
+        event: { command: dape-step-out }
+        hint: "Control x, Control a, o, from inside parse_readings."
+      - text: the program is stopped in main.rs again
+        elisp: '(and (fboundp (quote dape--live-connection)) (let ((c (dape--live-connection (quote stopped) t))) (and c (equal (plist-get (plist-get (dape--current-stack-frame c) :source) :path) "/work/lsp/temps/src/main.rs"))))'
+        hint: "One step out returns to the caller. If you stepped deeper, press C-x C-a o until the arrow is back in main.rs."
+  - id: watch
+    goal: Step over the assignment and watch readings
+    detail: "`C-x C-a n` finishes line 5. Move the cursor onto `readings` on line 6 and press `C-x C-a w`, then `RET` for the name it offers: the watch list shows the three values, 21, 19.5 and 23. The first reading, 18.5, is missing."
+    demo: 'C-x C-a q ~1500 C-x 1 ~300 C-x C-f ~400 "/work/lsp/temps/src/main.rs" RET ~400 M-< ~200 C-s ~300 "let readings" RET ~300 C-x C-a B ~400 C-x C-a b ~600 M-x ~300 "dape" RET ~1500 RET ~7000 C-x C-a n ~1500 C-x C-f ~400 "/work/lsp/temps/src/main.rs" RET ~400 M-< ~200 C-s ~300 "(&readings" RET ~300 M-b ~300 C-x C-a w ~600 RET ~1500'
+    conditions:
+      - text: C-x C-a w was used
+        event: { command: dape-watch-dwim }
+        hint: "Control x, Control a, w, with the cursor on readings; RET accepts the name. It toggles: if readings was already watched (after Watch it), the first press removes it and a second one adds it back."
+      - text: the session is still stopped
+        elisp: '(and (fboundp (quote dape--live-connection)) (dape--live-connection (quote stopped) t))'
+        hint: "If the program ended, M-x dape starts it again; it stops at the breakpoint."
+  - id: finish
+    goal: Continue to the end, then quit the session
+    detail: "`C-x C-a c` lets the program run to the end; its output, *average 21.17 C*, shows at the bottom. `C-x C-a q` ends the session and closes its windows."
+    demo: 'C-x C-a c ~2500 C-x C-a q ~1500'
+    conditions:
+      - text: the session was ended
+        any:
+          - event: { command: dape-quit }
+          - event: { command: dape-disconnect-quit }
+          - event: { command: dape-kill }
+        hint: "Control x, Control a, q."
+      - text: no debug session is left
+        elisp: '(not (and (fboundp (quote dape--live-connections)) (dape--live-connections)))'
+        hint: "Ending a session takes a second. If the debugger's windows are still there, quit once more; a program still paused at a breakpoint is stopped too."
+  - id: fix
+    goal: Fix parse_readings and run the program
+    detail: "`parse_readings` in lib.rs skips two lines, the header and the first reading. Make it `.skip(1)`, then `C-c C-r` runs the program: *average 20.50 C*."
+    demo: 'C-x C-f ~400 "/work/lsp/temps/src/lib.rs" RET ~400 M-< ~200 C-s ~300 ".skip(2" RET ~300 DEL ~200 "1" ~300 C-x C-s ~800 C-c C-r ~5000'
+    conditions:
+      - text: parse_readings skips only the header
+        file: { path: lsp/temps/src/lib.rs, contains: ".skip(1)" }
+        hint: "In parse_readings, .skip(2) becomes .skip(1). Save with C-x C-s."
+      - text: the program prints the right average
+        elisp: '(let ((b (get-buffer "*compilation*"))) (and b (not (get-buffer-process b)) (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "average 20.50 C" nil t)))))'
+        hint: "C-c C-r runs cargo run in the compile window. If it still says 21.17, the file was not saved yet."
