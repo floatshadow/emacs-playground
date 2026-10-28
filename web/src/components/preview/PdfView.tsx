@@ -48,12 +48,12 @@ export default function PdfView({
         })
         loaded = await task.promise
         if (cancelled) {
-          void loaded.destroy()
+          void loaded.loadingTask.destroy()
           return
         }
         setError(null)
         setDoc((prev) => {
-          void prev?.destroy()
+          void prev?.loadingTask.destroy()
           return loaded
         })
       } catch (e) {
@@ -65,7 +65,7 @@ export default function PdfView({
     }
   }, [url, version])
 
-  useEffect(() => () => void doc?.destroy(), [doc])
+  useEffect(() => () => void doc?.loadingTask.destroy(), [doc])
 
   const layout = useCallback(async () => {
     const host = pagesEl.current

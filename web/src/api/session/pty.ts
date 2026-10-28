@@ -83,7 +83,7 @@ export class PtyClient {
   }
 
   /** Sends terminal input: strings are UTF-8 encoded, bytes go as they are. */
-  send(data: string | Uint8Array): void {
+  send(data: string | Uint8Array<ArrayBuffer>): void {
     const ws = this.ws
     if (!ws || ws.readyState !== 1) return
     ws.send(typeof data === 'string' ? encoder.encode(data) : data)

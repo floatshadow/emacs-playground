@@ -1,9 +1,8 @@
 // Browser smoke scenarios for the whole stack (AGENTS.md §4, frontend.md §14),
 // run against `docker compose` in local mode through a remote headless Chrome:
 //
-//   docker run -d --rm --name pg-chrome --network host --shm-size=1g zenika/alpine-chrome:latest \
-//     --headless --no-sandbox --disable-gpu --remote-debugging-address=0.0.0.0 \
-//     --remote-debugging-port=9222 about:blank
+//   docker run -d --rm --name pg-chrome --network host --shm-size=1g \
+//     chromedp/headless-shell:156.0.8078.48
 //   cd web && pnpm e2e:smoke
 //
 // Scenarios (screenshots in artifacts/verify/<n>.png):

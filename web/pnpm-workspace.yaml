@@ -1,14 +1,8 @@
 minimumReleaseAgeExclude:
-  - '@tanstack/query-core@5.105.0'
-  - '@tanstack/react-query@5.105.0'
-  - '@typescript-eslint/eslint-plugin@8.72.1'
-  - '@typescript-eslint/parser@8.72.1'
-  - '@typescript-eslint/project-service@8.72.1'
-  - '@typescript-eslint/scope-manager@8.72.1'
-  - '@typescript-eslint/tsconfig-utils@8.72.1'
-  - '@typescript-eslint/type-utils@8.72.1'
-  - '@typescript-eslint/types@8.72.1'
-  - '@typescript-eslint/typescript-estree@8.72.1'
-  - '@typescript-eslint/utils@8.72.1'
-  - '@typescript-eslint/visitor-keys@8.72.1'
-  - typescript-eslint@8.72.1
+  - '@xterm/addon-clipboard@0.3.0-beta.314'
+  - '@xterm/addon-fit@0.12.0-beta.312'
+  - '@xterm/addon-unicode11@0.10.0-beta.311'
+  - '@xterm/addon-web-links@0.13.0-beta.311'
+  - '@xterm/addon-webgl@0.20.0-beta.310'
+  - '@xterm/xterm@6.1.0-beta.316'
+  - react-router@8.5.1

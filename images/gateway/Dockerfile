@@ -10,12 +10,15 @@
 # curriculum (playctl curriculum build) → final.
 
 ARG GO_VERSION=1.27.3
-ARG NODE_VERSION=24
+ARG NODE_VERSION=26
+# Node 25+ no longer bundles corepack.
+ARG COREPACK_VERSION=0.36.0
 
 # ---- web: build web/dist -------------------------------------------------
 FROM node:${NODE_VERSION}-trixie-slim AS web
+ARG COREPACK_VERSION
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0 CI=1
-RUN corepack enable
+RUN npm install -g corepack@${COREPACK_VERSION} && corepack enable
 WORKDIR /src/web
 COPY web/package.json web/pnpm-lock.yaml web/pnpm-workspace.yaml ./
 RUN --mount=type=cache,id=pnpm-store,target=/root/.local/share/pnpm/store \

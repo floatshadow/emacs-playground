@@ -15,6 +15,13 @@ SHELL := /bin/bash
 
 export PATH := $(HOME)/.local/go/bin:$(HOME)/go/bin:$(HOME)/.local/bin:$(PATH)
 export COREPACK_ENABLE_DOWNLOAD_PROMPT := 0
+# pnpm 12 keeps store locks in $XDG_RUNTIME_DIR, read-only in some sandboxes.
+ifneq ($(XDG_RUNTIME_DIR),)
+ifneq ($(shell test -w '$(XDG_RUNTIME_DIR)' && echo ok),ok)
+export XDG_RUNTIME_DIR := $(CURDIR)/artifacts/xdg-run
+$(shell mkdir -p -m 700 '$(XDG_RUNTIME_DIR)')
+endif
+endif
 
 TAG ?= latest
 # Forks: IMAGE_BASE=ghcr.io/<owner>/<repo>. (A comment after the value would
