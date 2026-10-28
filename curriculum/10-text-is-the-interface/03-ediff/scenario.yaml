@@ -1,0 +1,99 @@
+id: 10-text-is-the-interface/03-ediff
+title: ediff
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+vscode: diff editor
+setup:
+  workspace: fixtures/text
+  root: text
+  reset: true
+  open: [text/ediff/limits-old.toml]
+  layout: single
+  # A comparison left open by an earlier visit would make the new
+  # control window *Ediff Control Panel<2>*.
+  eval: >-
+    (let ((kill-buffer-query-functions nil))
+      (dolist (b (buffer-list))
+        (when (or (eq (buffer-local-value 'major-mode b) 'ediff-mode)
+                  (string-prefix-p "*ediff-" (buffer-name b))
+                  (equal (buffer-name b) "*Ediff Registry*"))
+          (kill-buffer b))))
+steps:
+  - id: compare
+    goal: Compare limits-old.toml with limits-new.toml
+    detail: "`M-x ediff-files RET`. File A is `/work/text/ediff/limits-old.toml`, file B `/work/text/ediff/limits-new.toml`: after the offered directory, typing a path that starts with `/` starts over from the root."
+    demo: 'M-x ~400 "ediff-files" RET ~600 "/work/text/ediff/limits-old.toml" RET ~600 "/work/text/ediff/limits-new.toml" RET'
+    conditions:
+      - text: ediff-files was run
+        event: { command: ediff-files }
+        hint: "M-x ediff-files RET. ediff-buffers would ask for buffers instead of files."
+      - text: an ediff control window is open
+        buffer: { name: "*Ediff Control Panel*", mode: ediff-mode }
+        hint: "ediff-files asks twice, once per file. The control window is the thin strip at the bottom that says Type ? for help."
+      - text: A is the old file and B the new one
+        elisp: '(seq-some (lambda (b) (with-current-buffer b (and (eq major-mode (quote ediff-mode)) (buffer-live-p ediff-buffer-A) (buffer-live-p ediff-buffer-B) (equal (buffer-file-name ediff-buffer-A) "/work/text/ediff/limits-old.toml") (equal (buffer-file-name ediff-buffer-B) "/work/text/ediff/limits-new.toml")))) (buffer-list))'
+        hint: "The order matters for the next steps: the old file first. If they are the wrong way round, q y in the control window and start again."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "Each prompt wants one file. Type the whole path after what is offered, starting with /, then RET; TAB completes names."
+  - id: walk
+    goal: Walk to the memory difference and flip the layout
+    detail: "In the control window, `n` goes to the next difference and `p` back. Stop on difference 2 of 4, the memory line. `|` switches between side by side and one above the other; press it again to go back if you prefer. (After Go to this step no comparison is open: start it again as in the previous step, as Watch it does.)"
+    # The comparison is not part of a checkpoint: the demo starts a new
+    # one, so it also works after Go to this step.
+    demo: 'M-x ~400 "ediff-files" RET ~600 "/work/text/ediff/limits-old.toml" RET ~600 "/work/text/ediff/limits-new.toml" RET ~1500 n ~800 n ~1000 | ~1500 | ~600'
+    conditions:
+      - text: n or p moved between differences
+        any:
+          - event: { command: ediff-next-difference }
+          - event: { command: ediff-previous-difference }
+          - event: { command: ediff-jump-to-difference }
+        hint: "Keys go to the control window: the cursor must be in the strip at the bottom. If it is in a file, C-x o until it is back there."
+      - text: the current difference is the memory line (2 of 4)
+        elisp: '(seq-some (lambda (b) (with-current-buffer b (and (eq major-mode (quote ediff-mode)) (eql ediff-current-difference 1)))) (buffer-list))'
+        hint: "The control window's mode line counts: diff 2 of 4. Both memory lines are highlighted there."
+      - text: the layout was flipped with |
+        event: { command: ediff-toggle-split }
+        hint: "| is Shift and the backslash key on most keyboards, typed in the control window."
+  - id: take
+    goal: Copy the new memory limit into the old file and save it
+    detail: "On difference 2, `b` copies B's version into A. `w a` saves A. (After Reset this step, `!` first compares the files again; after Go to this step, start the comparison again, as Watch it does.)"
+    demo: 'M-x ~400 "ediff-files" RET ~600 "/work/text/ediff/limits-old.toml" RET ~600 "/work/text/ediff/limits-new.toml" RET ~1500 2 j ~600 b ~800 w a'
+    conditions:
+      - text: B's memory line was copied into A
+        event: { command: ediff-copy-B-to-A }
+        hint: "b copies B into A, a copies A into B. Be on diff 2 first: 2 j jumps there."
+      - text: 'limits-old.toml on disk says memory = "4g"'
+        file: { path: text/ediff/limits-old.toml, contains: 'memory = "4g"' }
+        hint: "w a saves A. The mode line of the left window shows ** until it is saved."
+      - text: the other values in limits-old.toml are unchanged
+        file: { path: text/ediff/limits-old.toml, regex: '(?s)max_sessions = 40.*egress = "none"' }
+        hint: "Only difference 2 should change. On a wrong difference, r a in the control window restores A's version there."
+  - id: merge
+    goal: Merge mine.sh and theirs.sh against base.sh
+    detail: "The comparison can stay open: a new ediff session takes over the frame. `M-x ediff-merge-files-with-ancestor RET`, then three files under `/work/text/ediff/merge/`: `mine.sh` (A), `theirs.sh` (B) and the ancestor `base.sh`. C, the merge result, is the lower left window; the ancestor is beside it."
+    demo: 'M-x ~400 "ediff-merge-files-with-ancestor" RET ~600 "/work/text/ediff/merge/mine.sh" RET ~600 "/work/text/ediff/merge/theirs.sh" RET ~600 "/work/text/ediff/merge/base.sh" RET ~1500'
+    conditions:
+      - text: ediff-merge-files-with-ancestor was run
+        event: { command: ediff-merge-files-with-ancestor }
+        hint: "M-x ediff-merge-files-with-ancestor RET: the long name; TAB completes it."
+      - text: a merge with an ancestor is open
+        elisp: '(seq-some (lambda (b) (with-current-buffer b (and (eq major-mode (quote ediff-mode)) ediff-merge-with-ancestor-job (buffer-live-p ediff-buffer-A) (equal (buffer-file-name ediff-buffer-A) "/work/text/ediff/merge/mine.sh") (equal (buffer-file-name ediff-buffer-B) "/work/text/ediff/merge/theirs.sh")))) (buffer-list))'
+        hint: "Three prompts: A is mine.sh, B is theirs.sh, and the last one, Ancestor file, is base.sh. With ediff-merge-files (no ancestor) the change of only one side is not taken for you."
+  - id: choose
+    goal: Keep your backoff, and their other changes
+    detail: "Difference 1 (their `attempts=5` and comment) and difference 3 (their error message) are already in C, because only they changed those lines. Difference 2 changed on both sides: C shows both between `<<<<<<<` and `>>>>>>>`. Go there (`n` or `2 j`) and press `a` to keep your `sleep $((2 ** i))`. (After Go to this step, start the merge again, as Watch it does.) To finish, `w c` saves C under a name you type (`/work/text/ediff/merge/retry.sh`), and `q y` leaves each ediff session."
+    demo: 'M-x ~400 "ediff-merge-files-with-ancestor" RET ~600 "/work/text/ediff/merge/mine.sh" RET ~600 "/work/text/ediff/merge/theirs.sh" RET ~600 "/work/text/ediff/merge/base.sh" RET ~1500 2 j ~800 a'
+    conditions:
+      - text: a version was put into C
+        any:
+          - event: { command: ediff-copy-A-to-C }
+          - event: { command: ediff-copy-B-to-C }
+        hint: "In a merge, a and b copy A's or B's version of the current difference into C."
+      - text: C has no conflict markers left
+        elisp: '(seq-some (lambda (b) (with-current-buffer b (and (eq major-mode (quote ediff-mode)) ediff-merge-job (buffer-live-p ediff-buffer-C) (with-current-buffer ediff-buffer-C (not (string-search "<<<<<<<" (buffer-string))))))) (buffer-list))'
+        hint: "The markers are around difference 2, the sleep line. a or b in the control window replaces them with one side."
+      - text: C keeps your backoff and their attempts, comment and message
+        elisp: '(seq-some (lambda (b) (with-current-buffer b (and (eq major-mode (quote ediff-mode)) ediff-merge-job (buffer-live-p ediff-buffer-C) (with-current-buffer ediff-buffer-C (let ((s (buffer-string))) (and (string-search "sleep $((2 ** i))" s) (not (string-match-p "^ *sleep 2$" s)) (string-search "attempts=5" s) (string-search "at most $attempts times" s) (string-search "gave up after" s))))))) (buffer-list))'
+        hint: "a takes your (A) version of the current difference, b theirs. Difference 2 wants a; if 1 or 3 changed, go there and press b to take theirs back."

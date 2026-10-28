@@ -1,0 +1,116 @@
+id: 10-text-is-the-interface/02-registers-and-macros
+title: "Registers and macros, advanced"
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/text
+  root: text
+  reset: true
+  open: [text/macros/runbook.txt]
+  layout: single
+  # The counter's format and value start from Emacs's defaults, whatever
+  # an earlier lesson left. A checkpoint restores the default format but
+  # not the current macro's, so the current one follows the default
+  # whenever that is set outside a recording (C-x C-k C-f sets both).
+  eval: >-
+    (progn
+      (unless (get 'kmacro-default-counter-format 'playground-follow)
+        (put 'kmacro-default-counter-format 'playground-follow t)
+        (add-variable-watcher
+         'kmacro-default-counter-format
+         (lambda (_sym new op _where)
+           (when (and (eq op 'set) (stringp new) (not defining-kbd-macro))
+             (setq kmacro-counter-format new)))))
+      (setq kmacro-counter 0 kmacro-initial-counter-value nil
+            kmacro-default-counter-format "%d" kmacro-counter-format "%d"))
+steps:
+  - id: text
+    goal: Sign off with the owner's name from a text register
+    detail: "Select the text after `Owner: ` (`C-SPC` there, then `C-e`) and copy it into register `t` with `C-x r s t`. Go to the end of the `Sign-off:` line, type a space and insert the register with `C-x r i t`."
+    demo: 'M-< ~300 C-s "Owner: " RET ~300 C-SPC C-e ~400 C-x r s t ~600 C-s "Sign-off:" RET ~300 SPC ~300 C-x r i t'
+    conditions:
+      - text: text was copied into a register
+        event: { command: copy-to-register }
+        hint: "C-x r s copies the active region; the next key you press is the register's name. With no region, it has nothing to copy."
+      - text: 'the Sign-off line names "Platform team, on-call rotation B"'
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/macros/runbook.txt") (save-excursion (goto-char (point-min)) (re-search-forward "^Sign-off: *Platform team, on-call rotation B *$" nil t)))'
+        hint: "C-x r i t inserts at the cursor, which must be at the end of the Sign-off: line. If the text went elsewhere, C-/ and try again; the register keeps it."
+      - text: the Owner line is unchanged
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/macros/runbook.txt") (save-excursion (goto-char (point-min)) (re-search-forward "^Owner: Platform team, on-call rotation B$" nil t)))'
+        hint: "C-x r s copies; with C-u first it would also delete the region. C-/ brings the Owner line back."
+  - id: number
+    goal: Make the build number 42 with a number register
+    detail: "`C-u 41 C-x r n b` stores 41 in register `b`. `C-x r + b` adds one. Then put the cursor at the end of `Build:`, type a space and `C-x r i b`."
+    demo: 'C-u 4 1 ~300 C-x r n b ~600 C-x r + b ~600 C-g ~300 M-< ~300 C-s "Build:" RET ~300 SPC ~300 C-x r i b'
+    conditions:
+      - text: a number went into a register
+        event: { command: number-to-register }
+        hint: "The number comes from the prefix: C-u 41, then C-x r n and the register's name. Without C-u the register holds 0."
+      - text: the register was incremented
+        event: { command: increment-register }
+        hint: "C-x r + and the same register name adds one to the number in it."
+      - text: 'the Build line reads "Build: 42"'
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/macros/runbook.txt") (save-excursion (goto-char (point-min)) (re-search-forward "^Build: *42 *$" nil t)))'
+        hint: "Each C-x r + adds one, so after several the register is past 42: C-u 41 C-x r n b starts over. Then C-/ the wrong number and insert again."
+  - id: counter
+    goal: Number with two digits, starting at 1
+    detail: "`C-x C-k C-f` asks for the counter's format: type `%02d` and `RET`. Then `C-x C-k C-c 1 RET` sets the first value."
+    demo: 'C-x C-k C-f ~400 "%02d" RET ~400 C-x C-k C-c ~400 "1" RET'
+    conditions:
+      - text: the counter format is %02d
+        elisp: '(equal (bound-and-true-p kmacro-default-counter-format) "%02d")'
+        hint: "Type %02d without quotes: percent, zero, two, d. 0 pads with zeros, 2 is the width."
+      - text: the counter starts at 1
+        elisp: "(or (eql (bound-and-true-p kmacro-initial-counter-value) 1) (eql (bound-and-true-p kmacro-counter) 1))"
+        hint: "The prompt says Macro counter value. If it shows a different number, type 1 over it before RET."
+  - id: record
+    goal: Record the edit on the first check
+    detail: "A recording uses the counter up, so set it first: `C-x C-k C-c 1 RET`. Put the cursor at the start of `Confirm the change ticket…`, the first line under Release checks (`C-s Release checks RET`, `C-n` twice, `C-a`). `F3` starts recording; type `OPS-`, press `F3` (inserts the counter), type a space, and `F4` to stop. No motion: `C-x C-k r` moves to each line by itself."
+    # C-g first: typing OPS- would replace a region left active.
+    demo: 'C-x C-k C-f ~300 "%02d" RET ~300 C-x C-k C-c ~300 "1" RET ~600 C-g ~300 M-< ~300 C-s "Release checks" RET ~200 C-n C-n C-a ~500 <f3> ~400 "OPS-" <f3> ~300 " " ~300 <f4>'
+    conditions:
+      - text: 'the first check reads "OPS-01 Confirm the change ticket is approved"'
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/macros/runbook.txt") (save-excursion (goto-char (point-min)) (search-forward "Release checks\n\nOPS-01 Confirm the change ticket is approved\n" nil t)))'
+        hint: "If it says OPS-1, the format was not %02d (C-x C-k C-f); if OPS-00 or OPS-0, the counter was used up (C-x C-k C-c 1). C-/ the line back and record again."
+      - text: a macro was recorded and recording has stopped
+        all:
+          - state: { macro: false }
+          - elisp: "(and last-kbd-macro (> (length last-kbd-macro) 0))"
+        hint: "F4 stops recording; Def in the mode line means Emacs is still recording."
+  - id: apply
+    goal: Number the other 39 checks with C-x C-k r
+    detail: "The counter carries on from 2 (`C-x C-k C-c 2 RET` if you have run the macro since). Select from the start of the second check to the start of the empty line after the last one (`Schedule the post-deploy review`; `C-s Dev checks RET`, `C-a`, `C-p` lands there), then `C-x C-k r`."
+    demo: 'C-x C-k C-c ~300 "2" RET ~300 M-< ~300 C-s "OPS-01" RET ~200 C-n C-a ~300 C-SPC ~300 C-s "Dev checks" RET C-a C-p ~600 C-x C-k r'
+    conditions:
+      - text: the forty checks are numbered OPS-01 to OPS-40
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/macros/runbook.txt") (save-excursion (goto-char (point-min)) (and (search-forward "Release checks\n\n" nil t) (let ((ok t)) (dotimes (i 40) (unless (looking-at (format "OPS-%02d [A-Z]" (1+ i))) (setq ok nil)) (forward-line 1)) ok))))'
+        hint: "The region must start on the second check and end on the empty line after the last, and the counter must be 2 when you start. If the numbers are off, C-/ until only OPS-01 is left, set the counter and run C-x C-k r again."
+      - text: no other line was numbered
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/macros/runbook.txt") (save-excursion (goto-char (point-min)) (not (re-search-forward "^OPS-[0-9]+ *\\(Dev checks\\|Pull\\|Release\\)\\|^OPS-[0-9]+ *$" nil t))))'
+        hint: "The region went past the last check. C-/ and select only the 39 lines."
+  - id: edit
+    goal: Edit the macro to type DEV- instead of OPS-
+    detail: "`C-x C-k RET` shows the macro, one key per line; characters typed in a row share a line, so `OPS-` is one line with the comment `self-insert-command * 4`. Change `OPS-` to `DEV-` on that line (the comment after `;;` is ignored), then `C-c C-c`."
+    demo: 'C-x C-k RET ~1000 M-< C-s "Macro:" RET ~300 C-s "OPS-" RET ~400 M-DEL ~300 "DEV-" ~600 C-c C-c'
+    conditions:
+      - text: the macro editor was opened
+        any:
+          - event: { command: kmacro-edit-macro }
+          - event: { command: kmacro-edit-macro-repeat }
+          - event: { command: edit-kbd-macro }
+        hint: "C-x C-k RET: Control held for C-x and C-k, then RET. A buffer called *Edit Macro* opens."
+      - text: the macro types DEV- now
+        elisp: '(let ((s (concat (seq-filter (lambda (k) (and (characterp k) (< k 128) (>= k 32))) (append last-kbd-macro nil))))) (and (string-search "DEV-" s) (not (string-search "OPS" s))))'
+        hint: "Edit the line below Macro: that starts with OPS-, not the Original keys comment at the top. C-c C-c keeps the edit; C-x k RET would throw it away."
+  - id: reuse
+    goal: Number the five dev checks DEV-01 to DEV-05
+    detail: "`C-x C-k C-c 1 RET` starts the counter over. Select the five lines under Dev checks, from `Pull the latest main` to the start of the empty line after `Open the dev dashboard`, and `C-x C-k r`."
+    demo: 'C-x C-k C-c ~300 "1" RET ~300 M-< ~300 C-s "Dev checks" RET ~200 C-n C-n C-a ~300 C-SPC ~300 C-s "End of runbook" RET C-a C-p ~600 C-x C-k r'
+    conditions:
+      - text: the macro ran over a region
+        event: { command: apply-macro-to-region-lines }
+        hint: "C-x C-k r needs an active region: from the first dev check to the empty line after the fifth."
+      - text: the dev checks are numbered DEV-01 to DEV-05
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/macros/runbook.txt") (save-excursion (goto-char (point-min)) (and (search-forward "Dev checks\n\n" nil t) (let ((ok t)) (dotimes (i 5) (unless (looking-at (format "DEV-%02d [A-Z]" (1+ i))) (setq ok nil)) (forward-line 1)) ok))))'
+        hint: "If the numbers start at 41, the counter was not reset: C-/ the five lines back, C-x C-k C-c 1 RET, select them again."

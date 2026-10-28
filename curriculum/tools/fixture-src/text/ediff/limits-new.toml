@@ -1,0 +1,9 @@
+# Session limits, proposed for the next release.
+[limits]
+memory = "4g"
+cpus = 2
+idle_minutes = 30
+max_sessions = 25
+
+[network]
+egress = "registries"

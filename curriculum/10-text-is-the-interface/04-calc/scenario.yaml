@@ -1,0 +1,91 @@
+id: 10-text-is-the-interface/04-calc
+title: Calc
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/text
+  root: text
+  reset: true
+  open: [text/calc/latency.md]
+  layout: single
+  # A fresh Calc: an empty stack, and no embedded formula left active
+  # (calc's own kill query trips over a stale embedded entry).
+  eval: >-
+    (progn
+      (setq calc-embedded-active nil)
+      (dolist (n '("*Calculator*" "*Calc Trail*"))
+        (let ((b (get-buffer n)))
+          (when b
+            (with-current-buffer b
+              (setq-local kill-buffer-query-functions nil)
+              (setq-local kill-buffer-hook nil))
+            (kill-buffer b)))))
+steps:
+  - id: stack
+    goal: Add 35 and 210 on the Calc stack
+    detail: "`C-x * c` opens Calc below the document, with the cursor in it. Type `35`, `RET`, `210`, then `+`."
+    demo: 'C-x * c ~1200 "35" ~200 RET ~400 "210" ~300 +'
+    conditions:
+      - text: "+ added two numbers"
+        event: { command: calc-plus }
+        hint: "In Calc, + acts at once on the top two entries; no RET after it."
+      - text: Calc is open
+        buffer: { name: "*Calculator*", mode: calc-mode }
+        hint: "C-x, then *, then c. The Calculator window opens at the bottom with the trail beside it."
+      - text: the top of the stack is 245
+        elisp: '(let ((b (get-buffer "*Calculator*"))) (and b (with-current-buffer b (and (> (calc-stack-size) 0) (equal (math-format-value (calc-top-n 1)) "245")))))'
+        hint: "RET pushes the number you typed; + adds the top two. If the stack has other entries, that is fine: only line 1: counts. U undoes a step."
+  - id: units
+    goal: Convert 1200 microseconds to milliseconds
+    detail: "`'` starts algebraic entry: type `1200 us` and `RET`. Then `u c`, and at the prompt `ms` and `RET`. (If Calc is closed, `C-x * c` from the document opens it again with its stack; Watch it starts that way.)"
+    # Calc is not part of a checkpoint: the demo opens it from the document.
+    demo: "C-x b ~400 \"latency.md\" RET ~300 C-x 1 ~300 C-x * c ~1200 ' ~500 \"1200 us\" ~300 RET ~800 u c ~800 \"ms\" ~300 RET"
+    conditions:
+      - text: u c converted units
+        event: { command: calc-convert-units }
+        hint: "u, then c, in the Calculator window. The prompt asks for the new units."
+      - text: the top of the stack is 1.2 ms
+        elisp: '(let ((b (get-buffer "*Calculator*"))) (and b (with-current-buffer b (and (> (calc-stack-size) 0) (member (math-format-value (calc-top-n 1)) (quote ("1.2 ms" "1.2ms")))))))'
+        hint: "us is micro (µ) seconds. Without the apostrophe, the letters are Calc commands: U undoes whatever they did. Wait for the units prompt before typing ms."
+  - id: algebra
+    goal: Simplify 3 x + 2 (x - 1) - x
+    detail: "`'` again, type `3 x + 2 (x - 1) - x` (a space multiplies, as in `3 x`), `RET`. Then `a s` simplifies it, in the Calculator window."
+    demo: "C-x b ~400 \"latency.md\" RET ~300 C-x 1 ~300 C-x * c ~1200 ' ~500 \"3 x + 2 (x - 1) - x\" ~300 RET ~800 a s"
+    conditions:
+      - text: a s simplified
+        event: { command: calc-simplify }
+        hint: "a, then s, in the Calculator window, after the formula is on the stack."
+      - text: the top of the stack is 4 x - 2
+        elisp: '(let ((b (get-buffer "*Calculator*"))) (and b (with-current-buffer b (and (> (calc-stack-size) 0) (equal (math-format-value (calc-top-n 1)) "4 x - 2")))))'
+        hint: "a s works on line 1: of the stack. If line 1: still shows the formula as typed, the a s went elsewhere: the cursor must be in the Calculator window."
+  - id: total
+    goal: Add up the table's time column and write the total after "Total:"
+    detail: "Back in the document (`S-<up>`), put the cursor on the `1` of `1200 us` (`C-s 1200 RET`, then `C-b` four times), `C-x SPC`, then `C-n` three times and `C-f` seven times, so the rectangle covers the four times. `C-u C-x * r` grabs it, one formula per line, and Calc takes the cursor. `V R +` adds the entries into a sum of mixed units; `u s` makes it one unit, and `u c ms RET` converts that to milliseconds. Then up to the document again (`S-<up>`), `C-g` to drop the region the grab left, put the cursor after `Total:`, type a space and press `C-x * y`: it inserts the top of the Calc stack."
+    # C-x b and C-x 1 reach the document from any window; C-g drops the
+    # region the grab left active, which C-x * y would replace.
+    demo: 'C-x b ~400 "latency.md" RET ~300 C-x 1 ~300 M-< C-s "1200" RET C-b C-b C-b C-b ~300 C-x SPC ~300 C-n C-n C-n ~300 C-f C-f C-f C-f C-f C-f C-f ~600 C-u C-x * r ~1000 V R + ~800 u s ~800 u c ~800 "ms" ~300 RET ~800 S-<up> ~500 C-g ~300 M-< C-s "Total:" RET ~300 SPC ~300 C-x * y'
+    conditions:
+      - text: V R + added up the entries
+        event: { command: calc-reduce }
+        hint: "V R reduces a vector with the operator you type next: + for a sum. It works on line 1:, the grabbed matrix."
+      - text: 'the document says "Total: 336.2 ms"'
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/calc/latency.md") (save-excursion (goto-char (point-min)) (re-search-forward "^Total: ?\\(336\\.2 ms\\|0\\.3362 s\\)" nil t)))'
+        hint: "The rectangle must hold the times only, from the 1 of 1200 to just past 210 ms; without C-u, Calc splits 1200 and us into separate columns. If u c says the expression is unitless, C-g and press u s first. C-x * y inserts at the cursor of the document and replaces an active region: C-g first."
+      - text: latency.md is saved with the total
+        file: { path: text/calc/latency.md, regex: '(?m)^Total: ?(336\.2 ms|0\.3362 s)' }
+        hint: "The file saves itself a few seconds after an edit; C-x C-s saves it now."
+    stuck:
+      - when: { step_seconds: 240 }
+        say: "C-x SPC shows the rectangle as you move. If a grab went wrong, DEL in the Calculator drops it; then grab again from the document."
+  - id: embedded
+    goal: Work out what is left of the budget, in place
+    detail: "Put the cursor on the line `0.5 s - 336.2 ms` and press `C-x * e`: the mode line says CalcEmbed. `u s` simplifies the units (`0.1638 s`); `u c ms RET` turns it into milliseconds. `C-x * e` again goes back to Markdown."
+    demo: 'M-< ~300 C-s "0.5 s -" RET ~400 C-x * e ~1200 u s ~1000 u c ~800 "ms" ~300 RET ~1000 C-x * e'
+    conditions:
+      - text: the formula became 163.8 ms (or 0.1638 s)
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/calc/latency.md") (save-excursion (goto-char (point-min)) (re-search-forward "^\\(163\\.8 ms\\|0\\.1638 s\\)$" nil t)))'
+        hint: "In embedded mode the formula is the whole line between blank lines. u c alone may say the expression is unitless: simplify with u s first."
+      - text: embedded mode is off again
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/calc/latency.md") (and (not (bound-and-true-p calc-embedded-info)) (save-excursion (goto-char (point-min)) (re-search-forward "^\\(163\\.8 ms\\|0\\.1638 s\\)$" nil t))))'
+        hint: "C-x * e a second time leaves embedded mode; the mode line goes back to Markdown."

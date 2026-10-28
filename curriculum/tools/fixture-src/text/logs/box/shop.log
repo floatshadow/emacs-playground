@@ -1,0 +1,10 @@
+2026-10-27 09:58:12 INFO checkout started order=1041
+2026-10-27 09:58:13 INFO payment accepted order=1041
+2026-10-27 10:01:02 ERROR payment timeout order=1042
+2026-10-27 10:01:05 INFO retry scheduled order=1042
+2026-10-27 10:04:40 WARN slow-query 812ms table=orders
+2026-10-27 10:07:19 ERROR stock missing order=1043
+2026-10-27 10:07:20 INFO checkout cancelled order=1043
+2026-10-27 10:12:55 INFO checkout started order=1044
+2026-10-27 10:13:31 ERROR address invalid order=1044
+2026-10-27 10:15:00 INFO healthcheck ok

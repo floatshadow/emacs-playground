@@ -1,0 +1,83 @@
+id: 10-text-is-the-interface/07-line-tools
+title: Line tools and dynamic abbreviations
+minutes: 8
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+vscode: Sort Lines extension
+setup:
+  workspace: fixtures/text
+  root: text
+  reset: true
+  open: [text/lines/report.c]
+  layout: single
+steps:
+  - id: keep
+    goal: "Keep only the #include lines"
+    detail: "Select from the top of the file to the start of the `/* end of includes */` line (`M-<`, `C-SPC`, then `C-s end of RET` and `C-a`). `M-x keep-lines RET`, and the regexp `^#include RET`: the commented include, the variable and the empty line go."
+    demo: 'M-< ~300 C-SPC ~300 C-s "/* end of" RET C-a ~500 M-x ~400 "keep-lines" RET ~500 "^#include" ~300 RET'
+    conditions:
+      - text: 'every line above "end of includes" is an #include'
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/lines/report.c") (save-excursion (goto-char (point-min)) (let ((ok t)) (while (not (looking-at "/\\* end of includes")) (unless (looking-at "#include ") (setq ok nil)) (if (eobp) (setq ok nil) (forward-line 1))) (and ok (not (bobp))))))'
+        hint: "^ anchors the regexp at the start of the line, so the line that starts with // is not kept. If nothing changed, the region was not active: C-SPC, then move."
+      - text: the rest of the file is untouched
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/lines/report.c") (save-excursion (goto-char (point-min)) (and (search-forward "/* end of includes */\n\nstatic int max_rows = 500;" nil t) (search-forward "int main(void)" nil t))))'
+        hint: "Without a region, keep-lines works from the cursor to the end of the file. C-/ brings the lost lines back; select the include block first."
+  - id: flush
+    goal: Delete the debug.h includes
+    detail: "Same region (`M-<`, `C-SPC`, down to `/* end of includes */`), then `M-x flush-lines RET debug RET`."
+    demo: 'M-< ~300 C-SPC ~300 C-s "/* end of" RET C-a ~500 M-x ~400 "flush-lines" RET ~500 "debug" ~300 RET'
+    conditions:
+      - text: no include of debug.h is left
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/lines/report.c") (save-excursion (goto-char (point-min)) (not (search-forward "debug.h" nil t))))'
+        hint: "flush-lines deletes every matching line in the region; the regexp debug matches both includes."
+      - text: the other includes are still there
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/lines/report.c") (save-excursion (goto-char (point-min)) (and (search-forward "#include \"config.h\"" nil t) (goto-char (point-min)) (search-forward "#include <time.h>" nil t))))'
+        hint: "A regexp that is too short deletes too much (h matches every line). C-/ and use debug."
+  - id: dedupe
+    goal: Remove the duplicate includes
+    detail: "Same region, then `M-x delete-duplicate-lines RET`. The echo area says how many it deleted."
+    demo: 'M-< ~300 C-SPC ~300 C-s "/* end of" RET C-a ~500 M-x ~400 "delete-duplicate-lines" RET'
+    conditions:
+      - text: delete-duplicate-lines ran
+        event: { command: delete-duplicate-lines }
+        hint: "M-x delete-duplicate-lines; TAB after delete-dup completes the name."
+      - text: each include appears once
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/lines/report.c") (save-excursion (goto-char (point-min)) (let (seen (ok t)) (while (looking-at "#include .*$") (let ((l (match-string 0))) (when (member l seen) (setq ok nil)) (push l seen)) (forward-line 1)) (and ok (= (length seen) 7)))))'
+        hint: "delete-duplicate-lines needs the region over the whole include block: duplicates far apart count too, they do not have to be next to each other."
+  - id: sort
+    goal: Sort the includes
+    detail: "Same region, `M-x sort-lines RET`. Quoted headers sort before `<…>` ones, because `\"` comes before `<` in ASCII."
+    demo: 'M-< ~300 C-SPC ~300 C-s "/* end of" RET C-a ~500 M-x ~400 "sort-lines" RET'
+    conditions:
+      - text: sort-lines ran
+        event: { command: sort-lines }
+        hint: "M-x sort-lines works on the region only; without one it says The mark is not set."
+      - text: the seven includes are in sorted order
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/lines/report.c") (save-excursion (goto-char (point-min)) (looking-at "#include \"config.h\"\n#include \"report.h\"\n#include <errno.h>\n#include <stdio.h>\n#include <stdlib.h>\n#include <string.h>\n#include <time.h>\n/\\* end of includes")))'
+        hint: "If the order is reversed, sort-lines ran with a C-u prefix; run it again without. reverse-region also turns a sorted block upside down."
+  - id: align
+    goal: Line up the four constants on their = signs
+    detail: "Select the four `static` lines, from the start of the first (`C-a`) to the start of the empty line after `output_dir` (`C-n`). `M-x align-regexp RET = RET`."
+    demo: 'M-< ~300 C-s "static int max_rows" RET C-a ~300 C-SPC ~300 C-s "output_dir" RET C-n C-a ~500 M-x ~400 "align-regexp" RET ~500 "=" ~300 RET'
+    conditions:
+      - text: align-regexp ran
+        event: { command: align-regexp }
+        hint: "M-x align-regexp asks for the regexp to line up on: a single = here."
+      - text: the = signs are in one column
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/lines/report.c") (save-excursion (goto-char (point-min)) (let (cols) (dolist (v (quote ("max_rows" "timeout_seconds" "report_title" "output_dir"))) (goto-char (point-min)) (when (re-search-forward (concat "^static .*" v " *=") nil t) (push (current-column) cols))) (and (= (length cols) 4) (apply (function =) cols) (> (car cols) 30)))))'
+        hint: "The region must cover all four static lines. align-regexp pads before the first = of each line; C-/ and select again if only some moved."
+  - id: dabbrev
+    goal: Print report_title, completed with M-/
+    detail: "Go to the end of the comment `/* print the title here */` in `main` (`C-s title here RET`, `C-e`), `RET`, type `puts(rep` and press `M-/`: it completes to `report_title`. Close with `);`."
+    # The semicolon is a key, not typed text: tmux drops a ";" sent on
+    # its own as literal text (it separates tmux commands).
+    demo: 'M-< ~300 C-s "the title here */" RET C-e ~300 RET ~300 "puts(rep" ~600 M-/ ~600 ")" ;'
+    conditions:
+      - text: a word was completed with M-/
+        any:
+          - event: { command: dabbrev-expand }
+          - event: { command: dabbrev-completion }
+        hint: "M-/ is Meta (Alt or Esc) and the slash. It looks for the nearest word that starts like the one before the cursor."
+      - text: main prints report_title
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/lines/report.c") (save-excursion (goto-char (point-min)) (and (search-forward "int main(void)" nil t) (re-search-forward "puts(report_title);" nil t))))'
+        hint: "If M-/ offered another word, press M-/ again for the next candidate. The line should read puts(report_title);"

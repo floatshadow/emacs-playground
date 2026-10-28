@@ -1,0 +1,71 @@
+id: 10-text-is-the-interface/05-eshell-meets-tramp
+title: Eshell meets TRAMP
+minutes: 10
+mode: terminal
+tags: [remote]
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+remote: { box: true }
+setup:
+  workspace: fixtures/text
+  root: text
+  reset: true
+  open: [text/logs/errors.org]
+  layout: single
+  # The shop's log lives on the box; checkpoints do not cover the box,
+  # so every load installs it again.
+  run: "ssh box 'sudo install -m 644 /dev/stdin /var/log/shop.log' < logs/box/shop.log"
+  # A *grep* buffer from an earlier lesson would satisfy the look step.
+  eval: '(let ((kill-buffer-query-functions nil)) (when (get-buffer "*grep*") (kill-buffer "*grep*")))'
+steps:
+  - id: cd
+    goal: Open Eshell and cd to /var/log on the box
+    detail: "`M-x eshell RET`, then type `cd /ssh:box:/var/log` and `RET`. The first connection takes a few seconds; then the prompt shows `/ssh:box:/var/log $`."
+    demo: 'M-x ~400 "eshell" RET ~1200 "cd /ssh:box:/var/log" ~300 RET ~4000'
+    conditions:
+      - text: a command was entered in Eshell
+        event: { command: eshell-send-input }
+        hint: "M-x eshell RET opens Eshell; type at the $ prompt and press RET."
+      - text: an Eshell is in /var/log on the box
+        elisp: '(seq-some (lambda (b) (with-current-buffer b (and (derived-mode-p (quote eshell-mode)) (string-match-p "^/ssh:box:/var/log/?$" default-directory)))) (buffer-list))'
+        hint: "The path has three parts: /ssh: (the method), box: (the machine), /var/log (the directory there). Mind both colons."
+    stuck:
+      - when: { step_seconds: 90 }
+        say: "If the prompt has not changed after a while, C-c C-c interrupts the connection attempt; check the path and try cd again."
+  - id: look
+    goal: Read the log and find the errors
+    detail: "`cat shop.log` prints the whole log in the shell. `grep ERROR shop.log` opens the matches in a *grep* buffer; `RET` on one would open the remote file at that line. (If no Eshell is open, `M-x eshell` and the `cd` again.)"
+    # Eshell is not part of a checkpoint: M-x eshell shows the existing one
+    # or starts a new one, and cd is harmless when it is already there.
+    demo: 'M-x ~400 "eshell" RET ~1200 "cd /ssh:box:/var/log" ~300 RET ~1500 "cat shop.log" ~300 RET ~2000 "grep ERROR shop.log" ~300 RET ~2500'
+    conditions:
+      - text: commands were entered in Eshell
+        event: { command: eshell-send-input, min: 2 }
+        hint: "Two commands, each followed by RET: cat shop.log, then grep ERROR shop.log."
+      - text: cat printed the log in Eshell
+        elisp: '(seq-some (lambda (b) (with-current-buffer b (and (derived-mode-p (quote eshell-mode)) (save-excursion (goto-char (point-min)) (search-forward "INFO healthcheck ok" nil t))))) (buffer-list))'
+        hint: "cat shop.log, in the Eshell whose prompt shows /ssh:box:/var/log. The last line of the log says healthcheck ok."
+      - text: grep listed the ERROR lines
+        buffer: { name: "*grep*", contains: "ERROR address invalid" }
+        hint: "Type grep ERROR shop.log at the same prompt. ERROR is in capitals, as in the log."
+  - id: collect
+    goal: Append the ERROR lines to errors.org
+    detail: "In Eshell: `*grep ERROR shop.log >> #<buffer errors.org>`. The `*` runs the plain grep, so its output is text rather than a *grep* buffer, and `>>` appends it to the end of the buffer errors.org."
+    demo: 'M-x ~400 "eshell" RET ~1200 "cd /ssh:box:/var/log" ~300 RET ~1500 "*grep ERROR shop.log >> #<buffer errors.org>" ~300 RET ~2500'
+    conditions:
+      - text: errors.org holds the three ERROR lines
+        buffer: { name: errors.org, contains: "2026-10-27 10:01:02 ERROR payment timeout order=1042\n2026-10-27 10:07:19 ERROR stock missing order=1043\n2026-10-27 10:13:31 ERROR address invalid order=1044\n" }
+        hint: "Without the *, grep makes its own buffer and adds file names and line numbers. With > instead of >>, the heading of errors.org is gone: C-/ in errors.org brings it back."
+      - text: the heading of errors.org is still there
+        buffer: { name: errors.org, contains: "* From the box" }
+        hint: "> replaces the whole buffer, >> appends. In errors.org, C-/ undoes the replacement; then use >>."
+  - id: table
+    goal: Turn the three lines into an Org table
+    detail: "Go to errors.org (`C-x b errors.org RET`). Select the three lines, from the start of the first (`C-s 10:01 RET`, `C-a`, `C-SPC`) to the end of the last (`C-e`), and press `C-c |`: Org splits each line at its spaces into cells."
+    demo: 'C-x b ~400 "errors.org" RET ~600 M-< C-s "2026-10-27 10:01" RET C-a ~300 C-SPC ~300 C-s "order=1044" RET C-e ~600 C-c |'
+    conditions:
+      - text: Org converted the region into a table
+        event: { command: org-table-create-or-convert-from-region }
+        hint: "C-c | is Control and c, then the bar (Shift and backslash on most keyboards), in errors.org."
+      - text: errors.org has a table row for each error
+        elisp: '(let ((b (find-buffer-visiting "/work/text/logs/errors.org"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (let ((n 0)) (while (re-search-forward "^| *2026-10-27 *| *[0-9:]+ *| *ERROR *|" nil t) (setq n (1+ n))) (= n 3))))))'
+        hint: "The region must cover the three lines and nothing else: no heading, no empty line above. C-c | converts the region; with no region it makes an empty table."

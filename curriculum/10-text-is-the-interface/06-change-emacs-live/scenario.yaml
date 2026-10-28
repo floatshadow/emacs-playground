@@ -1,0 +1,118 @@
+id: 10-text-is-the-interface/06-change-emacs-live
+title: Change Emacs while it runs
+minutes: 12
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/text
+  root: text
+  reset: true
+  open: [text/live/stamp.el]
+  layout: single
+  # Saving after a few seconds is off, so the file on disk keeps the
+  # original definitions (the next scenario load turns it back on).
+  # Definitions from an earlier visit stay, so Go to this step finds
+  # stamp-line defined.
+  eval: >-
+    (progn
+      (auto-save-visited-mode -1)
+      (let ((kill-buffer-query-functions nil))
+        (dolist (n '("*ielm*" "*RE-Builder*" "*timer-list*" "*Proced*" "*Help*"))
+          (when (get-buffer n) (kill-buffer n)))))
+steps:
+  - id: expr
+    goal: Evaluate Lisp two ways
+    detail: "`M-:` and type `(count-lines (point-min) (point-max))`, then `RET`: the answer appears in the echo area. Then put the cursor right after `(* 6 7)` in the comment at the top of stamp.el and press `C-x C-e`."
+    demo: 'M-: ~500 "(count-lines (point-min) (point-max))" ~400 RET ~1500 M-< C-s "(* 6 7)" RET ~400 C-x C-e'
+    conditions:
+      - text: "an expression was evaluated with M-:"
+        event: { command: eval-expression }
+        hint: "M-: opens Eval: in the bottom line. Type the whole expression with its parentheses; RET evaluates it."
+      - text: an expression was evaluated with C-x C-e
+        event: { command: eval-last-sexp }
+        hint: "C-x C-e looks at the text just before the cursor: put it right after the closing parenthesis of (* 6 7). The echo area shows 42."
+  - id: load
+    goal: Evaluate stamp.el with eval-buffer
+    detail: "`M-x eval-buffer RET` evaluates every form in stamp.el and records that `stamp-text` and `stamp-line` come from this file. (`C-x C-e` on each defun would define them too, but without that record, so help could not find their source.)"
+    demo: 'M-x ~400 "eval-buffer" RET'
+    conditions:
+      - text: stamp.el was evaluated
+        any:
+          - event: { command: eval-buffer }
+          - event: { command: elisp-eval-region-or-buffer }
+          - event: { command: load-file }
+        hint: "M-x eval-buffer with stamp.el as the current buffer; it evaluates the buffer you are in."
+      - text: stamp-line is defined, and Emacs knows it comes from stamp.el
+        elisp: "(and (fboundp 'stamp-text) (fboundp 'stamp-line) (equal (symbol-file 'stamp-line 'defun) \"/work/text/live/stamp.el\"))"
+        hint: "Functions defined with C-x C-e are not tied to a file. M-x eval-buffer in stamp.el defines them again with the file recorded."
+  - id: ielm
+    goal: Call stamp-text from ielm
+    detail: "`M-x ielm RET` opens a Lisp prompt. Type `(stamp-text)` and `RET`: ielm prints the string the function returns."
+    demo: 'M-x ~400 "ielm" RET ~1000 "(stamp-text)" ~400 RET'
+    conditions:
+      - text: an expression was entered in ielm
+        event: { command: ielm-return }
+        hint: "ielm evaluates when the expression is complete: an unclosed parenthesis makes RET wait for more."
+      - text: ielm printed "[reviewed]"
+        buffer: { name: "*ielm*", contains: "\"[reviewed]\"" }
+        hint: "The parentheses matter: (stamp-text) calls the function, stamp-text alone is only its name."
+  - id: source
+    goal: Open the source of stamp-line from its help page
+    detail: "`C-h f stamp-line RET`. The help window takes the cursor. Its first line names the file, stamp.el, as a link: move onto it (`C-s stamp.el RET`, then `C-b`) and press `RET` to open the file at the definition. `s` anywhere in the help window does the same."
+    # The link, not s: s is not a key in helpful's help (ui module, Part 13).
+    demo: 'C-h f ~500 "stamp-line" RET ~1500 C-s "stamp.el" RET ~300 C-b ~300 RET'
+    conditions:
+      - text: help described a function
+        any:
+          - event: { command: describe-function }
+          - event: { command: helpful-callable }
+        hint: "C-h f asks which function; type stamp-line, the command, not stamp-text."
+      - text: stamp.el shows the definition of stamp-line
+        state: { buf: stamp.el, line: 13 }
+        hint: "RET must be on the file name in the first line of the help (C-b after the search puts the cursor inside it). If the help names no file, run M-x eval-buffer in stamp.el and ask again."
+  - id: redefine
+    goal: Make stamp-line write [checked] instead, live
+    detail: "In stamp.el, change `\"[reviewed]\"` to `\"[checked]\"` inside `stamp-text` and press `C-M-x` with the cursor in that defun. Do not save. Then open `/work/text/live/notes.txt` (`C-x C-f`), go to line 3 (`M-<`, `C-n` twice) and run `M-x stamp-line`."
+    demo: 'C-x b ~400 "stamp.el" RET ~300 M-< C-s "[reviewed" RET ~300 M-DEL ~300 "checked" ~400 C-M-x ~800 C-x C-f ~400 "/work/text/live/notes.txt" RET ~600 M-< C-n C-n ~300 M-x ~400 "stamp-line" RET'
+    conditions:
+      - text: stamp-text returns something new
+        elisp: "(and (fboundp 'stamp-text) (let ((s (ignore-errors (stamp-text)))) (and (stringp s) (not (equal s \"[reviewed]\")))))"
+        hint: "Editing the text changes nothing until the defun is evaluated: C-M-x with the cursor anywhere inside (defun stamp-text ...)."
+      - text: notes.txt has a line with the new stamp
+        elisp: "(let ((b (find-buffer-visiting \"/work/text/live/notes.txt\")) (s (and (fboundp 'stamp-text) (ignore-errors (stamp-text))))) (and b (stringp s) (not (equal s \"[reviewed]\")) (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward (concat \" \" s \"\\n\") nil t)))))"
+        hint: "M-x stamp-line in notes.txt, after the new definition is evaluated. It appends the stamp to the line the cursor is on."
+  - id: reload
+    goal: Bring the original back with load-file
+    detail: "`M-x load-file RET /work/text/live/stamp.el RET` evaluates the file as saved, so `stamp-text` returns `\"[reviewed]\"` again. The stamp.el buffer still shows your edit; `C-/` there or `M-x revert-buffer` would drop it."
+    demo: 'M-x ~400 "load-file" RET ~600 "/work/text/live/stamp.el" RET'
+    conditions:
+      - text: a file was loaded
+        any:
+          - event: { command: load-file }
+          - event: { command: load-library }
+        hint: "M-x load-file, then the path of stamp.el. It asks for a file, not a buffer."
+      - text: stamp-text returns "[reviewed]" again
+        elisp: "(and (fboundp 'stamp-text) (equal (ignore-errors (stamp-text)) \"[reviewed]\"))"
+        hint: "If it still returns the new text, stamp.el was saved with your edit: C-/ in stamp.el until [reviewed] is back, C-x C-s, then load it again."
+  - id: regexp
+    goal: Build a regexp for version numbers like 1.4.0 with re-builder
+    detail: "In notes.txt, `M-x re-builder`. In the small window at the bottom, between the quotes, type `[0-9]+\\.[0-9]+\\.[0-9]+` and watch 1.4.0, 1.4.1 and 1.5.0 light up, but not 1.6."
+    demo: 'C-x b ~400 "notes.txt" RET ~400 M-x ~400 "re-builder" RET ~1000 "[0-9]+\\.[0-9]+\\.[0-9]+" ~1500'
+    conditions:
+      - text: re-builder was started
+        event: { command: re-builder }
+        hint: "M-x re-builder in the notes.txt window: the regexp applies to the buffer it was started from."
+      - text: the regexp matches 1.4.0 and v1.5.0-rc2, not 1.6
+        elisp: '(let ((b (get-buffer "*RE-Builder*"))) (and b (with-current-buffer b (let ((re (ignore-errors (reb-read-regexp)))) (and (stringp re) (> (length re) 0) (string-match-p re "Release 1.4.0 adds") (string-match-p re "see v1.5.0-rc2") (not (string-match-p re "version 1.6 is not")) (not (string-match-p re "Version 2 is")))))))'
+        hint: "One backslash before each dot: here the regexp is written as you would type it at a prompt. Without it, . matches any character."
+  - id: inspect
+    goal: List the timers, then the processes
+    detail: "`M-x list-timers` shows what Emacs will run later; `q` closes it. `M-x proced` lists the processes on the machine."
+    demo: 'M-x ~400 "list-timers" RET ~2000 q ~500 M-x ~400 "proced" RET ~1500'
+    conditions:
+      - text: the timer list was opened
+        event: { command: list-timers }
+        hint: "M-x list-timers. Each line is a timer: when it runs next, how often, and the function."
+      - text: proced was opened
+        event: { command: proced }
+        hint: "M-x proced. One of the lines is this Emacs; q closes the list."

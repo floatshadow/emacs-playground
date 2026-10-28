@@ -1,0 +1,9 @@
+# Session limits, as deployed last month.
+[limits]
+memory = "2g"
+cpus = 2
+idle_minutes = 30
+max_sessions = 40
+
+[network]
+egress = "none"

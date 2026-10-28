@@ -1,0 +1,29 @@
+#+title: Release notes, raw material
+
+* Contributors
+
+Yusuf
+Chen
+Amara
+Bruno
+Dmitri
+Elena
+
+* Service config
+
+#+begin_src json
+{"name":"playground","ports":[8080,9222],"limits":{"memory":"2g","cpus":2},"debug":false}
+#+end_src
+
+* Benchmarks
+
+Pasted from the Markdown README:
+
+| Tool | Time | Notes |
+|:-----|-----:|:------|
+| ripgrep | 0.4 s | **fastest** |
+| grep | 2.1 s | [manual](https://www.gnu.org/software/grep/) |
+
+* Footer
+
+Updated:

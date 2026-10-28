@@ -1,0 +1,6 @@
+Review notes
+
+Release 1.4.0 adds the export command.
+Release 1.4.1 fixes the crash on empty files.
+Release 1.5.0 needs a migration; see v1.5.0-rc2 for details.
+Version 2 is planned, version 1.6 is not.

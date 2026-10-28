@@ -1,0 +1,64 @@
+id: 10-text-is-the-interface/08-occur-edit
+title: occur and occur-edit
+minutes: 8
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/text
+  root: text
+  reset: true
+  open: [text/occur/intro.md, text/occur/install.md, text/occur/usage.md, text/occur/themes.md, text/occur/faq.md]
+  layout: faq.md
+  eval: '(let ((kill-buffer-query-functions nil)) (when (get-buffer "*Occur*") (kill-buffer "*Occur*")))'
+steps:
+  - id: occur
+    goal: List the lines of faq.md that mention colour
+    detail: "In faq.md, `M-s o`, type `colour` and `RET`. *Occur* opens below with the three matching lines; the cursor stays in faq.md."
+    demo: 'M-s o ~600 "colour" ~300 RET'
+    conditions:
+      - text: occur ran
+        event: { command: occur }
+        hint: "M-s, then o: Meta and s together, then o on its own. The prompt says List lines matching regexp."
+      - text: '*Occur* lists the lines of faq.md with "colour"'
+        buffer: { name: "*Occur*", mode: occur-mode, contains: "The palette has eight colours" }
+        hint: "Run it in faq.md: occur searches the buffer you are in."
+  - id: edit
+    goal: Change colour to color in faq.md from *Occur*
+    detail: "`C-x o` into *Occur* and press `e` (occur-edit mode; after Reset this step, `g` first lists the lines again, and if *Occur* is gone, `M-s o colour RET` in faq.md makes it again, as Watch it does). Go to the first match line (`M-<`, `C-n`) and replace with `M-% colour RET color RET`, then `!` for all. `C-c C-c` ends the edit."
+    # *Occur* is not part of a checkpoint: the demo lists the lines
+    # again from faq.md, so it also works after Go to this step.
+    demo: 'C-x b ~400 "faq.md" RET ~300 C-x 1 ~300 M-s o ~600 "colour" ~300 RET ~800 C-x o ~500 e ~500 M-< C-n ~300 M-% ~500 "colour" RET ~400 "color" RET ~600 ! ~1000 C-c C-c'
+    conditions:
+      - text: faq.md says color everywhere
+        elisp: '(let ((b (find-buffer-visiting "/work/text/occur/faq.md"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (and (not (search-forward "colour" nil t)) (progn (goto-char (point-min)) (search-forward "eight colors" nil t)))))))'
+        hint: "Edits only reach faq.md in occur-edit mode: press e in *Occur* first (the mode line says Occur-Edit). After a Reset, g in *Occur* lists the lines again before you edit."
+      - text: '*Occur* is back to a read-only list'
+        elisp: '(let ((b (get-buffer "*Occur*"))) (and b (eq (buffer-local-value (quote major-mode) b) (quote occur-mode))))'
+        hint: "The mode line of *Occur* says Occur-Edit while you edit; it should say Occur again."
+  - id: multi
+    goal: List colour in every Markdown buffer
+    detail: "`M-x multi-occur-in-matching-buffers RET`. The first prompt wants a regexp for buffer names: `\\.md$` (every name ending in .md). The second is the search: `colour`."
+    demo: 'M-x ~400 "multi-occur-in-matching-buffers" RET ~600 "\\.md$" ~300 RET ~600 "colour" ~300 RET'
+    conditions:
+      - text: multi-occur ran
+        any:
+          - event: { command: multi-occur-in-matching-buffers }
+          - event: { command: multi-occur }
+        hint: "Two prompts: buffer names first (\\.md$ means .md at the end), then what to search for."
+      - text: '*Occur* lists matches from usage.md and themes.md'
+        buffer: { name: "*Occur*", contains: "with its colour" }
+        hint: "If *Occur* shows only one file, the buffer-name regexp matched only that one: \\.md$ with one backslash."
+      - text: themes.md is in the list too
+        buffer: { name: "*Occur*", contains: "one colour per line" }
+        hint: "All five files are open as buffers; the name regexp must match them all."
+  - id: edit-all
+    goal: Change colour to color in all five files at once
+    detail: "In *Occur* (`C-x o`), `g` to list the lines afresh, then `e`. (If *Occur* is gone, run the search of the previous step again, as Watch it does.) Start on the first match line (`M-<`, `C-n`), not on the summary line above it, and `M-% colour RET color RET !`. `C-c C-c` ends the edit."
+    demo: 'C-x b ~400 "faq.md" RET ~300 C-x 1 ~300 M-x ~400 "multi-occur-in-matching-buffers" RET ~600 "\\.md$" ~300 RET ~600 "colour" ~300 RET ~800 C-x o ~500 e ~500 M-< C-n ~300 M-% ~500 "colour" RET ~400 "color" RET ~600 ! ~1200 C-c C-c'
+    conditions:
+      - text: no file says colour any more
+        elisp: '(let ((ok t)) (dolist (f (quote ("intro" "install" "usage" "faq" "themes"))) (let ((b (find-buffer-visiting (concat "/work/text/occur/" f ".md")))) (if (not b) (setq ok nil) (with-current-buffer b (save-excursion (goto-char (point-min)) (when (search-forward "colour" nil t) (setq ok nil))))))) ok)'
+        hint: "One M-% in occur-edit mode reaches every listed line; ! replaces them all. Started on the summary line at the very top, it stops with an error: that line belongs to no file. g in *Occur* lists what is left."
+      - text: '*Occur* is back to a read-only list'
+        elisp: '(let ((b (get-buffer "*Occur*"))) (and b (eq (buffer-local-value (quote major-mode) b) (quote occur-mode))))'
+        hint: "C-c C-c in *Occur* ends occur-edit mode. The files save themselves a few seconds later; C-x s saves now."

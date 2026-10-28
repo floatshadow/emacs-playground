@@ -1,0 +1,71 @@
+id: 10-text-is-the-interface/01-pipe-a-region
+title: Pipe a region through any tool
+minutes: 10
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power]
+setup:
+  workspace: fixtures/text
+  root: text
+  reset: true
+  open: [text/pipe/notes.org]
+  layout: single
+  eval: '(when (get-buffer "*Shell Command Output*") (kill-buffer "*Shell Command Output*"))'
+steps:
+  - id: peek
+    goal: Preview the names sorted, without changing the file
+    detail: "Select the six names under Contributors: `C-a` on Yusuf (`C-s Yusuf RET` gets there), `C-SPC`, then `C-n` until the cursor is at the start of the empty line after Elena. `M-|`, type `sort`, `RET`. The sorted list appears at the bottom; the file stays as it was."
+    demo: 'M-< ~300 C-s "Yusuf" RET C-a ~300 C-SPC ~300 C-s "Elena" RET ~200 C-n C-a ~500 M-| ~500 "sort" ~300 RET'
+    conditions:
+      - text: the region went through sort
+        event: { command: shell-command-on-region }
+        hint: "M-| asks for a command in the bottom line (Shell command on region). The region must be active first: C-SPC, then move."
+      - text: the sorted names are in *Shell Command Output*
+        buffer: { name: "*Shell Command Output*", contains: "Amara\nBruno\nChen\nDmitri\nElena\nYusuf" }
+        hint: "Select all six names, Yusuf to Elena, and nothing above them. If only part of the list came out, select again and repeat."
+      - text: the file still has the names in their old order
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/pipe/notes.org") (save-excursion (goto-char (point-min)) (search-forward "Yusuf\nChen\nAmara" nil t)))'
+        hint: "Without C-u, M-| leaves the buffer alone. If the list changed, C-/ puts it back."
+  - id: sort
+    goal: Replace the names with the sorted list
+    detail: "Same region, but `C-u M-|`: the output replaces the region."
+    demo: 'M-< ~300 C-s "Yusuf" RET C-a ~300 C-SPC ~300 C-s "Elena" RET ~200 C-n C-a ~500 C-u M-| ~500 "sort" ~300 RET'
+    conditions:
+      - text: the region went through a command again
+        event: { command: shell-command-on-region }
+        hint: "Select the names again first: the previous step's region is gone. The bottom line shows C-u- while Emacs waits for M-|."
+      - text: the names under Contributors are in alphabetical order
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/pipe/notes.org") (save-excursion (goto-char (point-min)) (and (search-forward "* Contributors\n\nAmara\nBruno\nChen\nDmitri\nElena\nYusuf\n" nil t) (not (search-forward "Yusuf\nChen" nil t)))))'
+        hint: "C-u first, then M-|: the bottom line shows C-u- while Emacs waits. If the names landed in the wrong place or twice, C-/ until the list is back and select it again."
+  - id: json
+    goal: Pretty-print the JSON in place with jq
+    detail: "Select the JSON line inside the source block (`C-a`, `C-SPC`, `C-n`), then `C-u M-|` with the command `jq .` (the dot is jq's filter for the whole input)."
+    demo: 'M-< ~300 C-s "{\"name" RET C-a ~300 C-SPC ~300 C-n ~500 C-u M-| ~500 "jq ." ~300 RET'
+    conditions:
+      - text: the JSON is spread over indented lines
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/pipe/notes.org") (save-excursion (goto-char (point-min)) (and (search-forward "{\n  \"name\": \"playground\",\n  \"ports\": [" nil t) (search-forward "\"debug\": false\n}" nil t))))'
+        hint: "jq needs the whole JSON object: one line, from { to }. If jq printed an error instead, the region missed a brace; C-/ and select the line again."
+      - text: the source block is still closed by "#+end_src"
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/pipe/notes.org") (save-excursion (goto-char (point-min)) (search-forward "\"debug\": false\n}\n#+end_src" nil t)))'
+        hint: "Select from the start of the JSON line to the start of the #+end_src line, not further."
+  - id: table
+    goal: Convert the Markdown table to an Org table with pandoc
+    detail: "Select the four table lines under Benchmarks, from `| Tool` to the start of the empty line after the last row, then `C-u M-|` with `pandoc -f gfm -t org` (from GitHub Markdown to Org)."
+    demo: 'M-< ~300 C-s "| Tool" RET C-a ~300 C-SPC ~300 C-s "manual](" RET ~200 C-n C-a ~500 C-u M-| ~500 "pandoc -f gfm -t org" ~300 RET'
+    conditions:
+      - text: the table has an Org separator row
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/pipe/notes.org") (save-excursion (goto-char (point-min)) (and (re-search-forward "^| Tool +| Time +| Notes +|\n|-+\\+-+\\+-+|$" nil t) (not (search-forward "|:-----|" nil t)))))'
+        hint: "Org separators use + where the columns meet (|---+---|). If the lines are unchanged, the C-u was missing; if pandoc printed only part of a table, the region did not cover all four lines."
+      - text: bold and the link are in Org syntax
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/pipe/notes.org") (save-excursion (goto-char (point-min)) (and (search-forward "*fastest*" nil t) (search-forward "[[https://www.gnu.org/software/grep/][manual]]" nil t))))'
+        hint: "pandoc rewrites **bold** as *bold* and [text](url) as [[url][text]]. Both rows must be in the region."
+  - id: date
+    goal: Insert today's date after "Updated:"
+    detail: "Put the cursor after `Updated:` and type a space. `M-!` with `date +%F` only shows the date; `C-u M-!` inserts it at point."
+    demo: 'M-< ~300 C-s "Updated:" RET ~300 SPC ~300 C-u M-! ~500 "date +%F" ~300 RET'
+    conditions:
+      - text: a shell command ran with M-!
+        event: { command: shell-command }
+        hint: "M-! is Meta (Alt or Esc) with !, which is Shift+1 on most keyboards."
+      - text: the footer reads "Updated:" and a date
+        elisp: '(with-current-buffer (find-buffer-visiting "/work/text/pipe/notes.org") (save-excursion (goto-char (point-min)) (re-search-forward "^Updated: ?[0-9]\\{4\\}-[0-9][0-9]-[0-9][0-9]" nil t)))'
+        hint: "Without C-u the date only flashes in the echo area. Put the cursor right after Updated:, then C-u M-! date +%F RET."

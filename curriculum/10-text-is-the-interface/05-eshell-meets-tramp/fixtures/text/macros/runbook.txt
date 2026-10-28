@@ -1,0 +1,58 @@
+Deploy runbook
+
+Owner: Platform team, on-call rotation B
+Build:
+Sign-off:
+
+Release checks
+
+Confirm the change ticket is approved
+Announce the deploy in the team channel
+Check that the main branch is green
+Freeze merges to main
+Tag the release commit
+Build the release artefacts
+Verify the artefact checksums
+Upload the artefacts to the registry
+Snapshot the production database
+Check free disk space on every host
+Drain the first host from the load balancer
+Stop the service on the first host
+Install the new version on the first host
+Run the database migrations
+Start the service on the first host
+Check the health endpoint on the first host
+Put the first host back in the load balancer
+Watch the error rate for five minutes
+Drain the second host
+Stop the service on the second host
+Install the new version on the second host
+Start the service on the second host
+Check the health endpoint on the second host
+Put the second host back in the load balancer
+Drain the third host
+Stop the service on the third host
+Install the new version on the third host
+Start the service on the third host
+Check the health endpoint on the third host
+Put the third host back in the load balancer
+Compare latency with last week
+Check the logs for new warnings
+Run the smoke tests
+Confirm the dashboards look normal
+Unfreeze merges to main
+Close the change ticket
+Write the release notes
+Announce the end of the deploy
+Archive the build logs
+Schedule the post-deploy review
+
+Dev checks
+
+Pull the latest main
+Rebuild the dev image
+Reset the dev database
+Run the seed script
+Open the dev dashboard
+
+End of runbook
