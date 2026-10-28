@@ -130,7 +130,4 @@ you were before switching to the project."
 
 ;; follow-mode is built in: two windows on one buffer scroll as one page.
 
-;; TODO(emacs, emacs.md section 3): golden-ratio (off by default) is not
-;; in packages.lock yet.
-
 ;;; windows.el ends here

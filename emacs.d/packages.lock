@@ -3,7 +3,7 @@
 # Do not edit; change packages.el and regenerate.  The image build installs these
 # files in order and fails when a download is missing or its sha256 differs.
 #
-# Built in, not locked: cl-lib compat eglot jsonrpc map project seq transient
+# Built in, not locked: cl-lib compat eglot jsonrpc let-alist map org project seq transient
 #
 # @archive NAME URL
 # NAME VERSION ARCHIVE FILE SHA256
@@ -40,9 +40,17 @@ llama 1.0.6 nongnu llama-1.0.6.tar eafea6f32985ebf2c0266cdeff3a7b72eaf674c7a51e1
 magit-section 4.7.1 nongnu magit-section-4.7.1.tar 65427cfa50393325fcc5876da0bf1fa95ea170b71046e5523a19a2255f6458bf
 with-editor 3.5.4 nongnu with-editor-3.5.4.tar 6dd3156efcec9be9ee2e47881c26aceb35858508c203341cc6d10f51b1637f26
 magit 4.7.1 nongnu magit-4.7.1.tar b2d38a34aeddea92cc87b4cb9823dcd597993f800633c760587dba083acff2e5
+emacsql 4.4.2 nongnu emacsql-4.4.2.tar 36f061fd9718e29a97ab8f85a94677fb2258e7ed6fcbbf661e087947561edc40
+closql 2.4.2 melpa-stable closql-2.4.2.tar 50d952ef498cf09f25993e8aafb8167fa64be9b40e78bd6594dddcea64594cfe
+treepy 0.1.3 nongnu treepy-0.1.3.tar 1fcce921b398f73ba28e880dda7feb993d35de7a2ead0b649e76740bf1c6bc1f
+ghub 5.3.3 melpa-stable ghub-5.3.3.tar fd5cc9748ab6914ad8c25ed39249712e952bfca14d17412ae8fa6628ce76a884
+markdown-mode 2.8 nongnu markdown-mode-2.8.tar c265ee2c6b230f5b65d208e596c728ccb62d4c0e9e9ad568104d51ee8bd7c8a0
+yaml 1.2.4 gnu yaml-1.2.4.tar 9e6260055013feb84a8a9077e7f510f39e2aaedd57f9310bd33154090132518a
+forge 0.6.9 melpa-stable forge-0.6.9.tar cb4bb3526fba68e2b4bb2ef460bd3e17fd7225c45854bc5b12e1b01d03b8c836
 diff-hl 1.11.2 gnu diff-hl-1.11.2.tar 87dfec1f904595045d3dd215525f50445264e5d94e6591e2b9cc044ce74a91b1
 git-timemachine 4.13 melpa-stable git-timemachine-4.13.tar 960c6860505b18a67afebdb16987ed10ec72c02a75c7e9c66bd78768ad7d6087
 eat 0.9.4 nongnu eat-0.9.4.tar 14971fc562f0820794eb6af78beebc7dc3ba898221e785c2d272a9f0fccfc54a
+vterm 20260914.1641 melpa vterm-20260914.1641.tar ccfdd38d6ea9f90aa14eec5c6343194890e7e47681ae29a0cd5d2b4248837912
 eldoc-box 20260903.1246 melpa eldoc-box-20260903.1246.tar c965012dfe0629bae8953136d5029fc8dd2392be0b47b65c22b1fd83b01304b2
 apheleia 4.6.0 melpa-stable apheleia-4.6.0.tar c1391aa444712b39885e8dc08bf02768ed4117081ac2de0269326d6f8efa1b01
 dape 0.28.0 gnu dape-0.28.0.tar 51fec8cce4e67cbcc4256f98e6efe61dd55bff38dd969fa5f52b8ea555df7a1f
@@ -51,6 +59,31 @@ s 1.13.1 melpa-stable s-1.13.1.tar 8730ac9005a8629a674fc882782211240c7dc7e95910a
 dash 2.20.0 gnu dash-2.20.0.tar 28f84b0905f84520163f5dd2087e47cac042bd27b7ec34eeb293f1ada7d36cb2
 f 0.21.0 melpa-stable f-0.21.0.tar 7f6f1e7e4835a481698b196996c1372b7c508664896bd8071323528dcbdd1438
 pet 4.0.0 melpa-stable pet-4.0.0.tar c7e7046ccd84eb78f58d21a2c545c02689d20790e4eac4f32129e4db09b8aad6
+tuareg 3.1.0 nongnu tuareg-3.1.0.tar 5527c6558716e25587264f9b6a7c0b9b636fb0d74d0e6f6076f9b79a07091cba
+dune 3.24.2 melpa-stable dune-3.24.2.tar df176e776a063ff617c4617daa6cbbe7e5433f61498c1ca28af99ef00948b523
+utop 2.17.0 melpa-stable utop-2.17.0.tar 380cccd9dd81790a4741dfe1b57d1d57e92e7f441021e313f751b8fa26aba85b
+ocaml-eglot 1.4.0 melpa-stable ocaml-eglot-1.4.0.tar 3ecbf1bd72c5eee6be6fa214c1ba718c422c82fa83651a4871ad6a96d8877377
+edit-indirect 0.1.13 nongnu edit-indirect-0.1.13.tar adc99cffab7c06a8162d836e230c70836feb0961ab38d2c404c081bbb887fa83
+typst-ts-mode 0.12.2 nongnu typst-ts-mode-0.12.2.tar 8bc4603a616ff8e8db5f6737ad0d891d38245a84eeaa959ed79321a06a02189c
+auctex 14.2.0 gnu auctex-14.2.0.tar d7e32b4d1b95bc2f6d2c1e3564a4627ba453f7f7c858dca88d152e934d0254f4
+cdlatex 4.18.5 nongnu cdlatex-4.18.5.tar de70d615fcf08332d337d6354340b483a40c74caea5506aa62441d3bfbddf134
+tablist 1.0 nongnu tablist-1.0.tar a7f887044aaf3b9fb7f10b02ab229966835e66a7eb5ab8b5efa400ec8ada057c
+pdf-tools 1.3.0 nongnu pdf-tools-1.3.0.tar 37f68c80982e1fcdf7fab591c94a01cad60457345f540adc6cf66a046518bb4f
+parsebib 6.7 melpa-stable parsebib-6.7.tar 0057420334393d24dd4e9d1870c8191dbeef137283cd13047eb8089674927a35
+queue 0.2 gnu queue-0.2.tar 880dc17566232e7b1d4b2298906d153a971971ded7a250cdd5fac056a836ef84
+string-inflection 1.0.16 melpa-stable string-inflection-1.0.16.tar b0deb3a2fcf57af0bd637b6f52f604afaa1b20522bd0ae6ee37d0009bdf88872
+citeproc 0.9.5 melpa-stable citeproc-0.9.5.tar d02b0b63dfdc7a3f9dec00d37fe0c868273220d979f7d85f45378af331db4421
+citar 20261015.55 melpa citar-20261015.55.tar 83d09b9c467039bfb7c20cd73719dfde711bbe87cb3a24d7aa4169ec694231a8
+citar-embark 20251027.1830 melpa citar-embark-20251027.1830.tar 9ff13c7d54bda2a92bb5a833ba810c1685d647698e435df6e184dcc045f16e3a
+jinx 2.11 gnu jinx-2.11.tar b09e7518a4a7a7b62baa6f09b57eb0d4111b93335fb4b45ccd9b732b9a6cd9e6
+async 2.0 gnu async-2.0.tar bfdfa780ef8a8a01212a4db3df55320023c0fb8c81e58312a97d2f0312839f60
+xr 2.2 gnu xr-2.2.tar 0e4b931169d20f7320983f5116b4d0fea0e999d3814cab50fd2f94378ee55034
+pyim 5.3.6 gnu pyim-5.3.6.tar f5a162bb07550a5fbcf8d4f444fa4c6c8ef3e4ea145d606fceeb395242a35f03
+pyim-basedict 0.5.5 gnu pyim-basedict-0.5.5.tar 878c15ac035cd648d193d97fd288b8a62ba07c40f38d005ef534eeecb98f4e13
+org-roam 2.3.1 melpa-stable org-roam-2.3.1.tar bd01b586a0e8cde15dec5e65db9f824d13028ea4bba6f0cbe0f8b4c31db56484
+org-present 0.1 nongnu org-present-0.1.tar fe3a816ff104c9d5a61bd1b2bee74e05c9e272dabd6212e43b0546955adef9a3
+htmlize 1.59 nongnu htmlize-1.59.tar 5927ec1b7672dc7af5576d383cab38873021643df4037532b3c778b29f7de359
+wgrep 3.0.0 nongnu wgrep-3.0.0.tar ff73b18324a80176d050344a764f8a176ff2d52fb00e3475f1b5c9dc8d2749a2
 nerd-icons 20261011.1410 melpa nerd-icons-20261011.1410.tar 3d37618ffa429bb18b8552d0f741a67f00e4b3e3445d6ac0e770c9d5c5be3be6
 nerd-icons-dired 20260415.1746 melpa nerd-icons-dired-20260415.1746.tar c377e5cc90521ed87c305ff2d85b99a4ecb85ace78d7dbab4e88a06c1a890954
 nerd-icons-completion 20260921.2012 melpa nerd-icons-completion-20260921.2012.tar 6c33a4ea97b5a5b2473bb25b974dbb3320782bdec614124714c794d2ec62bf28
@@ -63,4 +96,5 @@ helpful 20250408.334 melpa helpful-20250408.334.tar afc8dfee16aedc433e29432702e6
 modus-themes 5.3.0 gnu modus-themes-5.3.0.tar bd1a6c34ebcd0d8d69ce669156006bd0d099281f6bd299db095ee0ee9a0da610
 ef-themes 2.2.1 gnu ef-themes-2.2.1.tar 55aaeadc42a741be256165572894475ff030d4b2261caecee8588826cd40c4f1
 ligature 20260723.1509 melpa ligature-20260723.1509.tar e27fce562034c98adfd6ad782d0f2d0cb9aefa346d16a2fb08768c635b3bf87a
-markdown-mode 2.8 nongnu markdown-mode-2.8.tar c265ee2c6b230f5b65d208e596c728ccb62d4c0e9e9ad568104d51ee8bd7c8a0
+shrink-path 0.3.1 melpa-stable shrink-path-0.3.1.tar 5c920d0f24e1b26f394a75b68ce009594da638bd23692f791fe574e78591bf82
+doom-modeline 4.2.1 melpa-stable doom-modeline-4.2.1.tar 7e24534ff670e9c125aa62d7ab9d3bdfea41e7471853b41e5ca40e727261254f

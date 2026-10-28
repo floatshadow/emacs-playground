@@ -15,6 +15,14 @@
 ;; while installing, so package.el cannot fetch anything the lock does
 ;; not name: an unsatisfied dependency is an error too.
 ;;
+;; Byte compilation runs once more, in a fresh Emacs, for every file
+;; the install left without byte code: package.el compiles each package
+;; in the installing Emacs, where `read-symbol-shorthands' from a
+;; package that uses cond-let (closql, forge) can leak into later
+;; packages and fail their compilation ("Invalid binding").  Files that
+;; still do not compile are listed; a package's main file among them
+;; fails the build.
+;;
 ;; Native code goes to ELN_DIR (early-init.el adds it to
 ;; `native-comp-eln-load-path' at run time).
 
@@ -78,6 +86,40 @@ ARCHIVES is an alist (NAME . URL); each entry is a list
              (and (fboundp 'comp-async-runnings) (> (comp-async-runnings) 0)))
     (accept-process-output nil 1)))
 
+(defun playground-install--uncompiled (elpa-dir)
+  "Lisp files under ELPA-DIR without byte code, tests and generated files aside."
+  (seq-remove
+   (lambda (file)
+     (or (file-exists-p (concat file "c"))
+         (string-match-p "\\(-pkg\\|-autoloads\\|loaddefs\\|-shortdoc\\|-subtest\\|\\`\\.dir-locals\\)\\.el\\'"
+                         (file-name-nondirectory file))
+         (string-match-p "/tests?/" file)))
+   (directory-files-recursively elpa-dir "\\.el\\'")))
+
+(defun playground-install--recompile (elpa-dir)
+  "Byte-compile the files the install left uncompiled, in fresh Emacsen.
+One child Emacs per package directory, so nothing leaks between them."
+  (dolist (dir (delete-dups (mapcar #'file-name-directory
+                                    (playground-install--uncompiled elpa-dir))))
+    (message "recompiling %s" (file-relative-name dir elpa-dir))
+    (call-process
+     (expand-file-name invocation-name invocation-directory) nil nil nil
+     "--batch" "-Q"
+     "--eval" (format "(progn (setq package-user-dir %S byte-compile-warnings nil) (package-activate-all) (byte-recompile-directory %S 0))"
+                      (file-name-as-directory elpa-dir) dir)))
+  (let ((left (playground-install--uncompiled elpa-dir)))
+    (dolist (file left)
+      (message "not byte-compiled: %s" (file-relative-name file elpa-dir)))
+    (let ((main (seq-filter
+                 (lambda (file)
+                   (string-prefix-p (concat (file-name-base file) "-")
+                                    (file-name-nondirectory
+                                     (directory-file-name (file-name-directory file)))))
+                 left)))
+      (when main
+        (error "Main package files did not byte-compile: %s"
+               (mapconcat (lambda (f) (file-relative-name f elpa-dir)) main ", "))))))
+
 (defun playground-install (emacs-d elpa-dir eln-dir)
   "Install EMACS-D/packages.lock into ELPA-DIR, native code into ELN-DIR."
   (let* ((lock (playground-install--read-lock (expand-file-name "packages.lock" emacs-d)))
@@ -100,6 +142,7 @@ ARCHIVES is an alist (NAME . URL); each entry is a list
         (unless (package-installed-p (intern (nth 0 entry)))
           (error "%s did not install" (nth 0 entry)))))
     (delete-directory tmp t)
+    (playground-install--recompile package-user-dir)
     ;; Every package activated: now compile them all to native code,
     ;; in parallel, into ELN-DIR.
     (when (and (featurep 'native-compile) eln-dir)

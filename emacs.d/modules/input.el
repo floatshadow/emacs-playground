@@ -1,14 +1,41 @@
-;;; input.el --- input methods  -*- lexical-binding: t; -*-
+;;; input.el --- special characters and input methods  -*- lexical-binding: t; -*-
 
-;; Module: input.  Unlocked in Part 8, with writing.
+;; Module: input.  Unlocked in Part 8 (lesson 8.7), with writing.
 ;;
-;; Planned: C-x 8 helpers for special characters, the TeX input method
-;; as default (C-\ then \alpha gives α), rime for Chinese input
-;; (optional, needs librime).
+;; Characters that are not on the keyboard: C-x 8 RET inserts any
+;; character by name, C-x 8 followed by a short sequence types common
+;; ones (C-x 8 - - is an en dash, C-x 8 ' e is é).  An input method
+;; turns what you type into other characters while it is on: C-\
+;; toggles the default one, TeX (\alpha gives α, \to gives →), and
+;; C-u C-\ picks another, such as pyim for Chinese (type pinyin, then
+;; the number or SPC of a candidate).  C-u C-x = describes the
+;; character at point.
 ;;
-;; TODO(emacs, emacs.md section 3): not in slice 1 apart from the
-;; default input method below; rime is not in packages.lock.
+;; Keys, lesson 8.7:
+;;   C-x 8 RET  insert a character by name     C-\  input method on/off
+;;   C-u C-\    choose an input method (TeX, pyim, ...)
+;;   C-u C-x =  everything about the character at point
 
+;;;; The TeX input method
+
+;; C-\ turns it on; the mode line shows "\" while it is active.
 (setq default-input-method "TeX")
+
+;;;; Chinese: pyim
+
+;; pyim is a Chinese input method written in Emacs Lisp, with the basic
+;; pinyin dictionary (pyim-basedict); it works in the terminal frame
+;; too, showing candidates in the echo area.  C-u C-\ pyim RET turns it
+;; on.  Its caches go to var/ with the other state files.
+(playground-with-package pyim
+  (setq pyim-dcache-directory (playground-var "pyim/dcache/")
+        pyim-default-scheme 'quanpin
+        pyim-page-tooltip 'minibuffer
+        pyim-page-length 7
+        pyim-cloudim nil)
+  (with-eval-after-load 'pyim
+    (when (playground-package-p 'pyim-basedict)
+      (require 'pyim-basedict)
+      (pyim-basedict-enable))))
 
 ;;; input.el ends here

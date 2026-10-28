@@ -22,16 +22,17 @@ Roles, licenses and caveats of external dependencies. Versions live in `go.mod`,
 | TigerVNC Xvnc, xdotool | GUI frame display; demo typing in it | GPL-2.0, BSD-3 | localhost, no auth; only sessiond reaches it |
 | kkp | decodes CSI u keys in Emacs | GPL-3.0 | until Emacs decodes CSI u itself |
 | Iosevka Nerd Font, Noto CJK, Source Serif 4 | terminal and GUI font; CJK fallback; chrome typeface | OFL-1.1 | self-hosted WOFF2 under `/fonts/` |
+| Noto Color Emoji | emoji in the GUI frame | OFL-1.1 | |
 
 ## 3. Emacs packages
 
 GPL-3.0+ unless noted, from GNU ELPA, NonGNU ELPA, MELPA and MELPA Stable. `emacs.d/packages.el` maps modules to packages (modules: emacs.md); `packages.lock` pins version, archive and SHA-256, every locked tarball is vendored in `emacs.d/vendor/`, and the image installs exactly the lock. Packages whose last stable tag predates Emacs 30 come from MELPA snapshots (`:prefer-snapshot`).
 
-*Planned:* forge, vterm (needs cmake, libvterm), wgrep, rime (librime); writing: typst-ts-mode, auctex, cdlatex, pdf-tools (builds `epdfinfo` against poppler and cairo), citar, jinx (compiles against enchant); OCaml: tuareg, dune, utop, merlin-eldoc; org-roam, org-present, ob-rust. dape needs debug adapters on PATH.
+Native parts are built in the image (`natives` stage) from the vendored tarballs: vterm's module against libvterm, jinx's against enchant, pdf-tools' `epdfinfo` against poppler. Chinese input is pyim with pyim-basedict (pure Lisp), not rime. Org's Rust blocks are the org module's own `org-babel-execute:rust` (rustc); ob-rust needs rust-script. dape 0.28 has no codelldb configuration; the lsp module adds one. Typst's grammar is uben0/tree-sitter-typst at a pinned commit (no recent release tag).
 
 ## 4. Language servers and tools
 
-Rust through rustup (rustc, cargo, rust-analyzer, clippy, rustfmt, rust-src); Python through uv with basedpyright and ruff; ripgrep, fd, git, jq, gcc, make. *Planned:* ocaml-lsp-server, merlin, ocamlformat, utop, dune; tinymist, typst; texlab, latexmk, TeX Live; marksman, bash-language-server, shellcheck, debugpy, codelldb, ocamlearlybird, delta, pandoc.
+Rust through rustup (rustc, cargo, rust-analyzer, clippy, rustfmt, rust-src), cargo-nextest, codelldb; Python through uv with ruff, debugpy, basedpyright (npm); OCaml through opam (dune, utop, ocaml-lsp-server, merlin, ocamlformat, odoc, earlybird); typst, tinymist; TeX Live 2025 (frozen tlnet-final: the newest year that no longer changes) with latexmk, biber and texlab; Node for bash-language-server and basedpyright (`images/session/node/package-lock.json`); marksman, pandoc, shellcheck, delta; ripgrep, fd, git, jq, gcc, make, ImageMagick, poppler-utils. OCaml is 5.4: on 5.5 ocamlfind, which utop needs, exists only as a preview.
 
 ## 5. Go modules
 

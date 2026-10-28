@@ -1,0 +1,8 @@
+# Python packages prefetched into the session image (emacs.md section 9):
+# their wheels go to /opt/playground/prefetch/wheels, which uv reads as a
+# find-links directory, so `uv add numpy` and `uv sync` work offline.
+#
+# To offer another package: add it here, regenerate python.txt (the
+# command is at the top of that file), rebuild the image.
+numpy
+pytest

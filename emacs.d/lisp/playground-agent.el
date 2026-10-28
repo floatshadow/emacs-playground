@@ -153,7 +153,8 @@ on the next pong, or the connection is dropped after
     dired-hide-details-mode compilation-shell-minor-mode
     compilation-minor-mode electric-pair-mode abbrev-mode
     eldoc-box-hover-mode eldoc-box-hover-at-point-mode
-    breadcrumb-local-mode pulsar-mode)
+    breadcrumb-local-mode pulsar-mode org-capture-mode org-src-mode
+    with-editor-mode edebug-mode)
   "Minor modes reported in the state's `minors' list when enabled.
 Housekeeping modes that never ask anything of the learner, such as
 ws-butler (which trims the spaces you added), are left out."

@@ -1,0 +1,10 @@
+# opam packages installed into the image's OCaml switch next to dune and
+# utop (emacs.md sections 2 and 9): the libraries projects may depend on,
+# so `dune build` works offline.  Versions are whatever the pinned
+# opam-repository commit (OPAM_REPOSITORY_COMMIT in versions.env)
+# resolves to with the pinned compiler; /opt/opam/installed.txt in the
+# image lists them.  Prereleases fail the build.
+base
+stdio
+ppx_expect
+ppx_inline_test

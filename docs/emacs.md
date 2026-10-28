@@ -10,15 +10,15 @@ Configure flags: `--with-native-compilation=aot --with-tree-sitter --with-module
 
 Paths: user `learner` (uid 1000); workspace `/work`; pristine config `/opt/playground/emacs.d`; live config `/work/emacs.d` (`--init-directory`); server socket `/run/playground/emacs/playground`; agent socket `/run/playground/agent.sock`; versions in `/opt/playground/versions.env` (`GET /status`). The root filesystem may be read-only; `/tmp`, `/run` and `~/.cache` are tmpfs. Run-time native code goes to `~/.cache/emacs/eln-cache`, else `/work/.playground/eln-cache` when that is `noexec`.
 
-Size: about 3.4 GB; about 5.5 GB with every toolchain of §2.
+Size: about 5.8 GB unpacked, 1.5 GB compressed (the remote box 2.6 GB); a cold build takes about 11 minutes on a 96-core builder, a config-only change about a minute.
 
 ## 2. Toolchains
 
-Target: Rust (rustup, rust-analyzer, clippy, codelldb), Python (uv, basedpyright, ruff, debugpy), OCaml (opam, dune, ocaml-lsp-server, merlin), Typst (tinymist), TeX Live (texlab), marksman, pandoc, shellcheck, enchant; fonts Iosevka Nerd Font, Noto CJK, Libertinus, Noto Color Emoji. Slice 1 installs Rust, Python, the shell basics, Iosevka and Noto CJK; the rest is `TODO(emacs, emacs.md §2)`. Versions in `versions.env`.
+One cached stage per toolchain, versions and sha256 in `versions.env`: Rust (rustup, rust-analyzer, clippy, rustfmt, cargo-nextest, codelldb in `/opt/codelldb`), Python (uv, ruff, basedpyright; debugpy in `/opt/debugpy`), OCaml (opam with one switch, `/opt/opam/default`: dune, utop and the prefetched libraries; the editor tools ocaml-lsp-server, ocamlformat, merlin, odoc and earlybird are built in a second switch and only their executables kept; OCaml 5.4 because ocamlfind has no 5.5 release), Typst and tinymist, TeX Live 2025 from its frozen repository (scheme-basic plus `prefetch/texlive.txt`, in `/opt/texlive`; per-user files under `~/.cache/texlive`) with texlab, Node (one binary) for bash-language-server and basedpyright (from npm: the PyPI wheel bundles a second Node), marksman, pandoc, delta, shellcheck, ImageMagick, poppler-utils, enchant with hunspell en_US and en_GB; fonts Iosevka Nerd Font, Noto CJK, Noto Color Emoji (Typst embeds Libertinus). The `natives` stage compiles vterm's module, jinx's module and pdf-tools' `epdfinfo` from the vendored tarballs into their package directories.
 
 ## 3. Configuration layout
 
-`emacs.d/`: `early-init.el` (GC, frame defaults, native-code location), `init.el` (loads the modules listed in `modules.el`, in order; never edited by the course), `modules.el` (written by the playground: `(setq playground-modules '(base agent …))`), `modules/` (base, agent, editing, completion, files, windows, ui, terminals, lsp, lang-rust, lang-python, git; stubs lang-ocaml, writing, org, power, remote, input), `lisp/playground-agent.el` (§10), `user-lisp/` (the learner's Lisp), `packages.el`, `packages.lock`, `vendor/`, `tools/` (§8), `test/` (§10.6).
+`emacs.d/`: `early-init.el` (GC, frame defaults, native-code location), `init.el` (loads the modules listed in `modules.el`, in order; never edited by the course), `modules.el` (written by the playground: `(setq playground-modules '(base agent …))`), `modules/` (base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui; each file's header lists its keys by lesson), `lisp/playground-agent.el` (§10), `user-lisp/` (the learner's Lisp), `packages.el`, `packages.lock`, `vendor/`, `tools/` (§8), `test/` (§10.6).
 
 A module that fails to load is reported (a warning and `moduleErrors` in the agent's `hello`) and the others still load. `agent.el` prefers the compiled agent in the image (`/opt/playground/emacs.d/lisp`) so it always speaks sessiond's protocol.
 
@@ -26,7 +26,7 @@ The pristine config is copied to `/work/emacs.d` on first start only: after chan
 
 ## 4. Module unlocking
 
-Scenarios declare `modules`. Unlocking is monotonic: a scenario load adds its modules and never removes any (`rpc modules` can still set any set). sessiond writes `modules.el` and restarts the daemon with buffer restore (backend.md §3.3, §3.12); checkpoint restores never change `modules.el`. Part 0 runs `base agent`; Part 12 reaches the full set.
+Scenarios declare `modules`. Unlocking is monotonic: a scenario load adds its modules and never removes any (`rpc modules` can still set any set). sessiond writes `modules.el` and restarts the daemon with buffer restore (backend.md §3.3, §3.12); checkpoint restores never change `modules.el`. Part 0 runs `base agent`; Part 13 reaches the full set.
 
 Authors: a lesson must pass with more modules than it lists, since a learner who has gone further or replays has more on (from Part 2 `C-x C-b` is ibuffer; the windows module closes a project's tab after `C-x p k`). Replays meant to match an in-order learner start from a fresh workspace.
 
@@ -43,7 +43,7 @@ tmux (`-L pg`, session `emacs`) holds the terminal frame so it survives browser 
 
 Keys: the browser's CSI u chords (frontend.md §5) pass through tmux to `kkp`. kkp waits for a protocol answer tmux never gives, so `base.el` installs its decoders directly in tmux frames (`playground--kkp-tmux`). It also maps tmux's Home `ESC [ 1 ~` and End `ESC [ 4 ~` to `<home>`/`<end>` (kkp knows only rxvt's 7 and 8) and unmodified Delete `ESC [ 3 ~` to `<deletechar>`, since `<delete>` becomes DEL through `local-function-key-map`; modified keys keep kkp's names (`C-<delete>` is `kill-word`).
 
-Mode lines: selected violet `#7a58c4`, others `#232639` (lessons say "the bright mode line"), as palette overrides set before the theme loads. Housekeeping minors (ws-butler) have no lighter and are not in the state's `minors`. `extended-command-suggest-shorter` is off (its tip masked M-x answers); key-binding suggestions stay.
+Mode lines: selected violet `#7a58c4`, others `#232639` (lessons say "the bright mode line"), as palette overrides set before the theme loads. Housekeeping minors have no lighter (ws-butler, apheleia, jinx, ocaml-eglot); ws-butler is not in the state's `minors` either. `extended-command-suggest-shorter` is off (its tip masked M-x answers); key-binding suggestions stay.
 
 Clipboard: OSC 52 through tmux; paste arrives bracketed. `xterm-mouse-mode` is on (not automatic behind tmux).
 
@@ -63,11 +63,11 @@ After a daemon restart sessiond re-applies its latest `snapshot` (taken every 30
 
 ## 8. Packages and pinning
 
-Sources, preferred first: GNU ELPA, NonGNU ELPA, MELPA Stable, MELPA. `packages.el` lists top-level packages per module; `tools/lock.el` resolves them into `packages.lock` (version, archive, file, sha256), skipping what Emacs ships. Every locked tarball is vendored in `vendor/`: GNU and NonGNU ELPA drop superseded releases and MELPA keeps no old snapshots, so a build never depends on an archive still serving a pinned version. The image installs exactly the lock with no archive configured, failing on any hash mismatch. Pinned packages are read-only in `/opt/playground/elpa`; the learner's own go to `/work/emacs.d/elpa` (Part 12). 
+Sources, preferred first: GNU ELPA, NonGNU ELPA, MELPA Stable, MELPA. `packages.el` lists top-level packages per module; `tools/lock.el` resolves them into `packages.lock` (version, archive, file, sha256), skipping what Emacs ships. Every locked tarball is vendored in `vendor/`: GNU and NonGNU ELPA drop superseded releases and MELPA keeps no old snapshots, so a build never depends on an archive still serving a pinned version. The image installs exactly the lock with no archive configured, failing on any hash mismatch. Pinned packages are read-only in `/opt/playground/elpa`; the learner's own go to `/work/emacs.d/elpa` (Part 13).
 
 ## 9. Prefetched project dependencies
 
-The image should prefetch every curriculum project's dependencies so lessons work with egress blocked (deployment.md §3). `TODO(emacs, emacs.md §9)`.
+Sessions have no egress (deployment.md §9.2), so the image runs cargo and uv offline (`CARGO_NET_OFFLINE`, `UV_OFFLINE`; the gateway sets them to false/0 for `egress: all`) against prefetched dependencies, listed in `images/session/prefetch/` where authors extend them: `cargo/` (crates, a registry cache copied to `$CARGO_HOME` under `~/.cache` at start), `python.in`/`python.txt` (hashed wheels, uv's `UV_FIND_LINKS`), `opam.txt` (libraries in the switch), `typst.txt` (packages under `TYPST_PACKAGE_PATH`), `texlive.txt`. Fixtures should omit `Cargo.lock` and `uv.lock` or resolve to the prefetched versions. The remote box gets the same crates and wheels.
 
 ## 10. playground-agent.el
 
@@ -119,8 +119,8 @@ C-g during redisplay: a C-g read while redisplay runs Lisp (typically `jit-lock-
 
 ### 10.6 Testing
 
-`make emacs-test` runs `test/agent-test.el` (against a fake socket server) and `test/config-test.el` with `test/modules-test.el` (init.el with base and editing: tmux keys, mode-line contrast, M-y staying `yank-pop` until the completion module of lesson 4.2, GUI frame fit). sessiond's integration test (backend.md §6) covers the agent end to end.
+`make emacs-test` runs `test/agent-test.el` (against a fake socket server) and `test/config-test.el` with `test/modules-test.el` (init.el with base and editing: tmux keys, mode-line contrast, M-y staying `yank-pop` until the completion module of lesson 4.2, GUI frame fit), which runs `test/all-modules-test.el` in a child Emacs (every module: no load errors or missing packages, the keys of Parts 4 to 13, vterm's and jinx's modules, `epdfinfo`, grammars, tools on PATH, language servers, dape adapters, Org's Rust blocks, compile's error regexps). sessiond's integration test (backend.md §6) covers the agent end to end.
 
 ## 11. Standalone use
 
-The image works as a plain Emacs environment (`docker run -it --rm -v "$PWD:/work" …/session emacs -nw`); `PLAYGROUND=0` turns off the agent and the frame-only `C-x C-c`. The config also runs on any Emacs 31 with the toolchains (Part 12).
+The image works as a plain Emacs environment (`docker run -it --rm -v "$PWD:/work" …/session emacs -nw`); `PLAYGROUND=0` turns off the agent and the frame-only `C-x C-c`. The config also runs on any Emacs 31 with the toolchains (lesson 13.6 starts it on the remote box, which has Emacs and the pinned packages).

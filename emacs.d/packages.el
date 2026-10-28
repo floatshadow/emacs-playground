@@ -21,16 +21,17 @@
 ;;                  predates Emacs 30/31 or the companion packages
 ;;                  (nerd-icons 0.1.0 is from 2023; helpful 0.21 breaks
 ;;                  on Emacs 30's help-fns; consult-dir 0.1 predates
-;;                  consult 1.0).
+;;                  consult 1.0; citar 1.4.0's autoloads define a struct
+;;                  before cl-lib is loaded; vterm has no stable tag).
 ;;
-;; Slice 1 covers the modules base, editing, completion, files,
-;; windows, git, terminals, lsp, lang-rust, lang-python and ui.
-;; TODO(emacs, emacs.md section 3): packages for lang-ocaml (tuareg,
-;; dune, utop, merlin-eldoc), writing (edit-indirect, typst-ts-mode,
-;; auctex, cdlatex, pdf-tools, citar, jinx), org (org-roam,
-;; org-present, ob-rust), power (wgrep), terminals (vterm, needs
-;; cmake and libvterm at build time), git (forge), input (rime).
+;; Native parts are built at image time, not by the packages:
+;; vterm-module.so (libvterm), jinx-mod.so (enchant) and pdf-tools'
+;; epdfinfo (poppler) are compiled in the session Dockerfile's `natives'
+;; stage from the vendored tarballs and copied into the installed
+;; package directories.
 
+;; One entry per module that configures packages; agent and remote use
+;; built-in libraries only.
 (:modules
  ((base kkp clipetty)
   (editing avy expreg multiple-cursors iedit vundo visual-replace ws-butler)
@@ -38,16 +39,21 @@
               corfu cape tempel)
   (files dirvish consult-dir)
   (windows ace-window popper burly olivetti)
-  (git magit diff-hl git-timemachine)
-  (terminals eat)
+  (git magit forge diff-hl git-timemachine)
+  (terminals eat vterm)
   (lsp eldoc-box apheleia dape consult-eglot)
   (lang-python pet)
+  (lang-ocaml tuareg dune utop ocaml-eglot)
+  (writing markdown-mode edit-indirect typst-ts-mode auctex cdlatex
+           pdf-tools citar citar-embark jinx)
+  (input pyim pyim-basedict)
+  (org org-roam org-present htmlize)
+  (power wgrep)
   (ui nerd-icons nerd-icons-dired nerd-icons-completion nerd-icons-corfu
-      nerd-icons-ibuffer breadcrumb pulsar helpful ef-themes ligature)
-  ;; Only markdown-mode for now: lesson fixtures open README.md files.
-  (writing markdown-mode))
+      nerd-icons-ibuffer breadcrumb pulsar helpful ef-themes ligature
+      doom-modeline))
  :pin
  ((dirvish . "melpa-stable"))
  :prefer-snapshot
  (nerd-icons nerd-icons-corfu nerd-icons-ibuffer consult-dir visual-replace
-  helpful elisp-refs eldoc-box burly ligature))
+  helpful elisp-refs eldoc-box burly ligature vterm citar citar-embark))

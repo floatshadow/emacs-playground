@@ -8,7 +8,7 @@
 ;; file, function); a brief highlight of the line you jumped to
 ;; (pulsar); line numbers in code; ligatures in the GUI frame; helpful,
 ;; a richer *Help* buffer; ef-themes, more themes to try with
-;; M-x load-theme.
+;; M-x load-theme; doom-modeline, an alternative mode line to try.
 ;;
 ;; Keys added here:
 ;;   C-h f / C-h v / C-h k / C-h x   helpful versions of describe-*
@@ -68,6 +68,16 @@
       (global-ligature-mode 1)))
   (add-hook 'after-make-frame-functions #'playground--ligatures-for-gui)
   (when (display-graphic-p) (playground--ligatures-for-gui)))
+
+;;;; The mode line
+
+;; doom-modeline is the popular replacement mode line (icons, compact
+;; segments).  It stays off: lessons describe the built-in one.
+;; M-x doom-modeline-mode tries it; again turns it off.
+(playground-with-package doom-modeline
+  (setq doom-modeline-icon t
+        doom-modeline-height 1
+        doom-modeline-buffer-file-name-style 'relative-from-project))
 
 ;;;; Helpful
 

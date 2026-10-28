@@ -1,0 +1,52 @@
+# TeX Live packages installed on top of scheme-basic (emacs.md section 2):
+# what lessons 8.3 to 8.6, the Org exports of Part 9 and project P4 use.
+# One tlmgr package name per line, comments allowed; the image build
+# compiles prefetch/tex-check.tex and fails on a missing package.
+#
+# Building: latexmk drives pdflatex and biber; synctex for pdf-tools.
+latexmk
+biber
+synctex
+# Bibliographies (8.6): biblatex with biber, natbib with bibtex
+biblatex
+csquotes
+natbib
+# Papers (8.3, P4)
+amscls
+mathtools
+siunitx
+cleveref
+booktabs
+caption
+float
+geometry
+xcolor
+enumitem
+microtype
+fancyhdr
+parskip
+titlesec
+listings
+fancyvrb
+upquote
+epstopdf-pkg
+babel-english
+pgf
+# Org's default LaTeX packages (9.6, P7; rotating comes with graphics)
+# and Beamer (C-c C-e l b)
+ulem
+capt-of
+wrapfig
+beamer
+translator
+etoolbox
+# Fonts: Latin Modern; ec and metafont let T1 Computer Modern fall back
+# to generated bitmaps instead of failing
+lm
+ec
+metafont
+mfware
+# LaTeX fragments as images in Org and AUCTeX (8.5)
+preview
+dvipng
+dvisvgm

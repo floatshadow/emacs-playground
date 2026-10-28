@@ -12,7 +12,9 @@
 ;; terminal frame, the M-x messages, the mode-line colours, the mode
 ;; line's minor modes, the M-y binding, the search's match count, and
 ;; how the GUI frame is fitted to its display.  One test loads the
-;; files module on top, for ibuffer's groups.
+;; files module on top, for ibuffer's groups.  The last one runs
+;; all-modules-test.el in a child Emacs: every module on, the set Part
+;; 13 reaches.
 
 ;;; Code:
 
@@ -189,6 +191,27 @@
                  '(0 0 1580 860)))
   (should (equal (playground--frame-fit '(0 0 10 10) '(1000 600) '(980 560))
                  '(0 0 1 1))))
+
+;;;; Every module (in a child Emacs)
+
+(ert-deftest pg-modules/all-modules ()
+  "all-modules-test.el passes: every module on, in a fresh Emacs."
+  (let* ((buffer (generate-new-buffer " *pg-all-modules*"))
+         (status (call-process (expand-file-name invocation-name invocation-directory)
+                               nil buffer nil "--batch"
+                               "-l" (expand-file-name "early-init.el" pg-modules-test-dir)
+                               "-l" (expand-file-name "test/all-modules-test.el" pg-modules-test-dir)
+                               "-f" "ert-run-tests-batch-and-exit"))
+         (output (with-current-buffer buffer (buffer-string))))
+    (kill-buffer buffer)
+    ;; The child's report: one line per test, then the summary.
+    (message "%s" (mapconcat #'identity
+                             (seq-filter (lambda (line)
+                                           (string-match-p "\\`\\(   passed\\|FAILED\\|Ran \\|  \\)" line))
+                                         (split-string output "\n"))
+                             "\n"))
+    (unless (eq status 0) (message "%s" output))
+    (should (eq status 0))))
 
 (provide 'modules-test)
 ;;; modules-test.el ends here

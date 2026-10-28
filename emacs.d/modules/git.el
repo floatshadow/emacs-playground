@@ -4,15 +4,18 @@
 ;;
 ;; Magit (status, staging hunks, commits, log, blame, branches, rebase),
 ;; diff-hl (changed lines marked in the margin, like VS Code's gutter),
-;; git-timemachine (step through a file's history).
+;; git-timemachine (step through a file's history), forge (pull
+;; requests and issues of GitHub and GitLab remotes; it needs the
+;; network, so it stays out of the way until you call it).
 ;;
 ;; Keys added here, by lesson:
 ;;   5.1  C-x g   Magit status (TAB s u S U k c c ? inside)
 ;;        C-c g   Magit commands for the repository; C-c f for this file
 ;;   5.2  l l, l a, b (blame), C-x v = (built in)
 ;;   5.4  smerge keys in conflicted files: C-c ^ (built in)
-;;   5.5  C-x v t   git-timemachine;  [ and ] (diff-hl) jump between
-;;        changed hunks with C-x v [ and C-x v ]
+;;   5.5  C-x v n / C-x v p   next / previous changed hunk (diff-hl;
+;;        C-x v ] and C-x v [ too), C-x v r  revert the hunk at point,
+;;        C-x v t   git-timemachine (p n to step, q to leave)
 
 ;;;; Lesson 5.1  Status and staging hunks
 
@@ -35,6 +38,12 @@
   (diff-hl-margin-mode 1)
   (diff-hl-flydiff-mode 1)
   (add-hook 'dired-mode-hook #'diff-hl-dired-mode)
+  ;; Lesson 5.5's keys under C-x v: n and p move between hunks, r
+  ;; reverts one (diff-hl's own n is revert, which surprises).
+  (with-eval-after-load 'diff-hl
+    (keymap-set diff-hl-command-map "n" #'diff-hl-next-hunk)
+    (keymap-set diff-hl-command-map "p" #'diff-hl-previous-hunk)
+    (keymap-set diff-hl-command-map "r" #'diff-hl-revert-hunk))
   (with-eval-after-load 'magit
     (add-hook 'magit-pre-refresh-hook #'diff-hl-magit-pre-refresh)
     (add-hook 'magit-post-refresh-hook #'diff-hl-magit-post-refresh)))
@@ -42,7 +51,11 @@
 (playground-with-package git-timemachine
   (keymap-global-set "C-x v t" #'git-timemachine))
 
-;; TODO(emacs, emacs.md section 3): forge (optional) is not in
-;; packages.lock yet.
+;;;; forge
+
+;; ' (or N) in a Magit buffer opens forge's menu; nothing loads before
+;; that.  Its database goes to var/.
+(playground-with-package forge
+  (setq forge-database-file (playground-var "forge-database.sqlite")))
 
 ;;; git.el ends here

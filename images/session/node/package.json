@@ -1,0 +1,9 @@
+{
+  "name": "playground-node-tools",
+  "private": true,
+  "description": "Language servers that run on Node in the session image (emacs.md section 2): bash-language-server and basedpyright. Update with npm install --package-lock-only.",
+  "dependencies": {
+    "bash-language-server": "5.8.1",
+    "basedpyright": "1.40.2"
+  }
+}

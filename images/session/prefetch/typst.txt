@@ -1,0 +1,10 @@
+# Typst packages prefetched into the session image (emacs.md section 9),
+# unpacked into /opt/playground/typst/packages, which TYPST_PACKAGE_PATH
+# names, so `#import "@preview/cetz:0.5.3"` compiles offline.
+#
+# NAMESPACE/NAME VERSION SHA256 of https://packages.typst.org/NAMESPACE/NAME-VERSION.tar.gz
+# List every package a listed one imports too: the image build compiles a
+# document importing them all and fails if Typst had to download anything.
+preview/charged-ieee 0.1.4 ae040669d934fe01915c1a781a5e69db9ebdcab9839f6cd9c73294973882ceca
+preview/cetz 0.5.3 79ca64869c60aefaf0eccc7e7371ab47cc6cb85bce1ad222e42cf1879c965b5f
+preview/oxifmt 1.0.0 7d17a1fc8ad01740ec3cb2b03c7360a4225ff9318e5710765fa98ea6fd59594f

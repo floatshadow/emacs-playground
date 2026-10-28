@@ -4,14 +4,29 @@
 #   docker run IMAGE                      sessiond (the playground)
 #   docker run -it -v "$PWD:/work" IMAGE emacs -nw    standalone Emacs
 #
-# For anything other than sessiond (standalone use, emacs.md section 11)
-# it first gives an empty workspace the playground configuration, as
-# sessiond does when it starts (backend.md section 3.2): /work/emacs.d is
-# a copy of /opt/playground/emacs.d, and ~/.config/emacs points there.
+# 1. Makes ~/.cache/ssh, where the ~/.ssh symlink points (~/.cache may be
+#    an empty tmpfs on a read-only root), and seeds $CARGO_HOME (also
+#    under ~/.cache) with the crates the image prefetched (emacs.md
+#    section 9), so cargo builds offline; the copy is a few megabytes and
+#    is skipped when present.
+# 2. For anything other than sessiond (standalone use, emacs.md section
+#    11) it gives an empty workspace the playground configuration, as
+#    sessiond does when it starts (backend.md section 3.2): /work/emacs.d
+#    is a copy of /opt/playground/emacs.d, and ~/.config/emacs points
+#    there.
 set -eu
 
 pristine="${PG_PRISTINE_CONFIG:-/opt/playground/emacs.d}"
 work="${PG_WORKSPACE:-/work}"
+prefetch=/opt/playground/prefetch
+
+mkdir -p -m 0700 "$HOME/.cache/ssh" 2>/dev/null || true
+
+if [ -n "${CARGO_HOME:-}" ] && [ -d "$prefetch/cargo/registry" ] && [ ! -d "$CARGO_HOME/registry" ]; then
+  if mkdir -p "$CARGO_HOME" 2>/dev/null; then
+    cp -R "$prefetch/cargo/registry" "$CARGO_HOME/" || echo "pg-entrypoint: could not seed $CARGO_HOME" >&2
+  fi
+fi
 
 if [ "${1:-}" != "sessiond" ] && [ ! -e "$work/emacs.d" ] && [ -w "$work" ]; then
   cp -R "$pristine" "$work/emacs.d"

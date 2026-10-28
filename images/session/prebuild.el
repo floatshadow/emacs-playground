@@ -2,7 +2,8 @@
 
 ;; Run at image build time (config stage), as root:
 ;;
-;;   PG_MODULES="base agent ..." HOME=/tmp/x emacs --batch -l prebuild.el
+;;   PG_MODULES="base agent ..." HOME=/tmp/x PG_WORKSPACE=/tmp/x/work \
+;;     emacs --batch -l prebuild.el
 ;;
 ;; 1. Loads /opt/playground/emacs.d/init.el with the modules named in
 ;;    PG_MODULES; a module that fails to load fails the build.
@@ -41,10 +42,14 @@
     avy expreg multiple-cursors iedit vundo visual-replace ws-butler
     dirvish consult-dir ace-window popper burly olivetti helpful
     nerd-icons nerd-icons-dired nerd-icons-completion nerd-icons-corfu nerd-icons-ibuffer
-    breadcrumb pulsar ligature kkp markdown-mode pet
+    breadcrumb pulsar ligature kkp markdown-mode pet doom-modeline
+    forge vterm tuareg dune utop ocaml-eglot edit-indirect typst-ts-mode
+    tex latex reftex cdlatex pdf-tools pdf-view pdf-sync citar citar-embark jinx
+    org org-agenda org-capture ob-python ob-shell ob-ocaml ox-latex ox-beamer ox-html
+    htmlize org-roam org-present wgrep ediff calc doc-view image-dired
     xt-mouse ibuffer dired project tab-bar winner windmove compile eshell
     rust-ts-mode python which-key server tramp)
-  "Features the slice-1 modules configure but load lazily.")
+  "Features the modules configure but load lazily.")
 
 (defconst prebuild-runtime-primitives
   '(message run-hooks write-region delete-frame all-completions execute-kbd-macro

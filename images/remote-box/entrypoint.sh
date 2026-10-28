@@ -8,7 +8,8 @@
 #      AUTHORIZED_KEYS_FILE  a file read at every login (may be a read-only
 #                            mount that appears or changes later)
 #    sshd asks /usr/local/sbin/remote-box-authorized-keys at each login.
-# 3. Run sshd in the foreground, logging to stderr.
+# 3. Start nginx (it serves /srv/www on port 80, P5's deploy target).
+# 4. Run sshd in the foreground, logging to stderr.
 set -eu
 
 ssh-keygen -A >/dev/null
@@ -25,4 +26,5 @@ fi
 if [ "$#" -gt 0 ]; then
   exec "$@"
 fi
+nginx || echo "remote-box: nginx did not start" >&2
 exec /usr/sbin/sshd -D -e

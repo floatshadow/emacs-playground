@@ -1,0 +1,34 @@
+% Build-time check of the TeX Live packages in texlive.txt (emacs.md
+% section 2): the session Dockerfile runs latexmk on this file, then on
+% beamer-check.tex, and fails if either does not produce a PDF.
+\documentclass{article}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage{graphicx,longtable,wrapfig,rotating,capt-of,float,booktabs,caption}
+\usepackage[normalem]{ulem}
+\usepackage{geometry,xcolor,enumitem,microtype,fancyhdr,parskip,titlesec}
+\usepackage{siunitx,listings,fancyvrb,upquote,tikz}
+\usepackage[backend=biber]{biblatex}
+\usepackage{csquotes}
+\usepackage{hyperref}
+\usepackage{cleveref}
+\addbibresource{tex-check.bib}
+\newtheorem{theorem}{Theorem}
+\begin{document}
+\section{Results}\label{sec:results}
+Latency is \SI{12.5}{\milli\second} \cite{knuth}; see \cref{eq:mean,tab:t}.
+\begin{equation}\label{eq:mean}
+  \bar{x} = \frac{1}{n}\sum_{i=1}^{n} x_i
+\end{equation}
+\begin{table}[H]\centering
+  \begin{tabular}{lr}\toprule Run & ms \\ \midrule a & 12 \\ \bottomrule\end{tabular}
+  \caption{Runs}\label{tab:t}
+\end{table}
+\begin{theorem}\sout{False} true.\end{theorem}
+\begin{tikzpicture}\draw (0,0) -- (1,1);\end{tikzpicture}
+\begin{lstlisting}[language=Python]
+print("hi")
+\end{lstlisting}
+\printbibliography
+\end{document}
