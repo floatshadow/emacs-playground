@@ -4,7 +4,7 @@ Everything in the session container except sessiond.
 
 ## 1. Session image
 
-Debian trixie, multi-stage `images/session/Dockerfile`; each heavy stage (`emacs-build`, `rust`, `python`, `fonts`, `packages`, …) rebuilds only when its own pins in `images/session/versions.env` change. Emacs 31.1 is natively compiled ahead of time with tree-sitter grammars; pinned packages are compiled into `/opt/playground/{elpa,eln-cache}`.
+Debian trixie, multi-stage `images/session/Dockerfile`; each heavy stage (`emacs-build`, `tmux`, `rust`, `python`, `fonts`, `packages`, …) rebuilds only when its own pins in `images/session/versions.env` change. Emacs 31.1 is natively compiled ahead of time with tree-sitter grammars; tmux is built from its release tarball (Debian ships 3.5a); pinned packages are compiled into `/opt/playground/{elpa,eln-cache}`.
 
 Configure flags: `--with-native-compilation=aot --with-tree-sitter --with-modules --with-x --with-x-toolkit=lucid --with-cairo --with-harfbuzz --with-xinput2 --with-rsvg --with-webp --with-imagemagick --with-gnutls --with-sqlite3 --without-pop` (Emacs 31 rejects `--with-json`). Lucid: the daemon survives losing the X connection; pgtk cannot serve terminal and X frames from one daemon. Fallback: Emacs 30.2.
 
@@ -37,7 +37,8 @@ tmux (`-L pg`, session `emacs`) holds the terminal frame so it survives browser 
 - `default-terminal tmux-256color`; outer `xterm*` features RGB, extkeys, clipboard, hyperlinks.
 - `extended-keys always`, `extended-keys-format csi-u`, `escape-time 10` (keeps a split escape sequence together), `focus-events on`, `set-clipboard on`, `allow-passthrough on`.
 - No tmux UI: no status line, prefix or bindings, no history; every mouse event goes to Emacs.
-- `C-S-<letter>` re-sent as CSI u (tmux 3.5a drops the Shift); `send-keys` bypasses this.
+- `C-S-<letter>` re-sent as CSI u (tmux, 3.8 included, drops the Shift); `send-keys` bypasses this.
+- `fill-character " "`: blanks, not 3.8's grey `~`, around a window smaller than its client.
 - `remain-on-exit on` and a global `pane-died` respawn hook, overridden per session so only sessiond respawns (backend.md §3.3).
 
 Keys: the browser's CSI u chords (frontend.md §5) pass through tmux to `kkp`. kkp waits for a protocol answer tmux never gives, so `base.el` installs its decoders directly in tmux frames (`playground--kkp-tmux`). It also maps tmux's Home `ESC [ 1 ~` and End `ESC [ 4 ~` to `<home>`/`<end>` (kkp knows only rxvt's 7 and 8) and unmodified Delete `ESC [ 3 ~` to `<deletechar>`, since `<delete>` becomes DEL through `local-function-key-map`; modified keys keep kkp's names (`C-<delete>` is `kill-word`).

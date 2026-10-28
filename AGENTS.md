@@ -24,7 +24,7 @@ The specification is in `docs/`: start with `DESIGN.md` (overview, decisions, ro
 
 ## 3. Development environment
 
-- Host: Git, Docker Engine 27+ with Compose v2, Go 1.26, Node 24 with corepack (pnpm 11.28.8 pinned), python3 with PyYAML. **No Emacs or tmux on the host**: whatever needs them runs in the session image. Install: notes.md §4.
+- Host: Git, Docker Engine 27+ with Compose v2, Go 1.27, Node 24+ with corepack (pnpm from `packageManager`), python3 with PyYAML. **No Emacs or tmux on the host**: whatever needs them runs in the session image. Install: notes.md §4.
 - `make` puts `~/.local/go/bin`, `~/go/bin`, `~/.local/bin` on `PATH`. Run pnpm inside `web/`.
 - Containers run as uid 1000 (`learner`). If your uid differs, bind-mounted directories a container writes must be world-writable; `make local`, `make dev` and `make reset-workspace` do this for `./workspace`.
 - With a remote Docker daemon, bind mounts and build contexts must be on a path it shares (usually not `/tmp`), and published ports are on its host. Write test output under `artifacts/` (git-ignored). When a sandbox refuses `docker run`/`exec` with inline shell code, use a script file.
@@ -66,8 +66,7 @@ Configuration precedence: defaults < JSON file < `PG_*` environment < flags; `PG
 - **Browser:** no browser on the host; run Chrome in Docker with `--shm-size=1g` (the default 64 MB makes later page loads fail with `net::ERR_INSUFFICIENT_RESOURCES`) and drive it with playwright-core over CDP:
 
   ```sh
-  docker run -d --rm --name pg-chrome --network host --shm-size=1g zenika/alpine-chrome:latest \
-    --headless --no-sandbox --disable-gpu --remote-debugging-address=0.0.0.0 --remote-debugging-port=9222 about:blank
+  docker run -d --rm --name pg-chrome --network host --shm-size=1g chromedp/headless-shell:156.0.8078.48  # CDP :9222
   make e2e && (cd web && node e2e/review.mjs)
   ```
 

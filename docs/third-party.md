@@ -18,7 +18,7 @@ Roles, licenses and caveats of external dependencies. Versions live in `go.mod`,
 | Software | Role | License | Caveats |
 |---|---|---|---|
 | GNU Emacs 31.1 | from source: native compilation, tree-sitter, Lucid with Cairo | GPL-3.0+ | grammars at Emacs's pinned revisions |
-| tmux 3.5a | terminal frame persistence | ISC | `extended-keys always`, `csi-u`; the build checks the version |
+| tmux | terminal frame persistence; from source (Debian 13 ships 3.5a) | ISC | `extended-keys always`, `csi-u`; the build checks the version |
 | TigerVNC Xvnc, xdotool | GUI frame display; demo typing in it | GPL-2.0, BSD-3 | localhost, no auth; only sessiond reaches it |
 | kkp | decodes CSI u keys in Emacs | GPL-3.0 | until Emacs decodes CSI u itself |
 | Iosevka Nerd Font, Noto CJK, Source Serif 4 | terminal and GUI font; CJK fallback; chrome typeface | OFL-1.1 | self-hosted WOFF2 under `/fonts/` |
@@ -40,7 +40,7 @@ Rust through rustup (rustc, cargo, rust-analyzer, clippy, rustfmt, rust-src); Py
 | Module | Role | Caveats |
 |---|---|---|
 | coder/websocket | pty, events, vnc | compression off for binary streams |
-| creack/pty | tmux attach | |
+| creack/pty | tmux attach | v1: `creack/pty/v2` v2.0.1 is a stray 2023 tag, older than v1.1.24 |
 | moby/moby/client, moby/moby/api | Engine API | not `docker/docker/client`; `containerd/errdefs` classifies errors |
 | fsnotify | workspace watching | not recursive: add directories as they appear |
 | modernc.org/sqlite | server store without cgo | single writer |
@@ -53,22 +53,21 @@ The standard library covers routing, the reverse proxy, `os.Root`, `log/slog` an
 
 ## 6. Frontend packages
 
-Node 24, pnpm through corepack (`packageManager`). MIT unless noted: noVNC MPL-2.0; pdfjs-dist, playwright-core and TypeScript Apache-2.0.
+Node 24 or newer (`engines`; @types/node follows that floor), pnpm through corepack (`packageManager`); the gateway image builds with Node 26 and installs corepack, which Node 25+ no longer bundles. pnpm 12 keeps store locks in `$XDG_RUNTIME_DIR`; where that is read-only (some sandboxes) the Makefile points it at `artifacts/xdg-run`. MIT unless noted: noVNC MPL-2.0; pdfjs-dist, playwright-core and TypeScript Apache-2.0.
 
 | Package | Role | Caveats |
 |---|---|---|
-| react 19, react-router 7, zustand, @tanstack/react-query | UI, routing, live and server state | |
+| react 19, react-router 8, zustand, @tanstack/react-query | UI, routing, live and server state | |
 | vite, @vitejs/plugin-react | build, dev server | |
-| typescript 5.9 | types | typescript-eslint 8.72 supports TypeScript below 6.1 |
-| @xterm/xterm 6.1 beta, addons fit, webgl, unicode11, clipboard, web-links | terminal | betas from one upstream commit (`vtExtensions.kittyKeyboard`); re-pin all six together |
+| typescript 6.0 | types | not 7: typescript-eslint 8.72 supports TypeScript below 6.1 |
+| @xterm/xterm 6.1 beta, addons fit, webgl, unicode11, clipboard, web-links | terminal | betas from one upstream commit: stable 6.0 lacks `vtExtensions.kittyKeyboard`; re-pin all six together |
 | @novnc/novnc | GUI frame | `core/rfb.js`, lazy loaded |
-| pdfjs-dist | PDF preview | worker is a separate asset |
+| pdfjs-dist | PDF preview | worker is a separate asset; legacy build |
 | react-markdown, remark-gfm, remark-directive | lesson rendering | |
 | react-i18next | UI strings | |
 | vitest, jsdom, Testing Library, msw, vitest-websocket-mock | unit tests | |
-| playwright-core | `web/e2e/` over CDP | drives an external Chrome |
-| eslint 9, typescript-eslint, jsx-a11y, prettier | lint, format | jsx-a11y 6.10 does not declare ESLint 10 |
-| @playwright/test, json-schema-to-typescript | unused | to be removed through integration |
+| playwright-core | `web/e2e/` over CDP | drives an external Chrome: `chromedp/headless-shell` pinned to Chrome's stable major (its `stable` tag runs ahead) |
+| eslint 9, typescript-eslint, jsx-a11y, prettier | lint, format | not 10: jsx-a11y 6.10 does not declare ESLint 10 |
 
 ## 7. External services
 

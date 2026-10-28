@@ -89,7 +89,7 @@ Specified in architecture.md §3.
 
 ## 7. Technology choices
 
-Go 1.26 with the stdlib mux, `coder/websocket`, `creack/pty`, the Docker client, fsnotify and `modernc.org/sqlite`; React 19, Vite, TypeScript, Zustand, TanStack Query, React Router, CSS Modules; xterm.js 6.1 beta, noVNC, PDF.js; Emacs 31.1 from source (Lucid, native compilation, tree-sitter) with vanilla keys, Eglot, package.el + use-package, vertico, consult, corfu, Magit. Versions and reasons: third-party.md. Rationale: §8.
+Go 1.27 with the stdlib mux, `coder/websocket`, `creack/pty`, the Docker client, fsnotify and `modernc.org/sqlite`; React 19, Vite, TypeScript, Zustand, TanStack Query, React Router, CSS Modules; xterm.js 6.1 beta, noVNC, PDF.js; Emacs 31.1 from source (Lucid, native compilation, tree-sitter) with vanilla keys, Eglot, package.el + use-package, vertico, consult, corfu, Magit. Versions and reasons: third-party.md. Rationale: §8.
 
 ## 8. Decision records
 
