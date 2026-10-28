@@ -41,7 +41,7 @@ Caddy obtains the TLS certificate; the gateway starts one isolated session conta
 
 ## Images
 
-`ghcr.io/floatshadow/emacs-playground/` + `session` (Emacs 31, toolchains, the course configuration, sessiond), `remote-box` (SSH target for the remote-editing lessons), `gateway` (web app, gateway, curriculum bundle, fonts). Tags: `latest`/`main` follow main, `main-<sha>` pins a commit, `X.Y.Z`/`X.Y` are releases. Pin with `TAG=` in `.env`; `IMAGE_BASE=ghcr.io/<owner>/<repo>` pulls a fork's images.
+`ghcr.io/floatshadow/emacs-playground/` + `session` (Emacs 31, toolchains, the course configuration, sessiond), `remote-box` (SSH target for the remote-editing lessons), `gateway` (web app, gateway, curriculum bundle, fonts). Tags: `latest` follows main, the short commit sha pins a commit, `vX.Y.Z` is a release. Pin with `TAG=` in `.env`; `IMAGE_BASE=ghcr.io/<owner>/<repo>` pulls a fork's images.
 
 ## Contributing
 

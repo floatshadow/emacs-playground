@@ -12,9 +12,9 @@
 
 Dockerfiles: `images/<name>/Dockerfile`, context the repository root. Pins: third-party.md; `images/session/versions.env` is reported by sessiond's `/status`.
 
-GitHub Actions builds everything: `ci.yml` (Go, web and curriculum checks), `image-emacs.yml` (session and remote-box images, then their ERT suites; a cold build takes over an hour), `image-web.yml` (gateway image, smoke-tested in local mode), `release.yml` (`v*` tags). Pull requests build without pushing.
+GitHub Actions: `ci.yml` (Go, web and curriculum checks) and `images.yml` (one matrix job per image, then `images/<image>/test/ci-smoke.sh`: the session's ERT suites, the gateway in local mode; a cold session build takes over an hour). Pull requests build without pushing. No attestations are pushed, and the build cache lives in a separate `buildcache` package.
 
-Tags: `main`, `main-<sha>`, `latest`; releases add `X.Y.Z`, `X.Y`. Forks set `IMAGE_BASE` in `.env`. *Planned:* the gateway refuses a session image of another major version.
+Tags: the short commit sha and `latest` for pushes to main; `vX.Y.Z` for release tags. Forks set `IMAGE_BASE` in `.env`. *Planned:* the gateway refuses a session image of another major version.
 
 ## 2. Compose files
 
@@ -65,7 +65,7 @@ sessiond reads environment only (`protocol.SessiondConfig`, backend.md §3.13). 
 Copy `deploy/config.example.json` and `deploy/invites.example.txt` to `deploy/config.json` and `deploy/invites.txt`, edit, then `make server DOMAIN=… && docker compose up -d`.
 
 - Host: 4 GB RAM plus about 1.5 GB and a quarter core per concurrent session; 10 GB disk plus 2–4 GB per learner; ports 80 and 443; `DOMAIN` resolving before first start.
-- Upgrade: `TAG=X.Y.Z docker compose pull && docker compose up -d`; running sessions keep their image until they stop.
+- Upgrade: `TAG=vX.Y.Z docker compose pull && docker compose up -d`; running sessions keep their image until they stop.
 - Monitoring: `/healthz`, optional Prometheus (*planned:* latency histograms), JSON logs.
 - Backups: §8; *planned:* `playctl export-user`.
 - `images/gateway/test/server-mode.sh <image>` smoke-tests server mode, isolation and gateway replacement.

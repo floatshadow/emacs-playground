@@ -1,6 +1,5 @@
 # Tests, lint, type checks and the curriculum validator. Runs on every push
-# to main and on pull requests. Image builds live in image-emacs.yml and
-# image-web.yml; releases in release.yml.
+# to main and on pull requests. Image builds and releases live in images.yml.
 name: CI
 
 on:
