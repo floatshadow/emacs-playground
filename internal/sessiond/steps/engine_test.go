@@ -733,3 +733,34 @@ func TestFirstSentence(t *testing.T) {
 		}
 	}
 }
+
+// A save completes nothing on a shell result from before it: the step is
+// confirmed with a fresh run (the file event that clears the cache comes
+// later).
+func TestStaleShellResultIsConfirmed(t *testing.T) {
+	f := newFixture(t)
+	f.shell.res = map[string]ShellResult{"test out -nt src": {OK: true}}
+	sc := scenarioFromJSON(t, `{"id": "a/b", "title": "t", "steps": [{"id": "build", "goal": "g", "conditions": [
+	  {"text": "saved", "event": {"command": "save-buffer"}},
+	  {"text": "built", "shell": {"run": "test out -nt src"}}]}]}`)
+	f.e.Activate(sc, 0)
+	ctx := context.Background()
+	f.e.evaluate(ctx, false)
+	if f.shell.runs["test out -nt src"] != 1 {
+		t.Fatalf("runs: %v", f.shell.runs)
+	}
+	f.shell.mu.Lock()
+	f.shell.res["test out -nt src"] = ShellResult{ExitCode: 1}
+	f.shell.mu.Unlock()
+	f.clock.add(time.Second)
+	f.e.OnKey(&protocol.KeyEvent{Cmd: "save-buffer"})
+	res, _ := f.e.evaluate(ctx, false)
+	if res.Complete || f.shell.runs["test out -nt src"] != 2 {
+		t.Fatalf("stale result completed the step: %+v runs %v", res, f.shell.runs)
+	}
+	// Fresh results are used as they are.
+	f.e.evaluate(ctx, false)
+	if f.shell.runs["test out -nt src"] != 2 {
+		t.Fatalf("fresh result re-ran: %v", f.shell.runs)
+	}
+}

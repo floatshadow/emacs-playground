@@ -846,6 +846,27 @@ func (e *Engine) Check(ctx context.Context) (protocol.CheckResult, bool) {
 	return e.evaluate(ctx, true)
 }
 
+// conditionResults evaluates the step's conditions.
+func (e *Engine) conditionResults(ec *evalContext, step *protocol.Step) ([]protocol.CondResult, bool) {
+	results := make([]protocol.CondResult, len(step.Conditions))
+	complete := len(step.Conditions) > 0
+	for i := range step.Conditions {
+		c := &step.Conditions[i]
+		r := ec.eval(c)
+		id := c.ID
+		if id == "" {
+			id = protocol.ConditionID(step.ID, i)
+		}
+		cr := protocol.CondResult{ID: id, OK: r.t == protocol.True, Unknown: r.t == protocol.Unknown}
+		if !cr.OK {
+			cr.Detail = truncate(r.detail, MaxShellOutput)
+			complete = false
+		}
+		results[i] = cr
+	}
+	return results, complete
+}
+
 // evaluate runs one pass: conditions, check event, completion, stuck rules.
 func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult, bool) {
 	e.evalMu.Lock()
@@ -873,6 +894,7 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 		trigger:      e.Trigger,
 		shellWait:    e.opt.ShellWait,
 		now:          e.opt.Now,
+		keyAt:        e.lastKeyAt,
 	}
 	e.mu.Unlock()
 
@@ -902,21 +924,12 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 		}
 	}
 
-	results := make([]protocol.CondResult, len(step.Conditions))
-	complete := len(step.Conditions) > 0
-	for i := range step.Conditions {
-		c := &step.Conditions[i]
-		r := ec.eval(c)
-		id := c.ID
-		if id == "" {
-			id = protocol.ConditionID(step.ID, i)
-		}
-		cr := protocol.CondResult{ID: id, OK: r.t == protocol.True, Unknown: r.t == protocol.Unknown}
-		if !cr.OK {
-			cr.Detail = truncate(r.detail, MaxShellOutput)
-			complete = false
-		}
-		results[i] = cr
+	results, complete := e.conditionResults(ec, step)
+	if complete && ec.staleShell {
+		// A shell result predates the last command: confirm with fresh runs
+		// before the step completes (a save is seen before its file event).
+		ec.notBefore, ec.staleShell = ec.keyAt, false
+		results, complete = e.conditionResults(ec, step)
 	}
 	out := protocol.CheckResult{LessonID: sc.ID, StepID: step.ID, Conditions: results, Complete: complete}
 

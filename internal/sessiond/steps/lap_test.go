@@ -162,7 +162,7 @@ func TestSlowShellRunsInBackground(t *testing.T) {
 	ec.shellCache.clear()
 	close(sh.release)
 	<-triggered
-	if _, ok := ec.shellCache.get(ec.workspace+"\x00cargo test", time.Now()); ok {
+	if _, _, ok := ec.shellCache.get(ec.workspace+"\x00cargo test", time.Now()); ok {
 		t.Fatal("stale result cached")
 	}
 }

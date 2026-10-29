@@ -158,6 +158,13 @@ type evalContext struct {
 	// shellWait overrides ShellSyncWait (tests).
 	shellWait time.Duration
 	now       func() time.Time
+	// keyAt is the learner's last command. A cached shell result from a
+	// run that started before it sets staleShell: the command may have
+	// changed what the script sees before the file event clears the cache
+	// (a save). notBefore makes runShell ignore such results.
+	keyAt      time.Time
+	notBefore  time.Time
+	staleShell bool
 }
 
 // result is a three-valued truth with an optional detail for author mode.
@@ -518,17 +525,22 @@ func (ec *evalContext) runShell(key, dir, script string, timeout, ttl time.Durat
 	if ec.now != nil {
 		now = ec.now
 	}
-	if r, ok := ec.shellCache.get(key, now()); ok {
+	if r, at, ok := ec.shellCache.get(key, now()); ok && !at.Before(ec.notBefore) {
+		ec.noteShellAt(at)
 		return r
 	}
 	if ec.shell == nil {
 		return result{t: protocol.Unknown, detail: "shell conditions unavailable"}
 	}
-	fl, started, epoch := ec.shellCache.start(key)
+	fl, started, epoch := ec.shellCache.start(key, now())
 	if !started {
 		// A run from an earlier evaluation: do not hold this one up.
 		select {
 		case <-fl.done:
+			if fl.at.Before(ec.notBefore) {
+				return result{t: protocol.Unknown, detail: "running"}
+			}
+			ec.noteShellAt(fl.at)
 			return fl.r
 		default:
 			return result{t: protocol.Unknown, detail: "running"}
@@ -589,26 +601,35 @@ type shellCache struct {
 type cached struct {
 	r   result
 	exp time.Time
+	at  time.Time // when the run started
 }
 
 type flight struct {
 	done chan struct{}
 	r    result
+	at   time.Time
 }
 
-func (c *shellCache) get(k string, now time.Time) (result, bool) {
+// noteShellAt records that a result came from a run started at at.
+func (ec *evalContext) noteShellAt(at time.Time) {
+	if at.Before(ec.keyAt) {
+		ec.staleShell = true
+	}
+}
+
+func (c *shellCache) get(k string, now time.Time) (result, time.Time, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.m[k]
 	if !ok || (!e.exp.IsZero() && now.After(e.exp)) {
-		return result{}, false
+		return result{}, time.Time{}, false
 	}
-	return e.r, true
+	return e.r, e.at, true
 }
 
-// start returns the run in flight for k, or a new one (started true) the
-// caller must finish.
-func (c *shellCache) start(k string) (*flight, bool, uint64) {
+// start returns the run in flight for k, or a new one (started true, at
+// now) the caller must finish.
+func (c *shellCache) start(k string, now time.Time) (*flight, bool, uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if f, ok := c.inflight[k]; ok {
@@ -617,7 +638,7 @@ func (c *shellCache) start(k string) (*flight, bool, uint64) {
 	if c.inflight == nil {
 		c.inflight = map[string]*flight{}
 	}
-	f := &flight{done: make(chan struct{})}
+	f := &flight{done: make(chan struct{}), at: now}
 	c.inflight[k] = f
 	return f, true, c.epoch
 }
@@ -633,7 +654,7 @@ func (c *shellCache) finish(k string, epoch uint64, f *flight, r result, exp tim
 		if c.m == nil {
 			c.m = map[string]cached{}
 		}
-		c.m[k] = cached{r: r, exp: exp}
+		c.m[k] = cached{r: r, exp: exp, at: f.at}
 	}
 	f.r = r
 	c.mu.Unlock()
