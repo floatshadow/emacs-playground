@@ -44,6 +44,20 @@
           (move-marker compilation--parsed (point)))))))
 (advice-add 'compilation--ensure-parse :after #'playground--compilation-unparse-last-line)
 
+;; A short remote job (Eshell's grep in /ssh:box:) can finish while
+;; compilation-start still talks to TRAMP, before it adds the process to
+;; `compilation-in-progress'; the sentinel has then already run, so the
+;; dead process stays listed and [Compiling] stays in every mode line.
+(defvar compilation-in-progress)
+(declare-function compilation--update-in-progress-mode-line "compile")
+(defun playground--compilation-drop-finished (buffer)
+  "Forget compilation processes that finished before they were listed."
+  (when (seq-some (lambda (p) (not (process-live-p p))) compilation-in-progress)
+    (setq compilation-in-progress (seq-filter #'process-live-p compilation-in-progress))
+    (compilation--update-in-progress-mode-line))
+  buffer)
+(advice-add 'compilation-start :filter-return #'playground--compilation-drop-finished)
+
 ;; C-c C-c builds a Rust crate without asking, like VS Code's Run Build
 ;; Task; M-x compile asks for the command.  lang-rust (Part 7) defines
 ;; the same command and adds run, test and clippy.
