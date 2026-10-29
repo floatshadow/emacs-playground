@@ -32,7 +32,7 @@ setup:
 steps:
   - id: open
     goal: Open the first conflicted file from Magit
-    detail: "`C-x g`: the status says *Merging categories* and lists three files under *Unmerged*. Put the cursor on `src/lib.rs` and press `RET`. The file opens with smerge on and the cursor in the first conflict: each conflict is marked `<<<<<<<`, `=======`, `>>>>>>>`."
+    detail: "`C-x g`: the status says *Merging categories* and marks three files *unmerged*. Put the cursor on `src/lib.rs` and press `RET`. The file opens with smerge on and the cursor in the first conflict: each conflict is marked `<<<<<<<`, `=======`, `>>>>>>>`."
     demo: 'C-x g ~1200 M-< ~300 C-s ~300 "src/lib.rs" ~300 RET ~500 RET ~1200'
     conditions:
       - text: src/lib.rs is open
@@ -46,8 +46,8 @@ steps:
     detail: "The cursor is already in the first conflict: smerge put it there when the file opened. The upper side is main's (`HEAD`): `EUR`. The lower is the categories branch: `GBP`. `C-c ^ u` keeps the upper version and removes the markers. (`C-c ^ n` and `C-c ^ p` move to the next and previous conflict.)"
     demo: 'C-x b ~600 "lib.rs" ~400 RET ~600 M-< ~300 C-c ^ n ~800 C-c ^ u ~800'
     conditions:
-      - text: CURRENCY is EUR
-        elisp: '(let ((b (find-buffer-visiting "/work/ledger/src/lib.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (search-forward "CURRENCY: &str = \"EUR\";" nil t)))))'
+      - text: CURRENCY is EUR, outside any conflict
+        elisp: '(let ((b (find-buffer-visiting "/work/ledger/src/lib.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (and (search-forward "CURRENCY: &str = \"EUR\";" nil t) (progn (goto-char (point-min)) (not (re-search-forward "^<<<<<<< .*\n.*CURRENCY" nil t))))))))'
         hint: "C-c ^ u acts on the conflict the cursor is in. If C-c ^ n took you on to the second conflict (the comment above total), C-c ^ p comes back; C-/ undoes a resolution made in the wrong one."
       - text: GBP is gone
         elisp: '(let ((b (find-buffer-visiting "/work/ledger/src/lib.rs"))) (and b (with-current-buffer b (save-excursion (goto-char (point-min)) (not (search-forward "GBP" nil t))))))'

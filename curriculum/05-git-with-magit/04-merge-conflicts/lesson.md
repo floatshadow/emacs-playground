@@ -20,7 +20,7 @@ pub const CURRENCY: &str = "GBP";
 >>>>>>> categories
 ```
 
-The *upper* version, between `<<<<<<<` and `=======`, is the branch you are on (`HEAD`, here main). The *lower* version, down to `>>>>>>>`, comes from the branch being merged. During a merge Magit's status (:try[C-x g]) says *Merging*, lists the files under *Unmerged*, and `RET` on one opens it.
+The *upper* version, between `<<<<<<<` and `=======`, is the branch you are on (`HEAD`, here main). The *lower* version, down to `>>>>>>>`, comes from the branch being merged. During a merge Magit's status (:try[C-x g]) says *Merging* and marks each conflicted file *unmerged* (it is listed under both Unstaged and Staged changes); `RET` on one opens it.
 
 ## Resolving
 
