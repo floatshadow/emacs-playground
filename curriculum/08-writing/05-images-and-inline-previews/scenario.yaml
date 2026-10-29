@@ -55,8 +55,8 @@ steps:
     demo: 'C-x C-f ~400 "/work/writing/plot.svg" RET ~1200 C-c C-c ~1500 C-c C-c ~800'
     conditions:
       - text: plot.svg is open
-        buffer: { name: plot.svg }
-        hint: "The chart is in /work/writing itself, not in figures/."
+        elisp: '(and (find-buffer-visiting "/work/writing/plot.svg") t)'
+        hint: "The chart is in /work/writing itself, not in figures/: C-x C-f /work/writing/plot.svg RET. An empty buffer means the name or folder was wrong; C-x k closes it."
       - text: you toggled between picture and source
         event: { command: image-toggle-display }
         hint: "C-c C-c in the plot.svg buffer. In the source view the bars are the <rect> lines; change a height and C-c C-c draws it again."

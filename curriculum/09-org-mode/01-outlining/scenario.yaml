@@ -75,7 +75,7 @@ steps:
                    (quote ((1 . "Launch the team blog") (2 . "Design") (3 . "Pick a theme") (3 . "Draw a logo")
                            (2 . "Content") (3 . "Write the about page") (3 . "Point the domain at the box") (3 . "First three posts")
                            (2 . "Server") (3 . "Set up nginx on the box")))))
-        hint: "A heading only moves past headings of its own level, so Design jumps over the whole Content subtree at once. Two M-<up> on Design, then one M-<down> on Server."
+        hint: "A heading only moves past headings of its own level, so Design jumps over the whole Content subtree at once. Two M-<up> on Design, then one M-<down> on Server. If a task moved instead (the cursor was on its line), C-/ undoes that."
   - id: move-task
     goal: Move "Point the domain at the box" under Server
     detail: "`C-c C-x C-w` cuts the subtree at the cursor; `C-c C-x C-y` pastes it, adjusting its level to the heading before the cursor. Cut the task, go to the end of the file with `M->` (the line below Server's last task), and paste."

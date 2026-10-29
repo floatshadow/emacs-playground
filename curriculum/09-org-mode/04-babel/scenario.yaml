@@ -45,7 +45,7 @@ steps:
         elisp: >-
           (with-current-buffer (find-buffer-visiting "/work/org/pipeline.org")
             (org-with-wide-buffer (goto-char (point-min))
-              (re-search-forward "^[ \t]*#\\+begin_src python.*:var +rows=samples" nil t)))
+              (re-search-forward "^[ \t]*#\\+begin_src python.*:var +rows *= *samples" nil t)))
         hint: "Type it on the #+begin_src python line itself, after :results table, separated by a space."
       - text: "#+RESULTS: scores lists slow and fast pages"
         elisp: >-
@@ -57,7 +57,7 @@ steps:
                            (and r (let ((end (progn (goto-char r) (org-babel-result-end))))
                                     (goto-char r)
                                     (and (re-search-forward "| *slow" end t) (progn (goto-char r) (re-search-forward "| *fast" end t)))))))))))
-        hint: "C-c C-c inside the Python block. An error about rows means the :var did not take: check the spelling, rows=samples with no spaces around =."
+        hint: "C-c C-c inside the Python block. An error about rows means the :var did not take: check the spelling of :var rows=samples (samples is the #+name above the sh block)."
   - id: block
     goal: Insert a Rust block under Verdict
     detail: "Go to the empty line at the end (`M->`). `C-c C-,` offers block templates; `s` makes a source block and leaves the cursor after `#+begin_src`. Type `rust :var scores=scores`."

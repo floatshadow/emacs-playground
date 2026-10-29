@@ -62,7 +62,7 @@ setup:
 steps:
   - id: skeleton
     goal: Write the skeleton of paper.typ and let its PDF follow every save
-    detail: "`C-x C-f /work/paper-lab/paper.typ` `RET` creates the paper. Type a skeleton, each part on its own line with a blank line between: `#set heading(numbering: \"1.\")`, the title `= Lantern build times`, then `== Method`, the sentence `We built three folders of notes and timed each build.`, `== Results` and `== Discussion`. Save, then `C-c C-w` starts `typst watch`: `[Watch]` appears in the mode line, and from now on every save rebuilds paper.pdf, which the preview pane shows. (`C-u C-c C-w` turns watching on whatever its state.)"
+    detail: "`C-x C-f /work/paper-lab/paper.typ` `RET` creates the paper. Type a skeleton, each part on its own line with a blank line between: `#set heading(numbering: \"1.\")`, the title `= Lantern build times`, then `== Method`, the sentence `We built three folders of notes and timed each build.`, `== Results` and `== Discussion`. Save, then `C-c C-w` starts `typst watch`: `[Watch]` appears in the mode line, and from now on every save rebuilds paper.pdf, which the preview pane shows. (`C-u C-c C-w` turns watching on whatever its state. Outside Focus mode the browser may take Ctrl+W and close the tab: `M-x typst-ts-watch-mode` is the same command.)"
     demo: 'C-x C-f "/work/paper-lab/paper.typ" RET ~1000 C-x 1 "#set heading(numbering: \"1.\")\n\n= Lantern build times\n\n== Method\n\nWe built three folders of notes and timed each build.\n\n== Results\n\n== Discussion\n" ~300 C-x C-s ~1000 C-u C-c C-w ~3000'
     conditions:
       - text: paper.typ has a title and three sections
@@ -72,7 +72,7 @@ steps:
         hint: "A heading is = or == at the very start of a line, then a space: = is the title, == a section. Files save themselves a few seconds after you stop typing; C-x C-s saves now."
       - text: typst watch is running
         buffer: { name: "*Typst-Watch*", process: running }
-        hint: "C-c C-w in paper.typ. If [Watch] was already in the mode line, your C-c C-w turned it off: press it once more."
+        hint: "C-c C-w in paper.typ. If [Watch] was already in the mode line, your C-c C-w turned it off: press it once more. Browsers like to grab Ctrl+W: use Focus mode, or M-x typst-ts-watch-mode."
       - text: paper.pdf shows the sections
         shell: { run: "pdftotext paper.pdf - | grep -q Discussion" }
         hint: "Watch mode rebuilds on save. If the PDF does not change, the *Typst-Watch* buffer (C-x b) names the line Typst could not read."
@@ -139,7 +139,7 @@ steps:
   - id: synctex
     mode: gui
     goal: In the GUI frame, find the typo in the appendix PDF, jump back to the source and fix it
-    detail: "A PDF shows as pages only in the GUI frame, so the screen switches to it for this task. In appendix.tex, build once more with `C-c C-c` `RET`: LaTeX writes the SyncTeX map that links lines and pages, which a restored checkpoint does not keep. Then `C-c C-v` opens appendix.pdf beside the source, at the page of the cursor's line. Select the PDF (click it, or `C-x o`) and search it: `C-s mesurements`; the match lights up on page 2. While the search is still open, `M-s s` jumps back to that line of appendix.tex (a double-click on the word does too). Fix the word, then `C-c C-c` `RET` rebuilds and the PDF beside it reloads."
+    detail: "A PDF shows as pages only in the GUI frame, so the screen switches to it for this task. In appendix.tex, build once more with `C-c C-c`, `LaTeXMk`, `RET` (type the name: after a build AUCTeX offers View): LaTeX writes the SyncTeX map that links lines and pages, which a restored checkpoint does not keep. Then `C-c C-v` opens appendix.pdf beside the source, at the page of the cursor's line. Select the PDF (click it, or `C-x o`) and search it: `C-s mesurements`; the match lights up on page 2. While the search is still open, `M-s s` jumps back to that line of appendix.tex (a double-click on the word does too). Fix the word, then `C-c C-c` `LaTeXMk` `RET` rebuilds and the PDF beside it reloads."
     demo: 'C-x C-f "/work/paper-lab/appendix.tex" RET ~800 C-x 1 M-< ~300 C-c C-c ~800 "LaTeXMk" RET ~8000 C-x C-s ~6000 C-c C-v ~3000 C-x b ~300 "appendix.pdf" RET ~800 C-s ~400 "mesurements" ~1000 M-s s ~1500 C-s "mesure" RET M-DEL "measure" ~300 C-c C-c ~800 "LaTeXMk" RET ~8000'
     conditions:
       - text: the PDF is open in pdf-tools
@@ -149,7 +149,7 @@ steps:
         any:
           - event: { command: pdf-isearch-sync-backward }
           - event: { command: pdf-sync-backward-search-mouse }
-        hint: "M-s s works only while the search in the PDF is active (I-search at the bottom); after RET, start the search again. Unable to create synctex scanner means the map is missing: C-c C-c RET in appendix.tex first."
+        hint: "M-s s works only while the search in the PDF is active (I-search at the bottom); after RET, start the search again. Unable to create synctex scanner means the map is missing: in appendix.tex, C-c C-c, type LaTeXMk, RET first."
       - text: the typo is fixed in appendix.tex
         file: { path: paper-lab/appendix.tex, not_contains: mesurement }
         hint: "The backward search puts the cursor on the sentence: measurements has an a after the first e."
@@ -157,7 +157,7 @@ steps:
         all:
           - buffer: { name: "*/work/paper-lab/appendix output*", process: none, contains: "TeX Output finished" }
           - shell: { run: "t=$(pdftotext appendix.pdf -) && echo \"$t\" | grep -q Setup && ! echo \"$t\" | grep -q mesurement", timeout: 10 }
-        hint: "C-c C-c, then RET for LaTeXMk, after the fix: the PDF beside the source reloads when the build finishes."
+        hint: "C-c C-c, then type LaTeXMk and RET, after the fix (RET alone takes the offered View): the PDF beside the source reloads when the build finishes."
     stuck:
       - when: { step_seconds: 240 }
         say: "C-c C-v needs the GUI frame to show pages: the Frame switch is above the screen. In the PDF, C-s searches its text; M-s s, while that search is open, goes back to the source line."

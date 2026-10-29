@@ -39,12 +39,12 @@ steps:
         hint: "Read the build output: an error there names the line. The fixture compiles as it is, so undo any edit with C-/."
   - id: watch
     goal: Turn on watch mode
-    detail: "`C-x 1` closes the build output, then `C-c C-w` starts `typst watch` for report.typ. `[Watch]` appears in the mode line. (`C-u C-c C-w` turns it on whatever its state; plain `C-c C-w` switches it on and off.)"
+    detail: "`C-x 1` closes the build output, then `C-c C-w` starts `typst watch` for report.typ. `[Watch]` appears in the mode line. (`C-u C-c C-w` turns it on whatever its state; plain `C-c C-w` switches it on and off. Outside Focus mode the browser may take Ctrl+W and close the tab: `M-x typst-ts-watch-mode` is the same command.)"
     demo: 'C-x 1 ~400 C-u C-c C-w ~1500'
     conditions:
       - text: watch mode was switched
         event: { command: typst-ts-watch-mode }
-        hint: "C-c C-w in the report.typ buffer. If the mode line already showed [Watch], your C-c C-w turned it off: press it once more."
+        hint: "C-c C-w in the report.typ buffer. If the mode line already showed [Watch], your C-c C-w turned it off: press it once more. Browsers like to grab Ctrl+W: use Focus mode, or M-x typst-ts-watch-mode."
       - text: typst watch is running
         buffer: { name: "*Typst-Watch*", process: running }
         hint: "Look for [Watch] in the mode line. Without it, the process stopped: C-c C-w again starts it."

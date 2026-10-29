@@ -7,7 +7,7 @@ minutes: 12
 Some programs want a real terminal: test runners with colours, `htop`, `less`, an interactive installer. eat is a :jargon[terminal emulator] written in Emacs Lisp: a shell runs in a buffer, full-screen programs draw in it, and because it is a buffer you can search and copy its output with the keys you already know.
 
 :::vscode
-The integrated terminal (Ctrl+`) is `C-x p t`, which opens a terminal in the project's root, or `M-x eat` in the current file's folder. Toggling the panel is ``C-` `` (popper, lesson 3.5). The difference: selecting text with the mouse is replaced by switching the terminal to Emacs keys, where `C-s`, `C-SPC` and `M-w` work on the output like on any buffer.
+The integrated terminal (``Ctrl+` ``) is `C-x p t`, which opens a terminal in the project's root, or `M-x eat` in the current file's folder. Toggling the panel is ``C-` `` (popper, lesson 3.5). The difference: selecting text with the mouse is replaced by switching the terminal to Emacs keys, where `C-s`, `C-SPC` and `M-w` work on the output like on any buffer.
 :::
 
 ## Three input modes

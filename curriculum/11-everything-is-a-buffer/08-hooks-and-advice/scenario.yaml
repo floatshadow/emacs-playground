@@ -31,7 +31,7 @@ setup:
 steps:
 - id: hook
   goal: 'Compile Typst on every save: write form 1'
-  detail: Under comment 1 in glue.el, write a function that runs `typst compile` on the file when the buffer is in typst-ts-mode, and add it to `after-save-hook`. Type `RET` between lines and let Emacs indent; `M-x eval-buffer` runs the file. The demo shows the exact code.
+  detail: 'Under comment 1 in glue.el, type the first function and its `add-hook` line from the lesson (The glue): it runs `typst compile` on the file when the buffer is in typst-ts-mode. Type `RET` between lines and let Emacs indent; `M-x eval-buffer` runs the file.'
   demo: 'C-x b ~400 "glue.el" ~500 RET ~400 M-< ~300 C-s ~300 "1. " ~300 RET ~300 C-e ~300 RET ~300 "(defun glue-typst-compile ()\n(when (derived-mode-p ''typst-ts-mode)\n(let ((compilation-buffer-name-function (lambda (_) \"*typst*\")))\n(compile (concat \"typst compile \" (file-name-nondirectory buffer-file-name))))))\n(add-hook ''after-save-hook #''glue-typst-compile)" ~500 C-x C-s ~500 M-x ~500 "eval-buffer" ~300 RET ~800'
   conditions:
   - text: the code was evaluated
@@ -51,7 +51,7 @@ steps:
   stuck:
   - when:
       step_seconds: 300
-    say: 'Watch it shows the code; you can also type it exactly as the demo does. (defun NAME () (when (derived-mode-p ''typst-ts-mode) (let ((compilation-buffer-name-function (lambda (_) "*typst*"))) (compile (concat "typst compile " (file-name-nondirectory buffer-file-name)))))) and (add-hook ''after-save-hook #''NAME).'
+    say: 'The code is in the lesson text above the steps, under The glue: copy the first defun and the add-hook line under comment 1, then M-x eval-buffer.'
 - id: save-typ
   goal: Save report.typ and watch it compile
   detail: Open `/work/workbench/report/report.typ`, add a line at the end and `C-x C-s`. The hook runs `typst compile`; its output appears in a window `*typst*` at the bottom, and `report.pdf` appears next to the source.
@@ -70,7 +70,7 @@ steps:
     hint: 'Look at *typst*: if it shows an error, the Typst source has a typo in the line you added.'
 - id: finish
   goal: 'Report the result in the echo area: write form 2'
-  detail: Under comment 2, write a function of two arguments, the buffer and a status string, that shows a message when the buffer is `*typst*`, and add it to `compilation-finish-functions`. `M-x eval-buffer` again.
+  detail: 'Under comment 2, type the second function and its `add-hook` line from the lesson (The glue): two arguments, the buffer and a status string, and a message when the buffer is `*typst*`. `M-x eval-buffer` again.'
   demo: 'C-x b ~400 "glue.el" ~500 RET ~400 M-< ~300 C-s ~300 "2. " ~300 RET ~300 C-e ~300 RET ~300 "(defun glue-typst-done (buffer status)\n(when (equal (buffer-name buffer) \"*typst*\")\n(message \"Typst: %s\" (string-trim status))))\n(add-hook ''compilation-finish-functions #''glue-typst-done)" ~500 C-x C-s ~500 M-x ~500 "eval-buffer" ~300 RET ~800'
   conditions:
   - text: the code was evaluated
@@ -89,7 +89,7 @@ steps:
     hint: 'compile calls these functions with two arguments: the build''s buffer and a string such as finished. Compare the buffer''s name with *typst* so other builds stay quiet.'
 - id: rule
   goal: 'Keep *typst* out of sight: write form 3'
-  detail: Under comment 3, add a rule to `display-buffer-alist` (lesson 3.5) that matches `*typst*` and uses `display-buffer-no-window`, with `(allow-no-window . t)`. In the pattern, `\\*` matches a literal star. `M-x eval-buffer`.
+  detail: 'Under comment 3, type the `add-to-list` form from the lesson (The glue): a rule for `display-buffer-alist` (lesson 3.5) that matches `*typst*` and uses `display-buffer-no-window`, with `(allow-no-window . t)`. In the pattern, `\\*` matches a literal star. `M-x eval-buffer`.'
   demo: C-x b ~400 "glue.el" ~500 RET ~400 M-< ~300 C-s ~300 "3. " ~300 RET ~300 C-e ~300 RET ~300 "(add-to-list 'display-buffer-alist '(\"\\\\*typst\\\\*\" (display-buffer-no-window) (allow-no-window . t)))" ~500 C-x C-s ~500 M-x ~500 "eval-buffer" ~300 RET ~800
   conditions:
   - text: the code was evaluated

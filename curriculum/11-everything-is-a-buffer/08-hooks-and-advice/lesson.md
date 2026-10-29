@@ -24,6 +24,28 @@ The popup from lesson 4.4 opens while you type a symbol, and `RET` then picks it
 
 :jargon[user-lisp] is the folder `emacs.d/user-lisp/`. Emacs 31 byte-compiles the files there at startup and collects their `;;;###autoload` lines, but it runs nothing else from them on its own. That suits a lesson: what you evaluate with :try[M-x] `eval-buffer` works until Emacs restarts. To keep a form for good, put `;;;###autoload` on the line before it, or move it into `custom.el` (lesson 13.1).
 
+## The glue
+
+These are the three forms you will write in glue.el, each under its comment:
+
+```elisp
+(defun glue-typst-compile ()
+  (when (derived-mode-p 'typst-ts-mode)
+    (let ((compilation-buffer-name-function (lambda (_) "*typst*")))
+      (compile (concat "typst compile " (file-name-nondirectory buffer-file-name))))))
+(add-hook 'after-save-hook #'glue-typst-compile)
+
+(defun glue-typst-done (buffer status)
+  (when (equal (buffer-name buffer) "*typst*")
+    (message "Typst: %s" (string-trim status))))
+(add-hook 'compilation-finish-functions #'glue-typst-done)
+
+(add-to-list 'display-buffer-alist
+             '("\\*typst\\*" (display-buffer-no-window) (allow-no-window . t)))
+```
+
+The first runs `compile` on the saved file, only in Typst buffers; binding `compilation-buffer-name-function` around the call names its buffer `*typst*`. The second gets the build's buffer and status and speaks only for `*typst*`. The third is a rule for `display-buffer-alist`: a regular expression for the buffer's name (`\\*` is a literal star) and the action that gives it no window.
+
 ## Per-folder settings
 
 `.dir-locals.el` in a folder sets variables for the files below it: an indentation width for one project, a compile command, a formatter. `M-x add-dir-local-variable` writes the file for you. Emacs asks before applying values it does not know to be safe; the formatter used here is marked safe by its package, so it applies at once.

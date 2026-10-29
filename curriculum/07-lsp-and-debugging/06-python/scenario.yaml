@@ -60,7 +60,7 @@ steps:
         hint: "Start it from tips.py so pet chooses the interpreter. A REPL started elsewhere runs the system Python."
   - id: explore
     goal: Send the file with C-c C-c and try with_tip
-    detail: "Back in tips.py (`C-x o`), `C-c C-c` sends the whole file to the REPL. Then, in the REPL, type `with_tip(100)` and `RET`: 1600.0, not 115. The percentage is used as if it were a fraction."
+    detail: "Back in tips.py (`C-x o`), `C-c C-c` sends the whole file to the REPL. Then, in the REPL, type `with_tip(100)` and `RET`: 1600, not 115. The percentage is used as if it were a fraction."
     demo: 'C-x b ~300 "tips.py" RET ~400 C-c C-c ~1200 C-c C-z ~500 M-> ~300 "with_tip(100)" ~300 RET ~1200'
     conditions:
       - text: the buffer was sent

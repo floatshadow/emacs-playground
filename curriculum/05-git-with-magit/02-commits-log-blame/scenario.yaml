@@ -53,7 +53,7 @@ steps:
         hint: "RET in the log, on a commit's line. SPC also shows the commit, without moving the cursor."
       - text: that commit is shown
         elisp: '(seq-find (lambda (w) (with-current-buffer (window-buffer w) (and (derived-mode-p (quote magit-revision-mode)) (equal (magit-rev-format "%s" magit-buffer-revision) "Add totals per category")))) (window-list))'
-        hint: "RET shows the commit on the cursor's line. n and p move between commits; the summary is the text after the author column."
+        hint: "RET shows the commit on the cursor's line. n and p move between commits; each line shows the short hash, then the summary, then the author and the age."
   - id: blame
     goal: Find who last changed the CURRENCY line, and open that commit
     detail: "Who set the currency to euros, and when? Open `/work/ledger/src/lib.rs`, put the cursor on the line `pub const CURRENCY`, and press `C-c f b`. Each block of lines gets a heading: the commit that last changed it, with author and date. Then `RET` on the line opens that commit in full."

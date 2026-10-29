@@ -7,7 +7,7 @@ minutes: 15
 Emacs shows a lot of buffers by itself: help, build output, search results, shells. Where each one appears is not hard-wired. Every time Emacs needs to show a buffer it consults a list of rules, `display-buffer-alist`, and the first rule that matches decides. Once you can read and write a rule, :jargon[pop-ups] go where you want them.
 
 :::vscode
-The panel at the bottom (Problems, Output, Terminal) is a habit Emacs can reproduce: build output already opens at the bottom, a third of the screen high, and ``C-` `` toggles the latest pop-up the way Ctrl+` toggles the terminal panel. Where VS Code's layout is fixed, here each kind of buffer gets the place you give it.
+The panel at the bottom (Problems, Output, Terminal) is a habit Emacs can reproduce: build output already opens at the bottom, a third of the screen high, and ``C-` `` toggles the latest pop-up the way ``Ctrl+` `` toggles the terminal panel. Where VS Code's layout is fixed, here each kind of buffer gets the place you give it.
 :::
 
 ## Reading a rule

@@ -70,7 +70,7 @@ steps:
         all:
           - event: { command: next-error, min: 2 }
           - elisp: '(and (buffer-live-p next-error-last-buffer) (with-current-buffer next-error-last-buffer (derived-mode-p (quote grep-mode))))'
-        hint: "Start with the cursor in the grep buffer; from main.rs, M-g M-n would carry on through the build errors. C-x o moves to the grep window."
+        hint: "Press M-g M-n twice. It follows the list you used last, the grep buffer; if it walks the build errors instead, C-x o into the grep window and press it again."
       - text: the cursor is on a TODO in the crate
         elisp: '(let ((w (selected-window))) (with-current-buffer (window-buffer w) (and buffer-file-name (string-prefix-p "/work/workbench/broken/src/" buffer-file-name) (save-excursion (goto-char (window-point w)) (beginning-of-line) (looking-at ".*TODO")))))'
         hint: "Each M-g M-n opens the next match in its file, with the cursor on the TODO line."
