@@ -53,7 +53,7 @@ export function FrameSwitch() {
           title: guiAvailable ? t('frame.guiTitle') : t('frame.guiUnavailable'),
         },
       ]}
-      onChange={(m) => void switchFrame(m)}
+      onChange={(m) => void switchFrame(m, 'learner')}
     />
   )
 }

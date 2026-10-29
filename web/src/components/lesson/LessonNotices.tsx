@@ -39,7 +39,7 @@ function GuiNotice() {
         size="small"
         variant="primary"
         disabled={starting}
-        onClick={() => void switchFrame('gui')}
+        onClick={() => void switchFrame('gui', 'learner')}
       >
         {starting ? t('notices.guiStarting') : t('notices.guiOpen')}
       </Button>

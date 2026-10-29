@@ -12,7 +12,7 @@ import { rpc } from '../../api/session/rpc'
 import { useSessionStore } from '../../store/session'
 import { useUiStore } from '../../store/ui'
 import { hintKey, resumeStep, selectStepView, type StepView } from '../../store/selectors'
-import { switchFrame } from '../screen/frame'
+import { guiChosenByLearner, switchFrame } from '../screen/frame'
 import { wantsGui } from './lessonTags'
 import { focusTerminal } from '../screen/focus'
 import { loadAtStep } from '../live/actions'
@@ -125,7 +125,9 @@ export function useScenarioLoad(
 
   // A step that needs the GUI frame (a project task with images or PDF
   // pages: step mode gui) switches to it when it becomes active, once per
-  // activation, so the learner can switch back.
+  // activation, so the learner can switch back. A step of a terminal
+  // lesson, or a terminal task, returns to the terminal from a GUI frame
+  // that a lesson opened (not one the learner picked).
   const guiStep = useRef<string | null>(null)
   useEffect(() => {
     if (!scenario || !active || active.lessonId !== lessonId || guiOff) return
@@ -133,7 +135,12 @@ export function useScenarioLoad(
     if (guiStep.current === key) return
     guiStep.current = key
     const step = scenario.steps.find((s) => s.id === active.stepId)
-    if (step?.mode === 'gui' && useSessionStore.getState().mode !== 'gui') void switchFrame('gui')
+    const mode = useSessionStore.getState().mode
+    if (step?.mode === 'gui') {
+      if (mode !== 'gui') void switchFrame('gui')
+    } else if (!wantsGui(scenario) && mode === 'gui' && !guiChosenByLearner()) {
+      void switchFrame('terminal')
+    }
   }, [active, lessonId, scenario, guiOff])
 
   return {
