@@ -911,6 +911,14 @@ command chosen by name."
   "Keys of the current command, in `key-description' form."
   (key-description (this-command-keys-vector)))
 
+(defun playground--saved-keys ()
+  "Keys of the running command: those `pre-command-hook' saved, if any.
+Commands that read keys themselves change `this-command-keys': after
+Embark's C-. d it is d."
+  (if (> (length playground--pre-keys) 0)
+      (key-description playground--pre-keys)
+    (playground--this-keys)))
+
 (defun playground--key-event (cmd keys mx &optional buffer frame)
   "Build a key event for CMD invoked with KEYS; MX when run through M-x.
 BUFFER is where the command ran: by default the selected window's
@@ -950,10 +958,7 @@ kind of frame it was typed in, by default the selected window's."
                (mx (and playground--mx-armed (>= playground--mx-armed depth)))
                ;; The keys saved before the command ran: commands that
                ;; read keys themselves (C-h k) change `this-command-keys'.
-               (keys (cond (mx (playground--mx-keys playground--mx-armed))
-                           ((> (length playground--pre-keys) 0)
-                            (key-description playground--pre-keys))
-                           (t (playground--this-keys))))
+               (keys (if mx (playground--mx-keys playground--mx-armed) (playground--saved-keys)))
                ;; The frame the keys were typed in (C-x C-c deletes it).
                (frame (and (> (length playground--pre-keys) 0) playground--pre-frame))
                ;; Focus and mouse-movement events are no keys of the
@@ -1009,11 +1014,14 @@ kind of frame it was typed in, by default the selected window's."
             ;; Report the command now so the ticker shows C-x C-f while
             ;; its prompt is open, not after it has finished.
             (let ((mx (and playground--mx-armed (= playground--mx-armed outer))))
-              (playground--emit (playground--key-event
-                                 cmd
-                                 (if mx (playground--mx-keys outer) (playground--this-keys))
-                                 mx
-                                 (window-buffer (playground--user-window))))
+              ;; A prompt opened with no keys left to name (Embark's
+              ;; action asking after C-. quit the prompt it was typed
+              ;; in, which reported the keys) is the same command.
+              (let ((keys (if mx (playground--mx-keys outer) (playground--saved-keys))))
+                (unless (string-empty-p keys)
+                  (playground--emit (playground--key-event
+                                     cmd keys mx
+                                     (window-buffer (playground--user-window))))))
               (push (cons outer cmd) playground--early))))
           (playground--minibuffer-event t (playground--prompt) depth "prompt")
           (playground--schedule-state))))))
@@ -1026,12 +1034,15 @@ kind of frame it was typed in, by default the selected window's."
         ;; The command that leaves the prompt (RET runs exit-minibuffer,
         ;; C-g minibuffer-keyboard-quit) exits by a throw, so its own
         ;; `post-command-hook' run never happens; report it here, where
-        ;; its keys are still known.
+        ;; its keys are still known.  A prompt closed by the command
+        ;; that opened it (Embark's action filling in and accepting
+        ;; Delete file:) was reported when it opened.
         (when-let* ((cmd (playground--command)))
-          (let ((keys (playground--this-keys)))
-            (unless (string-empty-p keys)
+          (let ((keys (playground--saved-keys)))
+            (unless (or (string-empty-p keys) (rassq cmd playground--early))
               (playground--emit (playground--key-event cmd keys nil (current-buffer)))
-              (setq playground--exit-reported cmd))))
+              (setq playground--exit-reported cmd
+                    playground--pre-keys []))))
         (playground--minibuffer-event nil (playground--prompt) (minibuffer-depth) "prompt")
         (playground--schedule-state)))))
 

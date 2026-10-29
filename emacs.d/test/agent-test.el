@@ -489,6 +489,46 @@ Pings are left out unless TYPE is \"ping\"."
                            (pg-test-messages "key"))
                    '(("C-x C-f" "find-file") ("C-g" "minibuffer-keyboard-quit"))))))
 
+(ert-deftest pg-agent/action-key-read-by-the-command ()
+  "Embark's C-. d in a prompt is C-., once, then the y that confirms it.
+embark-act reads d itself (`this-command-keys' becomes d), quits the
+prompt it was typed in, and its action asks a question and then opens
+a prompt of its own, both while embark-act is still the command."
+  (pg-test-with-agent
+    (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1))
+              ((symbol-function 'minibuffer-prompt) (lambda () "Find file: ")))
+      (let ((this-command 'find-file) (real-this-command 'find-file))
+        (cl-letf (((symbol-function 'playground--this-keys) (lambda () "C-x C-f")))
+          (playground--on-minibuffer-setup)
+          (playground--post-command)))
+      (pg-test-clear)
+      (let ((this-command 'embark-act) (real-this-command 'embark-act))
+        (cl-letf (((symbol-function 'playground--this-keys) (lambda () "d")))
+          (setq playground--pre-keys (kbd "C-."))
+          ;; The action quits the file prompt (the command loop runs
+          ;; the hook once more, at depth 0)...
+          (playground--on-minibuffer-exit)
+          (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 0)))
+            (playground--post-command))
+          ;; ...asks y or n, when `this-command-keys' is empty...
+          (cl-letf (((symbol-function 'playground--this-keys) (lambda () "")))
+            (playground--on-minibuffer-setup))))
+      (let ((this-command 'y-or-n-p-insert-y) (real-this-command 'y-or-n-p-insert-y))
+        (cl-letf (((symbol-function 'playground--this-keys) (lambda () "y")))
+          (setq playground--pre-keys [?y])
+          (playground--on-minibuffer-exit)))
+      ;; ...and fills in a prompt of its own.
+      (let ((this-command 'embark-act) (real-this-command 'embark-act))
+        (cl-letf (((symbol-function 'playground--this-keys) (lambda () "y")))
+          (playground--on-minibuffer-setup)
+          (playground--on-minibuffer-exit))))
+    (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 0)))
+      (pg-test-command 'embark-act "" nil))
+    (pg-test-settle)
+    (should (equal (mapcar (lambda (k) (list (alist-get 'keys k) (alist-get 'cmd k)))
+                           (pg-test-messages "key"))
+                   '(("C-." "embark-act") ("y" "y-or-n-p-insert-y"))))))
+
 (ert-deftest pg-agent/unbound-keys ()
   "An unbound key is one key event, however often its message is shown."
   (pg-test-with-agent
