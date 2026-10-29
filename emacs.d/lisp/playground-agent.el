@@ -902,7 +902,12 @@ command chosen by name."
   real-this-command)
 
 (defun playground--pre-command ()
-  "Remember the keys of the command about to run, and the command."
+  "Remember the keys of the command about to run, and the command.
+A command starting at this depth means every command at this depth or
+deeper has finished, even one whose last part ran from a timer and so
+got no `post-command-hook' run (Embark's action after C-.)."
+  (let ((depth (minibuffer-depth)))
+    (setq playground--early (seq-remove (lambda (e) (>= (car e) depth)) playground--early)))
   (setq playground--pre-keys (this-command-keys-vector)
         playground--pre-command (playground--command)
         playground--pre-frame (playground--frame-kind)))

@@ -128,7 +128,8 @@ Pings are left out unless TYPE is \"ping\"."
   "Return the agent to a pristine state."
   (setq playground--queue nil playground--queue-length 0
         playground--backoff 1 playground--last-state nil
-        playground--early nil playground--mx-reader nil playground--mx-armed nil))
+        playground--early nil playground--mx-reader nil playground--mx-armed nil
+        playground--pre-keys [] playground--pre-command nil playground--exit-reported nil))
 
 (defmacro pg-test-with-agent (&rest body)
   "Run BODY with a fake sessiond and a connected agent."
@@ -493,7 +494,8 @@ Pings are left out unless TYPE is \"ping\"."
   "Embark's C-. d in a prompt is C-., once, then the y that confirms it.
 embark-act reads d itself (`this-command-keys' becomes d), quits the
 prompt it was typed in, and its action asks a question and then opens
-a prompt of its own, both while embark-act is still the command."
+a prompt of its own, both from a timer while embark-act is still the
+command."
   (pg-test-with-agent
     (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1))
               ((symbol-function 'minibuffer-prompt) (lambda () "Find file: ")))
@@ -522,12 +524,17 @@ a prompt of its own, both while embark-act is still the command."
         (cl-letf (((symbol-function 'playground--this-keys) (lambda () "y")))
           (playground--on-minibuffer-setup)
           (playground--on-minibuffer-exit))))
-    (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 0)))
-      (pg-test-command 'embark-act "" nil))
     (pg-test-settle)
     (should (equal (mapcar (lambda (k) (list (alist-get 'keys k) (alist-get 'cmd k)))
                            (pg-test-messages "key"))
-                   '(("C-." "embark-act") ("y" "y-or-n-p-insert-y"))))))
+                   '(("C-." "embark-act") ("y" "y-or-n-p-insert-y"))))
+    ;; The action ran from a timer, so no hook run ended embark-act; the
+    ;; next command at depth 0 does, and a later C-. is reported again.
+    (should playground--early)
+    (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 0))
+              ((symbol-function 'this-command-keys-vector) (lambda () (kbd "M-s r"))))
+      (playground--pre-command))
+    (should-not playground--early)))
 
 (ert-deftest pg-agent/unbound-keys ()
   "An unbound key is one key event, however often its message is shown."
