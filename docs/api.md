@@ -108,7 +108,7 @@ Envelope `{t, seq, ts, …}`, `seq` monotonic from 1 per process; unknown types 
 - `check`: as the RPC; `unknown: true` (with `ok: false`) when unevaluable; `detail` is evaluator output.
 - `step`: `lessonId, stepId, status, index (0-based), count, lessonComplete?, lap?, lapMs?` (`lapMs` on the event that ends a lap).
 - `nudge`: `id` (stable per rule), `kind: calm|ask, title, body`.
-- `checkpoint`: `label, ref, createdAt`. `mode`: `mode`. `modules`: `enabled, restarting` (`true`, then `false`).
+- `checkpoint`: `label, ref, createdAt`. `mode`: `mode`. `modules`: `enabled, restarting` (`true`, then `false` once the lesson that asked for the modules is set up).
 - `gap`: `from, to`; resync (`rpc check`) or reconnect.
 - `error`: `code, message` for the learner (fixtures, setup, `emacs_unavailable`).
 

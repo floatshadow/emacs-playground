@@ -68,7 +68,7 @@
     "replacedBody": "Another tab or window attached to the terminal. Your work is safe; take it back here whenever you like.",
     "reattach": "Use it here",
     "restarting": "Emacs is restarting.",
-    "restartingBody": "Your files are safe. Buffers come back from the last snapshot in a moment.",
+    "restartingBody": "Your files are safe, and your keys wait. Buffers come back from the last snapshot in a moment.",
     "frameClosed": "The Emacs frame closed.",
     "frameClosedBody": "C-x C-c ran save-buffers-kill-terminal. The playground is reopening your frame; buffers are intact because Emacs runs as a daemon. On your own machine this would quit Emacs.",
     "suspended": "Emacs is suspended.",
@@ -78,7 +78,7 @@
     "unavailable": "Emacs is not available yet.",
     "unavailableBody": "Retrying. If this lasts, use Restart Emacs on the session page.",
     "modules": "Loading new configuration modules…",
-    "modulesBody": "Emacs restarts with the modules this part teaches. Your buffers come back.",
+    "modulesBody": "Emacs restarts with the modules this part teaches and the lesson is set up again. Your buffers come back; your keys wait until then.",
     "busy": "Emacs is busy.",
     "busyBody": "It has not answered for a few seconds.",
     "reconnecting": "reconnecting…"

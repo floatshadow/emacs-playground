@@ -441,7 +441,8 @@ func TestLoaderModuleChangeRestarts(t *testing.T) {
 	if f.restart.n != 1 {
 		t.Fatalf("restarts %d", f.restart.n)
 	}
-	want := "modules:base,agent,git,editing,files:restarting modules:base,agent,git,editing,files:done step:open:loaded"
+	// The restart is over once the lesson is set up (the browser holds keys until then).
+	want := "modules:base,agent,git,editing,files:restarting step:open:loaded modules:base,agent,git,editing,files:done"
 	if f.evs() != want {
 		t.Fatalf("events %s", f.evs())
 	}

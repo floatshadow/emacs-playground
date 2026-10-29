@@ -326,7 +326,10 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
           return {
             ...base,
             emacs: { ...e, overlay: null, busy: false, restartedAt: ev.ts ?? now },
-            modulesRestarting: false,
+            // A restart for modules is over with its modules event, sent once
+            // the lesson's setup has run too.
+            modulesRestarting:
+              ev.reason && /module/i.test(ev.reason) ? base.modulesRestarting : false,
           }
         case 'unresponsive':
           return { ...base, emacs: { ...e, busy: true } }

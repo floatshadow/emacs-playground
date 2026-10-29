@@ -410,7 +410,9 @@ func (l *Loader) SetModules(mods []string) (bool, error) {
 
 // restartForModules announces and runs, in the background, the daemon
 // restart that loads a changed module set, then calls after (when set)
-// with the restart's context.
+// with the restart's context. The restart is announced as over once after
+// has returned: the browser holds the learner's keys until then, so none
+// land in the frame before the lesson's setup has run.
 func (l *Loader) restartForModules(mods []string, after func(context.Context)) {
 	l.emit(&protocol.ModulesEvent{Enabled: mods, Restarting: true})
 	l.bg.Add(1)
@@ -421,10 +423,10 @@ func (l *Loader) restartForModules(mods []string, after func(context.Context)) {
 		if err := l.Restart.RestartEmacs(ctx, "module set changed"); err != nil {
 			l.log().Error("restart for modules failed", "err", err)
 		}
-		l.emit(&protocol.ModulesEvent{Enabled: mods, Restarting: false})
 		if after != nil {
 			after(ctx)
 		}
+		l.emit(&protocol.ModulesEvent{Enabled: mods, Restarting: false})
 	}()
 }
 

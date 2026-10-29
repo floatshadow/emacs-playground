@@ -64,6 +64,12 @@ const clipboardProvider: IClipboardProvider = {
   },
 }
 
+/** Emacs is restarting: keys typed now would be lost or misplaced. */
+export function keysHeld(): boolean {
+  const s = useSessionStore.getState()
+  return s.modulesRestarting || s.emacs.overlay === 'restarting'
+}
+
 const isFirefox = () => typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent)
 
 /**
@@ -181,10 +187,12 @@ class TerminalHost {
       }
     })
     term.attachCustomKeyEventHandler((e) => {
-      // While sessiond plays steps (Skip this step, Go to this step), the
-      // learner's keys wait.
+      // While sessiond plays steps (Skip this step, Go to this step) or
+      // Emacs restarts (and, for modules, the lesson is set up again), the
+      // learner's keys wait: they would reach a frame that is gone, or one
+      // that setup is about to change.
       const ui = useUiStore.getState()
-      if (ui.skipping || ui.stepJump) {
+      if (ui.skipping || ui.stepJump || keysHeld()) {
         e.preventDefault()
         return false
       }

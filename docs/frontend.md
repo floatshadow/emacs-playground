@@ -50,7 +50,7 @@ Keys: xterm.js encodes, sessiond's tap decodes. tmux never forwards Emacs's kitt
 
 - `Shift+Escape` moves focus to the lesson pane (leaving focus mode).
 - Outside focus mode, a browser-reserved chord (`Ctrl+W`, …) shows a one-time toast about focus mode.
-- Swallows keys while Skip or Go to this step plays.
+- Swallows keys while Skip or Go to this step plays, and while Emacs restarts (`restarting` until `daemon-restarted`; for modules until `modules {restarting: false}`, after the lesson's setup).
 - Counts a real keydown (not a lone modifier) or a paste as learner input, which stops a demo. `onData` is not input: it also carries focus, mouse and OSC 52 reports.
 
 Focus mode is in-page first: the stage takes the full width and a `role="status"` banner says what it does, whether the keyboard is locked and how to leave (its button, the top-bar button, Shift+Esc). Then document fullscreen and `navigator.keyboard.lock()` are tried, each abandoned after 1.5 s (headless browsers may never answer); leaving that fullscreen ends focus mode.

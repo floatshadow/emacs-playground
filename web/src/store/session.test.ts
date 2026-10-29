@@ -137,6 +137,12 @@ describe('applyEvent reducer', () => {
     s = run([{ t: 'emacs', event: 'daemon-restarted' }], s)
     expect(s.emacs.overlay).toBeNull()
     expect(s.emacs.restartedAt).toBeDefined()
+    // A restart for modules lasts until its modules event (after setup).
+    s = run([{ t: 'modules', enabled: ['base'], restarting: true }], s)
+    s = run([{ t: 'emacs', event: 'daemon-restarted', reason: 'module set changed' }], s)
+    expect(s.modulesRestarting).toBe(true)
+    s = run([{ t: 'modules', enabled: ['base'], restarting: false }], s)
+    expect(s.modulesRestarting).toBe(false)
     s = run([{ t: 'emacs', event: 'unresponsive' }], s)
     expect(s.emacs.busy).toBe(true)
     s = run([{ t: 'emacs', event: 'responsive' }], s)
