@@ -39,7 +39,7 @@ steps:
         hint: "Press C-x g in the box's site folder, not in README.md: Magit shows the repository of the buffer's folder, and /work/tramp is not the one you want."
       - text: Magit shows the box's site repository
         elisp: '(with-current-buffer (window-buffer (selected-window)) (and (derived-mode-p (quote magit-status-mode)) (string-match-p "\\`/ssh:box:.*site/\\''" default-directory)))'
-        hint: "The Magit buffer's header names the repository. If it shows /work/..., open /ssh:box:~/site/ first and press C-x g there."
+        hint: "Magit on the box shows the site's commits under Recent commits. A status that says In the beginning there was darkness, with the lesson folders untracked, is the playground's own workspace repository on this machine: q, open /ssh:box:~/site/ and press C-x g there."
   - id: commit
     goal: Add a line to index.html, then commit it from Magit
     detail: "`C-x C-f index.html RET`, add a line before `</html>`, `C-x C-s`. Then `C-x g`: `S` stages it, `c c` opens the message, type one line, `C-c C-c` commits, on the box."

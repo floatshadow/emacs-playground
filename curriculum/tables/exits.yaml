@@ -124,7 +124,7 @@
 - id: minibuffer-mx
   when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "M-x" } }
   why: "M-x is waiting for a command name."
-  how: "Type part of the name, TAB completes, RET runs it. C-g cancels."
+  how: "Type part of the name, RET runs it. TAB completes it, or in the list from Part 4 on takes the highlighted name: check it first. C-g cancels."
 
 - id: minibuffer-yes-no
   when: { "minibuffer.kind": prompt, "minibuffer.prompt": { regex: "\\((y or n|yes or no)\\)" } }

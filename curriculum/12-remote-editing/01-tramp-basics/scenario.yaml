@@ -86,12 +86,12 @@ steps:
         say: "In the terminal, type ssh box cat app/config.toml and RET. ssh logs in with the playground's key, runs cat on the box and prints the file."
   - id: cleanup
     goal: Close every TRAMP connection
-    detail: "`M-x tramp-cleanup-all-connections`. The connections close; remote buffers stay open and reconnect when you use them again."
+    detail: "`M-x tramp-cleanup-all-connections`: type `cleanup-all-conn` and check that the highlighted line ends in connections before `RET` (`tramp-cleanup-all-buffers`, listed next to it, also kills the remote buffers). The connections close; remote buffers stay open and reconnect when you use them again."
     demo: 'M-x ~400 "tramp-cleanup-all-connections" ~300 RET ~1500'
     conditions:
       - text: tramp-cleanup-all-connections ran
         event: { command: tramp-cleanup-all-connections }
-        hint: "M-x, then tramp-cleanup-all (TAB completes the rest), RET."
+        hint: "M-x, then type cleanup-all-conn until the highlighted line is tramp-cleanup-all-connections, RET. TAB would take whatever is highlighted, which may be tramp-cleanup-all-buffers."
       - text: config.toml is still open
         elisp: '(seq-some (lambda (b) (string-match-p "\\`/ssh:box:.*app/config\\.toml\\''" (or (buffer-file-name b) ""))) (buffer-list))'
         hint: "Cleaning up closes connections, not buffers. If you killed config.toml, open it again: C-x C-f /ssh:box:~/app/config.toml."
