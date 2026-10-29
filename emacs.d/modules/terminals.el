@@ -93,11 +93,18 @@
 
 ;;;; Lesson 6.2  eat: a terminal in a buffer
 
+;; The daemon has no SHELL, so terminals would run /bin/sh (dash: no
+;; history or line editing, C-r prints ^R).  M-x shell and eat run bash.
+(setq explicit-shell-file-name "/bin/bash")
+
 (playground-with-package eat
   (setq eat-kill-buffer-on-exit t
         eat-enable-mouse t)
-  (with-eval-after-load 'project
-    (keymap-set project-prefix-map "t" #'eat-project))
+  ;; project-prefix-map exists (autoloaded) before project.el loads,
+  ;; which may be never in this part: bind now, not after load.
+  (require 'project)
+  (keymap-set project-prefix-map "t" #'eat-project)
+  (setq eat-shell explicit-shell-file-name)
   ;; Full-screen programs (htop, less) started from Eshell run in eat.
   (add-hook 'eshell-load-hook #'eat-eshell-mode)
   (add-hook 'eshell-load-hook #'eat-eshell-visual-command-mode))

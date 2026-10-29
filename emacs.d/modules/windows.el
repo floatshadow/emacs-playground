@@ -102,8 +102,8 @@ it, so each project keeps its own window layout."
       (tab-bar-new-tab)
       (tab-bar-rename-tab name)
       (project-switch-project dir))))
-(with-eval-after-load 'project
-  (keymap-set project-prefix-map "p" #'playground-project-tab))
+(require 'project)
+(keymap-set project-prefix-map "p" #'playground-project-tab)
 
 (defun playground--close-project-tab (orig &rest args)
   "Around advice for `project-kill-buffers' (ORIG with ARGS).
