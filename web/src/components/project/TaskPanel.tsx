@@ -195,7 +195,9 @@ export function TaskPanel({
       />
       {p.finished && (
         <div className={lessonStyles.doneAll} role="status">
-          {t('project.complete')}
+          {p.skipped > 0
+            ? t('project.completeSkipped', { count: p.skipped })
+            : t('project.complete')}
         </div>
       )}
       {bundle.markdown.trim() && (

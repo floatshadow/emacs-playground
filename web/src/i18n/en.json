@@ -297,6 +297,8 @@
     "checkpoints": "Checkpoints",
     "checkpointsNote": "git refs under refs/playground",
     "complete": "Project complete. Every task is done.",
+    "completeSkipped_one": "Project finished, with {{count}} task skipped by Go to this step. Restore its checkpoint to do it yourself.",
+    "completeSkipped_other": "Project finished, with {{count}} tasks skipped by Go to this step. Restore a checkpoint to do them yourself.",
     "brief": "About this project",
     "notFound": "This project is not written yet.",
     "notFoundBody": "It is listed on the course map as planned.",
