@@ -134,7 +134,7 @@ Statuses and the demo latch: api.md §4.1. Internals:
 
 ### 3.9 Checkpoints
 
-The workspace is a git repository. A checkpoint is a commit at `refs/playground/<lesson>/<step>` made with a temporary index (`GIT_INDEX_FILE=.playground/index.tmp`), so the learner's index and branch are untouched and course files stay untracked. `.git/info/exclude` lists build output (`target`, `_build`, `.venv`, `node_modules`), `.playground/` and emacs.d's package and cache directories. sessiond's git gets `safe.directory=*` via `GIT_CONFIG_COUNT` (bind-mounted `/work` belongs to the host uid).
+The workspace is a git repository. A checkpoint is a commit at `refs/playground/<lesson>/<step>` made with a temporary index (`GIT_INDEX_FILE=.playground/index.tmp`), so the learner's index and branch are untouched and course files stay untracked. `.git/info/exclude` lists build output (`target`, `_build`, `.venv`, `node_modules`), `.playground/` and emacs.d's package and cache directories. sessiond's git gets `safe.directory=*` via `GIT_CONFIG_COUNT` (bind-mounted `/work` belongs to the host uid); checkpoints and shell conditions also get `GIT_OPTIONAL_LOCKS=0`, so their `git status` never holds `index.lock` while the learner's `git add` or `git commit` runs.
 
 `.playground/checkpoints/<ref>.json` (`checkpoint.Meta`) adds what git cannot hold:
 
