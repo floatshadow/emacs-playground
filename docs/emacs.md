@@ -57,7 +57,7 @@ The browser asks Xvnc for a screen the size of its pane (RandR). Without a windo
 
 `emacs --fg-daemon=playground`; terminal frame `emacsclient -t -s playground` in tmux, GUI frame `emacsclient -c -s playground` on `:1`. `C-x C-c` closes only its frame, without asking about unsaved files; sessiond respawns the terminal frame. A frame that opens again shows the most recent file buffer, not `*scratch*`.
 
-Saving: `auto-save-visited-mode` saves file buffers 5 s after the last edit, without format on save (apheleia skips those saves), but never over a file changed on disk since visited (`auto-save-visited-predicate`; otherwise a timer would ask "Save anyway?" after a lesson reset). Unmodified buffers auto-revert. No backup, auto-save or lock files. sessiond saves modified buffers before the daemon stops (backend.md §3.3).
+Saving: `auto-save-visited-mode` saves file buffers 5 s after the last edit, without format on save (apheleia skips those saves; `C-x C-s` formats even when one has already written the buffer), but never over a file changed on disk since visited (`auto-save-visited-predicate`; otherwise a timer would ask "Save anyway?" after a lesson reset). Unmodified buffers auto-revert. No backup, auto-save or lock files. sessiond saves modified buffers before the daemon stops (backend.md §3.3).
 
 After a daemon restart sessiond re-applies its latest `snapshot` (taken every 30 s and before restarts and checkpoints) with `open`.
 

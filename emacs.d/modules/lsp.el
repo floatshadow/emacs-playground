@@ -142,9 +142,17 @@ afresh (`eldoc-doc-buffer' alone fails before eldoc has shown anything)."
     (when apheleia-mode
       (remove-hook 'after-save-hook #'apheleia-format-after-save 'local)
       (add-hook 'after-save-hook #'apheleia-format-after-save 90 'local)))
-  ;; Only saves you make format: not auto-save-visited's (base module).
+  ;; Only saves you make format, not auto-save-visited's (base module),
+  ;; as in VS Code.  C-x C-s formats even when an automatic save has
+  ;; already written the buffer (Emacs then saves nothing).
+  (defvar-local playground--format-pending nil
+    "Non-nil when an automatic save skipped formatting this buffer.")
   (define-advice apheleia-format-after-save (:before-until (&rest _) playground-not-auto-save)
-    (bound-and-true-p playground-auto-saving))
+    (setq playground--format-pending (bound-and-true-p playground-auto-saving)))
+  (define-advice save-buffer (:after (&rest _) playground-format-pending)
+    (when (and playground--format-pending (eq this-command 'save-buffer)
+               (not (buffer-modified-p)) (bound-and-true-p apheleia-mode))
+      (apheleia-format-after-save)))
   (apheleia-global-mode 1))
 
 (defun playground-format-buffer ()
