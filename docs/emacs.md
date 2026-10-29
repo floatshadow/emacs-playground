@@ -41,7 +41,7 @@ tmux (`-L pg`, session `emacs`) holds the terminal frame so it survives browser 
 - `fill-character " "`: blanks, not 3.8's grey `~`, around a window smaller than its client.
 - `remain-on-exit on` and a global `pane-died` respawn hook, overridden per session so only sessiond respawns (backend.md §3.3).
 
-Keys: the browser's CSI u chords (frontend.md §5) pass through tmux to `kkp`. kkp waits for a protocol answer tmux never gives, so `base.el` installs its decoders directly in tmux frames (`playground--kkp-tmux`). It also maps tmux's Home `ESC [ 1 ~` and End `ESC [ 4 ~` to `<home>`/`<end>` (kkp knows only rxvt's 7 and 8) and unmodified Delete `ESC [ 3 ~` to `<deletechar>`, since `<delete>` becomes DEL through `local-function-key-map`; modified keys keep kkp's names (`C-<delete>` is `kill-word`).
+Keys: the browser's CSI u chords (frontend.md §5) pass through tmux to `kkp`. kkp waits for a protocol answer tmux never gives, so `base.el` installs its decoders directly in tmux frames (`playground--kkp-tmux`). It also maps tmux's Home `ESC [ 1 ~` and End `ESC [ 4 ~` to `<home>`/`<end>` (kkp knows only rxvt's 7 and 8) and unmodified Delete `ESC [ 3 ~` to `<deletechar>`, since `<delete>` becomes DEL through `local-function-key-map`; modified keys keep kkp's names (`C-<delete>` is `kill-word`). A keyboard macro records raw bytes, so when recording ends, sequences `input-decode-map` turns into one key become that key (F3 is `<f3>` in `C-x C-k RET`, not `ESC O` and `R`).
 
 Mode lines: selected violet `#7a58c4`, others `#232639` (lessons say "the bright mode line"), as palette overrides set before the theme loads. Housekeeping minors have no lighter (ws-butler, apheleia, jinx, ocaml-eglot); ws-butler is not in the state's `minors` either. `extended-command-suggest-shorter` is off (its tip masked M-x answers); key-binding suggestions stay.
 
@@ -75,7 +75,7 @@ A global minor mode using built-in libraries only. It reports and answers sessio
 
 ### 10.1 Hooks and emissions
 
-- Command hooks → `key`, then `state`. `cmd` is `real-this-command`, since commands rewrite `this-command` (C-k is `kill-line`, M-y `yank-pop`, TAB in a prompt `minibuffer-complete`). M-x (advised) reports the command run with `mx: true`. Internal events (focus, frame switch, mouse movement) and `which-key-C-h-dispatch` send nothing and do not change the learner's frame. An unbound key is reported once, with `cmd` `undefined`.
+- Command hooks → `key`, then `state`. `cmd` is `real-this-command`, since commands rewrite `this-command` (C-k is `kill-line`, M-y `yank-pop`, TAB in a prompt `minibuffer-complete`). M-x (advised) reports the command run with `mx: true`. Internal events (focus, frame switch, mouse movement) and `which-key-C-h-dispatch` send nothing and do not change the learner's frame. An unbound key is reported once, with `cmd` `undefined`. `keys` are those saved by `pre-command-hook` (Embark's `C-.` reads its action key itself); a prompt the running command opens and closes itself (Embark's action) reports nothing more.
 - Messages and command errors → `echo`, minus noise (`playground-agent-echo-noise`: isearch's prompt, eldoc) and minus a repeat with no key read since (`num-input-keys`).
 - Minibuffer and isearch start and end → `minibuffer` (`kind: isearch` for isearch) and `state`.
 - Window, buffer, major-mode and keyboard-macro changes → one coalesced `state` per command.

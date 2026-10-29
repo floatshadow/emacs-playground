@@ -73,7 +73,7 @@ The rules are CURRICULUM.md B.3 (demo strings, authoring rules) and B.4 (exit ro
 - **Write the keys out.** Keys in the lesson or step text silence habit cards; paraphrased ones do not. `:try` clicks count as the learner's own input.
 - **Command names:** the agent reports `real-this-command`; keep older names (`kill-region` for `C-k`) as alternatives, and `M-y` is `consult-yank-pop` only from lesson 4.2.
 - **Test with every module on:** with a language server, imenu positions can land on doc comments and corfu's popup opens inside snippet fields.
-- **Demos never type a newline right after a symbol** in code buffers: corfu-auto with cape-dabbrev can take the RET as a candidate.
+- **Demos never type a newline right after a symbol** in code buffers: corfu-auto with cape-dabbrev can take the RET as a candidate. Prose buffers (`text-mode` and derived) open the popup only on request.
 - **Magit** buffers survive restores, and Magit keeps each repository's open sections after its buffer is killed: setups clear `magit-repository-local-cache`, demos fold first (`M-2`, `M-4`). Opening a conflicted file puts point in its first conflict, so `C-c ^ n` goes to the second.
 - **setup.run rebuilding `.git`** races with git run by the previous lesson's buffers (diff-hl, Magit): retry `rm`, `add` and `commit`. Box state comes from setup.run; checkpoints do not cover the box.
 - **No TRAMP calls from timers or process callbacks:** one that runs inside another TRAMP operation on the same connection breaks it.
