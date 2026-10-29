@@ -153,6 +153,17 @@
 (defvar playground--pdf-tools-ready nil)
 (defvar playground--pdf-mode-depth 0)
 
+;; C-c C-v puts the PDF beside the source, and a window that narrow
+;; truncates long lines (`truncate-partial-width-windows'): the source
+;; scrolls sideways to point and every line starts with a cut.  Prose
+;; wraps at word boundaries instead; only the display changes, so C-e
+;; and C-k still work on whole lines.  Org keeps its truncation.
+(defun playground--prose-wrap ()
+  "Wrap long lines at word boundaries, also in side-by-side windows."
+  (setq-local truncate-partial-width-windows nil
+              word-wrap t))
+(add-hook 'text-mode-hook #'playground--prose-wrap)
+
 (defun playground--pdf-tools-setup (&rest _)
   "Load pdf-tools the first time a PDF is shown in a graphical frame."
   (unless playground--pdf-tools-ready
