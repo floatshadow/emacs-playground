@@ -24,15 +24,15 @@ steps:
         hint: "Run it in the ideas.md buffer, with no region highlighted (C-g removes one first): without a region it cleans the whole buffer."
   - id: exclude
     goal: Count the words twice, by name and by the key the list shows
-    detail: "`M-x count words` lists two commands. Add a third term, `!region`: a term that starts with `!` removes the candidates that match it, so only `count-words` is left; `RET` runs it and the echo area reports the lines, words and characters. In that list, marginalia wrote `(M-=)` beside `count-words-region`: its key. Press `M-=` too."
-    demo: 'M-x ~800 "count words" ~1200 " !region" ~1500 RET ~1500 M-='
+    detail: "`M-x count words` lists two commands. Add a third term, `!region`: a term that starts with `!` removes the candidates that match it, so only `count-words` is left; `RET` runs it and the echo area reports the lines, words and characters. In that list, marginalia wrote `(M-=)` beside `count-words-region`: its key. It counts the region, so select the whole buffer with `C-x h`, then press `M-=`."
+    demo: 'M-x ~800 "count words" ~1200 " !region" ~1500 RET ~1500 C-x h ~600 M-='
     conditions:
       - text: count-words ran
         event: { command: count-words }
         hint: "Put a space before !region: it is a term of its own. When only one candidate is left, RET runs it."
       - text: count-words-region ran
         event: { command: count-words-region }
-        hint: "Hold Alt and press the = key once. With no region it counts the whole buffer. M-x count words shows the key again in parentheses."
+        hint: "C-x h selects the whole buffer, then hold Alt and press the = key once. Without a region it counts from the mark to the cursor, and in a buffer with no mark it says so instead of counting."
   - id: as-typed
     goal: "Create notes/idea.md, a name RET cannot reach"
     detail: "`C-x C-f` and type `/work/bench/notes/idea.md`. The list highlights the existing `ideas.md`, so `RET` would open that file. Press `M-RET` (Alt and Enter) to accept your input as typed: a new, empty buffer for `idea.md`."

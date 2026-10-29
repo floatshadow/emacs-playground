@@ -20,7 +20,7 @@ The IntelliSense popup and snippets, with the same keys: the popup appears as yo
 | `M-SPC` | add a space to the input to filter with a second word, as in lesson 4.1 |
 | `C-g` | close the popup and keep what you typed |
 
-Typing anything that is not part of a name (a bracket, a space) closes the popup and inserts the character as usual. Remember that while the popup is open, `RET` inserts a candidate instead of a new line: `C-g` first if you wanted the new line.
+Typing anything that is not part of a name (a bracket, a space) closes the popup and inserts the character as usual. Remember that while the popup is open, `RET` inserts a candidate instead of a new line: `C-g` first if you wanted the new line. In prose (Org, Markdown, plain text, commit messages) the popup does not open by itself: `C-M-i` asks for it, so `RET` at the end of a sentence always starts a new line.
 
 `TAB` first indents the line; on a line that is already indented it completes. `C-M-i` always completes, and opens the popup at once without waiting for two characters.
 
