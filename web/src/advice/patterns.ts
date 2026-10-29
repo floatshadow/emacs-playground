@@ -84,7 +84,9 @@ export function patternNudges({
     })
   }
 
-  if (state && last && last.cmd === 'self-insert-command' && state.readonly) {
+  // In a prompt the letters go to the minibuffer, whatever the window shows
+  // (a read-only preview of the candidate).
+  if (state && last && last.cmd === 'self-insert-command' && state.readonly && !state.minibuffer) {
     const special = state.file === null || state.buf.startsWith('*')
     out.push({
       id: 'ro:' + state.buf,

@@ -271,6 +271,14 @@ describe('stuck patterns', () => {
     expect(ro?.body).toBe('C-x C-q makes this buffer writable.')
   })
 
+  it('typing in a prompt over a read-only buffer is no read-only slip', () => {
+    rec = record()
+    rec.keys('C-x C-q C-x b').type('c')
+    expect(
+      selectNudges(rec.replay(), rec.now()).find((x) => x.id.startsWith('ro:')),
+    ).toBeUndefined()
+  })
+
   it('typing into a special buffer says q leaves it', () => {
     rec = record()
     rec.keys('C-x C-b C-x o').type('z')
