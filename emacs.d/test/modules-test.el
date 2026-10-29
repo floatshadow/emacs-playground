@@ -28,6 +28,7 @@
 (defvar modus-vivendi-tinted-palette-overrides)
 (declare-function modus-themes-get-color-value "modus-themes" (color &optional with-overrides theme))
 (declare-function playground--kkp-decode "base")
+(declare-function playground--decode-macro-keys "base")
 (declare-function playground-fit-frame-to-display "base")
 (declare-function playground--frame-fit "base")
 (defvar ibuffer-filter-groups)
@@ -77,6 +78,14 @@
   (should (eq (key-binding [home]) 'move-beginning-of-line))
   (should (eq (key-binding [deletechar]) 'delete-forward-char))
   (should (eq (key-binding [C-delete]) 'kill-word)))
+
+(ert-deftest pg-modules/macro-function-keys ()
+  "A macro recorded in the terminal shows F3 as <f3>, not ESC O R."
+  (let ((input-decode-map (make-sparse-keymap)))
+    (define-key input-decode-map "\eOR" [f3])
+    (should (equal (playground--decode-macro-keys [?O ?P ?S ?- 27 ?O ?R 32 27 ?f])
+                   [?O ?P ?S ?- f3 32 27 ?f]))
+    (should (equal (playground--decode-macro-keys [?a ?b]) [?a ?b]))))
 
 ;;;; M-x messages
 

@@ -296,5 +296,40 @@
   "Lesson 8.4: PDFs open through `playground-pdf-mode'."
   (should (eq (cdr (assoc "\\.[pP][dD][fF]\\'" auto-mode-alist)) 'playground-pdf-mode)))
 
+(ert-deftest pg-all/compile-forgets-processes-that-finished-early ()
+  "Lesson 10.5: a job that ended before it was listed leaves no [Compiling]."
+  (require 'compile)
+  (let* ((proc (start-process "pg-done" nil "true"))
+         (compilation-in-progress (list proc)))
+    (while (process-live-p proc) (accept-process-output proc 0.05))
+    (playground--compilation-drop-finished nil)
+    (should-not compilation-in-progress)))
+
+(ert-deftest pg-all/babel-error-window-closes-when-empty ()
+  "Lesson 9.5: an emptied *Org-Babel Error Output* window goes after a clean run."
+  (require 'ob-eval)
+  (save-window-excursion
+    (delete-other-windows)
+    (let ((buf (get-buffer-create org-babel-error-buffer-name)))
+      (unwind-protect
+          (progn
+            (display-buffer buf '(display-buffer-pop-up-window))
+            (should (get-buffer-window buf))
+            (with-current-buffer buf (erase-buffer))
+            (run-hooks 'org-babel-after-execute-hook)
+            (should-not (get-buffer-window buf)))
+        (kill-buffer buf)))))
+
+(ert-deftest pg-all/prose-completes-on-request ()
+  "Prose waits for C-M-i and wraps at words in narrow windows; code completes as you type."
+  (with-temp-buffer
+    (text-mode)
+    (should-not corfu-auto)
+    (should word-wrap)
+    (should-not truncate-partial-width-windows))
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (should corfu-auto)))
+
 (provide 'all-modules-test)
 ;;; all-modules-test.el ends here
