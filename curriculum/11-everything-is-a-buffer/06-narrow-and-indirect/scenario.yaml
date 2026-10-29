@@ -48,12 +48,16 @@ steps:
         hint: "C-c C-c in the edit buffer commits the block and closes it. C-c C-k would throw the edit away."
   - id: org
     goal: Fix the Python block in notes/plan.org the same way
-    detail: "Open `/work/workbench/notes/plan.org`, go into the source block (`C-s print RET`) and press `C-c '` (org-edit-special): a Python buffer. Change `print(sum(samples))` to `print(sum(samples) / len(samples))`, `C-c '` again to go back, `C-x C-s` to save."
+    detail: "Open `/work/workbench/notes/plan.org`, go into the source block (`C-s print( RET`: with the parenthesis, so the search skips *prints* in the text above) and press `C-c '` (org-edit-special): a Python buffer. Change `print(sum(samples))` to `print(sum(samples) / len(samples))`, `C-c '` again to go back, `C-x C-s` to save."
     demo: "C-x C-f ~400 \"/work/workbench/notes/plan.org\" RET ~600 M-< ~300 C-s ~300 \"print(\" ~300 RET ~300 C-c ' ~1200 C-e ~300 C-b ~200 \" / len(samples)\" ~300 C-c ' ~800 C-x C-s ~600"
     conditions:
-      - text: C-c ' opened the block
-        event: { command: org-edit-special }
-        hint: "In Org, C-c ' works on the line inside the block. On the #+begin_src line it works too."
+      - text: C-c ' opened the block in a Python buffer
+        all:
+          - event: { command: org-edit-special }
+          - any:
+              - elisp: '(seq-some (lambda (b) (string-prefix-p "*Org Src" (buffer-name b))) (buffer-list))'
+              - file: { path: workbench/notes/plan.org, contains: "print(sum(samples) / len(samples))" }
+        hint: "C-c ' works with the cursor inside the block (on the print( line) or on its #+begin_src line; in the text above the block it says No special environment to edit here. The Python buffer is called *Org Src plan.org[ python ]*."
       - text: plan.org computes the mean
         file: { path: workbench/notes/plan.org, contains: "print(sum(samples) / len(samples))" }
         hint: "Type / len(samples) before the last closing parenthesis, go back with C-c ' and save with C-x C-s."
