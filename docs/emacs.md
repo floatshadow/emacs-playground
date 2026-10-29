@@ -119,7 +119,7 @@ C-g during redisplay: a C-g read while redisplay runs Lisp (typically `jit-lock-
 
 ### 10.6 Testing
 
-`make emacs-test` runs `test/agent-test.el` (against a fake socket server) and `test/config-test.el` with `test/modules-test.el` (init.el with base and editing: tmux keys, mode-line contrast, M-y staying `yank-pop` until the completion module of lesson 4.2, GUI frame fit), which runs `test/all-modules-test.el` in a child Emacs (every module: no load errors or missing packages, the keys of Parts 4 to 13, vterm's and jinx's modules, `epdfinfo`, grammars, tools on PATH, language servers, dape adapters, Org's Rust blocks, compile's error regexps). sessiond's integration test (backend.md §6) covers the agent end to end.
+`make emacs-test` runs `test/agent-test.el` (against a fake socket server) and `test/config-test.el` with `test/modules-test.el` (init.el with base and editing: tmux keys, mode-line contrast, M-y staying `yank-pop` until the completion module of lesson 4.2, GUI frame fit), which runs `test/all-modules-test.el` in a child Emacs (every module: no load errors or missing packages, the keys of Parts 4 to 13, vterm's and jinx's modules, `epdfinfo`, grammars, tools on PATH, language servers, dape adapters, Org's Rust blocks, compile's error regexps and cargo's two-line messages arriving in two chunks). sessiond's integration test (backend.md §6) covers the agent end to end.
 
 ## 11. Standalone use
 
