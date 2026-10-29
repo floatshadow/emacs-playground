@@ -46,6 +46,17 @@
 
 ;;;; Where you are
 
+(defun playground--breadcrumb-skip-p (&rest _)
+  "Non-nil in buffers that show a document, not text (PDF, image).
+Their imenu is not a list of definitions: the header line would
+signal an error on every redisplay."
+  (derived-mode-p 'pdf-view-mode 'doc-view-mode 'image-mode))
+
+(with-eval-after-load 'breadcrumb
+  (advice-add 'breadcrumb--turn-on-local-mode-on-behalf-of-global-mode
+              :before-until #'playground--breadcrumb-skip-p))
+
+;; Lesson 13.1 turns this off.
 (playground-with-package breadcrumb
   (breadcrumb-mode 1))
 

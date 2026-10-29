@@ -343,7 +343,9 @@ to `fundamental-mode', which would choose this function again."
 (playground-with-package citar-embark
   (with-eval-after-load 'embark
     (with-eval-after-load 'citar
-      (citar-embark-mode 1))))
+      (citar-embark-mode 1)
+      ;; Global, so its lighter would be on every mode line.
+      (setf (alist-get 'citar-embark-mode minor-mode-alist) '("")))))
 
 ;;;; Lesson 8.8  Focused writing
 
