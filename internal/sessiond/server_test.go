@@ -783,3 +783,12 @@ func TestProxyAuth(t *testing.T) {
 		t.Fatalf("without a secret: %d", rec.Code)
 	}
 }
+
+// Shell conditions run git status while the learner's Magit runs git add
+// and git commit: they must not take the index lock (GIT_OPTIONAL_LOCKS=0).
+func TestShellTakesNoOptionalGitLocks(t *testing.T) {
+	r := (&Server{}).shell().Run(context.Background(), t.TempDir(), `printf %s "$GIT_OPTIONAL_LOCKS"`, 5*time.Second)
+	if !r.OK || r.Output != "0" {
+		t.Fatalf("GIT_OPTIONAL_LOCKS in shell conditions: %+v", r)
+	}
+}

@@ -67,6 +67,13 @@ var ExcludePatterns = []string{
 // the learner's shells) get the same variables.
 var SafeDirectoryEnv = []string{"GIT_CONFIG_COUNT=1", "GIT_CONFIG_KEY_0=safe.directory", "GIT_CONFIG_VALUE_0=*"}
 
+// NoOptionalLocksEnv keeps sessiond's background git (checkpoints, shell
+// conditions such as `git status --porcelain`) from taking optional locks:
+// git status otherwise refreshes the index under index.lock, and a git add
+// or git commit the learner (Magit) runs at that moment fails with "Unable
+// to create index.lock: File exists".
+var NoOptionalLocksEnv = []string{"GIT_OPTIONAL_LOCKS=0"}
+
 // Identity used for checkpoint commits (environment only; the learner's git
 // configuration is not touched).
 var identityEnv = []string{
@@ -95,6 +102,7 @@ func (r ExecRunner) Run(ctx context.Context, dir string, env []string, args ...s
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "LC_ALL=C")
 	cmd.Env = append(cmd.Env, SafeDirectoryEnv...)
+	cmd.Env = append(cmd.Env, NoOptionalLocksEnv...)
 	cmd.Env = append(cmd.Env, env...)
 	var out, errb bytes.Buffer
 	cmd.Stdout = &limitedBuffer{b: &out, max: 8 << 20}

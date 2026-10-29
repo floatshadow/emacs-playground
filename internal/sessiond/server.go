@@ -647,9 +647,11 @@ func (s *Server) initWorkspace(ctx context.Context) error {
 }
 
 // shell runs shell conditions and setup.run as the learner, without
-// sessiond's secrets.
+// sessiond's secrets and without git's optional locks.
 func (s *Server) shell() steps.ExecShell {
-	return steps.ExecShell{Env: append([]string{"PG_SESSION_TOKEN=", "PG_PROXY_SECRET=", "PG_BOX_KEY="}, checkpoint.SafeDirectoryEnv...)}
+	env := []string{"PG_SESSION_TOKEN=", "PG_PROXY_SECRET=", "PG_BOX_KEY="}
+	env = append(env, checkpoint.SafeDirectoryEnv...)
+	return steps.ExecShell{Env: append(env, checkpoint.NoOptionalLocksEnv...)}
 }
 
 // setupBox writes the remote box's key pair and the "box" alias
