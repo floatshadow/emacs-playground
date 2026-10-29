@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { CheckpointInfo } from '../../protocol.gen'
 import { useCheckpoints } from '../../api/queries'
 import { rpc } from '../../api/session/rpc'
 import { clock } from '../../lib/time'
+import { useSessionStore } from '../../store/session'
 import { toast } from '../../store/ui'
 import { Button } from '../common/Button'
 import { ConfirmDialog, Dialog } from '../common/Dialog'
@@ -24,6 +25,8 @@ function projectCheckpoints(
  * Checkpoints (frontend.md §10): rpc('checkpoints'), Restore after a
  * confirmation that names what will be overwritten, and manual checkpoints.
  * A task checkpoint is named after its task (taskName) and restored by ref.
+ * The list is refetched shortly after files change and whenever the
+ * confirmation opens, so it never says nothing differs when a save would be lost.
  */
 export function Checkpoints({
   lessonId,
@@ -34,8 +37,15 @@ export function Checkpoints({
 } = {}) {
   const { t } = useTranslation()
   const q = useCheckpoints()
-  const [confirm, setConfirm] = useState<CheckpointInfo | null>(null)
+  const [confirmRef, setConfirmRef] = useState<string | null>(null)
+  const [checking, setChecking] = useState(false)
   const [busy, setBusy] = useState(false)
+  const files = useSessionStore((s) => s.files)
+  const { refetch } = q
+  useEffect(() => {
+    const id = setTimeout(() => void refetch(), 1500)
+    return () => clearTimeout(id)
+  }, [files, refetch])
   const [saveOpen, setSaveOpen] = useState(false)
   const [label, setLabel] = useState('')
 
@@ -47,7 +57,7 @@ export function Checkpoints({
     try {
       const r = await rpc('restore', c.step ? { ref: c.ref } : { label: c.label })
       toast(t('checkpoints.restored', { label: nameOf(c), count: r.restoredFiles ?? 0 }))
-      setConfirm(null)
+      setConfirmRef(null)
     } catch {
       // toasted
     } finally {
@@ -71,6 +81,16 @@ export function Checkpoints({
   }
 
   const items = projectCheckpoints(q.data?.items ?? [], lessonId)
+  const confirm = confirmRef === null ? null : (items.find((c) => c.ref === confirmRef) ?? null)
+  const openConfirm = async (c: CheckpointInfo) => {
+    setConfirmRef(c.ref)
+    setChecking(true)
+    try {
+      await refetch()
+    } finally {
+      setChecking(false)
+    }
+  }
   return (
     <div>
       {q.isLoading && <p className={styles.treeNote}>{t('common.loading')}</p>}
@@ -86,7 +106,7 @@ export function Checkpoints({
                 {clock(c.createdAt)} · {t('checkpoints.files', { count: c.files?.length ?? 0 })}
               </span>
             </span>
-            <Button size="small" onClick={() => setConfirm(c)}>
+            <Button size="small" onClick={() => void openConfirm(c)}>
               {t('checkpoints.restore')}
             </Button>
           </li>
@@ -99,11 +119,13 @@ export function Checkpoints({
         open={!!confirm}
         title={t('checkpoints.confirmTitle', { label: confirm ? nameOf(confirm) : '' })}
         confirmLabel={t('checkpoints.restore')}
-        busy={busy}
-        onClose={() => setConfirm(null)}
+        busy={busy || checking}
+        onClose={() => setConfirmRef(null)}
         onConfirm={() => confirm && void restore(confirm)}
       >
-        {confirm && confirm.files.length > 0 ? (
+        {checking ? (
+          <p>{t('common.loading')}</p>
+        ) : confirm && confirm.files.length > 0 ? (
           <>
             <p>{t('checkpoints.willOverwrite', { count: confirm.files.length })}</p>
             <ul>
