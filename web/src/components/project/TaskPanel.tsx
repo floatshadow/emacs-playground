@@ -195,8 +195,8 @@ export function TaskPanel({
       />
       {p.finished && (
         <div className={lessonStyles.doneAll} role="status">
-          {p.skipped > 0
-            ? t('project.completeSkipped', { count: p.skipped })
+          {p.done < p.total
+            ? t('project.completeSkipped', { count: p.total - p.done })
             : t('project.complete')}
         </div>
       )}
