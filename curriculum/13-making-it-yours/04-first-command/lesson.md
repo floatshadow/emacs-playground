@@ -28,7 +28,21 @@ The string under the name is the documentation `C-h f` shows. `C-M-x` with the c
 
 ## A hook
 
-A :jargon[hook] is a list of functions Emacs runs at a moment: `markdown-mode-hook` runs in every buffer that turns Markdown mode on, `after-save-hook` after every save. `(add-hook 'markdown-mode-hook #'my-journal-header)` adds yours; the function checks that the buffer is empty and that its file is under a `journal/` folder, so other Markdown files are left alone. A named function, rather than a `lambda`, can be removed again with `remove-hook`.
+A :jargon[hook] is a list of functions Emacs runs at a moment: `markdown-mode-hook` runs in every buffer that turns Markdown mode on, `after-save-hook` after every save. Your hook function checks that the buffer is empty and that its file is under a `journal/` folder, so other Markdown files are left alone, and only then calls your command:
+
+```elisp
+;;;###autoload
+(defun my-journal-header ()
+  "Insert a dated heading in a new, empty file under journal/."
+  (when (and (= (buffer-size) 0)
+             (string-match-p "/journal/" (or buffer-file-name "")))
+    (my-dated-header)))
+
+;;;###autoload
+(add-hook 'markdown-mode-hook #'my-journal-header)
+```
+
+`when` runs its body only if the test is true; `and` is true when both parts are. `buffer-size` counts the characters in the buffer, and `buffer-file-name` is the file's path (`nil` in a buffer without a file, hence the `or`). A named function, rather than a `lambda`, can be removed again with `remove-hook`.
 
 ## Advice
 

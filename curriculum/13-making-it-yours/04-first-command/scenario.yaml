@@ -56,7 +56,7 @@ steps:
         hint: "Press C-c u h in notes.md: the heading goes in at the cursor."
   - id: hook
     goal: Run it from markdown-mode-hook in new journal files
-    detail: "Back in my-commands.el (`C-x b my-commands.el`), above `(provide 'my-commands)`, add `my-journal-header`, which calls `my-dated-header` in an empty buffer whose file is under a journal folder, and `(add-hook 'markdown-mode-hook #'my-journal-header)`. `C-x C-s`, `M-x eval-buffer`."
+    detail: "Back in my-commands.el (`C-x b my-commands.el`), above `(provide 'my-commands)`, type `my-journal-header` and the `add-hook` line from the lesson (A hook): the function calls `my-dated-header` only in an empty buffer whose file is under a journal folder. `C-x C-s`, `M-x eval-buffer`."
     demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-commands.el" ~400 RET ~800 M-< ~300 C-s ~300 "(provide ''my-commands)" ~300 RET C-a ";;;###autoload \n(defun my-journal-header ()\n\"Insert a dated heading in a new, empty file under journal/.\"\n(when (and (= (buffer-size) 0)\n(string-match-p \"/journal/\" (or buffer-file-name \"\")))\n(my-dated-header)))\n\n;;;###autoload \n(add-hook ''markdown-mode-hook #''my-journal-header)\n\n" C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000'
     conditions:
       - text: my-commands.el adds the hook
