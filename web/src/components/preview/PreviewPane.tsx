@@ -8,7 +8,7 @@ import { HtmlView } from './HtmlView'
 import { ImageView } from './ImageView'
 import { MarkdownView, TextView } from './MarkdownView'
 import { PreviewStatus } from './PreviewStatus'
-import { baseName, previewKind, previewUrl, workspaceRelative } from './kinds'
+import { baseName, followSource, previewKind, previewUrl, workspaceRelative } from './kinds'
 import styles from './Preview.module.css'
 
 const PdfView = lazy(() => import('./PdfView'))
@@ -49,10 +49,9 @@ export function PreviewPane({ owner, spec }: { owner: string; spec: PreviewSpec 
     if (!target) lastFollowed.current = null
   }, [file, spec?.follow, tabs, owner, addTab, setTab])
 
-  const source = useMemo(() => {
-    if (!current || !spec?.follow) return undefined
-    return Object.entries(spec.follow).find(([, v]) => v === current)?.[0]
-  }, [current, spec?.follow])
+  const source = useSessionStore((s) =>
+    current ? followSource(current, spec?.follow, file, s.files) : undefined,
+  )
 
   if (tabs.length === 0 || !current) {
     return (

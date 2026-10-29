@@ -18,6 +18,43 @@ export function isPreviewable(path: string): boolean {
   return previewKind(path) !== 'text'
 }
 
+/** True for artefacts a build makes (PDF, HTML, images), not files people write. */
+export function isBuildOutput(path: string): boolean {
+  const kind = previewKind(path)
+  return kind === 'pdf' || kind === 'html' || kind === 'image'
+}
+
+/**
+ * The source the artefact follows (preview.follow) when it is built from
+ * one: the file being edited if it is a candidate (several sources may map
+ * to one artefact, before and after a rename), else the one changed last
+ * and not deleted, else the first. A followed file that is not a build
+ * output (a README shown next to the code) has no source: it is never
+ * "being rebuilt".
+ */
+export function followSource(
+  artefact: string,
+  follow: Record<string, string> | undefined,
+  editing: string | null,
+  files: Record<string, { event: string; ts: number } | undefined>,
+): string | undefined {
+  if (!follow || !isBuildOutput(artefact)) return undefined
+  const candidates = Object.entries(follow)
+    .filter(([, v]) => v === artefact)
+    .map(([k]) => k)
+  if (editing && candidates.includes(editing)) return editing
+  let best: string | undefined
+  let bestTs = -1
+  for (const c of candidates) {
+    const mark = files[c]
+    if (mark && mark.event !== 'deleted' && mark.ts > bestTs) {
+      best = c
+      bestTs = mark.ts
+    }
+  }
+  return best ?? candidates[0]
+}
+
 export function previewUrl(sessionId: string, path: string, version?: number): string {
   const base = `${sessionBase(sessionId)}/preview/${workspacePath(path)}`
   return version ? `${base}?v=${version}` : base

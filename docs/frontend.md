@@ -103,7 +103,7 @@ Lesson notices (`LessonNotices.tsx`, lesson panes and project screens): GUI less
 
 ## 9. Preview pane
 
-Tabs: `preview.tabs` plus files opened from the tree; `preview.follow` maps the current source buffer to its artefact. Views: PDF (lazy worker, keeps scale and scroll across reloads), HTML (iframe `sandbox="allow-scripts"`), Markdown (lesson pipeline without directives), image; they reload on `file` events. A HEAD probe gates every view: a missing artefact says so and, under `preview.follow`, which source builds it; the `file` event that creates it shows the view. A PDF that fails to parse (still being written) is retried once after 800 ms. Tabs opened from the tree close with × or Delete. sessiond's `SandboxCSP` keeps `allow-same-origin`, an open question (deployment.md §9.3).
+Tabs: `preview.tabs` plus files opened from the tree; `preview.follow` maps the current source buffer to its artefact. Views: PDF (lazy worker, keeps scale and scroll across reloads), HTML (iframe `sandbox="allow-scripts"`), Markdown (lesson pipeline without directives), image; they reload on `file` events. A HEAD probe gates every view: a missing artefact says so and, under `preview.follow`, which source builds it (the one being edited, else the last changed; a followed file that is no build output, such as a README shown next to the code, has no source and is never "rebuilding"); the `file` event that creates it shows the view. A PDF that fails to parse (still being written) is retried once after 800 ms. Tabs opened from the tree close with × or Delete. sessiond's `SandboxCSP` keeps `allow-same-origin`, an open question (deployment.md §9.3).
 
 ## 10. Course map and projects
 
