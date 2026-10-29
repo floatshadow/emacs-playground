@@ -94,7 +94,7 @@ steps:
         hint: "If an error is left, M-g M-n takes you to it. A build takes a few seconds; the mode line of *compilation* says exit [0] when it worked."
   - id: pytest
     goal: Run the Python tests with M-x compile
-    detail: "Open `/work/terminals/scores/test_scores.py`. Then `M-x compile`, clear the offered `make -k` with `C-a C-k`, type `uv run pytest -q`, `RET`. One test fails."
+    detail: "Open `/work/terminals/scores/test_scores.py`. Then `M-x compile`, clear the command it offers (the last one, `cargo build`, or `make -k`) with `C-a C-k`, type `uv run pytest -q`, `RET`. One test fails."
     demo: 'C-x C-f ~400 "/work/terminals/scores/test_scores.py" RET ~600 M-x ~300 "compile" RET ~400 C-a ~200 C-k ~300 "uv run pytest -q" RET ~4000'
     conditions:
       - text: compile ran pytest
@@ -107,7 +107,7 @@ steps:
         hint: "In the prompt, C-a goes to the start of the offered command and C-k deletes it; then type uv run pytest -q. If it says no tests ran, the command ran in another folder: open test_scores.py first."
     stuck:
       - when: { minibuffer_seconds: 40 }
-        say: "The prompt offers make -k. C-a then C-k clears it; type uv run pytest -q and RET."
+        say: "The prompt offers the last command, cargo build (or make -k). C-a then C-k clears it; type uv run pytest -q and RET."
   - id: failure
     goal: Jump to the failing assertion
     detail: "`M-g M-n` reads pytest's `test_scores.py:9: AssertionError` like a compiler error and opens line 9 of the test: `grade(60)` should be *C*. (The bug is in `scores.py`; you can fix it, or leave it.)"
