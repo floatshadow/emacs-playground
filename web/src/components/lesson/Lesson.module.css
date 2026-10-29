@@ -48,6 +48,8 @@
   background: var(--paper-3);
   padding: 1px 5px;
   border-radius: 3px;
+  /* Spaces in code are meaningful ("the  cat" with two). */
+  white-space: break-spaces;
   /* Long paths (/work/projects/polyglot/src/main.rs) wrap instead of
      widening the pane past its column at 1440 px and below. */
   overflow-wrap: anywhere;
@@ -64,6 +66,7 @@
   background: none;
   padding: 0;
   color: inherit;
+  white-space: inherit;
 }
 .prose table {
   border-collapse: collapse;
@@ -312,6 +315,7 @@
   background: var(--paper-3);
   padding: 1px 4px;
   border-radius: 3px;
+  white-space: break-spaces;
   overflow-wrap: anywhere;
 }
 .conds {
