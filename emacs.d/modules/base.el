@@ -316,6 +316,36 @@ stops the daemon itself."
 
 ;; Truecolor is announced with COLORTERM=truecolor (set in the image).
 
+;; A keyboard macro records the terminal's raw bytes: F3 typed during a
+;; recording is stored as ESC O R, which replays fine but shows in
+;; C-x C-k RET as two odd lines (ESC O, then R typed).  When recording
+;; ends, sequences the terminal decodes to a single key become that key.
+(defun playground--decode-macro-keys (keys)
+  "KEYS with raw function-key sequences of this terminal replaced by keys."
+  (if (or (display-graphic-p) (not (vectorp keys)) (not (memq ?\e (append keys nil))))
+      keys
+    (let ((n (length keys)) (i 0) (out nil))
+      (while (< i n)
+        (let ((j (min n (+ i 8))) found)
+          (when (eq (aref keys i) ?\e)
+            (while (and (not found) (> j (1+ i)))
+              (let ((key (lookup-key input-decode-map (seq-subseq keys i j))))
+                (if (and (vectorp key) (> (length key) 0))
+                    (setq found (cons key j))
+                  (setq j (1- j))))))
+          (if found
+              (setq out (append (reverse (append (car found) nil)) out)
+                    i (cdr found))
+            (push (aref keys i) out)
+            (setq i (1+ i)))))
+      (vconcat (nreverse out)))))
+
+(defun playground--decode-last-macro (&rest _)
+  "Decode function keys in the macro just recorded."
+  (when last-kbd-macro
+    (setq last-kbd-macro (playground--decode-macro-keys last-kbd-macro))))
+(advice-add 'end-kbd-macro :after #'playground--decode-last-macro)
+
 ;;;; The GUI frame (emacs.md section 6)
 
 ;; Iosevka Nerd Font is the default (early-init.el); Chinese, Japanese
