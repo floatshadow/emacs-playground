@@ -3,7 +3,7 @@
 ;; Emacs 31 treats this directory (`user-lisp-directory') specially:
 ;; every .el file in it is byte-compiled, its ;;;###autoload cookies
 ;; are collected, and the directory is on `load-path' at startup.  Put
-;; commands you write here (Part 13.3 of the course); mark the ones you
+;; commands you write here (lesson 13.4 of the course); mark the ones you
 ;; want available without `require' with an autoload cookie, like:
 ;;
 ;;   ;;;###autoload
