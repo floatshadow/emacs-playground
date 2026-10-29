@@ -317,6 +317,11 @@ def uses_box(c) -> bool:
     return any(uses_box(x) for k in ("all", "any") for x in (c.get(k) or []) if isinstance(c.get(k), list))
 
 
+def shares_dune_lock(run: str) -> bool:
+    """Whether a shell script runs dune in the default build directory."""
+    return bool(re.search(r"(^|[\s;&|(])dune\s", run)) and "--build-dir" not in run and "DUNE_BUILD_DIR" not in run
+
+
 def check_condition(where: str, c, rep: Report, top: bool, ids: set, commands: set) -> None:
     if not isinstance(c, dict):
         rep.err(where, "condition must be a mapping")
@@ -389,6 +394,8 @@ def check_condition(where: str, c, rep: Report, top: bool, ids: set, commands: s
         t = v.get("timeout", 0)
         if not isinstance(t, int) or isinstance(t, bool) or t < 0 or t > MAX_SHELL_TIMEOUT:
             rep.err(where, f"shell.timeout must be between 1 and {MAX_SHELL_TIMEOUT} seconds")
+        if shares_dune_lock(v["run"]):
+            rep.err(where, "shell runs dune in the learner's _build: give it its own --build-dir (a second dune aborts while the learner's holds the lock)")
     elif kind == "buffer":
         if not isinstance(v, dict) or set(v) - BUFFER_KEYS or not isinstance(v.get("name"), str) or not v["name"]:
             rep.err(where, f"buffer wants {{name, mode?, contains?, process?, modified?}}, got {v!r}")

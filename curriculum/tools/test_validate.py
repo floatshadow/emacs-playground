@@ -154,6 +154,8 @@ class ConditionKindsTest(unittest.TestCase):
             {"file": {"host": "box", "path": "/srv/www/index.html", "contains": "Hello"}},
             {"shell": {"host": "box", "run": "systemctl is-active nginx"}},
             {"shell": {"run": "cargo test", "timeout": 300}},
+            {"shell": {"run": "dune runtest --build-dir $HOME/.cache/pg-check/x 2>&1"}},
+            {"shell": {"run": "git cat-file -e HEAD:wordstat/dune-project"}},
         ]:
             self.assertEqual(self.errors(c), [], c)
 
@@ -164,6 +166,7 @@ class ConditionKindsTest(unittest.TestCase):
             {"file": {"host": "web", "path": "a", "exists": True}},
             {"file": {"path": "/abs", "exists": True}},
             {"shell": {"run": "make", "timeout": 301}},
+            {"shell": {"run": "dune runtest 2>&1", "cwd": "lsp/wordfreq"}},
         ]:
             self.assertNotEqual(self.errors(c), [], c)
 

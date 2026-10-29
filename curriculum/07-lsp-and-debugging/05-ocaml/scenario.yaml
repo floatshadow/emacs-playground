@@ -97,5 +97,5 @@ steps:
           - event: { command: recompile }
         hint: "Control c, Control r, in wordfreq.ml."
       - text: the expect test passes
-        shell: { run: "dune runtest 2>&1", cwd: lsp/wordfreq, timeout: 120 }
+        shell: { run: "mkdir -p $HOME/.cache/pg-check && dune runtest --build-dir $HOME/.cache/pg-check/wordfreq 2>&1", cwd: lsp/wordfreq, timeout: 120 }
         hint: "A diff in *compilation* shows what the test printed (+) against what it expects (-). The test counts the words of the cat  sat on the mat: 6."
