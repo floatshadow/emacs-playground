@@ -22,7 +22,7 @@ Rules: `cmd/*` only wires; `protocol` uses only the standard library; `gateway` 
 
 ### 2.1 Responsibilities
 
-Serve the web bundle, fonts and curriculum; authenticate and issue cookies; own the session registry (one session per learner); proxy `/s/{id}/…` to sessiond; store progress, stuck reports and an audit log; stop idle sessions, expire volumes, rebuild the registry from container labels at start.
+Serve the web bundle, fonts and curriculum; authenticate; own the session registry (one session per learner); proxy `/s/{id}/…` to sessiond; store progress, stuck reports and an audit log; stop idle sessions, expire volumes, rebuild the registry from container labels at start.
 
 ### 2.2 HTTP surface
 
@@ -35,16 +35,16 @@ Serve the web bundle, fonts and curriculum; authenticate and issue cookies; own 
 
 ### 2.3 Sessions, backends, proxy secret
 
-Interfaces in `internal/gateway/sessions` (`Manager`, implemented by `Service`; `Backend`; `Networker`), `store.Store`, `auth.Authenticator`.
+Interfaces: `sessions.Manager` (implemented by `Service`), `Backend`, `Networker`; `store.Store`; `auth.Authenticator`.
 
 - **StaticBackend** (local): one pre-existing session at `local.sessionUrl` shared by all users, id and token `local.sessionId`/`local.sessionToken` (default `local`). Lifecycle calls are no-ops; `Inspect` probes `/healthz`.
-- **DockerBackend** (server, experimental): container `pg-session-<id>` labelled `playground.{session,user,version,role}`, volume `pg-ws-<user>` at `/work`, `docker.Harden` (deployment.md §9.2). Tokens are 256-bit random, stored as SHA-256. With `sessions.remoteBox.enabled`, a box `pg-box-<id>` (`docker.HardenBox`, alias `box` on the session network) gets the public half of a fresh ed25519 pair and sessiond the private half (`PG_BOX_KEY`, `PG_BOX_HOST`); a box that fails to start leaves the session without one.
-- **Isolation** `sessions.isolation`: `network` (default) gives each session an internal network `pg-net-<id>` (a `/28` from `sessions.subnetPool`), which the gateway container (`sessions.gatewayContainer`, default its hostname) joins as `gateway`. The registry rebuild re-attaches a new gateway container; rebuild and reaper prune networks without a session. `shared` uses `sessions.network`.
+- **DockerBackend** (server, experimental): container `pg-session-<id>` labelled `playground.{session,user,version,role}`, volume `pg-ws-<user>` at `/work`, `docker.Harden` (deployment.md §9.2); 256-bit tokens stored as SHA-256. With `sessions.remoteBox.enabled`, a box `pg-box-<id>` (`docker.HardenBox`, alias `box`) gets the public half of a fresh ed25519 pair and sessiond the private half (`PG_BOX_KEY`, `PG_BOX_HOST`); a box that fails to start leaves the session without one.
+- **Isolation** `sessions.isolation`: `network` (default) gives each session an internal network `pg-net-<id>` (a `/28` from `sessions.subnetPool`) that the gateway container (`sessions.gatewayContainer`) joins as `gateway`; the registry rebuild re-attaches a new gateway container and prunes orphan networks, as does the reaper. `shared` uses `sessions.network`.
 - **Proxy secret**: all gateway → session traffic (proxy, `Service.Call`, `Service.Status`) carries `X-Playground-Proxy: hex(HMAC-SHA256(key, "playground session proxy\0" + id))`, key in `<dataDir>/session-proxy.secret`; stable across restarts and re-creation; given to the container as `PG_PROXY_SECRET` (§3.13). The static session has none.
 
 ### 2.4 Session lifecycle
 
-`Ensure` is idempotent and serialised per user: a healthy running session is returned; a stopped or failed one is re-created on its volume with a fresh token; else volume, remote box and container are created and `/healthz` polled up to 30 s. Failure marks it `failed`, removes the container, keeps the volume. `sessions.maxSessions` bounds running sessions.
+`Ensure` is idempotent and serialised per user: a healthy running session is returned; a stopped or failed one is re-created on its volume with a fresh token; else volume, remote box and container are created and `/healthz` polled up to 30 s. Failure marks it `failed` and removes the container, keeping the volume. `sessions.maxSessions` bounds running sessions.
 
 Presence: the proxy's WebSocket counts plus sessiond's 30 s heartbeat. The reaper (every minute) marks sessions without WebSockets `idle`, stops them after `sessions.idleStopMinutes` (volume kept), and removes volumes stopped longer than `sessions.volumeRetentionDays` (audited).
 
@@ -66,11 +66,11 @@ Server: SQLite `<dataDir>/playground.db` (`modernc.org/sqlite`, no cgo), one wri
 
 ### 2.8 Curriculum serving
 
-Serves `playctl curriculum build` output from `curriculum.dir` (layout in `protocol/curriculum.go`) through `os.Root` with strong ETags. A wrong `protocol.CurriculumFormat` stops the gateway; a missing bundle makes the curriculum endpoints answer 503 until it appears (SIGHUP, or automatically in author mode).
+Serves `playctl curriculum build` output from `curriculum.dir` (layout in `protocol/curriculum.go`) through `os.Root` with strong ETags. A wrong `protocol.CurriculumFormat` stops the gateway; without a bundle the curriculum endpoints answer 503 until one appears (SIGHUP, or automatically in author mode).
 
 ### 2.9 Progress
 
-sessiond reports progress (step start, completion, demonstrated, skipped, hints via `rpc hint`, resets, finished laps), so it survives a tab closing mid-step. `progress.Service.Apply` only raises a status (api.md §2.4), takes absolute `hintsUsed`/`resets`, and rejects lessons or steps outside the loaded bundle (the learner can read their session token). `POST /progress/reset` then sends the session `drop-step` (best effort, 5 s).
+sessiond reports progress (step start, completions, hints, resets, finished laps), so it survives a tab closing mid-step. `progress.Service.Apply` only raises a status (api.md §2.4), takes absolute `hintsUsed`/`resets`, and rejects lessons or steps outside the loaded bundle (the learner can read their session token). `POST /progress/reset` then sends the session `drop-step` (best effort, 5 s).
 
 ## 3. sessiond
 
@@ -85,15 +85,15 @@ Keep Emacs, tmux and Xvnc alive; serve PTY, events, VNC, RPC and preview; tap in
 3. Start HTTP; `/healthz` answers 503 until step 4 is done.
 4. Start the daemon and wait for `hello` (60 s, then restart once).
 5. Start tmux and the terminal frame.
-6. Resume the step in `.playground/state.json`, if any, without fixtures or checkpoint: re-open `snapshot.json` when it shows a file under the lesson root, else run setup without `reset`. Until then snapshots are held (`Supervisor.HoldSnapshots`), so the fresh `*scratch*` never replaces the learner's windows.
+6. Resume the step in `.playground/state.json`, if any, without fixtures or checkpoint: re-open `snapshot.json` when it shows a file under the lesson root, else run setup without `reset`. Snapshots are held until then, so the fresh `*scratch*` never replaces the learner's windows.
 
 ### 3.3 Supervisor
 
 - Daemon `emacs --fg-daemon=playground --init-directory=/work/emacs.d`: backoff 1-8 s; after 5 restarts in 10 min give up (`/healthz` 503) until `restart-emacs`.
-- tmux `-L pg`, session `emacs`, pane `emacsclient -t -s playground`: `remain-on-exit on` and a session-level `pane-died` hook (overriding the image's global one) so only sessiond respawns the pane, with a growing delay when it keeps dying (`frame-closed`, `frame-opened`). `escape-time` 10 ms.
-- Xvnc `:1` (localhost, no auth, `-AcceptSetDesktopSize=1`) and the GUI frame (`emacsclient -c`, width and height only, no `fullscreen`): restarted while GUI mode is on. The browser resizes the screen through RandR; the config fits frames to it (emacs.md §6). Leaving GUI closes `/vnc` with 4002, deletes the X frames and closes Emacs's X connections before Xvnc stops; if Emacs cannot let go, Xvnc keeps running rather than dying under Emacs. Then a `top-level` from a timer restarts the command loop, which would otherwise swallow the terminal frame's next input event (the ESC of `ESC [ I`, typing `[I`).
+- tmux `-L pg`, session `emacs`, pane `emacsclient -t -s playground`: a session-level `pane-died` hook (emacs.md §5) lets only sessiond respawn the pane, with a growing delay when it keeps dying (`frame-closed`, `frame-opened`).
+- Xvnc `:1` (localhost, no auth, `-AcceptSetDesktopSize=1`) and the GUI frame (`emacsclient -c`, no `fullscreen`, emacs.md §6): restarted while GUI mode is on. Leaving GUI closes `/vnc` with 4002, deletes the X frames and closes Emacs's X connections before Xvnc stops (if Emacs cannot let go, Xvnc keeps running); then a `top-level` from a timer restarts the command loop, which would otherwise swallow the terminal's next input event (the ESC of `ESC [ I`, typing `[I`).
 - Heartbeat: agent pings every 2 s; five missed → `emacs unresponsive` and SIGUSR2; resumed → `responsive`. Rescue then sends C-g via tmux; still busy 10 s later → `error emacs_unavailable` offering a restart.
-- Restart (`restart-emacs`, module change): `restarting`, snapshot, save modified file buffers (`supervisor.FlushForm`: never over a file changed on disk, skipping remote and read-only, whatever `auto-save-visited-mode` says), restart, hello, re-open the snapshot, respawn the pane, `daemon-restarted` once the frame is open. Snapshots also every 30 s.
+- Restart (`restart-emacs`, module change): `restarting`, snapshot, save modified file buffers (`supervisor.FlushForm`: never over a file changed on disk, skipping remote and read-only ones), restart, hello, re-open the snapshot, respawn the pane, `daemon-restarted` once the frame is open.
 
 ### 3.4 PTY
 
@@ -105,16 +105,16 @@ One agent connection (api.md §7), replaced by a new one. Calls are serialised t
 
 ### 3.6 Input tap
 
-Decodes input into Emacs keys independently of Emacs to emit `prefix` within milliseconds; the agent's `key` stays authoritative.
+Decodes input into Emacs keys to emit `prefix` within milliseconds; the agent's `key` stays authoritative.
 
-- Terminal decoder: legacy bytes (`ESC`+byte within 50 ms → `M-`), CSI/SS3, `modifyOtherKeys`, CSI u (the browser sends it for chords legacy encoding lacks, frontend.md §5); skips paste, mouse and terminal replies. A mode tracker watches output for kitty keyboard and `modifyOtherKeys` changes.
+- Terminal decoder: legacy bytes (`ESC`+byte within 50 ms → `M-`), CSI/SS3, `modifyOtherKeys`, CSI u (frontend.md §5); skips paste, mouse and terminal replies. A mode tracker watches output for kitty keyboard and `modifyOtherKeys` changes.
 - RFB decoder on `/vnc`: KeyEvent and QEMU extended keys, keysyms via a generated table.
 - Prefix tracker (`inputtap.DefaultPrefixes`; M-o is not a prefix): `prefix` while the sequence is a prefix, `prefix ""` as soon as a key ends it, since the agent's `key` may come much later (`C-h k`). `C-h` after a prefix keeps it pending one more key for which-key paging (`n`/`p`/`d` keep, `u` drops a key, `a` ends).
-- Late keys: a lone `ESC` is reported when the 50 ms meta timeout ends, but tmux passes it on after 10 ms. A late key whose bytes arrived before the agent's last command was already consumed (third `ESC` of `ESC ESC ESC`): it is dropped and the pending prefix cleared, else `ESC` would stay pending and turn the next `C-x` into `C-M-x`.
+- Late keys: a lone `ESC` is reported when the 50 ms meta timeout ends, but tmux passes it on after 10 ms. A late key whose bytes arrived before the agent's last command was already consumed (third `ESC` of `ESC ESC ESC`), so it is dropped and the pending prefix cleared; else the next `C-x` would read as `C-M-x`.
 
 ### 3.7 Event bus
 
-`events.Bus` stamps a monotonic `seq`, encodes once and shares the frame with subscribers, the 500-event replay ring, the stuck window (`Bus.Recent`, 200) and the event log (deployment.md §9.4). A subscriber whose 256-entry buffer fills gets `gap` instead of blocking producers.
+`events.Bus` stamps a monotonic `seq`, encodes once and shares the frame with subscribers, the 500-event replay ring, the stuck window (200) and the event log (deployment.md §9.4). A subscriber whose 256-entry buffer fills gets `gap` instead of blocking producers.
 
 ### 3.8 Step engine
 
@@ -122,7 +122,7 @@ Decodes input into Emacs keys independently of Emacs to emit `prefix` within mil
 
 Triggers: agent `key`/`state`, `file` events, a 2 s ticker (for asynchronous output). One goroutine with a trailing debounce: 40 ms after the last trigger, at most 120 ms after the first (`DefaultDebounce`, `DefaultDebounceMax`); `check` follows its `key` by about 50 ms.
 
-Evaluators: `event` from command counts; `elisp` and `buffer` (turned into a form) by agent `check`, batched (error or timeout → unknown); `file` through `os.Root`, fresh, ≤ 1 MB; `shell` as `sh -c` in `cwd` (default setup root), exit 0 true, timeout → unknown, stdout ≤ 4 KB in `detail`, cached until the next file event, nested `.git` change or step change (a step about to complete on a result from a run older than the last command re-runs it first: a save is seen before its file event), one run per script at a time, unknown ("running") after 1.5 s while it finishes in the background and triggers a re-evaluation; `host: box` file and shell conditions run `ssh box` (exit 255 → unknown), cached 3 s; `layout` and `state` on the last agent state (no state → unknown). `all`/`any`/`not` are three-valued. A step completes when every top-level condition is true. Stuck rules run on the ticker, never while a demo plays.
+Evaluators: `event` from command counts; `elisp` and `buffer` (turned into a form) by batched agent `check` (error or timeout → unknown); `file` through `os.Root`, fresh, ≤ 1 MB; `shell` as `sh -c` in `cwd` (default setup root), exit 0 true, timeout → unknown, stdout ≤ 4 KB in `detail`, cached until the next file event, nested `.git` change or step change, one run per script at a time, unknown ("running") after 1.5 s while it finishes in the background. A step about to complete on a shell result older than the last command re-runs it first (a save is seen before its file event). `host: box` conditions run over `ssh box` (exit 255 → unknown), cached 3 s; `layout` and `state` use the last agent state (none → unknown). `all`/`any`/`not` are three-valued. A step completes when every top-level condition is true. Stuck rules run on the ticker, never while a demo plays.
 
 Statuses and the demo latch: api.md §4.1. Internals:
 
@@ -130,7 +130,7 @@ Statuses and the demo latch: api.md §4.1. Internals:
 - `skip` holds completions while `protocol.PlayDemo` plays, detached from the request.
 - `Engine.Rehearse` (fast-forward, §3.12) activates a step with nothing recorded, emitted or persisted.
 - `.playground/state.json` keeps the active step, the running lap and per lesson the done, skipped and demonstrated times, hints and resets.
-- Laps (`Engine.ActivateLap`): `LapStart` from `scenario {lap}`, `LapKeep` on resume, any other activation or `drop-step` ends it; `Hint`, `StartDemo`, `BeginSkip` refuse and stuck rules pause; the last completion reports `lapMs`.
+- Laps (`Engine.ActivateLap`): started by `scenario {lap}`, kept on resume, ended by any other activation or `drop-step`; hints, demos and skips are refused and stuck rules pause; the last completion reports `lapMs`.
 
 ### 3.9 Checkpoints
 
@@ -140,22 +140,19 @@ The workspace is a git repository. A checkpoint is a commit at `refs/playground/
 
 - `spec`: the agent's `WindowSpec` (api.md §7).
 - `buffers`: each file buffer's unsaved text (≤ 256 KiB) and readable undo entries (≤ 128 KiB), 512 KiB in all. A step usually starts with the previous step's edit still unsaved (auto-save waits 5 s).
-- `globals`: printed `sessiond.GlobalVars` (kill ring, minibuffer and search histories, last macro and counters; ≤ 256 KiB), so Watch it then Do it yourself leaves none of the demo's kills, history or macro counts. Add a variable when a lesson depends on more session state.
+- `globals`: printed `sessiond.GlobalVars` (kill ring, minibuffer and search histories, last macro and counters; ≤ 256 KiB), so Watch it then Do it yourself leaves none of the demo's kills, history or macro counts.
 - `emptyDirs` (≤ 1000).
-- `nested`: each nested git repository (a directory with a `.git` directory, ≤ 50) as two commits, its working tree (its own ignores apply) and its `.git` (lock files left out), kept reachable as extra parents of the checkpoint commit; the workspace tree leaves them out.
+- `nested`: each nested git repository (≤ 50) as two commits, its working tree (its own ignores apply) and its `.git` (minus lock files), kept reachable as extra parents of the checkpoint commit.
 
-Restore: `.git` of nested repositories the checkpoint lacks is removed (their files become ordinary workspace files); `git restore --worktree --staged` and `git clean -fd` against the temporary index, leaving the checkpoint's nested repositories out (removing exactly what the checkpoint lacks, except build output and `.playground`); each nested repository's `.git`, then its working tree, restored the same way; recreate empty directories; keep `emacs.d/modules.el` (modules only grow, emacs.md §4); agent `reset-step`; then unsaved text (`replace-buffer-contents`) and undo with recording off; then globals. `restoredFiles` counts files changed on disk plus buffers whose unsaved edits were discarded.
+Restore: remove the `.git` of nested repositories the checkpoint lacks; `git restore --worktree --staged` and `git clean -fd` against the temporary index, outside the checkpoint's nested repositories (removing exactly what the checkpoint lacks, except build output and `.playground`); restore each nested repository's `.git`, then its working tree; recreate empty directories; keep `emacs.d/modules.el` (emacs.md §4); agent `reset-step`; then unsaved text (`replace-buffer-contents`) and undo with recording off; then globals. `restoredFiles` counts files changed on disk plus buffers whose unsaved edits were discarded.
 
 A started restore runs to the end without the request's cancellation (`Server.restoreCheckpoint`). Git commands are serialised, detached and bounded by `checkpoint.GitTimeout`; a lock older than `checkpoint.StaleLockAge` (10 s) that blocks a command is removed and the command retried once.
 
-Limits and open items:
-
-- Not captured: the staging area of `/work` itself (nested repositories keep theirs), minor modes a demo turned on, variables outside `GlobalVars` such as `display-buffer-alist`; a step whose state lives there lacks it after Go to this step or Watch it.
-- `/work` being the checkpoint repository makes project.el treat it as a project (`emacs.d` in `project-files`); hiding it needs a separate `GIT_DIR`.
+Not captured: the staging area of `/work` itself (nested repositories keep theirs), minor modes a demo turned on, variables outside `GlobalVars` such as `display-buffer-alist`. `/work` being the checkpoint repository makes project.el treat it as a project (`emacs.d` in `project-files`); hiding it needs a separate `GIT_DIR`.
 
 ### 3.10 Preview and file watching
 
-`/preview/` serves `/work` through `os.Root` (no `..` or symlink escape; `.playground/` hidden), headers in api.md §3.5. The CSP's `allow-same-origin` is an open question (deployment.md §9.3). `fsnotify` watches `/work` recursively (ignoring `.git`, build output, `.playground`, lock and backup files), coalescing per path at 200 ms; a change at the top of a nested repository's `.git` (commit, staging, checkout) emits no event but drops cached shell results.
+`/preview/` serves `/work` through `os.Root` (no `..` or symlink escape; `.playground/` hidden), headers in api.md §3.5. `fsnotify` watches `/work` recursively (ignoring `.git`, build output, `.playground`, lock and backup files), coalescing per path at 200 ms; a change at the top of a nested repository's `.git` (commit, staging, checkout) emits no event but drops cached shell results.
 
 ### 3.11 VNC bridge
 
@@ -167,39 +164,36 @@ Limits and open items:
 
 1. Reloading the active lesson (same or no `stepId`, no `reset`) returns at once, never re-running setup.
 2. Fetch scenario and fixtures, cached by ETag in `.playground/cache` and used from there when the gateway is down.
-3. Extract fixtures into `/work/<setup.root>`, keeping existing files unless `reset` (request, `setup.reset` or `lap`); with reset the root matches the fixtures exactly (except build output and `.git`), so lessons replay in any order. Then `setup.repos` (`git init`, re-created on reset) and `setup.run` (≤ 120 s); failures are `error` events.
-4. Modules = current ∪ scenario's (`rpc modules` sets exactly), so lessons must pass with more modules than they list. On change: write `modules.el`, emit `modules {restarting: true}`, return `restarting: true`, finish after the restart, then emit `modules {restarting: false}` (the browser holds the learner's keys from `restarting` until then, so none land before setup).
+3. Extract fixtures into `/work/<setup.root>`, keeping existing files unless `reset` (request, `setup.reset` or `lap`), which makes the root match the fixtures exactly (except build output and `.git`). Then `setup.repos` (`git init`, re-created on reset) and `setup.run` (≤ 120 s); failures are `error` events.
+4. Modules = current ∪ scenario's (emacs.md §4). On change: write `modules.el`, emit `modules {restarting: true}`, return `restarting: true`, finish after the restart, then emit `modules {restarting: false}` (the browser holds keys until then, so none land before setup).
 5. Agent `setup` (emacs.md §10.3), after waiting ≤ 15 s for a restart and for the terminal frame, so layouts never land in the daemon's invisible frame. `compile` runs in the project root of the first `open` file. TODO(sessiond, CURRICULUM.md Part B.3): `.eld` layouts are ignored.
-6. A later step (Go to this step, resume mid-lesson) starts from its checkpoint; without one the loader fast-forwards, rehearsing each earlier step and playing its demo at playctl pacing (≤ 10 s per step, 3 min total, detached from the request). A later step's checkpoint is never overwritten with the lesson's initial state.
+6. A later step (Go to this step, resume mid-lesson) starts from its checkpoint; without one the loader fast-forwards, rehearsing each earlier step and playing its demo (≤ 10 s per step, 3 min total, detached from the request). A later step's checkpoint is never overwritten with the lesson's initial state.
 7. Take the step's checkpoint if missing or fixtures were re-extracted, activate the step, emit `step loaded`, return.
 
 ### 3.13 Configuration and proxy auth
 
-Environment only: `protocol.SessiondConfig` (names and defaults in its tags), each overridable by a flag named after its JSON key. `sessiond config` prints it; `sessiond healthcheck` is the Compose health command.
+Environment only: `protocol.SessiondConfig` (names and defaults in its tags), each overridable by a flag named after its JSON key; `sessiond config` prints it, `sessiond healthcheck` is the Compose health command.
 
 `sessiond.ProxyAuth`: with `PG_PROXY_SECRET` set, every request except `GET`/`HEAD /healthz` needs it in `X-Playground-Proxy` (constant-time), else 401; the header is stripped. Emacs, tmux and shell conditions see `PG_PROXY_SECRET` and `PG_SESSION_TOKEN` empty. Unset (local mode, `make dev`), everything is served.
 
 ## 4. playctl
 
 - `curriculum validate [dir]`; `curriculum build [dir] -o out [-lenient]` (`-lenient` drops broken lessons, test builds only).
-- `curriculum play <lesson id|2.3|P1|part:N|all>[@step]… [-session URL] [-timeout] [-speed] [-watch|-lap] [-repeat N] [-reset-progress]`: loads each lesson by `/rpc/scenario`, plays its demos by `/rpc/keys` at playctl pacing, requires every step to complete, prints a table and the unmet conditions, exits non-zero on failure. `-session` is sessiond (default `$PG_PLAY_SESSION`) or a gateway session path, after which played lessons' progress is reset. `-watch` plays each step first as Watch it (`demo start`, demo, `demo end`, expect `step demonstrated`, `restore {}`). `@step` (id or task number) loads that step (checkpoint or fast-forward) and plays from it; `-lap` starts the lap, expects a refused hint and the final `lapMs`.
+- `curriculum play <lesson id|2.3|P1|part:N|all>[@step]… [-session URL] [-timeout] [-speed] [-watch|-lap] [-repeat N] [-reset-progress]`: loads each lesson by `/rpc/scenario`, plays its demos by `/rpc/keys`, requires every step to complete, prints a table and the unmet conditions, exits non-zero on failure. `-session` is sessiond (default `$PG_PLAY_SESSION`) or a gateway session path (played lessons' progress is then reset). `-watch` plays each step first as Watch it and expects `step demonstrated` before `restore {}`; `@step` (id or task number) starts at that step; `-lap` expects a refused hint and the final `lapMs`.
 - `config schema`, `config check <file>`; `protocol typescript [-check]` (api.md §8); `images build`, `dev`, `fonts`, `session shell` (notes.md §3); `export-user` is a TODO.
 
 ## 5. Cross-cutting
 
 - Config: unknown keys are errors; logged with secrets redacted; the struct generates `deploy/config.schema.json`.
 - Logging: `log/slog` JSON with `request_id`, `session_id`, `user_id`; never cookies, tokens or workspace contents.
-- Metrics (optional): sessions, WebSockets, events, RPC, evaluation, checkpoint and proxy durations. TODO(gateway, backend.md §5): creation duration, latency histograms.
+- Metrics (optional): sessions, WebSockets, events, RPC, evaluation, checkpoint and proxy durations.
 - Errors: handlers return `httpx` errors, rendered as problem+json with api.md §1's codes.
-- Every subprocess has a context, every call a deadline; HTTP read-header 10 s, idle 120 s; WebSocket pings every 20 s. Everything buffered is bounded.
+- Every subprocess has a context, every call a deadline; HTTP read-header 10 s, idle 120 s; WebSocket pings every 20 s; every buffer is bounded.
 - Shutdown: sessiond emits `emacs stopping`, snapshots, `FlushForm`, stops Emacs (≤ 15 s), closes WebSockets with 4003; the gateway drains 10 s.
 
 ## 6. Testing
 
-- `go test ./...` needs no Docker, Emacs or tmux: decoders, engine, checkpoints, loader, capture, auth, stores, docker backend against a fake, protocol drift.
-- `-tags dockerintegration ./internal/docker/`; `images/gateway/test/server-mode.sh` (isolation, re-attach).
-- `-tags integration ./internal/sessiond/` against the session image (notes.md §3).
-- Emacs ERT (emacs.md §10.6); `web/e2e/smoke.mjs` and `playctl curriculum play` (frontend.md §14).
+`go test ./...` needs no Docker, Emacs or tmux (subprocesses and the Engine are faked); the `dockerintegration` and `integration` tags, `server-mode.sh`, ERT (emacs.md §10.6) and the browser scripts run against real images (notes.md §3).
 
 ## 7. Conventions
 

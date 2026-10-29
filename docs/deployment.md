@@ -12,7 +12,7 @@
 
 Dockerfiles: `images/<name>/Dockerfile`, context the repository root. Pins: third-party.md; `images/session/versions.env` is reported by sessiond's `/status`.
 
-GitHub Actions: `ci.yml` (Go, web and curriculum checks) and `images.yml` (one matrix job per image, then `images/<image>/test/ci-smoke.sh`: the session's ERT suites, the gateway in local mode; a cold session build takes over an hour). Pull requests build without pushing. No attestations are pushed, and the build cache lives in a separate `buildcache` package.
+GitHub Actions: `ci.yml` (Go, web and curriculum checks) and `images.yml` (one matrix job per image, then `images/<image>/test/ci-smoke.sh`: the session's ERT suites, the gateway in local mode; a cold session build takes over an hour). Pull requests build without pushing. No provenance or SBOM attestations; the session and remote-box build caches live in a separate `buildcache` package.
 
 Tags: the short commit sha and `latest` for pushes to main; `vX.Y.Z` for release tags. Forks set `IMAGE_BASE` in `.env`. *Planned:* the gateway refuses a session image of another major version.
 
@@ -27,7 +27,7 @@ Tags: the short commit sha and `latest` for pushes to main; `vX.Y.Z` for release
 
 `.env` holds only `COMPOSE_FILE`, `TAG`, `IMAGE_BASE`, `DOMAIN`. Never set `hostname:` on the gateway in server mode: it finds its own container by hostname (§7). Caddy answers `/internal/*` with 404; the server-mode gateway also refuses `/internal` requests with forwarding headers.
 
-Server-mode session containers: `pg-session-<id>` (name and hostname), `playground.*` labels, the session network (§7), volume `pg-ws-<user>` at `/work`, the §9.2 profile, and `PG_SESSION_ID`, `PG_SESSION_TOKEN`, `PG_PROXY_SECRET`, `PG_GATEWAY_URL` plus geometry from the config.
+Server-mode session containers (backend.md §2.3) get the §9.2 profile and `PG_SESSION_ID`, `PG_SESSION_TOKEN`, `PG_PROXY_SECRET`, `PG_GATEWAY_URL` plus geometry from the config.
 
 ## 3. Configuration file
 
@@ -50,15 +50,13 @@ Keys with non-obvious behaviour:
 | `local.sessionId`, `sessionToken` | `local` | must match `compose.local.yaml` |
 | `features.authorMode` | `false` | raw conditions and state, `rpc eval`, hot reload |
 
-sessiond reads environment only (`protocol.SessiondConfig`, backend.md §3.13). `PG_PROXY_SECRET` is derived per session (backend.md §2.3) from `<dataDir>/session-proxy.secret`, a key separate from the cookie secret so rotating cookies does not lock out running sessions. Unset locally: sessiond then serves without it.
+sessiond reads environment only (backend.md §3.13). `PG_PROXY_SECRET` is derived per session (backend.md §2.3) from `<dataDir>/session-proxy.secret`, a key separate from the cookie secret so rotating cookies does not lock out running sessions; locally it is unset.
 
 ## 4. Local mode
 
 `make local && docker compose up`, then http://localhost:8080 (`BUILD=1` builds instead of pulling).
 
-- `./workspace` becomes a git repository on first start and receives the image's Emacs configuration then (emacs.md §3).
-- The session runs as uid 1000, so `make local` makes the workspace world-writable.
-- `make shell` attaches a native terminal to the browser's frame.
+`./workspace` becomes a git repository and receives the image's Emacs configuration on first start (emacs.md §3); `make local` makes it world-writable for uid 1000. `make shell` attaches a native terminal to the browser's frame.
 
 ## 5. Server mode (experimental)
 
@@ -66,13 +64,13 @@ Copy `deploy/config.example.json` and `deploy/invites.example.txt` to `deploy/co
 
 - Host: 4 GB RAM plus about 1.5 GB and a quarter core per concurrent session; 10 GB disk plus 2–4 GB per learner; ports 80 and 443; `DOMAIN` resolving before first start.
 - Upgrade: `TAG=vX.Y.Z docker compose pull && docker compose up -d`; running sessions keep their image until they stop.
-- Monitoring: `/healthz`, optional Prometheus (*planned:* latency histograms), JSON logs.
+- Monitoring: `/healthz`, optional Prometheus, JSON logs.
 - Backups: §8; *planned:* `playctl export-user`.
 - `images/gateway/test/server-mode.sh <image>` smoke-tests server mode, isolation and gateway replacement.
 
 ## 6. Remote box
 
-sshd, a `deploy` user (passwordless sudo, for `/ssh:box|sudo::`), Emacs with the pinned packages (lesson 13.6), Rust and Python running offline like the session's (emacs.md §9), nginx serving `/srv/www`; TRAMP lessons use `/ssh:box:`, P5 deploys to `/srv/www`, P6 to `/srv/app`. Each session has an ed25519 key pair in `/work/.playground/ssh` and a `box` alias in `~/.ssh/config` (`HostName` `PG_BOX_HOST`, user `deploy`, `BatchMode`, no host-key checks: a re-created box has new host keys), so `ssh box` and TRAMP never prompt; `/status` reports `remoteBox` once written. Locally sessiond generates the pair and one box, started with the stack, reads `authorized_keys` from that directory (mounted read-only) at every login. On servers the docker backend creates a box per session (`pg-box-<id>`, alias `box` on `pg-net-<id>`) with a fresh pair, the public half as `AUTHORIZED_KEYS`, the private half to sessiond as `PG_BOX_KEY`; the box keeps nothing across re-creation.
+sshd, a `deploy` user (passwordless sudo, for `/ssh:box|sudo::`), Emacs with the pinned packages (lesson 13.6), Rust and Python running offline like the session's (emacs.md §9), nginx serving `/srv/www`; TRAMP lessons use `/ssh:box:`, P5 deploys to `/srv/www`, P6 to `/srv/app`. Each session has an ed25519 key pair in `/work/.playground/ssh` and a `box` alias in `~/.ssh/config` (`HostName` `PG_BOX_HOST`, user `deploy`, `BatchMode`, no host-key checks: a re-created box has new host keys), so `ssh box` and TRAMP never prompt; `/status` reports `remoteBox` once written. Locally sessiond generates the pair and one box, started with the stack, reads `authorized_keys` from that directory (mounted read-only) at every login. On servers each session gets its own box with a fresh pair (backend.md §2.3, public half as `AUTHORIZED_KEYS`), which keeps nothing across re-creation.
 
 ## 7. Networking
 
@@ -85,7 +83,7 @@ sshd, a `deploy` user (passwordless sudo, for `/ssh:box|sudo::`), Emacs with the
 | session → remote box | 22 | TRAMP |
 | session → internet | 443 | per `sessions.egress` |
 
-With `isolation: network`, each session is alone on `pg-net-<id>`, created before its container, `internal` unless egress is `all`, removed with it. The gateway joins as alias `gateway`. A replacement gateway re-joins running sessions' networks while rebuilding its registry; rebuild and reaper prune networks without a container. Sessions reach only the gateway and their box.
+With `isolation: network`, each session is alone with its box on `pg-net-<id>`, created before its container, `internal` unless egress is `all`, removed with it; the gateway joins as `gateway` (re-joining and pruning: backend.md §2.3). Sessions reach only the gateway and their box.
 
 ## 8. Storage
 
@@ -113,16 +111,16 @@ cap_drop ALL; no-new-privileges; default seccomp and AppArmor
 sessions.limits; memory-swap = memory; nofile 65536; restart none; stop timeout 20 s
 ```
 
-No `nproc` ulimit: it counts per uid across the host and every session is uid 1000, so it would be one budget for all; `pids_limit` bounds each container.
+No `nproc` ulimit: it counts per uid across the host, and every session is uid 1000; `pids_limit` bounds each container.
 
 Egress: session networks have no route unless `egress: all` (NAT, and cargo and uv go online); lessons work offline. *Planned:* `registries` adds an allowlist proxy (crates.io, opam, PyPI, Typst packages, CTAN) via `HTTP(S)_PROXY`; until then it behaves like `none`.
 
 ### 9.3 Gateway and web application
 
 - Cookies and login: backend.md §2.6. CSRF: `Origin` must match `publicUrl` on state-changing requests and WebSocket upgrades; no CORS.
-- `/s/{id}` only for its owner; at most 6 WebSockets per user; `/internal` tokens are random 256-bit, stored hashed, per session. The proxy strips `Cookie`, `Authorization` and sessiond's `Set-Cookie`; `rpc eval` needs author mode; internal ops are refused from browsers.
-- sessiond requires `X-Playground-Proxy` (constant-time, not forwarded) on all but `GET`/`HEAD /healthz` when `PG_PROXY_SECRET` is set, else 401; with §7, one learner cannot reach another's Emacs, previews or RPCs.
-- Previews: read through `os.Root`; active content gets a sandboxing CSP, `nosniff`, a sandboxed iframe. Open question (DESIGN.md §12): the CSP keeps `allow-same-origin`, so a learner's HTML opened directly can make credentialed requests to `/api` and `/s`; closing it needs a separate origin or dropping that flag.
+- `/s/{id}` only for its owner, through the proxy of backend.md §2.5 (credentials stripped, `rpc eval` only in author mode, internal ops refused); `/internal` tokens are random 256-bit, stored hashed, per session.
+- sessiond requires the proxy secret (backend.md §3.13); with §7, one learner cannot reach another's Emacs, previews or RPCs.
+- Previews: read through `os.Root`; active content gets a sandboxing CSP, `nosniff`, a sandboxed iframe. Open (DESIGN.md §12): the CSP keeps `allow-same-origin`, so a learner's HTML opened directly can make credentialed requests to `/api` and `/s`; closing it needs a separate origin or dropping that flag.
 - App headers (`internal/gateway/static.go`): strict CSP, `frame-ancestors 'none'`, `X-Frame-Options: DENY`, `nosniff`; HSTS via Caddy.
 - Rate limits: login 10 per IP and 20 per code a minute; `POST /api/v1/sessions` 10 per user a minute, made once per page load; stuck reports 10 per user an hour (browser and `/internal`; caps in api.md §2.5). Progress is accepted only for steps in the loaded bundle.
 - Docker only through the socket proxy; no privileged containers or host mounts; only labelled objects.
@@ -133,7 +131,7 @@ Event logs stay in the session (`/work/.playground/events.log`, rotated at 10 MB
 
 ### 9.5 Supply chain and repository hygiene
 
-CI builds from pinned bases, `versions.env` (checksummed) and `packages.lock` (SHA-256, MELPA vendored); SBOM and provenance on each image. *Planned:* `govulncheck`, `pnpm audit`, automated pin updates. Open: no LICENSE file; `deploy/config.json` is tracked although `make local` writes it; two unused devDependencies (third-party.md §6).
+CI builds from pinned bases, `versions.env` (checksummed) and `packages.lock` (SHA-256, every tarball vendored). *Planned:* `govulncheck`, `pnpm audit`, automated pin updates. Open: no LICENSE file; `deploy/config.json` is tracked although `make local` writes it.
 
 ### 9.6 Residual risks
 

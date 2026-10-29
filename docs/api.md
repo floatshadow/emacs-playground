@@ -164,17 +164,17 @@ One JSON object per line, ≤ 1 MB (`protocol.MaxAgentLine`); a new connection r
 
 Agent → sessiond: `hello {protocol, agent, emacs, pid, modules?, moduleErrors?}`; `key`, `state`, `echo`, `minibuffer` as in §4; `frame {event: opened|closed, kind}`, `closed` only when a terminal's last frame goes; `ping` every 2 s; `reply {id, ok, value?, error?}`.
 
-sessiond → agent: `pong`, `call {id, op, args, timeoutMs}`, serialised. Each call runs from a top-level timer under `with-timeout` and `inhibit-interaction`, so a prompting op fails instead of blocking. Ops:
+sessiond → agent: `pong`, `call {id, op, args, timeoutMs}`, serialised; a prompting op fails instead of blocking (emacs.md §10.4). Ops:
 
 - `eval {form}` → `{value}`; `check {forms}` → `{results}` of `true|false|"unknown"` (`protocol.Truth`; 1 s per form).
-- `rescue` → `{did}`; `snapshot` → `WindowSpec`; `open WindowSpec` → `{opened, layoutDeferred?}` (deferred to the next client frame when none exists yet).
+- `rescue` → `{did}`; `snapshot` → `WindowSpec`; `open WindowSpec` → `{opened, layoutDeferred?}`.
 - `reset-step {spec}` → `{reverted, killed}`; `setup {open?, layout?, eval?, compile?, workspace, reset?, root?}` → `{ok}`.
 - `set-modules {enabled}` → `{written}` (sessiond then restarts); `frame {kind, display?}` → `{frame}`; `describe {keys}|{cmd}` → `{cmd, doc}`.
 
 `WindowSpec`: `files:[{path, point, visible}]` (most recent first, workspace-relative), `layout` (used without `windowState`), `windowState` and `specialBuffers` (printed, opaque to sessiond), `selected`, `tab`, `tabs`, `tabIndex`, `takenAt`; semantics in emacs.md §10.3.
 
-The agent never blocks editing: while disconnected or 5 s without a pong it queues events (≤ 1000, oldest dropped, replies kept) and reconnects a peer silent for 10 s with 1-16 s backoff.
+The agent never blocks editing: it queues output while the socket is stuck and reconnects with backoff (emacs.md §10.4).
 
 ## 8. Type generation
 
-`playctl protocol typescript` (`internal/protocol/tsgen`, reflection plus the Go AST for enums and doc comments) renders string-literal enums, an `Event` union on `t` and an `RpcOps` request/result map. `go test ./internal/protocol/...` fails when it is stale; `make protocol` regenerates it. `deploy/config.schema.json` comes from invopop/jsonschema.
+`playctl protocol typescript` (`internal/protocol/tsgen`: reflection plus the Go AST) renders string-literal enums, an `Event` union on `t` and an `RpcOps` request/result map. `go test ./internal/protocol/...` fails when it is stale; `make protocol` regenerates it. `deploy/config.schema.json` comes from invopop/jsonschema.
