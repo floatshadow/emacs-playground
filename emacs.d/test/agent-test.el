@@ -926,6 +926,21 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (should (= (length (window-list)) 2))
       (should (equal (playground--layout-string (playground--tree (selected-frame))) "(hsplit a.txt b.txt)")))))
 
+(ert-deftest pg-agent/op-reset-step-cancels-a-pending-prefix ()
+  "With a prefix key waiting (C-c), reset-step unwinds first, then resets and replies."
+  (pg-test-with-agent
+    (let* ((a (pg-test-file "a.txt" "original a\n"))
+           (unwound nil)
+           (playground-agent-rescue-unwind-function (lambda () (setq unwound t))))
+      (with-current-buffer (find-file-noselect a) (goto-char (point-max)) (insert "edited\n"))
+      (cl-letf (((symbol-function 'this-single-command-keys) (lambda () [3])))
+        (pg-test-value
+         (pg-test-call "reset-step"
+                       `((spec . ((files . ,(vector '((path . "a.txt") (point . 1) (visible . t))))
+                                  (layout . "a.txt")))))))
+      (should unwound)
+      (should (equal (with-current-buffer (get-file-buffer a) (buffer-string)) "original a\n")))))
+
 (defun pg-test--shown-files ()
   "Files of the selected frame's windows, top to bottom, left to right."
   (mapcar (lambda (w) (buffer-file-name (window-buffer w)))

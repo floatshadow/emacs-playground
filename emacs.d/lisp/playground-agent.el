@@ -2096,7 +2096,39 @@ closes it.  Returns the number killed."
           (cl-incf n))))
     n))
 
-(defun playground--op-reset-step (args &rest _)
+(defun playground--prefix-pending-p ()
+  "Non-nil when the learner has typed a prefix key (C-c) and Emacs waits for more.
+Ops run from the process filter while the command loop reads keys, so
+the keys read so far are the pending prefix.  A loop reading keys of
+its own (`playground-agent-waiting-loops') is not a prefix."
+  (and (not playground--waiting) (> (length (this-single-command-keys)) 0)))
+
+(defun playground--at-top-level (id fn)
+  "Call FN at top level and reply to call ID with its value.
+Run directly when no prompt, recursive edit or pending prefix key would
+swallow the keys that follow; otherwise those need a throw to the
+command loop, so FN runs from a timer there and the reply is sent from
+it (`playground--deferred')."
+  (if (and id (or (> (recursion-depth) 0) (playground--prefix-pending-p)))
+      (progn
+        (run-at-time 0 nil
+                     (lambda ()
+                       (condition-case err
+                           (let ((inhibit-interaction t))
+                             (playground--reply id t (funcall fn)))
+                         (error (playground--reply id nil nil (error-message-string err))))))
+        (funcall playground-agent-rescue-unwind-function)
+        'playground--deferred)
+    (funcall fn)))
+
+(defun playground--op-reset-step (args &optional id)
+  "Reset the step from ARGS at top level (see `playground--reset-step-now').
+A prefix key typed before Reset (C-c waiting for its second key) would
+otherwise swallow the next keys, so it is cancelled, and so are prompts
+(see `playground--at-top-level'); the reply to call ID may come later."
+  (playground--at-top-level id (lambda () (playground--reset-step-now args))))
+
+(defun playground--reset-step-now (args)
   "Put the files and windows back to the spec in ARGS (the step's start).
 Edited buffers are reverted to the restored files, buffers of files
 that are gone are killed, unmodified file buffers the step did not
@@ -2167,24 +2199,14 @@ fixture.  Returns the number of buffers reverted or killed."
 
 (defun playground--op-setup (args &optional id)
   "Run a scenario's setup: open, layout, eval, compile (ARGS).
-A prompt or recursive edit still open (the learner switched lessons
-in the middle of a command) would swallow the lesson's first keys, so
-it is left first.  That needs a throw to the command loop, so, as in
+A prompt, recursive edit or prefix key still open (the learner switched
+lessons in the middle of a command) would swallow the lesson's first
+keys, so it is left first.  That needs a throw to the command loop, so, as in
 rescue, the setup then runs from a timer at top level and the reply
 to call ID is sent from there."
   (when (bound-and-true-p isearch-mode)
     (playground--safely "setup isearch" (isearch-done)))
-  (if (and id (> (recursion-depth) 0))
-      (progn
-        (run-at-time 0 nil
-                     (lambda ()
-                       (condition-case err
-                           (let ((inhibit-interaction t))
-                             (playground--reply id t (playground--setup-now args)))
-                         (error (playground--reply id nil nil (error-message-string err))))))
-        (funcall playground-agent-rescue-unwind-function)
-        'playground--deferred)
-    (playground--setup-now args)))
+  (playground--at-top-level id (lambda () (playground--setup-now args))))
 
 (defconst playground--list-modes
   '(ibuffer-mode Buffer-menu-mode bookmark-bmenu-mode dired-mode)
