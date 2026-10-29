@@ -108,6 +108,15 @@
         corfu-cycle t
         corfu-preview-current nil
         corfu-max-width 60)
+  ;; In prose (Org, Markdown, LaTeX, commit messages) the popup waits
+  ;; for TAB or C-M-i, as VS Code offers no suggestions in Markdown:
+  ;; popping up words and file names under every sentence made RET at
+  ;; the end of a line take a candidate instead of starting a new one.
+  ;; It must be set before global-corfu-mode turns corfu on.
+  (defun playground--corfu-manual-in-prose ()
+    "Let the completion popup open only on request in this buffer."
+    (setq-local corfu-auto nil))
+  (add-hook 'text-mode-hook #'playground--corfu-manual-in-prose)
   (global-corfu-mode 1)
   (with-eval-after-load 'corfu
     (corfu-popupinfo-mode 1)
