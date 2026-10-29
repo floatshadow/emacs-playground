@@ -62,8 +62,8 @@ steps:
         say: "In the terminal: uv init --bare, then uv add numpy, then uv add --dev pytest, each followed by RET. C-x still works in the terminal, so C-x C-f opens stats.py."
   - id: write
     goal: Write load and summarize, and fix what basedpyright reports
-    detail: "In stats.py: `import numpy as np`; `def load(path: str) -> np.ndarray:` returning `np.loadtxt(path, delimiter=\",\", skiprows=1, usecols=1)`; and, as everyone writes it once, `def summarize(temps: np.ndarray) -> dict[str, float]:` returning `{\"mean\": temps.average()}`. Save. basedpyright underlines `average`: `M-n` jumps to the diagnostic and `C-h .` shows it, ndarray has no attribute average. Fix the line: `return {\"mean\": float(temps.mean()), \"max\": float(temps.max()), \"min\": float(temps.min())}`."
-    demo: 'C-x C-f "/work/data-lab/stats.py" RET ~800 C-x 1 M-< "import numpy as np\n\n\ndef load(path: str) -> np.ndarray:\nreturn np.loadtxt(path, delimiter=\",\", skiprows=1, usecols=1)\n\n\ndef summarize(temps: np.ndarray) -> dict[str, float]:\nreturn {\"mean\": temps.average()}\n" ~300 C-x C-s ~5000 M-< C-s "average" RET ~300 C-h . ~2000 M-m C-k "return {\"mean\": float(temps.mean()), \"max\": float(temps.max()), \"min\": float(temps.min())}" ~300 C-x C-s ~5000'
+    detail: "In stats.py: `import numpy as np`; `def load(path: str) -> np.ndarray:` returning `np.loadtxt(path, delimiter=\",\", skiprows=1, usecols=1)`; and, as everyone writes it once, `def summarize(temps: np.ndarray) -> dict[str, float]:` returning `{\"mean\": temps.average()}`. Save. basedpyright underlines `temps.average`, and `M-n` jumps from one diagnostic to the next, showing each message at the bottom: first a warning, `Type of \"average\" is unknown`, then, on a second `M-n`, the error, `Cannot access attribute \"average\" for class \"ndarray\"`. (`C-c l d` lists them all.) Fix the line: `return {\"mean\": float(temps.mean()), \"max\": float(temps.max()), \"min\": float(temps.min())}`."
+    demo: 'C-x C-f "/work/data-lab/stats.py" RET ~800 C-x 1 M-< "import numpy as np\n\n\ndef load(path: str) -> np.ndarray:\nreturn np.loadtxt(path, delimiter=\",\", skiprows=1, usecols=1)\n\n\ndef summarize(temps: np.ndarray) -> dict[str, float]:\nreturn {\"mean\": temps.average()}\n" ~300 C-x C-s ~5000 M-< ~300 M-n ~1000 M-n ~2000 M-< C-s "average" RET ~300 M-m C-k "return {\"mean\": float(temps.mean()), \"max\": float(temps.max()), \"min\": float(temps.min())}" ~300 C-x C-s ~5000'
     conditions:
       - text: stats.py defines load and summarize
         all:
@@ -79,7 +79,7 @@ steps:
           - event: { command: playground-doc-at-point }
           - event: { command: flymake-show-buffer-diagnostics }
           - event: { command: consult-flymake }
-        hint: "Save first: basedpyright checks what is saved too. Then M-n moves to the next underlined spot and C-h . explains it."
+        hint: "Save first: basedpyright checks what is saved too. Then M-n moves to the next underlined spot and shows its message at the bottom; C-c l d lists every message of the buffer."
       - text: basedpyright reports no errors
         elisp: '(let ((b (find-buffer-visiting "/work/data-lab/stats.py"))) (and b (with-current-buffer b (and (eglot-managed-p) (not (seq-some (lambda (d) (memq (flymake-diagnostic-type d) (quote (eglot-error :error)))) (flymake-diagnostics)))))))'
         hint: "C-c l d lists every diagnostic of the buffer. ndarray has mean, max and min; float(...) turns numpy's scalar into the float the annotation promises. A return at the left margin is outside the function: TAB indents the line back into it."

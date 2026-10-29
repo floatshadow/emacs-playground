@@ -46,7 +46,7 @@ setup:
 steps:
   - id: pages
     goal: Write the Usage page and preview it
-    detail: "`usage.md` is a stub. Replace its TODO line with a `## ` section heading, a list item and a link to the install page written as `[Install](install.md)`. Turn on the live preview with `C-c C-c l`, then save with `C-x C-s`: the preview below follows every save."
+    detail: "`usage.md` is a stub. Replace its TODO line with a `## ` section heading, a list item and a link to the install page written as `[Install](install.md)`. Turn on the live preview with `C-c C-c l`, then save with `C-x C-s`: the preview to the right follows every save."
     demo: 'C-x C-f ~400 "/work/docs-site/pages/usage.md" RET ~600 M-< ~300 C-n C-n ~300 C-k ~400 "## Counting words\n\n- `tally FILE` prints the words, lines and characters of FILE.\n\nInstall it first: [Install](install.md).\n" ~600 C-c C-c l ~2500 C-x C-s ~1500'
     conditions:
       - text: usage.md has a section heading
