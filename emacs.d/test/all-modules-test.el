@@ -12,8 +12,8 @@
 ;; the keys the lessons of Parts 4 to 13 teach, the compiled parts of
 ;; vterm, jinx and pdf-tools, the toolchains the modules call, the
 ;; language servers they register, and a few behaviours that are easy
-;; to break: Org's Rust blocks, compile's error regexps, citations in
-;; Typst.
+;; to break: Org's Rust blocks, compile's error regexps and two-line
+;; messages that arrive in two chunks, citations in Typst.
 
 ;;; Code:
 
@@ -254,6 +254,29 @@
     (should (string-match pytest "tests/test_score.py:12: AssertionError"))
     (should (equal (match-string 1 "tests/test_score.py:12: AssertionError") "tests/test_score.py"))
     (should (string-match pytest "tests/test_score.py:7: in test_mean"))))
+
+(defvar compilation-num-errors-found)
+(ert-deftest pg-all/compile-two-line-message-in-two-chunks ()
+  "Lesson 11.3: a cargo error whose two lines arrive apart is still found."
+  (require 'compile)
+  (let* ((default-directory (file-name-as-directory (make-temp-file "pg-compile" t)))
+         (buffer (compilation-start
+                  (concat "printf 'error[E0609]: one\\n'; sleep 0.5; "
+                          "printf '  --> src/main.rs:10:53\\n\\nerror[E0308]: two\\n  --> src/main.rs:12:18\\n'")
+                  nil (lambda (_) "*pg-compile-chunks*"))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (while (get-buffer-process buffer) (accept-process-output nil 0.1))
+          (let ((lines nil) (pos (point-min)))
+            (while (setq pos (next-single-property-change pos 'compilation-message))
+              (when (get-text-property pos 'compilation-message)
+                (push (save-excursion (goto-char pos) (buffer-substring-no-properties pos (line-end-position 2))) lines)))
+            (should (equal (nreverse lines)
+                           '("error[E0609]: one\n  --> src/main.rs:10:53"
+                             "error[E0308]: two\n  --> src/main.rs:12:18"))))
+          (should (= compilation-num-errors-found 2)))
+      (let ((kill-buffer-query-functions nil)) (kill-buffer buffer))
+      (delete-directory default-directory t))))
 
 (ert-deftest pg-all/typst-citation ()
   "Lesson 8.6: citar inserts @key citations in Typst."

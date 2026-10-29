@@ -22,6 +22,28 @@
       next-error-message-highlight t)
 (add-hook 'compilation-filter-hook #'ansi-color-compilation-filter)
 
+;; cargo's messages take two lines (error[E0609]: …, then --> file:line:col).
+;; compile.el parses output as it arrives (and again for redisplay) and
+;; never looks at a complete line twice, so when the output stops between
+;; the two lines for a moment the error is lost and M-g M-n skips it.
+;; While the process runs, a last line that matched nothing stays unparsed.
+(defvar compilation--parsed)
+(defun playground--compilation-unparse-last-line (&rest _)
+  "Leave the last complete output line to be parsed with the next one."
+  (when-let* ((proc (get-buffer-process (current-buffer)))
+              ((memq (process-status proc) '(run open)))
+              ((markerp compilation--parsed)))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char (process-mark proc))
+        (forward-line 0)
+        (forward-line -1)
+        (when (and (< (point) compilation--parsed)
+                   (not (text-property-not-all (point) (line-end-position) 'compilation-message nil)))
+          (move-marker compilation--parsed (point)))))))
+(advice-add 'compilation--ensure-parse :after #'playground--compilation-unparse-last-line)
+
 ;; C-c C-c builds a Rust crate without asking, like VS Code's Run Build
 ;; Task; M-x compile asks for the command.  lang-rust (Part 7) defines
 ;; the same command and adds run, test and clippy.
