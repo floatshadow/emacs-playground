@@ -115,6 +115,21 @@
    'org-babel-load-languages
    '((emacs-lisp . t) (shell . t) (python . t) (ocaml . t) (calc . t))))
 
+;; A failed block shows *Org-Babel Error Output*; Org empties it when the
+;; next block runs but leaves its window open.  After a block that ran
+;; cleanly, the empty window goes.
+(defvar org-babel-error-buffer-name)
+(defun playground--org-babel-close-error-window ()
+  "Close the windows of the error buffer when the last block left it empty."
+  (when-let* ((buf (and (boundp 'org-babel-error-buffer-name)
+                        (get-buffer org-babel-error-buffer-name)))
+              ((zerop (buffer-size buf))))
+    (dolist (win (get-buffer-window-list buf nil t))
+      (if (eq (window-deletable-p win) t)
+          (delete-window win)
+        (switch-to-prev-buffer win 'bury)))))
+(add-hook 'org-babel-after-execute-hook #'playground--org-babel-close-error-window)
+
 (with-eval-after-load 'org-src
   (add-to-list 'org-src-lang-modes '("rust" . rust-ts))
   (add-to-list 'org-src-lang-modes '("ocaml" . tuareg)))
