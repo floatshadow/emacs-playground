@@ -3,7 +3,11 @@
 # learner, each on its own internal network that the gateway joins
 # (docker backend; experimental in slice 1). Do not set a hostname on the
 # gateway: it finds its own container by its hostname, the container id
-# (or set sessions.gatewayContainer).
+# (or set sessions.gatewayContainer). Learners sign in with OpenID Connect
+# (auth.oidc in deploy/config.json); the client secret, if the provider
+# issued one, is deploy/secrets/oidc_client_secret (empty for a public
+# client). Compose bind-mounts it as is, so the file must be readable by the
+# gateway's uid 65532: `make server` keeps it 644 inside a 700 directory.
 services:
   caddy:
     image: caddy:2
@@ -33,8 +37,6 @@ services:
     environment:
       PG_MODE: server
     secrets: [oidc_client_secret]
-    volumes:
-      - ./deploy/invites.txt:/etc/playground/invites.txt:ro
     networks: [front, sessions, docker]
     depends_on: [socket-proxy]
 secrets:

@@ -16,7 +16,6 @@ coverage/
 
 # Secrets and per-deployment files
 /deploy/secrets/
-/deploy/invites.txt
 
 # Editors and OS
 .DS_Store

@@ -32,38 +32,63 @@
           "type": "string",
           "enum": [
             "none",
-            "invite",
             "oidc"
           ],
-          "description": "Mode is none (local only, default), invite or oidc."
-        },
-        "invites": {
-          "properties": {
-            "file": {
-              "type": "string",
-              "description": "File has one code per line with optional label, uses=N and\nuntil=YYYY-MM-DD (deploy/invites.example.txt)."
-            }
-          },
-          "additionalProperties": false,
-          "type": "object"
+          "description": "Mode is none (local mode only; the default there) or oidc (the\ndefault in server mode)."
         },
         "oidc": {
           "properties": {
             "issuer": {
-              "type": "string"
+              "type": "string",
+              "description": "Issuer is the provider's issuer URL; discovery reads\n\u003cissuer\u003e/.well-known/openid-configuration. It must be https unless\nits host is loopback or AllowInsecureIssuer is set."
+            },
+            "allowInsecureIssuer": {
+              "type": "boolean",
+              "description": "AllowInsecureIssuer accepts an http issuer on another host, for a\nprovider on a trusted internal network (tests)."
             },
             "clientId": {
               "type": "string"
             },
             "clientSecretFile": {
-              "type": "string"
+              "type": "string",
+              "description": "ClientSecretFile holds the client secret; empty for a public client\n(PKCE only)."
+            },
+            "scopes": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array",
+              "description": "Scopes requested, default openid, email and profile; add groups when\nthe provider needs a scope for the groups claim. openid is always\nrequested."
+            },
+            "displayName": {
+              "type": "string",
+              "description": "DisplayName labels the login button (\"Sign in with …\"), default\n\"SSO\"."
+            },
+            "usernameClaim": {
+              "type": "string",
+              "description": "UsernameClaim names the claim shown as the username, default\npreferred_username; the email is used when it is missing."
+            },
+            "groupsClaim": {
+              "type": "string",
+              "description": "GroupsClaim names the ID token claim listing the user's groups,\ndefault \"groups\"."
             },
             "allowedEmailDomains": {
               "items": {
                 "type": "string"
               },
               "type": "array",
-              "description": "AllowedEmailDomains restricts logins; empty allows any."
+              "description": "AllowedEmailDomains restricts logins to these email domains; empty\nallows any. With a restriction, an ID token is refused unless it has\nan email and email_verified true (providers that omit\nemail_verified, such as Entra ID, need allowedGroups or a\ntenant-specific issuer instead)."
+            },
+            "allowedGroups": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array",
+              "description": "AllowedGroups restricts logins to members of at least one of these\ngroups; empty allows any."
+            },
+            "providerLogout": {
+              "type": "boolean",
+              "description": "ProviderLogout also signs out at the provider on logout when it\nadvertises an end_session_endpoint, default true."
             }
           },
           "additionalProperties": false,
@@ -152,6 +177,27 @@
         "maxSessions": {
           "type": "integer",
           "description": "MaxSessions refuses new sessions beyond this, default 50."
+        },
+        "groupLimits": {
+          "items": {
+            "properties": {
+              "group": {
+                "type": "string"
+              },
+              "maxActiveSessions": {
+                "type": "integer"
+              }
+            },
+            "additionalProperties": false,
+            "type": "object",
+            "description": "GroupLimit is one entry of sessions.groupLimits."
+          },
+          "type": "array",
+          "description": "GroupLimits caps active sessions per group (from the OIDC groups\nclaim). A user counts against the first entry whose group they are\nin; maxActiveSessions 0 means no limit for that group."
+        },
+        "defaultGroupMaxActiveSessions": {
+          "type": "integer",
+          "description": "DefaultGroupMaxActiveSessions caps the active sessions of all users\nin no listed group together; 0 (default) means no limit."
         },
         "volumeRetentionDays": {
           "type": "integer",

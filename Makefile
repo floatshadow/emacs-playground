@@ -2,7 +2,7 @@
 #
 #   make local            write .env and deploy/config.json for local mode, create ./workspace,
 #                         pull images (BUILD=1 builds them instead); then `docker compose up`
-#   make server           select the server overlay (deployment.md §5); then `docker compose up -d`
+#   make server           select the server overlay and OIDC sign-in (deployment.md §5); then `docker compose up -d`
 #   make shell            attach a terminal to the local session's Emacs (tmux)
 #   make dev              session container + gateway from source + Vite dev server
 #   make images           build the gateway, session and remote-box images
@@ -49,17 +49,50 @@ local: ## local mode: .env, deploy/config.json, ./workspace; pull images (BUILD=
 	@if [ -n "$${BUILD:-}" ]; then $(COMPOSE) $(LOCAL_FILES) build; else $(COMPOSE) $(LOCAL_FILES) pull --ignore-buildable || true; fi
 	@echo "local mode ready: docker compose up, then open http://localhost:8080"
 
+# The deploy/config.json `make server` writes when there is none; the other
+# keys are in deploy/config.example.json.
+define SERVER_CONFIG
+{
+  "$$schema": "./config.schema.json",
+  "mode": "server",
+  "publicUrl": "https://$(DOMAIN)",
+  "auth": {
+    "oidc": {
+      "issuer": "$(OIDC_ISSUER)",
+      "clientId": "$(OIDC_CLIENT_ID)",
+      "clientSecretFile": "/run/secrets/oidc_client_secret"
+    }
+  },
+  "sessions": {
+    "dockerHost": "tcp://socket-proxy:2375",
+    "image": "$(IMAGE_BASE)/session:$(TAG)",
+    "limits": { "cpus": 2, "memory": "3g", "pids": 1024, "disk": "4g" },
+    "maxSessions": 50,
+    "groupLimits": [],
+    "defaultGroupMaxActiveSessions": 0,
+    "remoteBox": { "image": "$(IMAGE_BASE)/remote-box:$(TAG)" }
+  }
+}
+endef
+export SERVER_CONFIG
+
 .PHONY: server
-server: ## server mode: .env with the server overlay; needs deploy/config.json and DOMAIN
+server: ## server mode: .env with the server overlay; DOMAIN, plus OIDC_ISSUER and OIDC_CLIENT_ID for a new deploy/config.json
 	@test -n "$(DOMAIN)" || { echo "set DOMAIN=emacs.example.edu"; exit 1; }
+	@if grep -q '"server"' deploy/config.json 2>/dev/null; then \
+	  if [ -n "$(OIDC_ISSUER)$(OIDC_CLIENT_ID)" ]; then echo "deploy/config.json is already a server config; OIDC_ISSUER and OIDC_CLIENT_ID are ignored"; fi; \
+	elif [ -z "$(OIDC_ISSUER)" ] || [ -z "$(OIDC_CLIENT_ID)" ]; then \
+	  echo "deploy/config.json is not a server config: set OIDC_ISSUER and OIDC_CLIENT_ID to write one, or start from deploy/config.example.json"; exit 1; \
+	else \
+	  printf '%s\n' "$$SERVER_CONFIG" > deploy/config.json; \
+	  echo "wrote deploy/config.json; deploy/config.example.json shows the other keys"; \
+	fi
 	@printf 'COMPOSE_FILE=compose.yaml:compose.server.yaml\nTAG=%s\nIMAGE_BASE=%s\nDOMAIN=%s\n' '$(TAG)' '$(IMAGE_BASE)' '$(DOMAIN)' > .env
-	@if ! grep -q '"server"' deploy/config.json 2>/dev/null; then \
-	  echo "deploy/config.json is not a server config: cp deploy/config.example.json deploy/config.json and edit it"; exit 1; fi
-	@mkdir -p deploy/secrets && touch deploy/secrets/oidc_client_secret && chmod 600 deploy/secrets/oidc_client_secret
-	@test -f deploy/invites.txt || cp deploy/invites.example.txt deploy/invites.txt
+	@mkdir -p deploy/secrets && chmod 700 deploy/secrets && touch deploy/secrets/oidc_client_secret && chmod 644 deploy/secrets/oidc_client_secret
 	$(GO) run ./cmd/playctl config check deploy/config.json
 	$(COMPOSE) pull --ignore-buildable || true
-	@echo "server mode ready: docker compose up -d"
+	@echo "server mode ready: register the redirect URI https://$(DOMAIN)/api/v1/auth/oidc/callback at the provider,"
+	@echo "put its client secret (none for a public client) in deploy/secrets/oidc_client_secret, then docker compose up -d"
 
 .PHONY: shell
 shell: ## attach your terminal to the local session's Emacs

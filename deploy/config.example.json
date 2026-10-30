@@ -6,13 +6,18 @@
   "dataDir": "/data",
 
   "auth": {
-    "mode": "invite",
-    "invites": { "file": "/etc/playground/invites.txt" },
+    "mode": "oidc",
     "oidc": {
       "issuer": "https://login.example.edu/realms/main",
       "clientId": "emacs-playground",
       "clientSecretFile": "/run/secrets/oidc_client_secret",
-      "allowedEmailDomains": ["example.edu"]
+      "scopes": ["openid", "email", "profile"],
+      "displayName": "Example University",
+      "usernameClaim": "preferred_username",
+      "groupsClaim": "groups",
+      "allowedEmailDomains": ["example.edu"],
+      "allowedGroups": [],
+      "providerLogout": true
     },
     "cookieSecretFile": "/data/cookie.secret",
     "sessionDays": 30
@@ -29,6 +34,11 @@
     "limits": { "cpus": 2, "memory": "3g", "pids": 1024, "disk": "4g" },
     "idleStopMinutes": 30,
     "maxSessions": 50,
+    "groupLimits": [
+      { "group": "staff", "maxActiveSessions": 0 },
+      { "group": "cs101", "maxActiveSessions": 30 }
+    ],
+    "defaultGroupMaxActiveSessions": 10,
     "volumeRetentionDays": 30,
     "egress": "registries",
     "remoteBox": { "enabled": true, "image": "ghcr.io/floatshadow/emacs-playground/remote-box:v0.1.0" },
