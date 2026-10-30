@@ -12,13 +12,25 @@ setup:
   layout: single
   run: sh seed.sh my-keys.el my-hydras.el
   # my-map (lesson 13.3) and the menus: a file seeded just now is not in
-  # the user-lisp autoloads yet, so its cookie has not loaded it.
-  eval: "(ignore-errors (require 'my-keys) (load \"my-hydras\" nil t))"
-# The menus live in memory, outside checkpoints: the edit steps check the
-# saved file (the pretty-hydra-define form, read, heads found by command,
-# so the learner's own keys, titles and layout pass), the menu evaluated
-# from it (my-menu/heads-plist) and the keys pressed since the step began.
-# `waiting` is null once no hydra is open.
+  # the user-lisp autoloads yet, so its cookie has not loaded it. The
+  # menus live in memory, outside checkpoints, so every restore (Reset
+  # this step, Do it yourself, Go to this step) evaluates the restored
+  # file again, after taking away the keys bound to the menu: the menu
+  # and its key are then those of the file.
+  eval: >-
+    (progn
+      (ignore-errors (require 'my-keys) (load "my-hydras" nil t))
+      (add-hook 'playground-reset-step-hook
+                (lambda ()
+                  (dolist (key (where-is-internal 'my-menu/body (list global-map)))
+                    (define-key global-map key nil t))
+                  (ignore-errors (load "my-hydras" nil t)))))
+# The edit steps check the saved file (the pretty-hydra-define form,
+# read, heads found by command, so the learner's own keys, titles and
+# layout pass), the menu evaluated from it (my-menu/heads-plist) and the
+# keys pressed since the step began. `waiting` is null once no hydra is
+# open; "you closed the menu" also needs the step's head pressed, so it
+# is not met before the menu opened.
 steps:
   - id: open
     goal: Open the menu, split, move twice, close it
@@ -34,8 +46,10 @@ steps:
       - text: o ran twice without reopening the menu
         event: { command: my-menu/other-window, min: 2 }
         hint: "The cursor jumps between the windows and the hint stays on screen; there is no need to open the menu again between the two."
-      - text: the menu is closed
-        state: { waiting: null }
+      - text: you closed the menu
+        all:
+          - event: { command: my-menu/body }
+          - state: { waiting: null }
         hint: "The title says it: q closes the menu. C-g closes any hydra too."
     stuck:
       - when: { unbound_repeats: 2 }
@@ -45,7 +59,7 @@ steps:
   - id: bind
     goal: Put the menu on C-c u m
     detail: "`C-x C-f /work/emacs.d/user-lisp/my-hydras.el RET`. Under `;; My key for the menu:` add `(keymap-set my-map \"m\" '(\"my menu\" . my-menu/body))`, `C-x C-s`, `M-x eval-buffer`. Then `C-c u m`, and `q`."
-    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-hydras.el" ~400 RET ~1000 M-< ~300 C-s ~300 ";; My key for the menu:" ~300 RET RET "(keymap-set my-map \"m\" ''(\"my menu\" . my-menu/body))" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000 C-c u m ~1500 q ~800'
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-hydras.el" ~400 RET ~1000 M-< ~300 C-s ~300 ";; My key for the menu:" ~300 RET C-n C-a C-SPC C-e ~300 "(keymap-set my-map \"m\" ''(\"my menu\" . my-menu/body))" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000 C-c u m ~1500 q ~800'
     conditions:
       - text: my-hydras.el binds the menu
         file: { path: emacs.d/user-lisp/my-hydras.el, regex: "\\(keymap-(global-)?set\\s.*my-menu/body" }
@@ -56,8 +70,10 @@ steps:
       - text: you opened the menu with your key
         event: { command: my-menu/body }
         hint: "Press C-c u and wait: which-key lists m as my menu, next to s for window sizes."
-      - text: the menu is closed
-        state: { waiting: null }
+      - text: you closed the menu
+        all:
+          - event: { command: my-menu/body }
+          - state: { waiting: null }
         hint: "The menu's title says how: q closes it, and C-g closes any hydra."
     stuck:
       - when: { unbound_repeats: 2 }
@@ -94,12 +110,14 @@ steps:
                                               title)))))
             (and (funcall col (quote display-line-numbers-mode))
                  (equal (funcall col (quote display-line-numbers-mode)) (funcall col (quote whitespace-mode)))))
-        hint: "M-x eval-buffer applies the saved file. End of file during parsing, or lines below shifted right after saving, means a parenthesis went with the cut: C-/ until the line is back."
+        hint: "M-x eval-buffer applies the saved file. End of file during parsing, or lines below shifted right after saving, means a parenthesis went with the cut: C-/ until the line is back. Eager macro-expansion failure means the head landed after a column's closing parentheses: move it between two heads."
       - text: you switched line numbers from the menu
         event: { command: my-menu/display-line-numbers-mode }
         hint: "After the hint, (*) means on and ( ) off; l switches it in the buffer you are in, either way is fine."
-      - text: the menu is closed
-        state: { waiting: null }
+      - text: you closed the menu
+        all:
+          - event: { command: my-menu/display-line-numbers-mode }
+          - state: { waiting: null }
         hint: "Toggles are red keys: the menu stays after l until you press q."
     stuck:
       - when: { quits_in_window: { count: 3, seconds: 15 } }
@@ -121,7 +139,7 @@ steps:
                    (seq-some (lambda (h) (eq (car-safe (cdr-safe h)) (quote duplicate-line)))
                              (apply (function append) (seq-filter (function consp) p))))))
         hint: "The title is the string on the line above the column's heads; keep its quotes and change only the word."
-      - text: neither has the menu you evaluated
+      - text: the menu you evaluated has no Misc column either
         elisp: >-
           (let ((p (and (boundp (quote my-menu/heads-plist)) my-menu/heads-plist)))
             (and p (not (member "Misc" p))
@@ -131,13 +149,15 @@ steps:
       - text: d duplicated twice
         event: { command: my-menu/duplicate-line, min: 2 }
         hint: "Red keys repeat with the menu still on screen, like the repeat map of lesson 13.3: d, then d again, without reopening it."
-      - text: the menu is closed
-        state: { waiting: null }
+      - text: you closed the menu
+        all:
+          - event: { command: my-menu/duplicate-line }
+          - state: { waiting: null }
         hint: "The menu stays after d because d is red; q closes it."
   - id: exit
     goal: Make f blue and open draft.md with it
     detail: "In my-hydras.el add `:exit t` after `\"open a file\"` in the `f` head, `C-x C-s`, `M-x eval-buffer`. Then `C-c u m f /work/mine/journal/draft.md RET`: the menu closes on its own."
-    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-hydras.el" ~400 RET ~1000 M-< ~300 C-s ~300 "find-file \"open a file\"" ~300 RET ~300 " :exit t" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000 C-c u m ~1200 f ~800 "/work/mine/journal/draft.md" ~400 RET ~1500'
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-hydras.el" ~400 RET ~1000 M-< ~300 C-s ~300 "find-file \"open a file\"" ~300 RET ~300 C-k " :exit t)" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000 C-c u m ~1200 f ~800 "/work/mine/journal/draft.md" ~400 RET ~1500'
     conditions:
       - text: the saved f head exits
         elisp: >-
@@ -161,7 +181,9 @@ steps:
         state: { file: /work/mine/journal/draft.md }
         hint: "f asks for a file: type /work/mine/journal/draft.md right after the directory it offers; the second / starts over from the root."
       - text: the menu closed by itself
-        state: { waiting: null }
+        all:
+          - event: { command: my-menu/find-file-and-exit }
+          - state: { waiting: null }
         hint: "If the menu came back after the file opened, f is still red: q closes it, then check :exit t and evaluate again."
     stuck:
       - when: { minibuffer_seconds: 40 }
@@ -174,8 +196,10 @@ steps:
       - text: you widened a window twice
         event: { command: my-sizes/enlarge-window-horizontally, min: 2 }
         hint: "The arrow keys belong to the size menu while it is open. A single window has nothing to grow into: C-x 3 first."
-      - text: the size menu is closed
-        state: { waiting: null }
+      - text: you closed the size menu
+        all:
+          - event: { command: my-sizes/enlarge-window-horizontally }
+          - state: { waiting: null }
         hint: "Pink menus let other keys through, so they are easy to forget: the bottom line still says Window size. q closes it, and C-g always does."
     stuck:
       - when: { idle_seconds: 30 }

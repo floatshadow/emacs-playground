@@ -42,13 +42,13 @@ Each head has a colour that says what happens after it, and the menu's options c
 | pink (`:color pink`) | stays open | the key does its usual job, and the menu stays |
 | amaranth (`:color amaranth`) | stays open | the key is ignored, with a warning |
 
-Leave red the keys you press several times in a row, such as moving between windows or toggling. Make blue the keys that finish what you opened the menu for, such as opening a file or switching buffers; `:color blue` in the options makes every head blue. `q` closes this menu (its `:quit-key`), and :try[C-g] closes any hydra, whatever its colour. Rescue me closes it too.
+A mouse click counts as any other key: clicking into Emacs closes a red menu. Leave red the keys you press several times in a row, such as moving between windows or toggling. Make blue the keys that finish what you opened the menu for, such as opening a file or switching buffers; `:color blue` in the options makes every head blue. `q` closes this menu (its `:quit-key`), and :try[C-g] closes any hydra, whatever its colour. Rescue me closes it too. Escape alone does not: in the terminal it waits for another key (it starts the Meta keys), and which-key lists them under the menu; `ESC ESC ESC` (lesson 0.2) closes both.
 
 ## Your own groups
 
 A column is a title over a list, so regrouping is moving a line. `C-a C-k C-k` cuts a whole line, line break included, and `C-y` pastes it above the line the cursor is on. Save, evaluate, and the next `C-c u m` shows the new layout. Name the columns the way you think: Windows, Buffers, Toggles, and Mine for your own commands (`("h" my-dated-header "dated heading")` from lesson 13.4 belongs there). A head's key works only while its menu is open, so it never clashes with the keys outside.
 
-The last head of a column ends with the parentheses that close the column. Move a line from the middle, or carry those parentheses along. A lost one shows when you save: saving re-indents the file (format on save, lesson 7.3), so the lines below shift right, and evaluating fails with "End of file during parsing". Press `C-/` until the line is back; the first one undoes the re-indenting.
+The last head of a column ends with the parentheses that close the column. Move a line from the middle, or carry those parentheses along. A lost one shows when you save: saving re-indents the file (format on save, lesson 7.3), so the lines below shift right, and evaluating fails with "End of file during parsing". Press `C-/` until the line is back; the first one undoes the re-indenting. A head pasted after a column's closing parentheses is outside the column: evaluating fails with "Eager macro-expansion failure", and the old menu stays. Cut it again and paste it between two heads.
 
 ## defhydra
 
