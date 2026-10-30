@@ -6,8 +6,11 @@
 ;;
 ;; Try a change at once: M-x eval-buffer.
 
+;; Loaded after init.el (the cookie below).  A mistake in this file then
+;; shows as a message at startup instead of stopping it.
 ;;;###autoload
-(add-hook 'after-init-hook (lambda () (require 'my-keys)))
+(add-hook 'after-init-hook
+          (lambda () (with-demoted-errors "my-keys.el: %S" (require 'my-keys))))
 
 ;; My prefix map: C-c u, then one key.
 (defvar-keymap my-map
