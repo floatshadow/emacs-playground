@@ -238,7 +238,7 @@ parts:
     id: 13-making-it-yours
     title: Making it yours
     minutes: 120
-    outcome: Read and change your configuration, manage packages, bind keys, write commands and take the whole setup home.
+    outcome: Read and change your configuration, manage packages, bind keys and group them into menus, write commands and take the whole setup home.
     # All modules are on from here; ui is the one not unlocked earlier.
     modules: [ui]
     status: ready
@@ -248,8 +248,9 @@ parts:
       - { id: 13-making-it-yours/02-packages, n: "13.2", title: "Packages: install, update, pin, remove", minutes: 15, vscode: Extensions, status: ready }
       - { id: 13-making-it-yours/03-keybindings, n: "13.3", title: Keybindings, minutes: 15, vscode: keybindings.json, status: ready }
       - { id: 13-making-it-yours/04-first-command, n: "13.4", title: "Your first command, hooks and advice", minutes: 15, status: ready }
-      - { id: 13-making-it-yours/05-themes-fonts-icons, n: "13.5", title: "Themes, fonts, icons and the mode line", minutes: 12, vscode: "colour theme, file icon theme, font settings", status: ready }
-      - { id: 13-making-it-yours/06-take-it-home, n: "13.6", title: Take it home, minutes: 12, vscode: Settings Sync, tags: [remote], status: ready }
+      - { id: 13-making-it-yours/07-key-menus, n: "13.5", title: Key menus with hydra, minutes: 15, vscode: "Command Palette categories, Ctrl+K chords", status: ready }
+      - { id: 13-making-it-yours/05-themes-fonts-icons, n: "13.6", title: "Themes, fonts, icons and the mode line", minutes: 12, vscode: "colour theme, file icon theme, font settings", status: ready }
+      - { id: 13-making-it-yours/06-take-it-home, n: "13.7", title: Take it home, minutes: 12, vscode: Settings Sync, tags: [remote], status: ready }
 
   - n: 14
     id: 14-projects

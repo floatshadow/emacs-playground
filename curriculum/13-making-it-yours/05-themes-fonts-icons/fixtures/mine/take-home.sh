@@ -1,5 +1,5 @@
 #!/bin/sh
-# Lesson 13.6. Makes your configuration, /work/emacs.d, a git repository
+# Lesson 13.7. Makes your configuration, /work/emacs.d, a git repository
 # if it is not one yet, without a remote called box; gives the box an
 # empty repository to push it to (standing in for GitHub) and a home
 # without an Emacs configuration (a fresh machine). Every load starts

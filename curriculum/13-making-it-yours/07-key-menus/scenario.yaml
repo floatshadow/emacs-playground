@@ -1,0 +1,184 @@
+id: 13-making-it-yours/07-key-menus
+title: Key menus with hydra
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui]
+vscode: "Command Palette categories, Ctrl+K chords"
+setup:
+  workspace: fixtures/mine
+  root: mine
+  reset: true
+  open: [mine/journal/notes.md]
+  layout: single
+  run: sh seed.sh my-keys.el my-hydras.el
+  # my-map (lesson 13.3) and the menus: a file seeded just now is not in
+  # the user-lisp autoloads yet, so its cookie has not loaded it.
+  eval: "(ignore-errors (require 'my-keys) (load \"my-hydras\" nil t))"
+# The menus live in memory, outside checkpoints: the edit steps check the
+# saved file (the pretty-hydra-define form, read, heads found by command,
+# so the learner's own keys, titles and layout pass), the menu evaluated
+# from it (my-menu/heads-plist) and the keys pressed since the step began.
+# `waiting` is null once no hydra is open.
+steps:
+  - id: open
+    goal: Open the menu, split, move twice, close it
+    detail: "`M-x my-menu/body RET`: the menu appears at the bottom. Press `3` (split right), then `o` and `o` again, then `q`."
+    demo: 'M-x ~400 "my-menu/body" ~300 RET ~1200 3 ~800 o ~600 o ~600 q ~800'
+    conditions:
+      - text: the menu opened
+        event: { command: my-menu/body }
+        hint: "The completion list narrows to my-menu/body as you type. The menu sits above the echo area, under the title My menu (q closes it)."
+      - text: there are two windows
+        state: { "windows.length": { gte: 2 } }
+        hint: "3 in the menu splits like C-x 3, and the menu stays open: 3 is a red key. If the menu is gone, open it again."
+      - text: o ran twice without reopening the menu
+        event: { command: my-menu/other-window, min: 2 }
+        hint: "The cursor jumps between the windows and the hint stays on screen; there is no need to open the menu again between the two."
+      - text: the menu is closed
+        state: { waiting: null }
+        hint: "The title says it: q closes the menu. C-g closes any hydra too."
+    stuck:
+      - when: { unbound_repeats: 2 }
+        say: "A key that does nothing? C-c u m is not bound until the next step. For now M-x my-menu/body RET opens the menu."
+      - when: { idle_seconds: 45 }
+        say: "While the menu is open, the keys it lists at the bottom stay active: 3 splits, o moves, q closes it."
+  - id: bind
+    goal: Put the menu on C-c u m
+    detail: "`C-x C-f /work/emacs.d/user-lisp/my-hydras.el RET`. Under `;; My key for the menu:` add `(keymap-set my-map \"m\" '(\"my menu\" . my-menu/body))`, `C-x C-s`, `M-x eval-buffer`. Then `C-c u m`, and `q`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-hydras.el" ~400 RET ~1000 M-< ~300 C-s ~300 ";; My key for the menu:" ~300 RET RET "(keymap-set my-map \"m\" ''(\"my menu\" . my-menu/body))" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000 C-c u m ~1500 q ~800'
+    conditions:
+      - text: my-hydras.el binds the menu
+        file: { path: emacs.d/user-lisp/my-hydras.el, regex: "\\(keymap-(global-)?set\\s.*my-menu/body" }
+        hint: "The line has the shape of the window-sizes line above it: my-map, the key \"m\", then the label and the command in '( . )."
+      - text: a key opens it in this Emacs
+        elisp: "(where-is-internal 'my-menu/body nil t)"
+        hint: "Saving does not run Lisp: M-x eval-buffer runs the file, or C-M-x with the cursor in the line runs that line."
+      - text: you opened the menu with your key
+        event: { command: my-menu/body }
+        hint: "Press C-c u and wait: which-key lists m as my menu, next to s for window sizes."
+      - text: the menu is closed
+        state: { waiting: null }
+        hint: "The menu's title says how: q closes it, and C-g closes any hydra."
+    stuck:
+      - when: { unbound_repeats: 2 }
+        say: "C-c u m is still unbound in this Emacs. Saving does not apply the new line: M-x eval-buffer in my-hydras.el does."
+  - id: toggles
+    goal: Move line numbers into the Toggles column
+    detail: "In my-hydras.el (`C-x C-f /work/emacs.d/user-lisp/my-hydras.el RET`), on the `\"l\"` line under Misc, `C-a C-k C-k` cuts the whole line. On the `\"v\"` line under Toggles, `C-a C-y` pastes it above. `C-x C-s`, `M-x eval-buffer`. Then `C-c u m`: line numbers now sit under Toggles. Press `l`, then `q`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-hydras.el" ~400 RET ~1000 M-< ~300 C-s ~300 "display-line-numbers-mode" ~300 RET ~300 C-a C-k C-k ~500 M-< ~300 C-s ~300 "visual-line-mode" ~300 RET ~300 C-a C-y ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000 C-c u m ~1200 b ~800 "notes.md" ~400 RET ~1000 C-c u m ~1200 l ~1000 q ~800'
+    conditions:
+      - text: in the saved file, line numbers share a column with whitespace
+        elisp: >-
+          (ignore-errors
+            (let* ((form (with-temp-buffer
+                           (insert-file-contents "/work/emacs.d/user-lisp/my-hydras.el")
+                           (when (re-search-forward "^(pretty-hydra-define my-menu\\_>" nil t)
+                             (goto-char (match-beginning 0))
+                             (read (current-buffer)))))
+                   (p (nth 3 form))
+                   (col (lambda (cmd)
+                          (cl-loop for (title heads) on p by (function cddr)
+                                   thereis (and (consp heads)
+                                                (seq-some (lambda (h) (eq (car-safe (cdr-safe h)) cmd)) heads)
+                                                title)))))
+              (and (funcall col (quote display-line-numbers-mode))
+                   (equal (funcall col (quote display-line-numbers-mode)) (funcall col (quote whitespace-mode))))))
+        hint: "The second C-k takes the line break, so the whole head moves. Paste it between Toggles' two heads, not after the closing parentheses, and save."
+      - text: the menu you evaluated has them together
+        elisp: >-
+          (let* ((p (and (boundp (quote my-menu/heads-plist)) my-menu/heads-plist))
+                 (col (lambda (cmd)
+                        (cl-loop for (title heads) on p by (function cddr)
+                                 thereis (and (consp heads)
+                                              (seq-some (lambda (h) (eq (car-safe (cdr-safe h)) cmd)) heads)
+                                              title)))))
+            (and (funcall col (quote display-line-numbers-mode))
+                 (equal (funcall col (quote display-line-numbers-mode)) (funcall col (quote whitespace-mode)))))
+        hint: "M-x eval-buffer applies the saved file. End of file during parsing, or lines below shifted right after saving, means a parenthesis went with the cut: C-/ until the line is back."
+      - text: you switched line numbers from the menu
+        event: { command: my-menu/display-line-numbers-mode }
+        hint: "After the hint, (*) means on and ( ) off; l switches it in the buffer you are in, either way is fine."
+      - text: the menu is closed
+        state: { waiting: null }
+        hint: "Toggles are red keys: the menu stays after l until you press q."
+    stuck:
+      - when: { quits_in_window: { count: 3, seconds: 15 } }
+        say: "C-g closes menus and prompts, but it does not undo. C-/ does, one change at a time: press it until the cut line is back."
+  - id: mine
+    goal: Rename Misc to Mine and duplicate a line twice
+    detail: "In my-hydras.el change the column title `\"Misc\"` to `\"Mine\"` (or a name you like), `C-x C-s`, `M-x eval-buffer`. Go to notes.md (`b` in the menu switches buffers), then `C-c u m`, `d`, `d`, `q`."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-hydras.el" ~400 RET ~1000 M-< ~300 C-s ~300 "duplicate-line \"" ~300 RET ~300 C-p C-a C-k ~300 "   \"Mine\"" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000 C-c u m ~1200 b ~800 "notes.md" ~400 RET ~800 M-< ~300 C-c u m ~1200 d ~600 d ~1000 q ~800'
+    conditions:
+      - text: the saved file has no Misc column
+        elisp: >-
+          (ignore-errors
+            (let ((p (nth 3 (with-temp-buffer
+                              (insert-file-contents "/work/emacs.d/user-lisp/my-hydras.el")
+                              (when (re-search-forward "^(pretty-hydra-define my-menu\\_>" nil t)
+                                (goto-char (match-beginning 0))
+                                (read (current-buffer)))))))
+              (and p (not (member "Misc" p))
+                   (seq-some (lambda (h) (eq (car-safe (cdr-safe h)) (quote duplicate-line)))
+                             (apply (function append) (seq-filter (function consp) p))))))
+        hint: "The title is the string on the line above the column's heads; keep its quotes and change only the word."
+      - text: neither has the menu you evaluated
+        elisp: >-
+          (let ((p (and (boundp (quote my-menu/heads-plist)) my-menu/heads-plist)))
+            (and p (not (member "Misc" p))
+                 (seq-some (lambda (h) (eq (car-safe (cdr-safe h)) (quote duplicate-line)))
+                           (apply (function append) (seq-filter (function consp) p)))))
+        hint: "Evaluate the file after saving it: the next C-c u m shows the new title over d and c."
+      - text: d duplicated twice
+        event: { command: my-menu/duplicate-line, min: 2 }
+        hint: "Red keys repeat with the menu still on screen, like the repeat map of lesson 13.3: d, then d again, without reopening it."
+      - text: the menu is closed
+        state: { waiting: null }
+        hint: "The menu stays after d because d is red; q closes it."
+  - id: exit
+    goal: Make f blue and open draft.md with it
+    detail: "In my-hydras.el add `:exit t` after `\"open a file\"` in the `f` head, `C-x C-s`, `M-x eval-buffer`. Then `C-c u m f /work/mine/journal/draft.md RET`: the menu closes on its own."
+    demo: 'C-x C-f ~500 "/work/emacs.d/user-lisp/my-hydras.el" ~400 RET ~1000 M-< ~300 C-s ~300 "find-file \"open a file\"" ~300 RET ~300 " :exit t" ~500 C-x C-s ~600 M-x ~400 "eval-buffer" ~300 RET ~1000 C-c u m ~1200 f ~800 "/work/mine/journal/draft.md" ~400 RET ~1500'
+    conditions:
+      - text: the saved f head exits
+        elisp: >-
+          (ignore-errors
+            (let* ((form (with-temp-buffer
+                           (insert-file-contents "/work/emacs.d/user-lisp/my-hydras.el")
+                           (when (re-search-forward "^(pretty-hydra-define my-menu\\_>" nil t)
+                             (goto-char (match-beginning 0))
+                             (read (current-buffer)))))
+                   (body (nth 2 form))
+                   (h (seq-find (lambda (h) (eq (car-safe (cdr-safe h)) (quote find-file)))
+                                (apply (function append) (seq-filter (function consp) (nth 3 form))))))
+              (or (memq (plist-get body :color) (quote (blue teal)))
+                  (plist-get body :exit)
+                  (and h (or (cadr (memq :exit h)) (memq (cadr (memq :color h)) (quote (blue teal))))))))
+        hint: ":exit t goes inside the f head's parentheses, after its hint string, as in the b head above it."
+      - text: the menu you evaluated closes after f
+        elisp: "(and (boundp 'my-menu/keymap) (where-is-internal 'my-menu/find-file-and-exit (list my-menu/keymap) t))"
+        hint: "Evaluate the file after saving it: a head that closes the menu becomes my-menu/find-file-and-exit."
+      - text: draft.md is open
+        state: { file: /work/mine/journal/draft.md }
+        hint: "f asks for a file: type /work/mine/journal/draft.md right after the directory it offers; the second / starts over from the root."
+      - text: the menu closed by itself
+        state: { waiting: null }
+        hint: "If the menu came back after the file opened, f is still red: q closes it, then check :exit t and evaluate again."
+    stuck:
+      - when: { minibuffer_seconds: 40 }
+        say: "The prompt wants the file: type /work/mine/journal/draft.md after the directory it shows and press RET. C-g cancels it."
+  - id: sizes
+    goal: Widen a window with the pink size menu, then leave it
+    detail: "`C-x 3`, then `C-c u s`: the size menu. `<right>` twice widens this window. Type a word: it goes into the buffer, and the menu stays. `q` closes it."
+    demo: 'C-x 3 ~600 C-c u s ~1200 <right> ~500 <right> ~500 <left> ~500 "ok" ~800 q ~800'
+    conditions:
+      - text: you widened a window twice
+        event: { command: my-sizes/enlarge-window-horizontally, min: 2 }
+        hint: "The arrow keys belong to the size menu while it is open. A single window has nothing to grow into: C-x 3 first."
+      - text: the size menu is closed
+        state: { waiting: null }
+        hint: "Pink menus let other keys through, so they are easy to forget: the bottom line still says Window size. q closes it, and C-g always does."
+    stuck:
+      - when: { idle_seconds: 30 }
+        say: "Is the Window size line still at the bottom? Then the arrows resize instead of moving the cursor. q closes it."
+      - when: { quits_in_window: { count: 3, seconds: 10 } }
+        say: "One C-g closes the menu; after that, C-g only cancels."

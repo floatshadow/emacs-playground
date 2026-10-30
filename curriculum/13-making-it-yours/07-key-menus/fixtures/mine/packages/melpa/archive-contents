@@ -1,0 +1,4 @@
+(1
+ (wc-lite . [(0 3) ((emacs (29 1))) "Word count in the mode line" single
+             ((:keywords "convenience" "wp")
+              (:url . "https://github.com/playground-course/wc-lite"))]))
