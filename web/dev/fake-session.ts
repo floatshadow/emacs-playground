@@ -7,13 +7,15 @@
  * checked, checkpoints restore, previews rebuild.
  *
  *   node dev/fake-session.ts [--port 8090] [--host 127.0.0.1] [--static dist]
- *        [--auth none|invite] [--author] [--curriculum DIR] [--vite] [--sessiond]
+ *        [--auth none|oidc] [--quota-full] [--author] [--curriculum DIR] [--vite] [--sessiond]
  *   node dev/fake-session.ts --export-bundle DIR
  *
  * --static serves a built bundle (with the SPA fallback) for browser tests;
  * --vite also starts Vite on :5173 proxying to this server (pnpm dev:fake);
  * --curriculum serves a bundle built by `playctl curriculum build` instead
- * of the built-in fixtures; with --auth invite the code is "emacs".
+ * of the built-in fixtures; --auth oidc acts as server mode behind an OIDC
+ * provider that signs everyone in at once (logout answers a redirectUrl), and
+ * --quota-full answers POST /sessions with 429 group_quota_exceeded.
  * --sessiond also answers sessiond's unprefixed paths and --export-bundle
  * writes the built-in lessons in the bundle layout, so a real gateway can run
  * in front of the fake (contract tests; see dev/README.md).
@@ -58,7 +60,9 @@ export interface FakeOptions {
   port: number
   host: string
   staticDir?: string
-  auth: 'none' | 'invite'
+  auth: 'none' | 'oidc'
+  /** POST /sessions answers 429 group_quota_exceeded. */
+  quotaFull?: boolean
   author: boolean
   curriculumDir?: string
   quiet?: boolean
@@ -101,9 +105,15 @@ const json = (
   })
   res.end(JSON.stringify(body))
 }
-const problem = (res: ServerResponse, status: number, code: string, message: string) => {
+const problem = (
+  res: ServerResponse,
+  status: number,
+  code: string,
+  message: string,
+  details?: unknown,
+) => {
   res.writeHead(status, { 'Content-Type': 'application/problem+json' })
-  res.end(JSON.stringify({ status, code, message }))
+  res.end(JSON.stringify({ status, code, message, details }))
 }
 const noContent = (res: ServerResponse, headers: Record<string, string> = {}) => {
   res.writeHead(204, headers)
@@ -945,6 +955,7 @@ export async function startFakeSession(opts: FakeOptions) {
   }
 
   /* ---------------- HTTP ---------------- */
+  const oidc = opts.auth === 'oidc'
   const authed = (req: IncomingMessage) =>
     opts.auth === 'none' || /(?:^|;\s*)pg_session=fake/.test(req.headers.cookie ?? '')
 
@@ -1007,28 +1018,46 @@ export async function startFakeSession(opts: FakeOptions) {
         if (p === '/healthz') return json(res, 200, { ok: true })
         if (p.startsWith('/api/v1/')) {
           const r = p.slice('/api/v1'.length)
-          if (r === '/auth/config') return json(res, 200, { mode: 'local', authMode: opts.auth })
-          if (r === '/auth/invite' && method === 'POST') {
-            const b = await body(req)
-            if (b['code'] === 'emacs')
-              return noContent(res, {
-                'Set-Cookie': 'pg_session=fake; Path=/; HttpOnly; SameSite=Lax',
-              })
-            return problem(res, 403, 'invalid_request', 'unknown invite code')
+          if (r === '/auth/config')
+            return json(
+              res,
+              200,
+              oidc
+                ? {
+                    mode: 'server',
+                    authMode: 'oidc',
+                    oidcStartUrl: '/api/v1/auth/oidc/start',
+                    oidcDisplayName: 'Fake SSO',
+                  }
+                : { mode: 'local', authMode: 'none' },
+            )
+          if (oidc && r === '/auth/oidc/start') {
+            // The provider round trip, collapsed: signed in, back to next.
+            const next = url.searchParams.get('next') ?? '/'
+            res.writeHead(302, {
+              Location: /^\/(?![/\\])/.test(next) ? next : '/',
+              'Set-Cookie': 'pg_session=fake; Path=/; HttpOnly; SameSite=Lax',
+            })
+            return res.end()
           }
-          if (r === '/auth/logout' && method === 'POST')
-            return noContent(res, { 'Set-Cookie': 'pg_session=; Path=/; Max-Age=0' })
-          if (r.startsWith('/auth/oidc/'))
-            return problem(res, 501, 'not_implemented', 'OIDC is not implemented in slice 1')
+          if (r === '/auth/logout' && method === 'POST') {
+            const clear = { 'Set-Cookie': 'pg_session=; Path=/; Max-Age=0' }
+            return oidc ? json(res, 200, { redirectUrl: '/login' }, clear) : noContent(res, clear)
+          }
           if (!authed(req)) return problem(res, 401, 'unauthenticated', 'sign in first')
           if (r === '/me')
             return json(res, 200, {
-              user: {
-                id: 'local',
-                displayName: opts.auth === 'invite' ? 'Invited learner' : 'Local learner',
-                kind: opts.auth === 'invite' ? 'invite' : 'local',
-              },
-              mode: 'local',
+              user: oidc
+                ? {
+                    id: 'u-fake',
+                    displayName: 'Ada Lovelace',
+                    kind: 'oidc',
+                    username: 'ada',
+                    email: 'ada@example.org',
+                    groups: ['cs101'],
+                  }
+                : { id: 'local', displayName: 'Local learner', kind: 'local' },
+              mode: oidc ? 'server' : 'local',
               authMode: opts.auth,
               features: {
                 gui: true,
@@ -1038,7 +1067,16 @@ export async function startFakeSession(opts: FakeOptions) {
               },
               version: 'fake',
             })
-          if (r === '/sessions' && method === 'POST') return json(res, 201, sessionInfo())
+          if (r === '/sessions' && method === 'POST')
+            return opts.quotaFull
+              ? problem(
+                  res,
+                  429,
+                  'group_quota_exceeded',
+                  'all 30 active sessions allowed for group "cs101" are in use; try again in a few minutes',
+                  { group: 'cs101', maxActiveSessions: 30 },
+                )
+              : json(res, 201, sessionInfo())
           if (r === `/sessions/${SESSION}` && method === 'GET') return json(res, 200, sessionInfo())
           if (r === `/sessions/${SESSION}` && method === 'DELETE') return noContent(res)
           if (r === `/sessions/${SESSION}/restart-emacs` && method === 'POST')
@@ -1233,7 +1271,7 @@ export async function startFakeSession(opts: FakeOptions) {
   const port = typeof addr === 'object' && addr ? addr.port : opts.port
   const url = `http://${opts.host}:${port}`
   log(
-    `listening on ${url}${opts.staticDir ? ` (serving ${opts.staticDir})` : ''}; auth ${opts.auth}${opts.auth === 'invite' ? ' (code: emacs)' : ''}`,
+    `listening on ${url}${opts.staticDir ? ` (serving ${opts.staticDir})` : ''}; auth ${opts.auth}${opts.quotaFull ? ', group quota full' : ''}`,
   )
   return {
     url,
@@ -1260,7 +1298,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const opts: FakeOptions = {
     port: Number(arg('--port') ?? process.env['PG_FAKE_PORT'] ?? 8090),
     host: arg('--host') ?? '127.0.0.1',
-    auth: arg('--auth') === 'invite' ? 'invite' : 'none',
+    auth: arg('--auth') === 'oidc' ? 'oidc' : 'none',
+    quotaFull: process.argv.includes('--quota-full'),
     author: process.argv.includes('--author'),
   }
   const exp = arg('--export-bundle')

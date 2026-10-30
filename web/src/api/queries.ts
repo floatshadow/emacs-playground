@@ -12,6 +12,7 @@ import {
   type CheckpointsResult,
   type CurriculumIndex,
   type LessonBundle,
+  type LogoutResult,
   type Me,
   type Progress,
   type SessionInfo,
@@ -20,7 +21,7 @@ import {
 import { useSessionStore } from '../store/session'
 import { useUiStore } from '../store/ui'
 import { ApiError, api, lessonPath, request } from './http'
-import { ensureSession, onSessionEvent } from './session/connection'
+import { disconnectSession, ensureSession, onSessionEvent } from './session/connection'
 import { rpc } from './session/rpc'
 
 export function makeQueryClient(): QueryClient {
@@ -118,6 +119,25 @@ export async function resetProgress(qc: QueryClient, lessonId?: string): Promise
   useSessionStore.getState().forgetProgress(lessonId)
   useUiStore.getState().clearHintLevels(lessonId)
   await qc.invalidateQueries({ queryKey: qk.progress })
+}
+
+/**
+ * Signs out (POST /auth/logout, api.md §2): drops the session connection and
+ * every cached query. Returns the provider's end-session URL when the
+ * browser should visit it too (200 {redirectUrl}), else null (204).
+ */
+export async function logout(qc: QueryClient): Promise<string | null> {
+  let redirect: string | null = null
+  try {
+    const r = await api.post<LogoutResult | undefined>(`${APIPrefix}/auth/logout`)
+    redirect = r?.redirectUrl || null
+  } catch {
+    // the cookie may already be gone
+  }
+  disconnectSession()
+  useSessionStore.getState().reset()
+  qc.clear()
+  return redirect
 }
 
 /** Ensures the session (POST /api/v1/sessions, idempotent) for screens that need Emacs. */

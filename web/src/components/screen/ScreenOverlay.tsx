@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useEnsureSession } from '../../api/queries'
 import { useSessionStore } from '../../store/session'
 import { useUiStore } from '../../store/ui'
+import { sessionStartError } from '../../lib/sessionError'
 import { Button } from '../common/Button'
 import { doRescue } from '../live/actions'
 import styles from './Screen.module.css'
@@ -20,10 +21,11 @@ function Card({ title, body, children }: { title: string; body: string; children
 }
 
 /**
- * Overlays over the pane (frontend.md §5): no session yet, attached
- * elsewhere, Emacs restarting, frame closed, suspended, stopping, Emacs
- * unavailable, modules reloading; plus the non-blocking busy banner and the
- * reconnecting chip. Driven by emacs events and connection state.
+ * Overlays over the pane (frontend.md §5): no session yet or it could not
+ * start (a full group quota says so), attached elsewhere, Emacs restarting,
+ * frame closed, suspended, stopping, Emacs unavailable, modules reloading;
+ * plus the non-blocking busy banner and the reconnecting chip. Driven by
+ * emacs events and connection state.
  */
 export function ScreenOverlay({ onReattach }: { onReattach(): void }) {
   const { t } = useTranslation()
@@ -60,10 +62,7 @@ export function ScreenOverlay({ onReattach }: { onReattach(): void }) {
     )
   } else if (!sessionId) {
     card = session.isError ? (
-      <Card
-        title={t('overlay.sessionFailed')}
-        body={session.error instanceof Error ? session.error.message : ''}
-      >
+      <Card {...sessionStartError(session.error, t)}>
         <Button variant="primary" onClick={() => void session.refetch()}>
           {t('common.retry')}
         </Button>

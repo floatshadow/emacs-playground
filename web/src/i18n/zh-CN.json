@@ -82,8 +82,7 @@
   },
   "login": {
     "title": "登录",
-    "codeLabel": "邀请码",
-    "submit": "开始"
+    "oidc": "使用 {{name}} 登录"
   },
   "emacs": {
     "restarted": "Emacs 已重启，你的文件是安全的。",

@@ -4,7 +4,14 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import { APIPrefix } from '../protocol.gen'
 import { api } from '../api/http'
-import { useCurriculum, useEnsureSession, useMe, useSessionInfo, useStatus } from '../api/queries'
+import {
+  logout,
+  useCurriculum,
+  useEnsureSession,
+  useMe,
+  useSessionInfo,
+  useStatus,
+} from '../api/queries'
 import { disconnectSession } from '../api/session/connection'
 import { rpc } from '../api/session/rpc'
 import { Button } from '../components/common/Button'
@@ -19,6 +26,7 @@ import { useSessionStore } from '../store/session'
 import { toast, useUiStore } from '../store/ui'
 import styles from './Screens.module.css'
 import { errorMessage } from '../lib/errors'
+import { sessionStartError } from '../lib/sessionError'
 
 /**
  * Configuration modules (emacs.md §3) in load order, with the part that
@@ -47,14 +55,15 @@ const MODULES: { id: string; part: string }[] = [
 ]
 
 /**
- * /session (frontend.md §2): session status, frame mode, modules, restart,
- * export and bring-your-own-terminal instructions, plus preferences.
+ * /session (frontend.md §2): the signed-in account, session status, frame
+ * mode, modules, restart, export and bring-your-own-terminal instructions,
+ * plus preferences.
  */
 export default function SessionScreen() {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const qc = useQueryClient()
-  useEnsureSession()
+  const session = useEnsureSession()
   const me = useMe()
   const sessionId = useSessionStore((s) => s.sessionId)
   const modules = useSessionStore((s) => s.modules)
@@ -132,19 +141,16 @@ export default function SessionScreen() {
     }
   }
 
-  const logout = async () => {
-    try {
-      await api.post(`${APIPrefix}/auth/logout`, {})
-    } catch {
-      // the cookie may already be gone
-    }
-    disconnectSession()
-    useSessionStore.getState().reset()
-    qc.clear()
-    void navigate('/login')
+  const signOut = async () => {
+    setBusy(true)
+    const redirect = await logout(qc)
+    if (redirect) window.location.assign(redirect)
+    else void navigate('/login')
   }
 
   const st = status.data
+  const user = me.data && me.data.authMode !== 'none' ? me.data.user : null
+  const startError = !sessionId && session.isError ? sessionStartError(session.error, t) : null
   return (
     <AppShell
       scroll
@@ -158,8 +164,37 @@ export default function SessionScreen() {
         <h1>{t('session.title')}</h1>
         <p className={styles.lede}>{local ? t('session.ledeLocal') : t('session.ledeServer')}</p>
 
+        {user && (
+          <section className={styles.card} aria-labelledby="s-account">
+            <h2 id="s-account">{t('session.account')}</h2>
+            <dl className={styles.dl}>
+              <dt>{t('session.name')}</dt>
+              <dd>{user.displayName}</dd>
+              {user.email && (
+                <>
+                  <dt>{t('session.email')}</dt>
+                  <dd>{user.email}</dd>
+                </>
+              )}
+            </dl>
+            <div className={styles.row} style={{ marginTop: 12 }}>
+              <Button onClick={() => void signOut()} disabled={busy}>
+                {t('session.logout')}
+              </Button>
+            </div>
+          </section>
+        )}
+
         <section className={styles.card} aria-labelledby="s-emacs">
           <h2 id="s-emacs">{t('session.emacs')}</h2>
+          {startError && (
+            <div className={styles.error} role="alert" style={{ marginBottom: 12 }}>
+              <strong>{startError.title}</strong> {startError.body}{' '}
+              <Button size="small" onClick={() => void session.refetch()}>
+                {t('common.retry')}
+              </Button>
+            </div>
+          )}
           <dl className={styles.dl}>
             <dt>{t('session.state')}</dt>
             <dd>{info.data?.state ?? (sessionId ? '…' : t('session.none'))}</dd>
@@ -309,16 +344,6 @@ export default function SessionScreen() {
             />
             {t('session.reducedMotion')}
           </label>
-          {me.data && me.data.authMode !== 'none' && (
-            <div className={styles.row}>
-              <span className={styles.dim}>
-                {t('session.signedInAs', { name: me.data.user.displayName })}
-              </span>
-              <Button size="small" onClick={() => void logout()}>
-                {t('session.logout')}
-              </Button>
-            </div>
-          )}
         </section>
       </main>
       <ConfirmDialog

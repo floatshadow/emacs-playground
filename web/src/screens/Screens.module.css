@@ -102,29 +102,15 @@
   font-size: 28px;
   margin: 0 0 8px;
 }
-.login form {
-  display: grid;
-  gap: 10px;
+.login .error {
   margin-top: 18px;
 }
-.login label {
-  font-size: 14px;
-  color: var(--ink-2);
-}
-.login input {
-  font: 16px var(--mono);
-  border: 1px solid var(--rule);
-  border-radius: 5px;
-  padding: 8px 10px;
-}
-.login form button[type='submit'] {
+.loginButton {
+  display: flex;
   justify-content: center;
+  margin-top: 18px;
   padding-top: 8px;
   padding-bottom: 8px;
-}
-.login input:focus-visible {
-  outline: 2px solid var(--violet);
-  outline-offset: 1px;
 }
 .error {
   color: var(--err);

@@ -14,7 +14,8 @@ progress reset with no body clears every lesson and drops the active step.
 ```sh
 pnpm dev:fake                                    # fake on :8090 and Vite on :5173 proxying to it
 node dev/fake-session.ts --port 8090 --static dist          # serve a built bundle (browser tests)
-node dev/fake-session.ts --auth invite --author             # login screen (code: emacs), author panel
+node dev/fake-session.ts --auth oidc --author               # server mode: OIDC login screen, author panel
+node dev/fake-session.ts --auth oidc --quota-full           # session start refused: group quota full
 node dev/fake-session.ts --curriculum ../artifacts/curriculum   # a bundle from playctl curriculum build
 ```
 

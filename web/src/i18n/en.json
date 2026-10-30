@@ -64,6 +64,9 @@
     "starting": "Starting your Emacs…",
     "startingBody": "The playground is starting a session. The first start takes a few seconds.",
     "sessionFailed": "Could not start a session.",
+    "quotaTitle": "Your group has no free Emacs right now.",
+    "quotaGroup": "All {{max}} sessions allowed for the group “{{group}}” are in use. Try again in a few minutes, when someone finishes. If this keeps happening, ask your instructor or the playground administrator to raise the limit.",
+    "quotaDefault": "All {{max}} sessions allowed for learners outside a course group are in use. Try again in a few minutes. If you belong to a course, ask your instructor or the playground administrator to add you to its group.",
     "replaced": "This Emacs is open somewhere else.",
     "replacedBody": "Another tab or window attached to the terminal. Your work is safe; take it back here whenever you like.",
     "reattach": "Use it here",
@@ -413,7 +416,9 @@
     "language": "Language",
     "screenReader": "Screen reader mode for the terminal",
     "reducedMotion": "Reduce motion",
-    "signedInAs": "Signed in as {{name}}",
+    "account": "Account",
+    "name": "Name",
+    "email": "Email",
     "logout": "Sign out"
   },
   "author": {
@@ -425,11 +430,15 @@
   "login": {
     "title": "Sign in",
     "heading": "Welcome to Emacs Playground",
-    "lede": "Enter the invite code you were given to start your own Emacs.",
-    "codeLabel": "Invite code",
-    "submit": "Start",
-    "badCode": "That code was not accepted. Check it and try again.",
-    "oidc": "Sign in with your organisation"
+    "lede": "Sign in with your organisation account to start your own Emacs.",
+    "oidc": "Sign in with {{name}}",
+    "error": {
+      "forbidden": "This account is not allowed to use this playground: sign-in is limited to certain email domains or groups. Ask your instructor or administrator for access, or sign in with another account.",
+      "provider": "The sign-in provider reported an error. Try again; if it keeps failing, tell your administrator.",
+      "state": "The sign-in expired or was started in another tab. Try again.",
+      "token": "The sign-in could not be verified. Try again; if it keeps failing, tell your administrator.",
+      "unknown": "Signing in did not work. Try again."
+    }
   },
   "notFound": {
     "title": "Nothing here.",
