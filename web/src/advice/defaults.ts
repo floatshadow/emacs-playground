@@ -37,9 +37,16 @@ const SPECIAL_MODES = [
 export const DEFAULT_EXITS: ExitRow[] = [
   {
     id: 'waiting',
-    when: { waiting: { not: null } },
+    when: { waiting: { not: null }, 'waiting.kind': { not: 'hydra' } },
     why: 'Every key goes to a loop of its own: {waiting.what}.',
     how: '{waiting.leave} leaves it. Rescue me does too.',
+  },
+  {
+    id: 'hydra',
+    when: { 'waiting.kind': 'hydra' },
+    why: 'A key menu is open ({waiting.what}): the keys it lists stay active until it closes.',
+    how: 'Its quit key (the hint shows it) or {waiting.leave} closes it. Rescue me does too.',
+    flag: 'Hydra',
   },
   {
     id: 'minibuffer-prompt',

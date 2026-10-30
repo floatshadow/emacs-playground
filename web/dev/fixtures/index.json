@@ -916,7 +916,7 @@
       "id": "13-making-it-yours",
       "title": "Making it yours",
       "minutes": 120,
-      "outcome": "Read and change your configuration, manage packages, bind keys, write commands and take the whole setup home.",
+      "outcome": "Read and change your configuration, manage packages, bind keys and group them into menus, write commands and take the whole setup home.",
       "modules": ["ui"],
       "status": "planned",
       "suggestedAfter": 12,
@@ -957,8 +957,17 @@
           "steps": 0
         },
         {
-          "id": "13-making-it-yours/05-themes-fonts-icons",
+          "id": "13-making-it-yours/07-key-menus",
           "n": "13.5",
+          "title": "Key menus with hydra",
+          "minutes": 15,
+          "vscode": "Command Palette categories, Ctrl+K chords",
+          "status": "planned",
+          "steps": 0
+        },
+        {
+          "id": "13-making-it-yours/05-themes-fonts-icons",
+          "n": "13.6",
           "title": "Themes, fonts, icons and the mode line",
           "minutes": 12,
           "vscode": "colour theme, file icon theme, font settings",
@@ -967,7 +976,7 @@
         },
         {
           "id": "13-making-it-yours/06-take-it-home",
-          "n": "13.6",
+          "n": "13.7",
           "title": "Take it home",
           "minutes": 12,
           "vscode": "Settings Sync",

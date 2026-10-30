@@ -53,6 +53,20 @@ describe('exits table over real states (the demo whereAmI as data)', () => {
     expect(w.exits.map((e) => e.id)).toContain('isearch')
   })
 
+  it('an open hydra gets its own row, not the generic loop row', () => {
+    const state: State = {
+      ...calmState(),
+      waiting: { kind: 'hydra', what: 'the my-menu hydra', leave: 'C-g' },
+    }
+    const rows = evaluateExits(state, DEFAULT_EXITS)
+    expect(rows.map((r) => r.id)).toEqual(['hydra'])
+    expect(rows[0]?.why).toBe(
+      'A key menu is open (the my-menu hydra): the keys it lists stay active until it closes.',
+    )
+    const menu: State = { ...calmState(), waiting: { kind: 'menu', what: 'a menu', leave: 'C-g' } }
+    expect(evaluateExits(menu, DEFAULT_EXITS).map((r) => r.id)).toEqual(['waiting'])
+  })
+
   it('C-x 2: the frame is split, no special window', () => {
     const w = whereAfter('C-x 2')
     expect(w.exits.map((e) => e.why)).toEqual(['The frame is split into 2 windows.'])
