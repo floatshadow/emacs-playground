@@ -1245,7 +1245,7 @@ and lose the side window."
       (set-file-times main (time-add nil 2))
       (delete-file gone)
       (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/src/main.rs"))
-                                             (layout . "single")
+                                             (layout . "hello/README.md")
                                              (workspace . ,pg-test--dir))))
       (with-current-buffer (get-file-buffer main)
         (should-not (buffer-modified-p))
@@ -1265,7 +1265,7 @@ and lose the side window."
       (dired-noselect (file-name-directory a))
       (with-current-buffer (get-buffer-create "*Ibuffer*") (ibuffer-mode))
       (pg-test-value (pg-test-call "setup" `((open . ,(vector "p/a.rs"))
-                                             (layout . "single")
+                                             (layout . "hello/README.md")
                                              (reset . t)
                                              (workspace . ,pg-test--dir))))
       (should (get-file-buffer a))
@@ -1295,7 +1295,7 @@ and lose the side window."
             ;; A leftover buffer: killing it (the desk is cleared) saves its place.
             (with-current-buffer (find-file-noselect b) (goto-char 10))
             (pg-test-value (pg-test-call "setup" `((open . ,(vector "p/a.rs"))
-                                                   (layout . "single")
+                                                   (layout . "hello/README.md")
                                                    (reset . t)
                                                    (root . "p")
                                                    (workspace . ,pg-test--dir))))
@@ -1315,7 +1315,7 @@ and lose the side window."
            (save-place-loaded t)
            (save-place-alist (list (cons a 15))))
       (pg-test-value (pg-test-call "setup" `((open . ,(vector "p/a.rs"))
-                                             (layout . "single")
+                                             (layout . "hello/README.md")
                                              (root . "p")
                                              (workspace . ,pg-test--dir))))
       (should (equal (cdr (assoc a save-place-alist)) 15)))))
@@ -1564,6 +1564,167 @@ and lose the side window."
                      3)))
       (should (equal (alist-get 'did (pg-test-value reply)) '("closed the menu"))))))
 
+;;;; Hydras (lesson 13.5)
+
+;; The agent loads no package, so these tests stand in for hydra: its
+;; keymap in `hydra-curr-map', `hydra--clearfun' on the global
+;; `pre-command-hook', NAME/body in `hydra-curr-body-fn', and a
+;; `hydra-keyboard-quit' that takes the first two away.  The real
+;; package is exercised by all-modules-test.el.
+
+(defvar hydra-curr-map)
+(defvar hydra-curr-body-fn)
+(defvar pg-test--hydra-quits 0 "Times the fake `hydra-keyboard-quit' ran.")
+
+(defun pg-test--hydra-clearfun ()
+  "Stands in for `hydra--clearfun' on the hook.")
+
+(defmacro pg-test-with-hydra (name &rest body)
+  "Run BODY with a fake hydra NAME (a string) open."
+  (declare (indent 1) (debug t))
+  `(let ((hydra-curr-map (make-sparse-keymap))
+         (hydra-curr-body-fn (intern (concat ,name "/body")))
+         (pg-test--hydra-quits 0))
+     (cl-letf (((symbol-function 'hydra--clearfun) #'pg-test--hydra-clearfun)
+               ((symbol-function 'hydra-keyboard-quit)
+                (lambda ()
+                  (cl-incf pg-test--hydra-quits)
+                  (remove-hook 'pre-command-hook 'hydra--clearfun)
+                  (setq hydra-curr-map nil))))
+       (add-hook 'pre-command-hook 'hydra--clearfun)
+       (unwind-protect (progn ,@body)
+         (remove-hook 'pre-command-hook 'hydra--clearfun)))))
+
+(ert-deftest pg-agent/waiting-hydra ()
+  "An open hydra is the state's `waiting', which C-g leaves; a closed one is not."
+  (pg-test-with-agent
+    (should (eq (alist-get 'waiting (playground--state)) :null))
+    (pg-test-with-hydra "my-menu"
+      (should (equal (alist-get 'waiting (playground--state))
+                     '((kind . "hydra") (what . "the my-menu hydra") (leave . "C-g"))))
+      ;; A red head closes the hydra around its command (the hook goes,
+      ;; the map stays set): not open then.
+      (remove-hook 'pre-command-hook 'hydra--clearfun)
+      (should (eq (alist-get 'waiting (playground--state)) :null))
+      (add-hook 'pre-command-hook 'hydra--clearfun)
+      (let ((hydra-curr-body-fn nil))
+        (should (equal (alist-get 'what (alist-get 'waiting (playground--state))) "a hydra")))
+      (hydra-keyboard-quit)
+      (should (eq (alist-get 'waiting (playground--state)) :null)))
+    ;; A hydra closed by its :timeout reports a state.
+    (should (advice-member-p #'playground--schedule-state 'hydra-disable))))
+
+(ert-deftest pg-agent/rescue-closes-a-hydra ()
+  "Rescue closes an open hydra first and says so."
+  (pg-test-with-agent
+    (delete-other-windows)
+    (switch-to-buffer "*scratch*")
+    (pg-test-with-hydra "my-menu"
+      (should (equal (pg-test-rescue) '("closed the my-menu hydra")))
+      (should (= pg-test--hydra-quits 1))
+      (should (eq (alist-get 'waiting (playground--state)) :null))
+      ;; Nothing open: nothing to say.
+      (should (equal (pg-test-rescue) nil))
+      (should (= pg-test--hydra-quits 1)))))
+
+(ert-deftest pg-agent/rescue-hydra-and-prompt ()
+  "A pink hydra open over a prompt is closed before the prompt is unwound."
+  (pg-test-with-agent
+    (delete-other-windows)
+    (switch-to-buffer "*scratch*")
+    (pg-test-with-hydra "my-sizes"
+      (let* ((unwound nil)
+             (playground-agent-rescue-unwind-function (lambda () (setq unwound pg-test--hydra-quits))))
+        (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1))
+                  ((symbol-function 'recursion-depth) (lambda () 1)))
+          (let ((did (pg-test-rescue)))
+            (should (eql unwound 1))
+            (should (equal (seq-take did 2) '("closed the my-sizes hydra" "cancelled the prompt")))))))))
+
+(ert-deftest pg-agent/setup-and-reset-close-a-hydra ()
+  "setup and reset-step close an open hydra, whose keys would take the next ones."
+  (pg-test-with-agent
+    (pg-test-file "hello/README.md" "# hello\n")
+    (pg-test-with-hydra "my-menu"
+      (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/README.md"))
+                                             (layout . "hello/README.md")
+                                             (workspace . ,pg-test--dir))))
+      (should (= pg-test--hydra-quits 1))
+      (should (eq (alist-get 'waiting (playground--state)) :null)))
+    (pg-test-with-hydra "my-menu"
+      (pg-test-value
+       (pg-test-call "reset-step"
+                     `((spec . ((files . ,(vector '((path . "hello/README.md") (point . 1) (visible . t))))
+                                (layout . "hello/README.md"))))))
+      (should (= pg-test--hydra-quits 1)))))
+
+(defun pg-test-menu/body ()
+  "Call the body in the \"pg-test-menu\" hydra.
+
+The hint."
+  (interactive))
+
+(defun pg-test-menu/other-window ()
+  "Call the head `other-window' in the \"pg-test-menu\" hydra.
+
+The hint."
+  (interactive))
+
+(defun pg-test-menu/find-file-and-exit ()
+  "Call the head `find-file' in the \"pg-test-menu\" hydra.
+
+The hint."
+  (interactive))
+
+(defun pg-test-menu/nil ()
+  "Call the head `nil' in the \"pg-test-menu\" hydra.
+
+The hint."
+  (interactive))
+
+(defun pg-test-menu/lambda-x ()
+  "Call the head `(message \"x\")' in the \"pg-test-menu\" hydra.
+
+The hint."
+  (interactive))
+
+(ert-deftest pg-agent/describe-hydra-commands ()
+  "describe glosses the commands a hydra defines in words, not hydra's own text."
+  (pg-test-with-agent
+    (cl-flet ((doc (cmd) (alist-get 'doc (pg-test-value (pg-test-call "describe" `((cmd . ,cmd)))))))
+      (should (equal (doc "pg-test-menu/body")
+                     "Open the pg-test-menu hydra: its keys stay active until it closes"))
+      (should (equal (doc "pg-test-menu/nil") "Close the pg-test-menu hydra"))
+      (should (string-match-p "\\`other-window from the pg-test-menu hydra: Select another window"
+                              (doc "pg-test-menu/other-window")))
+      (should (string-prefix-p "find-file from the pg-test-menu hydra: "
+                               (doc "pg-test-menu/find-file-and-exit")))
+      (should (equal (doc "pg-test-menu/lambda-x") "A key of the pg-test-menu hydra")))
+    ;; By key, too: inside a hydra its keys are found first.
+    (let ((map (make-sparse-keymap)))
+      (keymap-set map "C-c z" #'pg-test-menu/nil)
+      (let ((overriding-terminal-local-map map))
+        (should (equal (pg-test-value (pg-test-call "describe" '((keys . "C-c z"))))
+                       '((cmd . "pg-test-menu/nil") (doc . "Close the pg-test-menu hydra"))))))))
+
+(ert-deftest pg-agent/hydra-heads-in-key-events ()
+  "Key events name a head's own command; a key an amaranth hydra ignores is its warning."
+  (pg-test-with-agent
+    (pg-test-clear)
+    ;; A head sets `this-command' to the command it wraps.
+    (let ((real-this-command 'pg-test-menu/other-window)
+          (this-command 'other-window))
+      (cl-letf (((symbol-function 'playground--this-keys) (lambda () "o")))
+        (playground--post-command)))
+    (let ((real-this-command 'self-insert-command)
+          (this-command 'hydra-amaranth-warn))
+      (cl-letf (((symbol-function 'playground--this-keys) (lambda () "x")))
+        (playground--post-command)))
+    (pg-test-settle)
+    (should (equal (mapcar (lambda (k) (list (alist-get 'keys k) (alist-get 'cmd k)))
+                           (pg-test-messages "key"))
+                   '(("o" "pg-test-menu/other-window") ("x" "hydra-amaranth-warn"))))))
+
 ;;;; Frames
 
 (ert-deftest pg-agent/copy-windows ()
@@ -1617,7 +1778,7 @@ and lose the side window."
         (progn
           (tab-bar-rename-tab "hello")
           (pg-test-value (pg-test-call "setup" `((open . ,(vector "p/a.rs"))
-                                                 (layout . "single")
+                                                 (layout . "hello/README.md")
                                                  (reset . t)
                                                  (workspace . ,pg-test--dir))))
           (should (= (length (funcall tab-bar-tabs-function)) 1))

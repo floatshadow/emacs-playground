@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.28
 #
 # Remote box image (deployment.md §6): Debian with sshd, a `deploy` user,
-# Emacs with the pinned packages (lesson 13.6 clones the playground
+# Emacs with the pinned packages (lesson 13.7 clones the playground
 # config here and starts it) and the session's Rust and Python
 # toolchains with the same prefetched crates and wheels, so remote
 # builds work offline (lessons 12.2, 9.5; projects P5, P6, P7). It is
@@ -161,7 +161,7 @@ RUN cd /src && for t in *.tar; do tar -xf "$t"; done && mkdir -p /out \
 
 # ---- emacs-runtime ----------------------------------------------------------
 # What running Emacs and its pinned packages needs; the base of the
-# toolchains stage and of the remote box (Part 13.6 starts Emacs there).
+# toolchains stage and of the remote box (Part 13.7 starts Emacs there).
 # gcc, binutils and libc6-dev serve Emacs's native compiler (libgccjit)
 # and, later, cargo's linker.
 FROM debian:${DEBIAN}-slim AS emacs-runtime

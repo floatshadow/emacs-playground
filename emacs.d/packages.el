@@ -22,7 +22,9 @@
 ;;                  (nerd-icons 0.1.0 is from 2023; helpful 0.21 breaks
 ;;                  on Emacs 30's help-fns; consult-dir 0.1 predates
 ;;                  consult 1.0; citar 1.4.0's autoloads define a struct
-;;                  before cl-lib is loaded; vterm has no stable tag).
+;;                  before cl-lib is loaded; vterm has no stable tag;
+;;                  pretty-hydra 0.2.2 needs dash-functional and the
+;;                  plist functions obsolete since Emacs 29).
 ;;
 ;; Native parts are built at image time, not by the packages:
 ;; vterm-module.so (libvterm), jinx-mod.so (enchant) and pdf-tools'
@@ -51,9 +53,10 @@
   (power wgrep)
   (ui nerd-icons nerd-icons-dired nerd-icons-completion nerd-icons-corfu
       nerd-icons-ibuffer breadcrumb pulsar helpful ef-themes ligature
-      doom-modeline))
+      doom-modeline hydra pretty-hydra))
  :pin
  ((dirvish . "melpa-stable"))
  :prefer-snapshot
  (nerd-icons nerd-icons-corfu nerd-icons-ibuffer consult-dir visual-replace
-  helpful elisp-refs eldoc-box burly ligature vterm citar citar-embark))
+  helpful elisp-refs eldoc-box burly ligature vterm citar citar-embark
+  pretty-hydra))

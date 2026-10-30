@@ -211,7 +211,7 @@ RUN cd /src && for t in *.tar; do tar -xf "$t"; done && mkdir -p /out \
 
 # ---- emacs-runtime ----------------------------------------------------------
 # What running Emacs and its pinned packages needs; the base of the
-# toolchains stage and of the remote box (Part 13.6 starts Emacs there).
+# toolchains stage and of the remote box (Part 13.7 starts Emacs there).
 # gcc, binutils and libc6-dev serve Emacs's native compiler (libgccjit)
 # and, later, cargo's linker.
 FROM debian:${DEBIAN}-slim AS emacs-runtime

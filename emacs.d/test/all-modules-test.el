@@ -13,7 +13,8 @@
 ;; vterm, jinx and pdf-tools, the toolchains the modules call, the
 ;; language servers they register, and a few behaviours that are easy
 ;; to break: Org's Rust blocks, compile's error regexps and two-line
-;; messages that arrive in two chunks, citations in Typst.
+;; messages that arrive in two chunks, citations in Typst, hydras with
+;; repeat-mode on.
 
 ;;; Code:
 
@@ -330,6 +331,84 @@
   (with-temp-buffer
     (emacs-lisp-mode)
     (should corfu-auto)))
+
+;;;; Key menus (hydra)
+
+(defvar pg-all--hydra-ran nil "Heads of the test hydra that ran, newest first.")
+(declare-function playground-hydra-active-p "ui")
+(declare-function playground--waiting-object "playground-agent")
+(declare-function playground--close-hydra "playground-agent")
+(declare-function playground--command-doc "playground-agent")
+
+(ert-deftest pg-all/hydra-red-heads-repeat ()
+  "Lesson 13.5: a red head pressed twice keeps its hydra open, repeat-mode or not.
+A head sets `this-command' to the command it runs, so without the ui
+module's advice repeat-mode arms `other-window-repeat-map' over the
+hydra and the second o closes it."
+  (require 'pretty-hydra)
+  (should repeat-mode)
+  (should (advice-member-p #'playground-hydra-active-p 'repeat-post-hook))
+  (eval '(pretty-hydra-define pg-all-menu (:title "Test menu" :quit-key "q")
+           ("Windows"
+            (("o" other-window "other window")
+             ("2" split-window-below "split below"))
+            "Mine"
+            (("r" (push 'r pg-all--hydra-ran) "record")
+             ("x" (push 'x pg-all--hydra-ran) "record and close" :exit t))))
+        t)
+  (let ((map (make-sparse-keymap))
+        (pg-all--hydra-ran nil))
+    (keymap-set map "C-c z" '("test menu" . pg-all-menu/body))
+    (save-window-excursion
+      (delete-other-windows)
+      (split-window-right)
+      (let ((start (selected-window))
+            (overriding-local-map map))
+        (unwind-protect
+            (progn
+              (execute-kbd-macro (key-parse "C-c z o o"))
+              (should (playground-hydra-active-p))
+              (should (eq (selected-window) start))
+              ;; The agent reports it, and glosses its commands.
+              (should (equal (playground--waiting-object)
+                             '((kind . "hydra") (what . "the pg-all-menu hydra") (leave . "C-g"))))
+              (should (string-prefix-p "other-window from the pg-all-menu hydra: "
+                                       (playground--command-doc 'pg-all-menu/other-window)))
+              (should (equal (playground--command-doc 'pg-all-menu/nil) "Close the pg-all-menu hydra"))
+              (execute-kbd-macro (key-parse "r r"))
+              (should (equal pg-all--hydra-ran '(r r)))
+              (should (playground-hydra-active-p))
+              (execute-kbd-macro (key-parse "q"))
+              (should-not (playground-hydra-active-p))
+              (should (eq (playground--waiting-object) :null))
+              ;; Rescue closes it from outside the command loop, hint too.
+              (execute-kbd-macro (key-parse "C-c z"))
+              (should (get-buffer-window " *LV*"))
+              (should (equal (playground--close-hydra) "closed the pg-all-menu hydra"))
+              (should-not (playground-hydra-active-p))
+              (should-not (get-buffer-window " *LV*"))
+              ;; A blue head closes it.
+              (execute-kbd-macro (key-parse "C-c z x"))
+              (should (equal pg-all--hydra-ran '(x r r)))
+              (should-not (playground-hydra-active-p)))
+          (when (playground-hydra-active-p) (hydra-keyboard-quit)))))))
+
+(ert-deftest pg-all/hydra-defhydra-hint-and-faces ()
+  "Lesson 13.5: a defhydra with a docstring hint expands; toggle indicators are coloured."
+  (require 'pretty-hydra)
+  (eval '(defhydra pg-all-sizes (:color pink :hint nil)
+           "
+ Size: _<left>_ narrower  _<right>_ wider  _q_ done"
+           ("<left>" shrink-window-horizontally)
+           ("<right>" enlarge-window-horizontally)
+           ("q" nil))
+        t)
+  (should (commandp 'pg-all-sizes/body))
+  (should (commandp 'pg-all-sizes/enlarge-window-horizontally))
+  (should (eq (face-attribute 'pretty-hydra-toggle-on-face :inherit) 'font-lock-keyword-face))
+  (should (eq (face-attribute 'pretty-hydra-toggle-off-face :inherit) 'font-lock-comment-face))
+  ;; The hint stays in its own window, not the echo area the agent reports.
+  (should (eq hydra-hint-display-type 'lv)))
 
 (provide 'all-modules-test)
 ;;; all-modules-test.el ends here

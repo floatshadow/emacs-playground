@@ -87,6 +87,9 @@
 (declare-function list-buffers-noselect "buff-menu" (&optional files-only buffer-list filter-predicate))
 (declare-function iedit-mode "iedit" (&optional arg))
 (declare-function multiple-cursors-mode "multiple-cursors-core" (&optional arg))
+(declare-function hydra-keyboard-quit "hydra" ())
+(defvar hydra-curr-map)
+(defvar hydra-curr-body-fn)
 
 ;;;; Customisation
 
@@ -825,12 +828,45 @@ buffer when it is the minibuffer, else `minibuffer-prompt'."
           (diagAtPoint . ,(playground--diag-at-point pt)))))))
 
 (defun playground--waiting-object ()
-  "The state's `waiting': {kind, what, leave} for a running loop, or :null."
-  (if playground--waiting
-      `((kind . ,(nth 1 playground--waiting))
-        (what . ,(nth 2 playground--waiting))
-        (leave . ,(nth 4 playground--waiting)))
-    :null))
+  "The state's `waiting': {kind, what, leave} for a running loop, or :null.
+An open hydra is reported too (`playground--hydra-name')."
+  (cond
+   (playground--waiting
+    `((kind . ,(nth 1 playground--waiting))
+      (what . ,(nth 2 playground--waiting))
+      (leave . ,(nth 4 playground--waiting))))
+   ((playground--hydra-name)
+    `((kind . "hydra")
+      (what . ,(playground--hydra-what (playground--hydra-name)))
+      (leave . "C-g")))
+   (t :null)))
+
+(defun playground--hydra-name ()
+  "Name of the hydra whose keys are active (\"my-menu\"), or nil.
+\"\" when one is active but hydra does not say which.
+A hydra (the hydra package, lesson 13.5) is no loop: it pushes its
+keymap over every other and puts `hydra--clearfun' on the global
+`pre-command-hook' until it closes, and every key goes to the command
+loop as usual.  `hydra-curr-body-fn' is NAME/body.  C-g closes every
+kind of hydra (`hydra--clearfun' lets `keyboard-quit' through)."
+  (and (bound-and-true-p hydra-curr-map)
+       (memq 'hydra--clearfun (default-value 'pre-command-hook))
+       (let ((body (bound-and-true-p hydra-curr-body-fn)))
+         (if (and body (symbolp body))
+             (string-remove-suffix "/body" (symbol-name body))
+           ""))))
+
+(defun playground--hydra-what (name)
+  "\"the NAME hydra\", or \"a hydra\" for an empty NAME."
+  (if (string-empty-p name) "a hydra" (format "the %s hydra" name)))
+
+(defun playground--close-hydra ()
+  "Close the open hydra, if any; return \"closed the NAME hydra\" or nil.
+`hydra-keyboard-quit' takes its keymap away and deletes its hint
+window; it needs no key and works outside the command loop."
+  (when-let* ((name (playground--hydra-name)))
+    (playground--safely "close hydra" (hydra-keyboard-quit))
+    (concat "closed " (playground--hydra-what name))))
 
 (defun playground--waiting-advice (entry)
   "Around advice marking the loop of ENTRY, from `playground-agent-waiting-loops'."
@@ -898,8 +934,12 @@ sets it to `kill-region' so that kills append; `yank-pop' sets it to
 `yank'; `yank' with an empty kill ring leaves t; TAB in the minibuffer
 runs `minibuffer-complete', which sets it to `completion-at-point'),
 so it can name a command the learner never ran.  M-x sets both to the
-command chosen by name."
-  real-this-command)
+command chosen by name.
+
+One exception: an amaranth hydra ignores keys it does not list by
+rewriting `this-command' to `hydra-amaranth-warn' before the command
+runs, so that warning is what the key did."
+  (if (eq this-command 'hydra-amaranth-warn) this-command real-this-command))
 
 (defun playground--pre-command ()
   "Remember the keys of the command about to run, and the command.
@@ -1289,21 +1329,24 @@ frame (`playground--in-user-window')."
 
 (defun playground--op-rescue (_args &optional id)
   "Get the learner out of any confusing state; reply {did:[...]}.
-A loop reading keys of its own (`playground-agent-waiting-loops') is
-left first, with the keys that leave it, and the rest happens once it
-has ended.  Leaving minibuffers and recursive edits needs a throw to the
-command loop, so in that case the rest of the work runs from a timer
-at top level.  In both cases the reply is sent from there."
-  (if (not playground--waiting)
-      (playground--rescue-from nil id)
-    (let ((left (nth 3 playground--waiting)))
-      (playground--quit-waiting
-       (key-parse (nth 4 playground--waiting))
-       (lambda ()
-         (let ((value (playground--rescue-from (list left) id)))
-           (when (and id (not (eq value 'playground--deferred)))
-             (playground--reply id t value)))))
-      'playground--deferred)))
+An open hydra is closed first (its keys would otherwise stay on top of
+everything rescue leaves the learner in).  A loop reading keys of its
+own (`playground-agent-waiting-loops') is left next, with the keys
+that leave it, and the rest happens once it has ended.  Leaving
+minibuffers and recursive edits needs a throw to the command loop, so
+in that case the rest of the work runs from a timer at top level.  In
+both cases the reply is sent from there."
+  (let ((hydra (playground--close-hydra)))
+    (if (not playground--waiting)
+        (playground--rescue-from (and hydra (list hydra)) id)
+      (let ((left (nth 3 playground--waiting)))
+        (playground--quit-waiting
+         (key-parse (nth 4 playground--waiting))
+         (lambda ()
+           (let ((value (playground--rescue-from (delq nil (list hydra left)) id)))
+             (when (and id (not (eq value 'playground--deferred)))
+               (playground--reply id t value)))))
+        'playground--deferred))))
 
 (defconst playground--quit-waiting-tries 40
   "Times, 50 ms apart, rescue checks whether a waiting loop has ended.")
@@ -2125,7 +2168,11 @@ it (`playground--deferred')."
   "Reset the step from ARGS at top level (see `playground--reset-step-now').
 A prefix key typed before Reset (C-c waiting for its second key) would
 otherwise swallow the next keys, so it is cancelled, and so are prompts
-(see `playground--at-top-level'); the reply to call ID may come later."
+(see `playground--at-top-level'); the reply to call ID may come later.
+An open hydra is closed: its keys would take the demo's or the
+learner's next keys, and the layout would delete its hint window
+while they stay active."
+  (playground--close-hydra)
   (playground--at-top-level id (lambda () (playground--reset-step-now args))))
 
 (defun playground--reset-step-now (args)
@@ -2199,13 +2246,14 @@ fixture.  Returns the number of buffers reverted or killed."
 
 (defun playground--op-setup (args &optional id)
   "Run a scenario's setup: open, layout, eval, compile (ARGS).
-A prompt, recursive edit or prefix key still open (the learner switched
-lessons in the middle of a command) would swallow the lesson's first
-keys, so it is left first.  That needs a throw to the command loop, so, as in
-rescue, the setup then runs from a timer at top level and the reply
-to call ID is sent from there."
+A prompt, recursive edit, prefix key or hydra still open (the learner
+switched lessons in the middle of a command) would swallow the lesson's
+first keys, so it is left first.  For the first three that needs a throw
+to the command loop, so, as in rescue, the setup then runs from a timer
+at top level and the reply to call ID is sent from there."
   (when (bound-and-true-p isearch-mode)
     (playground--safely "setup isearch" (isearch-done)))
+  (playground--close-hydra)
   (playground--at-top-level id (lambda () (playground--setup-now args))))
 
 (defconst playground--list-modes
@@ -2409,6 +2457,32 @@ none; the base module fits GUI frames to their display."
   (let ((doc (ignore-errors (documentation cmd t))))
     (if doc (car (split-string doc "\n")) "")))
 
+(defun playground--hydra-doc (line)
+  "A gloss for a hydra's command whose first doc line is LINE, or nil.
+hydra documents the commands it defines as \"Call the head `CMD' in
+the \"NAME\" hydra.\" (NAME/CMD, NAME/CMD-and-exit, NAME/nil for the
+quit key) and \"Call the body in the \"NAME\" hydra.\" (NAME/body)."
+  (cond
+   ((string-match "\\`Call the body in the \"\\(.*?\\)\" hydra" line)
+    (format "Open the %s hydra: its keys stay active until it closes" (match-string 1 line)))
+   ((string-match "\\`Call the head `\\(.*?\\)' in the \"\\(.*?\\)\" hydra" line)
+    (let* ((cmd (match-string 1 line))
+           (name (match-string 2 line))
+           (sym (intern-soft cmd)))
+      (cond
+       ((equal cmd "nil") (format "Close the %s hydra" name))
+       ((and sym (fboundp sym))
+        (let ((doc (playground--first-doc-line sym)))
+          (if (string-empty-p doc)
+              (format "%s from the %s hydra" cmd name)
+            (format "%s from the %s hydra: %s" cmd name doc))))
+       (t (format "A key of the %s hydra" name)))))))
+
+(defun playground--command-doc (cmd)
+  "The first line of CMD's documentation, or a gloss for a hydra's command."
+  (let ((line (playground--first-doc-line cmd)))
+    (or (playground--hydra-doc line) line)))
+
 (defun playground--op-describe (args &rest _)
   "Describe the key sequence (or command name) in ARGS: {cmd, doc}."
   (playground--in-user-window
@@ -2417,13 +2491,13 @@ none; the base module fits GUI frames to their display."
       (if (and cmd-name (not keys))
           (let ((sym (intern-soft cmd-name)))
             `((cmd . ,cmd-name)
-              (doc . ,(if (and sym (fboundp sym)) (playground--first-doc-line sym) ""))))
+              (doc . ,(if (and sym (fboundp sym)) (playground--command-doc sym) ""))))
         (let ((binding (key-binding (key-parse keys) t)))
           (cond
            ((null binding) '((cmd . "") (doc . "")))
            ((keymapp binding) `((cmd . "") (doc . ,(format "%s is a prefix key" keys))))
            ((symbolp binding)
-            `((cmd . ,(symbol-name binding)) (doc . ,(playground--first-doc-line binding))))
+            `((cmd . ,(symbol-name binding)) (doc . ,(playground--command-doc binding))))
            (t `((cmd . ,(playground--symbol-name binding)) (doc . "")))))))))
 
 (setq playground-agent-ops
@@ -2517,6 +2591,9 @@ Never saves, kills file buffers or reverts."
         (dolist (entry playground-agent-waiting-loops)
           (advice-add (car entry) :around (playground--waiting-advice entry)
                       '((name . playground-waiting))))
+        ;; A hydra closed by its :timeout or from outside the command
+        ;; loop gets no post-command run, and the state would keep it.
+        (advice-add 'hydra-disable :after #'playground--schedule-state)
         (unless set-message-function (setq set-message-function #'ignore))
         (add-function :before set-message-function #'playground--on-message)
         (add-function :before command-error-function #'playground--on-command-error))
@@ -2529,6 +2606,7 @@ Never saves, kills file buffers or reverts."
     (advice-remove 'eldoc-pre-command-refresh-echo-area #'playground--eldoc-quietly)
     (dolist (entry playground-agent-waiting-loops)
       (advice-remove (car entry) 'playground-waiting))
+    (advice-remove 'hydra-disable #'playground--schedule-state)
     (remove-function set-message-function #'playground--on-message)
     (remove-function command-error-function #'playground--on-command-error)))
 
