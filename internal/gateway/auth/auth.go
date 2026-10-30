@@ -4,13 +4,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/floatshadow/emacs-playground/internal/gateway/limit"
 	"github.com/floatshadow/emacs-playground/internal/gateway/store"
 	"github.com/floatshadow/emacs-playground/internal/httpx"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
@@ -46,16 +45,23 @@ type Options struct {
 	Signer      *Signer
 	Store       store.Store
 	Logger      *slog.Logger
+	// OIDC configures auth mode oidc; ClientSecret is the content of
+	// OIDC.ClientSecretFile ("" for a public client).
+	OIDC         protocol.OIDCConfig
+	ClientSecret string
+	// HTTPClient talks to the OIDC provider; default a client with a 15 s
+	// timeout.
+	HTTPClient *http.Client
 	// Now is the clock (tests); default time.Now.
 	Now func() time.Time
 }
 
-// Route paths under /api/v1.
+// Route paths. PathLogin is the web app's login screen.
 const (
-	PathInviteLogin  = protocol.APIPrefix + "/auth/invite"
 	PathLogout       = protocol.APIPrefix + "/auth/logout"
 	PathOIDCStart    = protocol.APIPrefix + "/auth/oidc/start"
 	PathOIDCCallback = protocol.APIPrefix + "/auth/oidc/callback"
+	PathLogin        = "/login"
 )
 
 // New returns the authenticator for mode.
@@ -72,25 +78,10 @@ func New(mode protocol.AuthMode, o Options) (Authenticator, error) {
 	switch mode {
 	case protocol.AuthNone:
 		return &noneAuth{o: o}, nil
-	case protocol.AuthInvite, protocol.AuthOIDC:
-	default:
-		return nil, errors.New("auth: unknown mode " + string(mode))
+	case protocol.AuthOIDC:
+		return newOIDC(o)
 	}
-	if o.Signer == nil {
-		return nil, errors.New("auth: " + string(mode) + " mode needs a cookie signer")
-	}
-	base := &cookieAuth{
-		o:        o,
-		secure:   strings.HasPrefix(strings.ToLower(o.PublicURL), "https:"),
-		lifetime: time.Duration(o.SessionDays) * 24 * time.Hour,
-		ipLimit:  limit.New(10, time.Minute),
-		codeLim:  limit.New(20, time.Minute),
-		seen:     map[string]time.Time{},
-	}
-	if mode == protocol.AuthInvite {
-		return &inviteAuth{cookieAuth: base}, nil
-	}
-	return &oidcAuth{cookieAuth: base}, nil
+	return nil, errors.New("auth: unknown mode " + string(mode))
 }
 
 // ---- none ------------------------------------------------------------------
@@ -131,34 +122,57 @@ func (a *noneAuth) Middleware(next http.Handler) http.Handler {
 }
 
 func (a *noneAuth) Routes(mux *http.ServeMux) {
-	mux.Handle("POST "+PathInviteLogin, httpx.Handle(func(w http.ResponseWriter, r *http.Request) error {
-		return httpx.Conflict("invite codes are not used: this playground has no login")
-	}))
 	mux.Handle("POST "+PathLogout, httpx.Handle(func(w http.ResponseWriter, r *http.Request) error {
 		httpx.NoContent(w)
 		return nil
 	}))
-	oidcNotConfigured(mux)
+	h := httpx.Handle(func(w http.ResponseWriter, r *http.Request) error {
+		return httpx.NotFound("OIDC sign-in is not configured")
+	})
+	mux.Handle("GET "+PathOIDCStart, h)
+	mux.Handle("GET "+PathOIDCCallback, h)
 }
 
-// ---- cookies (invite, oidc) -------------------------------------------------
+// ---- session cookies --------------------------------------------------------
 
-type cookieAuth struct {
+// cookies issues and verifies the pg_session cookie and loads its user.
+// A cookie lasts sessionDays from the sign-in and is never extended, so
+// the provider and the allow-lists are consulted again at least that
+// often. It carries the user's session epoch: logout increments it, which
+// revokes every cookie of the user.
+type cookies struct {
 	o        Options
+	kind     protocol.UserKind
 	secure   bool
 	lifetime time.Duration
-	ipLimit  *limit.Limiter
-	codeLim  *limit.Limiter
+	// allow, when set, rechecks a stored user on every request and returns
+	// why they are refused, or "" (a tightened allow-list applies at once).
+	allow func(*store.User) string
 
 	mu   sync.Mutex
 	seen map[string]time.Time // user id → last Touch
 }
 
-func (a *cookieAuth) setCookie(w http.ResponseWriter, userID string) {
+func newCookies(o Options, kind protocol.UserKind) cookies {
+	return cookies{
+		o:        o,
+		kind:     kind,
+		secure:   strings.HasPrefix(strings.ToLower(o.PublicURL), "https:"),
+		lifetime: time.Duration(o.SessionDays) * 24 * time.Hour,
+		seen:     map[string]time.Time{},
+	}
+}
+
+// cookieSubject is the signed subject of u's cookies: "<id>|<epoch>".
+func cookieSubject(u *store.User) string {
+	return u.ID + "|" + strconv.FormatInt(u.SessionEpoch, 10)
+}
+
+func (a *cookies) setCookie(w http.ResponseWriter, u *store.User) {
 	exp := a.o.Now().Add(a.lifetime)
 	http.SetCookie(w, &http.Cookie{
 		Name:     protocol.SessionCookie,
-		Value:    a.o.Signer.Sign(userID, exp),
+		Value:    a.o.Signer.Sign(cookieSubject(u), exp),
 		Path:     "/",
 		Expires:  exp,
 		MaxAge:   int(a.lifetime / time.Second),
@@ -168,33 +182,56 @@ func (a *cookieAuth) setCookie(w http.ResponseWriter, userID string) {
 	})
 }
 
-func (a *cookieAuth) clearCookie(w http.ResponseWriter) {
+func (a *cookies) clearCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name: protocol.SessionCookie, Value: "", Path: "/", MaxAge: -1,
 		HttpOnly: true, Secure: a.secure, SameSite: http.SameSiteLaxMode,
 	})
 }
 
+// Cookie refusals besides the Signer's.
+var (
+	// errWrongKind refuses users of another auth mode (a database kept
+	// across a configuration change).
+	errWrongKind = errors.New("auth: user signed in with another method")
+	errRevoked   = errors.New("auth: session cookie revoked")
+)
+
 // userFromCookie verifies the cookie and loads the user.
-func (a *cookieAuth) userFromCookie(r *http.Request) (*store.User, time.Time, error) {
+func (a *cookies) userFromCookie(r *http.Request) (*store.User, error) {
 	c, err := r.Cookie(protocol.SessionCookie)
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, err
 	}
-	uid, exp, err := a.o.Signer.Verify(c.Value, a.o.Now())
+	subject, _, err := a.o.Signer.Verify(c.Value, a.o.Now())
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, err
+	}
+	uid, _, ok := strings.Cut(subject, "|")
+	if !ok {
+		return nil, ErrBadCookie
 	}
 	u, err := a.o.Store.Users().Get(r.Context(), uid)
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, err
 	}
-	return u, exp, nil
+	switch {
+	case u.Kind != a.kind:
+		return nil, errWrongKind
+	case subject != cookieSubject(u):
+		return nil, errRevoked
+	}
+	return u, nil
 }
 
-func (a *cookieAuth) Middleware(next http.Handler) http.Handler {
+func (a *cookies) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		u, exp, err := a.userFromCookie(r)
+		u, err := a.userFromCookie(r)
+		if err == nil && a.allow != nil {
+			if why := a.allow(u); why != "" {
+				err = errors.New(why)
+			}
+		}
 		if err != nil {
 			if !errors.Is(err, http.ErrNoCookie) {
 				a.clearCookie(w)
@@ -202,19 +239,14 @@ func (a *cookieAuth) Middleware(next http.Handler) http.Handler {
 			httpx.WriteError(w, r, httpx.Unauthenticated("sign in to continue"))
 			return
 		}
-		now := a.o.Now()
-		// Renew on use, at most once a day.
-		if exp.Sub(now) < a.lifetime-24*time.Hour {
-			a.setCookie(w, u.ID)
-		}
-		a.touch(r.Context(), u.ID, now)
-		user := &protocol.User{ID: u.ID, DisplayName: u.DisplayName, Kind: u.Kind}
+		a.touch(r.Context(), u.ID, a.o.Now())
+		user := &protocol.User{ID: u.ID, DisplayName: u.DisplayName, Kind: u.Kind, Username: u.Username, Email: u.Email, Groups: u.Groups}
 		next.ServeHTTP(w, r.WithContext(WithUser(r.Context(), user)))
 	})
 }
 
 // touch records last_seen_at at most every five minutes per user.
-func (a *cookieAuth) touch(ctx context.Context, id string, now time.Time) {
+func (a *cookies) touch(ctx context.Context, id string, now time.Time) {
 	a.mu.Lock()
 	last := a.seen[id]
 	if now.Sub(last) < 5*time.Minute {
@@ -228,122 +260,14 @@ func (a *cookieAuth) touch(ctx context.Context, id string, now time.Time) {
 	}
 }
 
-func (a *cookieAuth) logout(w http.ResponseWriter, r *http.Request) error {
-	if u, _, err := a.userFromCookie(r); err == nil {
+// signOut revokes the user's cookies, clears this one and audits the
+// logout.
+func (a *cookies) signOut(w http.ResponseWriter, r *http.Request) {
+	if u, err := a.userFromCookie(r); err == nil {
+		if err := a.o.Store.Users().RevokeSessions(r.Context(), u.ID); err != nil {
+			a.o.Logger.Warn("auth: revoking session cookies", "err", err)
+		}
 		_ = a.o.Store.Audit(r.Context(), store.AuditEvent{At: a.o.Now().UnixMilli(), UserID: u.ID, Action: "logout"})
 	}
 	a.clearCookie(w)
-	httpx.NoContent(w)
-	return nil
-}
-
-// ClientIP is the address used for per-IP limits: the last X-Forwarded-For
-// hop (added by Caddy, the only proxy in front of the gateway) or the
-// connection's remote address.
-func ClientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if ip := strings.TrimSpace(parts[len(parts)-1]); ip != "" {
-			return ip
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
-// ---- invite -----------------------------------------------------------------
-
-type inviteAuth struct{ *cookieAuth }
-
-func (a *inviteAuth) Mode() protocol.AuthMode { return protocol.AuthInvite }
-
-func (a *inviteAuth) Routes(mux *http.ServeMux) {
-	mux.Handle("POST "+PathInviteLogin, httpx.Handle(a.login))
-	mux.Handle("POST "+PathLogout, httpx.Handle(a.logout))
-	oidcNotConfigured(mux)
-}
-
-// login implements POST /api/v1/auth/invite {code} (api.md §2.1).
-func (a *inviteAuth) login(w http.ResponseWriter, r *http.Request) error {
-	var req protocol.InviteLoginRequest
-	if err := httpx.DecodeJSON(w, r, &req); err != nil {
-		return err
-	}
-	code := strings.TrimSpace(req.Code)
-	if code == "" {
-		return httpx.BadRequest("enter your invite code")
-	}
-	if !a.ipLimit.Allow(ClientIP(r)) {
-		return httpx.RateLimited("too many attempts; wait a minute and try again")
-	}
-	hash := HashCode(code)
-	if !a.codeLim.Allow(hash) {
-		return httpx.RateLimited("too many attempts with this code; wait a minute and try again")
-	}
-	// Already signed in: keep the user, do not consume another use.
-	if u, _, err := a.userFromCookie(r); err == nil {
-		a.setCookie(w, u.ID)
-		httpx.NoContent(w)
-		return nil
-	}
-	now := a.o.Now()
-	inv, err := a.o.Store.Invites().Redeem(r.Context(), hash, now.UnixMilli())
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		return httpx.Forbidden("this invite code is not valid")
-	case errors.Is(err, store.ErrInviteExpired):
-		return httpx.Forbidden("this invite code has expired")
-	case errors.Is(err, store.ErrInviteUsedUp):
-		return httpx.Forbidden("this invite code has been used up")
-	case err != nil:
-		return err
-	}
-	name := inv.Label
-	if name == "" {
-		name = "Learner"
-	}
-	u := &store.User{ID: "u-" + httpx.NewID(9), Kind: protocol.UserInvite, DisplayName: name, CreatedAt: now.UnixMilli(), LastSeenAt: now.UnixMilli()}
-	if err := a.o.Store.Users().Put(r.Context(), u); err != nil {
-		return err
-	}
-	_ = a.o.Store.Audit(r.Context(), store.AuditEvent{At: now.UnixMilli(), UserID: u.ID, Action: "login.invite", Details: "label=" + inv.Label})
-	a.setCookie(w, u.ID)
-	httpx.NoContent(w)
-	return nil
-}
-
-// ---- oidc -------------------------------------------------------------------
-
-// oidcAuth verifies cookies like invite mode; the login flow itself is not
-// in slice 1.
-//
-// TODO(gateway, backend.md §2.6): GET /auth/oidc/start and /callback with
-// github.com/coreos/go-oidc/v3 and golang.org/x/oauth2 (PKCE, issuer
-// verification, allowedEmailDomains); user id = issuer + "|" + sub, display
-// name from name or email; then setCookie as for invites.
-type oidcAuth struct{ *cookieAuth }
-
-func (a *oidcAuth) Mode() protocol.AuthMode { return protocol.AuthOIDC }
-
-func (a *oidcAuth) Routes(mux *http.ServeMux) {
-	notImpl := httpx.Handle(func(w http.ResponseWriter, r *http.Request) error {
-		return httpx.NotImplemented("sign-in with your organisation's account is not available in this build")
-	})
-	mux.Handle("GET "+PathOIDCStart, notImpl)
-	mux.Handle("GET "+PathOIDCCallback, notImpl)
-	mux.Handle("POST "+PathInviteLogin, httpx.Handle(func(w http.ResponseWriter, r *http.Request) error {
-		return httpx.Conflict("this playground signs in with OIDC, not invite codes")
-	}))
-	mux.Handle("POST "+PathLogout, httpx.Handle(a.logout))
-}
-
-func oidcNotConfigured(mux *http.ServeMux) {
-	h := httpx.Handle(func(w http.ResponseWriter, r *http.Request) error {
-		return httpx.NotFound("OIDC sign-in is not configured")
-	})
-	mux.Handle("GET "+PathOIDCStart, h)
-	mux.Handle("GET "+PathOIDCCallback, h)
 }

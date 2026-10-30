@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -63,19 +64,33 @@ func testStore(t *testing.T, s Store) {
 	if _, err := s.Users().Get(ctx, "nobody"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("missing user: %v", err)
 	}
-	u := &User{ID: "u1", Kind: protocol.UserInvite, DisplayName: "cohort-A", CreatedAt: 100}
+	u := &User{ID: "u1", Kind: protocol.UserOIDC, Subject: "https://idp|1", DisplayName: "cohort-A", CreatedAt: 100}
 	if err := s.Users().Put(ctx, u); err != nil {
 		t.Fatal(err)
 	}
 	// Two users without subject must not collide on the unique index.
-	if err := s.Users().Put(ctx, &User{ID: "u2", Kind: protocol.UserInvite, CreatedAt: 101}); err != nil {
+	if err := s.Users().Put(ctx, &User{ID: "u2", Kind: protocol.UserLocal, CreatedAt: 101}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Users().Put(ctx, &User{ID: "o1", Kind: protocol.UserOIDC, Subject: "https://idp|42", DisplayName: "Ada", CreatedAt: 102}); err != nil {
+	if err := s.Users().Put(ctx, &User{ID: "u3", Kind: protocol.UserLocal, CreatedAt: 101}); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := s.Users().BySubject(ctx, "https://idp|42"); err != nil || got.ID != "o1" {
+	o1 := &User{ID: "o1", Kind: protocol.UserOIDC, Subject: "https://idp|42", DisplayName: "Ada", Username: "ada", Email: "ada@example.edu", Groups: []string{"cs101", "staff"}, CreatedAt: 102}
+	if err := s.Users().Put(ctx, o1); err != nil {
+		t.Fatal(err)
+	}
+	o1.Groups[0] = "mutated"
+	if got, err := s.Users().BySubject(ctx, "https://idp|42"); err != nil || got.ID != "o1" || got.Username != "ada" ||
+		got.Email != "ada@example.edu" || strings.Join(got.Groups, ",") != "cs101,staff" {
 		t.Fatalf("by subject: %v %+v", err, got)
+	}
+	// A login refreshes the claims: groups can shrink to none.
+	o1.Groups, o1.Email = nil, "ada@new.example.edu"
+	if err := s.Users().Put(ctx, o1); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s.Users().Get(ctx, "o1"); got.Groups != nil || got.Email != "ada@new.example.edu" {
+		t.Fatalf("refreshed %+v", got)
 	}
 	if _, err := s.Users().BySubject(ctx, ""); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("empty subject: %v", err)
@@ -83,53 +98,26 @@ func testStore(t *testing.T, s Store) {
 	if err := s.Users().Touch(ctx, "u1", 500); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := s.Users().Get(ctx, "u1"); got.LastSeenAt != 500 || got.DisplayName != "cohort-A" || got.Kind != protocol.UserInvite {
+	if got, _ := s.Users().Get(ctx, "u1"); got.LastSeenAt != 500 || got.DisplayName != "cohort-A" || got.Kind != protocol.UserOIDC {
 		t.Fatalf("user %+v", got)
 	}
 	if err := s.Users().Touch(ctx, "nobody", 1); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("touch missing: %v", err)
 	}
-
-	// Invites: sync, redeem, use counting, expiry, removal.
-	invs := []Invite{
-		{CodeHash: "h1", Label: "cohort-A", MaxUses: 2},
-		{CodeHash: "h2", Label: "old", ExpiresAt: 1000},
-		{CodeHash: "h3"},
-	}
-	if err := s.Invites().Sync(ctx, invs); err != nil {
+	// RevokeSessions increments the epoch, and Put (a login refreshing the
+	// user from an older read) never resets it.
+	stale, _ := s.Users().Get(ctx, "u1")
+	if err := s.Users().RevokeSessions(ctx, "u1"); err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 2; i++ {
-		inv, err := s.Invites().Redeem(ctx, "h1", 10)
-		if err != nil || inv.Uses != i+1 || inv.Label != "cohort-A" {
-			t.Fatalf("redeem %d: %v %+v", i, err, inv)
-		}
-	}
-	if _, err := s.Invites().Redeem(ctx, "h1", 10); !errors.Is(err, ErrInviteUsedUp) {
-		t.Fatalf("used up: %v", err)
-	}
-	if _, err := s.Invites().Redeem(ctx, "h2", 1000); !errors.Is(err, ErrInviteExpired) {
-		t.Fatalf("expired: %v", err)
-	}
-	if _, err := s.Invites().Redeem(ctx, "h2", 999); err != nil {
-		t.Fatalf("not yet expired: %v", err)
-	}
-	if _, err := s.Invites().Redeem(ctx, "nope", 1); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("unknown: %v", err)
-	}
-	// Re-sync keeps use counts, updates limits and drops removed codes.
-	if err := s.Invites().Sync(ctx, []Invite{{CodeHash: "h1", Label: "cohort-A", MaxUses: 3}, {CodeHash: "h3"}}); err != nil {
+	if err := s.Users().Put(ctx, stale); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Invites().Redeem(ctx, "h2", 1); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("removed code still works: %v", err)
+	if got, _ := s.Users().Get(ctx, "u1"); got.SessionEpoch != stale.SessionEpoch+1 {
+		t.Fatalf("epoch %d after revoke, was %d", got.SessionEpoch, stale.SessionEpoch)
 	}
-	if inv, err := s.Invites().Redeem(ctx, "h1", 10); err != nil || inv.Uses != 3 {
-		t.Fatalf("raised limit: %v %+v", err, inv)
-	}
-	list, _ := s.Invites().List(ctx)
-	if len(list) != 2 {
-		t.Fatalf("invites %+v", list)
+	if err := s.Users().RevokeSessions(ctx, "nobody"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("revoke missing: %v", err)
 	}
 
 	// Sessions.
@@ -244,10 +232,74 @@ func checkPersisted(t *testing.T, s Store) {
 	if got, _ := s.Progress().List(ctx, "u1"); len(got) != 2 {
 		t.Fatalf("persisted progress %+v", got)
 	}
-	if inv, err := s.Invites().Redeem(ctx, "h1", 10); !errors.Is(err, ErrInviteUsedUp) {
-		t.Fatalf("persisted invite uses: %v %+v", err, inv)
+	if u, err := s.Users().Get(ctx, "o1"); err != nil || u.Email != "ada@new.example.edu" {
+		t.Fatalf("persisted claims %v %+v", err, u)
 	}
 	if reps, _ := s.Stuck().List(ctx, 0); len(reps) != 2 {
 		t.Fatalf("persisted stuck %d", len(reps))
+	}
+}
+
+// TestSQLiteDropsOldSignInCodes: databases of earlier releases lose the
+// sign-in code table and gain the claim columns (migration 0003).
+func TestSQLiteDropsOldSignInCodes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SQLiteFile)
+	s, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := s.(*sqlStore).db
+	ctx := context.Background()
+	// Rewind to the schema before 0003.
+	for _, q := range []string{
+		`CREATE TABLE invites (code_hash TEXT PRIMARY KEY, label TEXT, max_uses INTEGER, uses INTEGER NOT NULL DEFAULT 0, expires_at INTEGER)`,
+		`INSERT INTO invites (code_hash, uses) VALUES ('h', 1)`,
+		`ALTER TABLE users DROP COLUMN username`,
+		`ALTER TABLE users DROP COLUMN email`,
+		`ALTER TABLE users DROP COLUMN groups_json`,
+		`ALTER TABLE users DROP COLUMN session_epoch`,
+		`INSERT INTO users (id, kind, display_name, created_at) VALUES ('u-old', 'oidc', 'Old', 1)`,
+		`DELETE FROM schema_migrations WHERE version >= 3`,
+	} {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+	s, err = OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	db = s.(*sqlStore).db
+	var n int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'invites'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("sign-in code table still there: %d %v", n, err)
+	}
+	if u, err := s.Users().Get(ctx, "u-old"); err != nil || u.DisplayName != "Old" || u.Groups != nil {
+		t.Fatalf("old user %v %+v", err, u)
+	}
+}
+
+// TestJSONDropsOldSignInCodes: opening a version 1 local.json rewrites it
+// without the removed data.
+func TestJSONDropsOldSignInCodes(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"version":1,"users":{"local":{"id":"local","kind":"local","displayName":"You","createdAt":1}},` +
+		`"invites":{"h":{"codeHash":"h","uses":1}},"sessions":{},"progress":{}}`
+	if err := os.WriteFile(filepath.Join(dir, JSONFile), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenJSON(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, err := s.Users().Get(context.Background(), "local"); err != nil || u.DisplayName != "You" {
+		t.Fatalf("user lost: %v %+v", err, u)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, JSONFile))
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil || raw["invites"] != nil || raw["version"] != float64(jsonVersion) {
+		t.Fatalf("not rewritten: %v %s", err, data)
 	}
 }

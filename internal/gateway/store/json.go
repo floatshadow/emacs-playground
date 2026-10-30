@@ -3,13 +3,13 @@ package store
 import (
 	"bytes"
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"sync"
 
@@ -18,6 +18,11 @@ import (
 
 // JSONFile is the local-mode store file name under the data directory.
 const JSONFile = "local.json"
+
+// jsonVersion is the current local.json format. Opening an older file
+// rewrites it, which drops data of removed features (version 1 kept
+// sign-in codes).
+const jsonVersion = 2
 
 // Retention limits of the JSON store (local mode keeps a short history).
 const (
@@ -29,7 +34,6 @@ const (
 type jsonData struct {
 	Version  int                 `json:"version"`
 	Users    map[string]*User    `json:"users"`
-	Invites  map[string]*Invite  `json:"invites,omitempty"`
 	Sessions map[string]*Session `json:"sessions"`
 	// Progress is user → lesson → step → record.
 	Progress map[string]map[string]map[string]*StepRecord `json:"progress"`
@@ -54,6 +58,7 @@ func OpenJSON(dir string) (Store, error) {
 	}
 	s := &jsonStore{path: filepath.Join(dir, JSONFile)}
 	data, err := os.ReadFile(s.path)
+	rewrite := false
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 	case err != nil:
@@ -62,13 +67,11 @@ func OpenJSON(dir string) (Store, error) {
 		if err := json.Unmarshal(data, &s.d); err != nil {
 			return nil, fmt.Errorf("store: %s: %w", s.path, err)
 		}
+		rewrite = s.d.Version < jsonVersion
 	}
-	s.d.Version = 1
+	s.d.Version = jsonVersion
 	if s.d.Users == nil {
 		s.d.Users = map[string]*User{}
-	}
-	if s.d.Invites == nil {
-		s.d.Invites = map[string]*Invite{}
 	}
 	if s.d.Sessions == nil {
 		s.d.Sessions = map[string]*Session{}
@@ -78,6 +81,11 @@ func OpenJSON(dir string) (Store, error) {
 	}
 	if s.d.Laps == nil {
 		s.d.Laps = map[string]map[string]*LapRecord{}
+	}
+	if rewrite {
+		if err := s.save(); err != nil {
+			return nil, err
+		}
 	}
 	return s, nil
 }
@@ -119,7 +127,6 @@ func (s *jsonStore) Users() UserRepo        { return jsonUsers{s} }
 func (s *jsonStore) Sessions() SessionRepo  { return jsonSessions{s} }
 func (s *jsonStore) Progress() ProgressRepo { return jsonProgress{s} }
 func (s *jsonStore) Stuck() StuckRepo       { return jsonStuck{s} }
-func (s *jsonStore) Invites() InviteRepo    { return jsonInvites{s} }
 func (s *jsonStore) Close() error           { return nil }
 
 func (s *jsonStore) Audit(_ context.Context, e AuditEvent) error {
@@ -148,8 +155,7 @@ func (r jsonUsers) Get(_ context.Context, id string) (*User, error) {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
 	if u, ok := r.s.d.Users[id]; ok {
-		c := *u
-		return &c, nil
+		return cloneUser(u), nil
 	}
 	return nil, ErrNotFound
 }
@@ -159,8 +165,7 @@ func (r jsonUsers) BySubject(_ context.Context, subject string) (*User, error) {
 	defer r.s.mu.Unlock()
 	for _, u := range r.s.d.Users {
 		if subject != "" && u.Subject == subject {
-			c := *u
-			return &c, nil
+			return cloneUser(u), nil
 		}
 	}
 	return nil, ErrNotFound
@@ -169,9 +174,29 @@ func (r jsonUsers) BySubject(_ context.Context, subject string) (*User, error) {
 func (r jsonUsers) Put(_ context.Context, u *User) error {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
-	c := *u
-	r.s.d.Users[u.ID] = &c
+	c := cloneUser(u)
+	if old, ok := r.s.d.Users[u.ID]; ok {
+		c.SessionEpoch = old.SessionEpoch
+	}
+	r.s.d.Users[u.ID] = c
 	return r.s.save()
+}
+
+func (r jsonUsers) RevokeSessions(_ context.Context, id string) error {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	u, ok := r.s.d.Users[id]
+	if !ok {
+		return ErrNotFound
+	}
+	u.SessionEpoch++
+	return r.s.save()
+}
+
+func cloneUser(u *User) *User {
+	c := *u
+	c.Groups = slices.Clone(u.Groups)
+	return &c
 }
 
 func (r jsonUsers) Touch(_ context.Context, id string, at int64) error {
@@ -183,62 +208,6 @@ func (r jsonUsers) Touch(_ context.Context, id string, at int64) error {
 	}
 	u.LastSeenAt = at
 	return r.s.save()
-}
-
-type jsonInvites struct{ s *jsonStore }
-
-func (r jsonInvites) Sync(_ context.Context, list []Invite) error {
-	r.s.mu.Lock()
-	defer r.s.mu.Unlock()
-	keep := map[string]bool{}
-	for _, inv := range list {
-		keep[inv.CodeHash] = true
-		if cur, ok := r.s.d.Invites[inv.CodeHash]; ok {
-			cur.Label, cur.MaxUses, cur.ExpiresAt = inv.Label, inv.MaxUses, inv.ExpiresAt
-			continue
-		}
-		c := inv
-		c.Uses = 0
-		r.s.d.Invites[inv.CodeHash] = &c
-	}
-	for h := range r.s.d.Invites {
-		if !keep[h] {
-			delete(r.s.d.Invites, h)
-		}
-	}
-	return r.s.save()
-}
-
-func (r jsonInvites) Redeem(_ context.Context, codeHash string, now int64) (*Invite, error) {
-	r.s.mu.Lock()
-	defer r.s.mu.Unlock()
-	var found *Invite
-	// Compare against every stored hash in constant time per entry.
-	for h, inv := range r.s.d.Invites {
-		if subtle.ConstantTimeCompare([]byte(h), []byte(codeHash)) == 1 {
-			found = inv
-		}
-	}
-	if found == nil {
-		return nil, ErrNotFound
-	}
-	if err := redeemable(found, now); err != nil {
-		return nil, err
-	}
-	found.Uses++
-	c := *found
-	return &c, r.s.save()
-}
-
-func (r jsonInvites) List(_ context.Context) ([]Invite, error) {
-	r.s.mu.Lock()
-	defer r.s.mu.Unlock()
-	out := make([]Invite, 0, len(r.s.d.Invites))
-	for _, inv := range r.s.d.Invites {
-		out = append(out, *inv)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CodeHash < out[j].CodeHash })
-	return out, nil
 }
 
 type jsonSessions struct{ s *jsonStore }

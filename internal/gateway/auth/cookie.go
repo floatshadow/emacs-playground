@@ -38,6 +38,12 @@ func NewSigner(key []byte) (*Signer, error) {
 	return &Signer{key: append([]byte(nil), key...)}, nil
 }
 
+// derive returns a signer keyed by HMAC(key, label), so that values it
+// signs never verify as session cookies.
+func (s *Signer) derive(label string) *Signer {
+	return &Signer{key: s.mac(label)}
+}
+
 var b64 = base64.RawURLEncoding
 
 func (s *Signer) mac(payload string) []byte {

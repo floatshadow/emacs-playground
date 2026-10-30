@@ -24,9 +24,8 @@ type AuthMode string
 
 // Auth modes. none is only valid in local mode.
 const (
-	AuthNone   AuthMode = "none"
-	AuthInvite AuthMode = "invite"
-	AuthOIDC   AuthMode = "oidc"
+	AuthNone AuthMode = "none"
+	AuthOIDC AuthMode = "oidc"
 )
 
 // SessionBackend selects how sessions are provided.
@@ -86,10 +85,10 @@ type Config struct {
 
 // AuthConfig configures authentication.
 type AuthConfig struct {
-	// Mode is none (local only, default), invite or oidc.
-	Mode    AuthMode      `json:"mode" jsonschema:"enum=none,enum=invite,enum=oidc"`
-	Invites InvitesConfig `json:"invites"`
-	OIDC    OIDCConfig    `json:"oidc"`
+	// Mode is none (local mode only; the default there) or oidc (the
+	// default in server mode).
+	Mode AuthMode   `json:"mode" jsonschema:"enum=none,enum=oidc"`
+	OIDC OIDCConfig `json:"oidc"`
 	// CookieSecretFile holds the HMAC key; generated on first start if
 	// missing; default "<dataDir>/cookie.secret".
 	CookieSecretFile string `json:"cookieSecretFile"`
@@ -97,20 +96,46 @@ type AuthConfig struct {
 	SessionDays int `json:"sessionDays"`
 }
 
-// InvitesConfig configures invite codes.
-type InvitesConfig struct {
-	// File has one code per line with optional label, uses=N and
-	// until=YYYY-MM-DD (deploy/invites.example.txt).
-	File string `json:"file"`
-}
-
-// OIDCConfig configures OpenID Connect login.
+// OIDCConfig configures OpenID Connect login (authorization code flow
+// with PKCE) against any provider that supports discovery. The redirect
+// URI to register at the provider is <publicUrl>/api/v1/auth/oidc/callback.
 type OIDCConfig struct {
-	Issuer           string `json:"issuer"`
-	ClientID         string `json:"clientId"`
+	// Issuer is the provider's issuer URL; discovery reads
+	// <issuer>/.well-known/openid-configuration. It must be https unless
+	// its host is loopback or AllowInsecureIssuer is set.
+	Issuer string `json:"issuer"`
+	// AllowInsecureIssuer accepts an http issuer on another host, for a
+	// provider on a trusted internal network (tests).
+	AllowInsecureIssuer bool   `json:"allowInsecureIssuer"`
+	ClientID            string `json:"clientId"`
+	// ClientSecretFile holds the client secret; empty for a public client
+	// (PKCE only).
 	ClientSecretFile string `json:"clientSecretFile"`
-	// AllowedEmailDomains restricts logins; empty allows any.
+	// Scopes requested, default openid, email and profile; add groups when
+	// the provider needs a scope for the groups claim. openid is always
+	// requested.
+	Scopes []string `json:"scopes"`
+	// DisplayName labels the login button ("Sign in with …"), default
+	// "SSO".
+	DisplayName string `json:"displayName"`
+	// UsernameClaim names the claim shown as the username, default
+	// preferred_username; the email is used when it is missing.
+	UsernameClaim string `json:"usernameClaim"`
+	// GroupsClaim names the ID token claim listing the user's groups,
+	// default "groups".
+	GroupsClaim string `json:"groupsClaim"`
+	// AllowedEmailDomains restricts logins to these email domains; empty
+	// allows any. With a restriction, an ID token is refused unless it has
+	// an email and email_verified true (providers that omit
+	// email_verified, such as Entra ID, need allowedGroups or a
+	// tenant-specific issuer instead).
 	AllowedEmailDomains []string `json:"allowedEmailDomains"`
+	// AllowedGroups restricts logins to members of at least one of these
+	// groups; empty allows any.
+	AllowedGroups []string `json:"allowedGroups"`
+	// ProviderLogout also signs out at the provider on logout when it
+	// advertises an end_session_endpoint, default true.
+	ProviderLogout bool `json:"providerLogout"`
 }
 
 // SessionsConfig configures session provisioning.
@@ -147,6 +172,13 @@ type SessionsConfig struct {
 	IdleStopMinutes int `json:"idleStopMinutes"`
 	// MaxSessions refuses new sessions beyond this, default 50.
 	MaxSessions int `json:"maxSessions"`
+	// GroupLimits caps active sessions per group (from the OIDC groups
+	// claim). A user counts against the first entry whose group they are
+	// in; maxActiveSessions 0 means no limit for that group.
+	GroupLimits []GroupLimit `json:"groupLimits"`
+	// DefaultGroupMaxActiveSessions caps the active sessions of all users
+	// in no listed group together; 0 (default) means no limit.
+	DefaultGroupMaxActiveSessions int `json:"defaultGroupMaxActiveSessions"`
 	// VolumeRetentionDays removes workspace volumes unused for this long,
 	// default 30.
 	VolumeRetentionDays int `json:"volumeRetentionDays"`
@@ -155,6 +187,12 @@ type SessionsConfig struct {
 	RemoteBox RemoteBoxConfig `json:"remoteBox"`
 	GUI       GUIConfig       `json:"gui"`
 	Terminal  TerminalConfig  `json:"terminal"`
+}
+
+// GroupLimit is one entry of sessions.groupLimits.
+type GroupLimit struct {
+	Group             string `json:"group"`
+	MaxActiveSessions int    `json:"maxActiveSessions"`
 }
 
 // LimitsConfig are per-session resource limits.

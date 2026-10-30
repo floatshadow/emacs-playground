@@ -6,18 +6,19 @@ type ErrorCode string
 
 // Stable error codes.
 const (
-	ErrUnauthenticated    ErrorCode = "unauthenticated"     // 401: no or invalid session cookie, bad bearer token
-	ErrForbidden          ErrorCode = "forbidden"           // 403: authenticated but not allowed (other user's session, bad Origin, bad invite)
-	ErrNotFound           ErrorCode = "not_found"           // 404
-	ErrInvalidRequest     ErrorCode = "invalid_request"     // 400: malformed JSON, missing or invalid fields
-	ErrSessionLimit       ErrorCode = "session_limit"       // 429 or 503: sessions.maxSessions reached, per-user WebSocket limit
-	ErrSessionUnavailable ErrorCode = "session_unavailable" // 502 or 503: the session container is not running or not healthy
-	ErrEmacsUnavailable   ErrorCode = "emacs_unavailable"   // 503: the agent is not connected or Emacs is unresponsive
-	ErrTimeout            ErrorCode = "timeout"             // 504: an RPC, agent call or subprocess timed out
-	ErrConflict           ErrorCode = "conflict"            // 409: state does not allow the operation (no active step, GUI disabled)
-	ErrInternal           ErrorCode = "internal"            // 500
-	ErrNotImplemented     ErrorCode = "not_implemented"     // 501: a documented feature that this build does not provide yet (OIDC in slice 1)
-	ErrRateLimited        ErrorCode = "rate_limited"        // 429: login attempts, session creation, stuck reports
+	ErrUnauthenticated    ErrorCode = "unauthenticated"      // 401: no or invalid session cookie, bad bearer token
+	ErrForbidden          ErrorCode = "forbidden"            // 403: authenticated but not allowed (other user's session, bad Origin)
+	ErrNotFound           ErrorCode = "not_found"            // 404
+	ErrInvalidRequest     ErrorCode = "invalid_request"      // 400: malformed JSON, missing or invalid fields
+	ErrSessionLimit       ErrorCode = "session_limit"        // 429 or 503: sessions.maxSessions reached, per-user WebSocket limit
+	ErrGroupQuotaExceeded ErrorCode = "group_quota_exceeded" // 429: the user's group has sessions.groupLimits active sessions (details: group, maxActiveSessions)
+	ErrSessionUnavailable ErrorCode = "session_unavailable"  // 502 or 503: the session container is not running or not healthy
+	ErrEmacsUnavailable   ErrorCode = "emacs_unavailable"    // 503: the agent is not connected or Emacs is unresponsive
+	ErrTimeout            ErrorCode = "timeout"              // 504: an RPC, agent call or subprocess timed out
+	ErrConflict           ErrorCode = "conflict"             // 409: state does not allow the operation (no active step, GUI disabled)
+	ErrInternal           ErrorCode = "internal"             // 500
+	ErrNotImplemented     ErrorCode = "not_implemented"      // 501: a documented feature that this build does not provide yet
+	ErrRateLimited        ErrorCode = "rate_limited"         // 429: session creation, stuck reports
 )
 
 // ProblemContentType is the media type of error responses.

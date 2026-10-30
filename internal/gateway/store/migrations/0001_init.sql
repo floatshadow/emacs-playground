@@ -1,10 +1,8 @@
 -- Initial schema (backend.md §2.7).
 CREATE TABLE users (
-  id TEXT PRIMARY KEY, kind TEXT NOT NULL,            -- local | invite | oidc
+  id TEXT PRIMARY KEY, kind TEXT NOT NULL,            -- local | oidc
   subject TEXT UNIQUE, display_name TEXT,
   created_at INTEGER NOT NULL, last_seen_at INTEGER);
-CREATE TABLE invites (
-  code_hash TEXT PRIMARY KEY, label TEXT, max_uses INTEGER, uses INTEGER NOT NULL DEFAULT 0, expires_at INTEGER);
 CREATE TABLE sessions (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
   state TEXT NOT NULL, container_id TEXT, remote_container_id TEXT, volume TEXT, image TEXT,

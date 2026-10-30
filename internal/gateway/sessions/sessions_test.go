@@ -170,7 +170,7 @@ func newDockerFixture(t *testing.T, mutate func(o *Options)) *dockerFixture {
 	f := &dockerFixture{fake: dockertest.New(), st: openStore(t), clk: &clock{t: time.Unix(1_800_000_000, 0)}}
 	ctx := context.Background()
 	for _, u := range []string{"u1", "u2", "https://idp.example|42"} {
-		if err := f.st.Users().Put(ctx, &store.User{ID: u, Kind: protocol.UserInvite, CreatedAt: 1}); err != nil {
+		if err := f.st.Users().Put(ctx, &store.User{ID: u, Kind: protocol.UserOIDC, CreatedAt: 1}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -287,7 +287,7 @@ func TestDockerEnsureAndHardening(t *testing.T) {
 		}
 	}
 	// Capacity: MaxSessions is 2.
-	_ = f.st.Users().Put(ctx, &store.User{ID: "u3", Kind: protocol.UserInvite, CreatedAt: 1})
+	_ = f.st.Users().Put(ctx, &store.User{ID: "u3", Kind: protocol.UserOIDC, CreatedAt: 1})
 	_, err = f.s.Ensure(ctx, "u3")
 	var he *httpx.Error
 	if !errors.As(err, &he) || he.Code != protocol.ErrSessionLimit {
@@ -562,5 +562,141 @@ func TestDockerIsolatedNetworks(t *testing.T) {
 	}
 	if len(f4.fake.Live()) != 0 {
 		t.Fatal("container created without a network")
+	}
+}
+
+func TestQuotaFor(t *testing.T) {
+	limits := []protocol.GroupLimit{{Group: "staff"}, {Group: "cs101", MaxActiveSessions: 30}, {Group: "cs102", MaxActiveSessions: 5}}
+	cases := []struct {
+		groups []string
+		want   Quota
+	}{
+		{[]string{"cs102", "cs101"}, Quota{Group: "cs101", Max: 30}}, // the first listed entry wins
+		{[]string{"cs101", "staff"}, Quota{Group: "staff"}},
+		{[]string{"cs102"}, Quota{Group: "cs102", Max: 5}},
+		{[]string{"other"}, Quota{Max: 3}},
+		{nil, Quota{Max: 3}},
+	}
+	for _, c := range cases {
+		if got := QuotaFor(c.groups, limits, 3); got != c.want {
+			t.Errorf("QuotaFor(%v) = %+v, want %+v", c.groups, got, c.want)
+		}
+	}
+}
+
+func TestGroupQuota(t *testing.T) {
+	limits := []protocol.GroupLimit{{Group: "staff"}, {Group: "cs101", MaxActiveSessions: 1}, {Group: "lab", MaxActiveSessions: 1}}
+	var f *dockerFixture
+	f = newDockerFixture(t, func(o *Options) {
+		o.MaxSessions = 20
+		o.Quota = func(ctx context.Context, userID string) (Quota, error) {
+			u, err := f.st.Users().Get(ctx, userID)
+			if err != nil {
+				return Quota{}, err
+			}
+			return QuotaFor(u.Groups, limits, 1), nil
+		}
+	})
+	ctx := context.Background()
+	for id, groups := range map[string][]string{
+		"a1": {"cs101"}, "a2": {"cs101", "lab"}, "s1": {"staff", "cs101"}, "s2": {"staff"},
+		"n1": nil, "n2": {"unlisted"}, "l1": {"lab"}, "l2": {"lab"},
+	} {
+		if err := f.st.Users().Put(ctx, &store.User{ID: id, Kind: protocol.UserOIDC, Groups: groups, CreatedAt: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	quotaErr := func(err error) *httpx.Error {
+		t.Helper()
+		var he *httpx.Error
+		if !errors.As(err, &he) || he.Status != 429 || he.Code != protocol.ErrGroupQuotaExceeded {
+			t.Fatalf("want 429 group_quota_exceeded, got %v", err)
+		}
+		return he
+	}
+
+	a1, err := f.s.Ensure(ctx, "a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a2 is in cs101 first (lab is listed later), which a1 fills.
+	_, err = f.s.Ensure(ctx, "a2")
+	he := quotaErr(err)
+	if !strings.Contains(he.Message, `group "cs101"`) || !strings.Contains(he.Message, "1 active session") {
+		t.Fatalf("message %q", he.Message)
+	}
+	if d := he.Details.(map[string]any); d["group"] != "cs101" || d["maxActiveSessions"] != 1 {
+		t.Fatalf("details %+v", he.Details)
+	}
+	// The user's own running session is reused, not counted twice.
+	if again, err := f.s.Ensure(ctx, "a1"); err != nil || again.ID != a1.ID {
+		t.Fatalf("reuse: %v", err)
+	}
+	// staff (listed first, no limit) is not capped.
+	for _, u := range []string{"s1", "s2"} {
+		if _, err := f.s.Ensure(ctx, u); err != nil {
+			t.Fatalf("%s: %v", u, err)
+		}
+	}
+	// Users in no listed group share the default limit.
+	if _, err := f.s.Ensure(ctx, "n1"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = f.s.Ensure(ctx, "n2")
+	if he := quotaErr(err); !strings.Contains(he.Message, "outside the listed groups") {
+		t.Fatalf("message %q", he.Message)
+	}
+	// Stopping frees the slot.
+	if err := f.s.Stop(ctx, a1.ID); err != nil {
+		t.Fatal(err)
+	}
+	a2, err := f.s.Ensure(ctx, "a2")
+	if err != nil {
+		t.Fatalf("after stop: %v", err)
+	}
+	// ...and a1 coming back finds it taken.
+	_, err = f.s.Ensure(ctx, "a1")
+	quotaErr(err)
+
+	// Simultaneous starts in one group cannot exceed the limit.
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, u := range []string{"l1", "l2"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := f.s.Ensure(ctx, u)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	ok := 0
+	for err := range errs {
+		if err == nil {
+			ok++
+		} else {
+			quotaErr(err)
+		}
+	}
+	if ok != 1 {
+		t.Fatalf("%d of 2 simultaneous starts in a group of 1 succeeded", ok)
+	}
+
+	// After a gateway restart running sessions still count.
+	s2, err := New(ctx, f.opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s2.Rebuild(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := s2.Get(ctx, a2.ID); !got.Usable() {
+		t.Fatalf("a2 after restart %+v", got)
+	}
+	_, err = s2.Ensure(ctx, "a1")
+	quotaErr(err)
+	if log, _ := f.st.AuditLog(ctx, 1); len(log) != 1 || log[0].Action != "session.quota" {
+		t.Fatalf("audit %+v", log)
 	}
 }

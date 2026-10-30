@@ -1,4 +1,4 @@
-// Package store persists users, invites, sessions, progress, stuck reports
+// Package store persists users, sessions, progress, stuck reports
 // and the audit log (backend.md §2.7) behind one interface with two
 // implementations:
 //

@@ -1,6 +1,5 @@
 // Package limit is a small fixed-window rate limiter keyed by string
-// (deployment.md §9.3: login attempts per IP and per code, session creation
-// per user, stuck reports per hour).
+// (deployment.md §9.3: session creation per user, stuck reports per hour).
 package limit
 
 import (

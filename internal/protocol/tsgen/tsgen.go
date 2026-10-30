@@ -49,7 +49,7 @@ func roots() []any {
 	r := []any{
 		protocol.Problem{}, protocol.PtyControl{}, protocol.EventsClientMessage{},
 		protocol.HealthStatus{}, protocol.PreviewListing{},
-		protocol.Me{}, protocol.AuthConfigInfo{}, protocol.InviteLoginRequest{},
+		protocol.Me{}, protocol.AuthConfigInfo{}, protocol.LogoutResult{},
 		protocol.SessionInfo{}, protocol.Progress{}, protocol.ProgressResetRequest{},
 		protocol.StuckRequest{}, protocol.Created{}, protocol.ProgressReport{},
 		protocol.InternalStuckReport{}, protocol.Heartbeat{},

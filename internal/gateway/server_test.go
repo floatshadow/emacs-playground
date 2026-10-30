@@ -26,6 +26,7 @@ import (
 	source "github.com/floatshadow/emacs-playground/internal/curriculum"
 	"github.com/floatshadow/emacs-playground/internal/docker"
 	"github.com/floatshadow/emacs-playground/internal/docker/dockertest"
+	"github.com/floatshadow/emacs-playground/internal/gateway/auth/oidctest"
 	"github.com/floatshadow/emacs-playground/internal/gateway/sessions"
 	"github.com/floatshadow/emacs-playground/internal/httpx"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
@@ -186,6 +187,28 @@ func (c *client) json(method, path string, body, out any, want int, hdr ...strin
 		}
 	}
 	return resp.Header
+}
+
+// oidcLogin signs in through the fake provider as claims.
+func (c *client) oidcLogin(idp *oidctest.Provider, claims map[string]any) {
+	c.t.Helper()
+	idp.SetClaims(claims)
+	resp, _ := c.do("GET", "/api/v1/auth/oidc/start", nil)
+	if resp.StatusCode != http.StatusFound {
+		c.t.Fatalf("oidc start: %d", resp.StatusCode)
+	}
+	back, err := idp.Authorize(resp.Header.Get("Location"))
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	u, _ := url.Parse(back)
+	if u.Scheme+"://"+u.Host != publicURL {
+		c.t.Fatalf("redirect uri %s", back)
+	}
+	resp, b := c.do("GET", u.Path+"?"+u.RawQuery, nil)
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/" {
+		c.t.Fatalf("oidc callback: %d %s %s", resp.StatusCode, resp.Header.Get("Location"), b)
+	}
 }
 
 func (c *client) cookies(base string) []string {
@@ -462,16 +485,19 @@ func TestServerModeEndToEnd(t *testing.T) {
 	sd := newSessiondFake(t)
 	sdURL, _ := url.Parse(sd.srv.URL)
 	dataDir := t.TempDir()
-	invites := filepath.Join(dataDir, "invites.txt")
-	if err := os.WriteFile(invites, []byte("spring-cohort-7f3a9c cohort-A uses=2\n"), 0o600); err != nil {
+	idp := oidctest.New("emacs-playground", "s3cret")
+	defer idp.Server.Close()
+	secretFile := filepath.Join(dataDir, "oidc_client_secret")
+	if err := os.WriteFile(secretFile, []byte("s3cret\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg := config.Defaults()
 	cfg.Mode = protocol.ModeServer
 	cfg.PublicURL = publicURL
 	cfg.DataDir = dataDir
-	cfg.Auth.Mode = protocol.AuthInvite
-	cfg.Auth.Invites.File = invites
+	cfg.Auth.OIDC.Issuer, cfg.Auth.OIDC.ClientID, cfg.Auth.OIDC.ClientSecretFile = idp.Issuer, "emacs-playground", secretFile
+	cfg.Auth.OIDC.DisplayName = "Example University"
+	cfg.Sessions.GroupLimits = []protocol.GroupLimit{{Group: "staff"}, {Group: "cs101", MaxActiveSessions: 1}}
 	cfg.Curriculum.Dir = bundle(t)
 	config.Resolve(&cfg)
 	if err := config.Validate(&cfg); err != nil {
@@ -492,14 +518,15 @@ func TestServerModeEndToEnd(t *testing.T) {
 	alice.json("POST", "/api/v1/sessions", nil, nil, 401)
 	var ac protocol.AuthConfigInfo
 	alice.json("GET", "/api/v1/auth/config", nil, &ac, 200)
-	if ac.AuthMode != protocol.AuthInvite || ac.Mode != protocol.ModeServer {
+	// Server mode signs in with OIDC by default.
+	if ac.AuthMode != protocol.AuthOIDC || ac.Mode != protocol.ModeServer || ac.OIDCStartURL != "/api/v1/auth/oidc/start" || ac.OIDCDisplayName != "Example University" {
 		t.Fatalf("auth config %+v", ac)
 	}
-	alice.json("POST", "/api/v1/auth/invite", protocol.InviteLoginRequest{Code: "wrong-code-xyz"}, nil, 403)
-	alice.json("POST", "/api/v1/auth/invite", protocol.InviteLoginRequest{Code: "spring-cohort-7f3a9c"}, nil, 204)
+	alice.oidcLogin(idp, map[string]any{"sub": "alice", "name": "Alice", "email": "alice@example.edu", "groups": []string{"cs101"}})
 	var me protocol.Me
 	alice.json("GET", "/api/v1/me", nil, &me, 200)
-	if me.User.Kind != protocol.UserInvite || me.User.DisplayName != "cohort-A" {
+	if me.User.Kind != protocol.UserOIDC || me.User.DisplayName != "Alice" || me.AuthMode != protocol.AuthOIDC ||
+		len(me.User.Groups) != 1 || me.User.Groups[0] != "cs101" || me.User.Email != "alice@example.edu" {
 		t.Fatalf("me %+v", me)
 	}
 	var info protocol.SessionInfo
@@ -571,12 +598,20 @@ func TestServerModeEndToEnd(t *testing.T) {
 	}
 
 	bob := newClient(t, gw.URL)
-	bob.json("POST", "/api/v1/auth/invite", protocol.InviteLoginRequest{Code: "spring-cohort-7f3a9c"}, nil, 204)
+	bob.oidcLogin(idp, map[string]any{"sub": "bob", "email": "bob@example.edu", "groups": []string{"cs101"}})
 	bob.json("GET", "/s/"+info.ID+"/status", nil, nil, 403)
 	bob.json("GET", "/api/v1/sessions/"+info.ID, nil, nil, 403)
-	// The code had two uses.
-	carol := newClient(t, gw.URL)
-	carol.json("POST", "/api/v1/auth/invite", protocol.InviteLoginRequest{Code: "spring-cohort-7f3a9c"}, nil, 403)
+	// alice holds cs101's only active session.
+	var quota protocol.Problem
+	bob.json("POST", "/api/v1/sessions", nil, &quota, 429)
+	if quota.Code != protocol.ErrGroupQuotaExceeded || !strings.Contains(quota.Message, `"cs101"`) {
+		t.Fatalf("group quota %+v", quota)
+	}
+	// Signing in again in staff (listed first, no limit) lifts it.
+	bob.oidcLogin(idp, map[string]any{"sub": "bob", "email": "bob@example.edu", "groups": []string{"cs101", "staff"}})
+	var bobInfo protocol.SessionInfo
+	bob.json("POST", "/api/v1/sessions", nil, &bobInfo, 201)
+	bob.json("DELETE", "/api/v1/sessions/"+bobInfo.ID, nil, nil, 204)
 
 	// sessiond reports with its own token; progress lands on alice.
 	auth := "Bearer " + token
@@ -603,6 +638,9 @@ func TestServerModeEndToEnd(t *testing.T) {
 	live = live[:0]
 	boxes = boxes[:0]
 	for _, c := range fake.Live() {
+		if c.Spec.Labels[docker.LabelUser] != me.User.ID {
+			continue
+		}
 		if c.Spec.Labels[docker.LabelRole] == docker.RoleSession {
 			live = append(live, c)
 		} else {

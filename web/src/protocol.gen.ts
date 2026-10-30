@@ -29,9 +29,8 @@ export const AgentOpDescribe = "describe" satisfies AgentOp;
 export const AgentOpSetup = "setup" satisfies AgentOp;
 
 /** AuthMode selects learner authentication. */
-export type AuthMode = "none" | "invite" | "oidc";
+export type AuthMode = "none" | "oidc";
 export const AuthNone = "none" satisfies AuthMode;
-export const AuthInvite = "invite" satisfies AuthMode;
 export const AuthOIDC = "oidc" satisfies AuthMode;
 
 /** Availability says whether content exists yet. */
@@ -101,12 +100,13 @@ export const EmacsStopping = "stopping" satisfies EmacsEventKind;
  * ErrorCode is a stable, machine-readable error code (api.md §1). New codes
  * may be added; clients must treat unknown codes like ErrInternal.
  */
-export type ErrorCode = "unauthenticated" | "forbidden" | "not_found" | "invalid_request" | "session_limit" | "session_unavailable" | "emacs_unavailable" | "timeout" | "conflict" | "internal" | "not_implemented" | "rate_limited";
+export type ErrorCode = "unauthenticated" | "forbidden" | "not_found" | "invalid_request" | "session_limit" | "group_quota_exceeded" | "session_unavailable" | "emacs_unavailable" | "timeout" | "conflict" | "internal" | "not_implemented" | "rate_limited";
 export const ErrUnauthenticated = "unauthenticated" satisfies ErrorCode;
 export const ErrForbidden = "forbidden" satisfies ErrorCode;
 export const ErrNotFound = "not_found" satisfies ErrorCode;
 export const ErrInvalidRequest = "invalid_request" satisfies ErrorCode;
 export const ErrSessionLimit = "session_limit" satisfies ErrorCode;
+export const ErrGroupQuotaExceeded = "group_quota_exceeded" satisfies ErrorCode;
 export const ErrSessionUnavailable = "session_unavailable" satisfies ErrorCode;
 export const ErrEmacsUnavailable = "emacs_unavailable" satisfies ErrorCode;
 export const ErrTimeout = "timeout" satisfies ErrorCode;
@@ -164,6 +164,16 @@ export type LessonMode = "terminal" | "gui" | "any";
 export const LessonTerminal = "terminal" satisfies LessonMode;
 export const LessonGUI = "gui" satisfies LessonMode;
 export const LessonAny = "any" satisfies LessonMode;
+
+/**
+ * LoginError is the error query parameter of /login when the OIDC
+ * callback fails (the callback redirects there instead of answering JSON).
+ */
+export type LoginError = "state" | "provider" | "token" | "forbidden";
+export const LoginErrorState = "state" satisfies LoginError;
+export const LoginErrorProvider = "provider" satisfies LoginError;
+export const LoginErrorToken = "token" satisfies LoginError;
+export const LoginErrorForbidden = "forbidden" satisfies LoginError;
 
 /**
  * MinibufferKind distinguishes a real minibuffer prompt from isearch, which
@@ -272,9 +282,8 @@ export const StepSkipped = "skipped" satisfies StepStatus;
 export const StepDropped = "dropped" satisfies StepStatus;
 
 /** UserKind says how a user authenticated. */
-export type UserKind = "local" | "invite" | "oidc";
+export type UserKind = "local" | "oidc";
 export const UserLocal = "local" satisfies UserKind;
-export const UserInvite = "invite" satisfies UserKind;
 export const UserOIDC = "oidc" satisfies UserKind;
 
 /** WaitingKind names the loop of State.Waiting. */
@@ -429,9 +438,11 @@ export interface AgentReplyMsg {
 
 /** AuthConfig configures authentication. */
 export interface AuthConfig {
-  /** Mode is none (local only, default), invite or oidc. */
+  /**
+   * Mode is none (local mode only; the default there) or oidc (the
+   * default in server mode).
+   */
   mode: AuthMode;
-  invites: InvitesConfig;
   oidc: OIDCConfig;
   /**
    * CookieSecretFile holds the HMAC key; generated on first start if
@@ -449,8 +460,14 @@ export interface AuthConfig {
 export interface AuthConfigInfo {
   mode: DeployMode;
   authMode: AuthMode;
-  /** OIDCStartURL is the path of GET /auth/oidc/start when AuthMode is oidc. */
+  /**
+   * OIDCStartURL is the path of GET /auth/oidc/start when AuthMode is
+   * oidc. It accepts ?next=<path> (a same-origin path) to return to after
+   * signing in.
+   */
   oidcStartUrl?: string;
+  /** OIDCDisplayName labels the login button (auth.oidc.displayName). */
+  oidcDisplayName?: string;
 }
 
 /**
@@ -965,6 +982,12 @@ export interface GapEvent {
   to: number;
 }
 
+/** GroupLimit is one entry of sessions.groupLimits. */
+export interface GroupLimit {
+  group: string;
+  maxActiveSessions: number;
+}
+
 /** HabitRow is one row of tables/habits.yaml. */
 export interface HabitRow {
   /** Key is the single key that VS Code users press by habit, e.g. "C-z". */
@@ -1028,20 +1051,6 @@ export interface InternalStuckReport {
   stepId?: string;
   note: string;
   events: unknown[];
-}
-
-/** InviteLoginRequest is POST /api/v1/auth/invite. */
-export interface InviteLoginRequest {
-  code: string;
-}
-
-/** InvitesConfig configures invite codes. */
-export interface InvitesConfig {
-  /**
-   * File has one code per line with optional label, uses=N and
-   * until=YYYY-MM-DD (deploy/invites.example.txt).
-   */
-  file: string;
 }
 
 /**
@@ -1212,6 +1221,15 @@ export interface LoggingConfig {
 }
 
 /**
+ * LogoutResult is the 200 body of POST /api/v1/auth/logout when the
+ * browser should also visit the provider's end-session endpoint; without
+ * one the answer is 204.
+ */
+export interface LogoutResult {
+  redirectUrl: string;
+}
+
+/**
  * Me is GET /api/v1/me. Unauthenticated requests get 401 with
  * ErrUnauthenticated; the browser then shows /login using AuthMode from
  * GET /api/v1/auth/config.
@@ -1317,13 +1335,68 @@ export interface NudgeEvent {
   body: string;
 }
 
-/** OIDCConfig configures OpenID Connect login. */
+/**
+ * OIDCConfig configures OpenID Connect login (authorization code flow
+ * with PKCE) against any provider that supports discovery. The redirect
+ * URI to register at the provider is <publicUrl>/api/v1/auth/oidc/callback.
+ */
 export interface OIDCConfig {
+  /**
+   * Issuer is the provider's issuer URL; discovery reads
+   * <issuer>/.well-known/openid-configuration. It must be https unless
+   * its host is loopback or AllowInsecureIssuer is set.
+   */
   issuer: string;
+  /**
+   * AllowInsecureIssuer accepts an http issuer on another host, for a
+   * provider on a trusted internal network (tests).
+   */
+  allowInsecureIssuer: boolean;
   clientId: string;
+  /**
+   * ClientSecretFile holds the client secret; empty for a public client
+   * (PKCE only).
+   */
   clientSecretFile: string;
-  /** AllowedEmailDomains restricts logins; empty allows any. */
+  /**
+   * Scopes requested, default openid, email and profile; add groups when
+   * the provider needs a scope for the groups claim. openid is always
+   * requested.
+   */
+  scopes: string[];
+  /**
+   * DisplayName labels the login button ("Sign in with …"), default
+   * "SSO".
+   */
+  displayName: string;
+  /**
+   * UsernameClaim names the claim shown as the username, default
+   * preferred_username; the email is used when it is missing.
+   */
+  usernameClaim: string;
+  /**
+   * GroupsClaim names the ID token claim listing the user's groups,
+   * default "groups".
+   */
+  groupsClaim: string;
+  /**
+   * AllowedEmailDomains restricts logins to these email domains; empty
+   * allows any. With a restriction, an ID token is refused unless it has
+   * an email and email_verified true (providers that omit
+   * email_verified, such as Entra ID, need allowedGroups or a
+   * tenant-specific issuer instead).
+   */
   allowedEmailDomains: string[];
+  /**
+   * AllowedGroups restricts logins to members of at least one of these
+   * groups; empty allows any.
+   */
+  allowedGroups: string[];
+  /**
+   * ProviderLogout also signs out at the provider on logout when it
+   * advertises an end_session_endpoint, default true.
+   */
+  providerLogout: boolean;
 }
 
 /**
@@ -1720,6 +1793,17 @@ export interface SessionsConfig {
   /** MaxSessions refuses new sessions beyond this, default 50. */
   maxSessions: number;
   /**
+   * GroupLimits caps active sessions per group (from the OIDC groups
+   * claim). A user counts against the first entry whose group they are
+   * in; maxActiveSessions 0 means no limit for that group.
+   */
+  groupLimits: GroupLimit[];
+  /**
+   * DefaultGroupMaxActiveSessions caps the active sessions of all users
+   * in no listed group together; 0 (default) means no limit.
+   */
+  defaultGroupMaxActiveSessions: number;
+  /**
    * VolumeRetentionDays removes workspace volumes unused for this long,
    * default 30.
    */
@@ -2110,11 +2194,17 @@ export interface TerminalConfig {
   initialSize: string;
 }
 
-/** User is the authenticated learner. */
+/**
+ * User is the authenticated learner. Username, Email and Groups come from
+ * the OIDC ID token and are refreshed at every login.
+ */
 export interface User {
   id: string;
   displayName: string;
   kind: UserKind;
+  username?: string;
+  email?: string;
+  groups?: string[];
 }
 
 /** Waiting describes a loop that reads keys of its own. */

@@ -110,19 +110,22 @@ func Build(ctx context.Context, cfg *protocol.Config, o Options) (*App, error) {
 			return nil, err
 		}
 	}
-	if cfg.Auth.Mode == protocol.AuthInvite {
-		if err := a.SyncInvites(ctx); err != nil {
-			return nil, err
+	var clientSecret string
+	if cfg.Auth.Mode == protocol.AuthOIDC && cfg.Auth.OIDC.ClientSecretFile != "" {
+		b, err := os.ReadFile(cfg.Auth.OIDC.ClientSecretFile)
+		if err != nil {
+			return nil, fmt.Errorf("auth.oidc.clientSecretFile: %w", err)
 		}
+		clientSecret = strings.TrimSpace(string(b))
 	}
 	a.Auth, err = auth.New(cfg.Auth.Mode, auth.Options{
 		PublicURL: cfg.PublicURL, SessionDays: cfg.Auth.SessionDays, Signer: signer,
 		Store: a.Store, Logger: o.Logger, Now: o.Now,
+		OIDC: cfg.Auth.OIDC, ClientSecret: clientSecret,
 	})
 	if err != nil {
 		return nil, err
 	}
-
 	a.Curriculum, err = curriculum.Open(curriculum.Options{
 		Dir: cfg.Curriculum.Dir, DefaultLocale: cfg.Curriculum.DefaultLocale,
 		AutoReload: cfg.Features.AuthorMode, Logger: o.Logger,
@@ -142,22 +145,6 @@ func Build(ctx context.Context, cfg *protocol.Config, o Options) (*App, error) {
 	return a, nil
 }
 
-// SyncInvites loads auth.invites.file into the store (start and SIGHUP).
-func (a *App) SyncInvites(ctx context.Context) error {
-	if a.cfg.Auth.Mode != protocol.AuthInvite {
-		return nil
-	}
-	invs, err := auth.LoadInvites(a.cfg.Auth.Invites.File)
-	if err != nil {
-		return err
-	}
-	if err := a.Store.Invites().Sync(ctx, invs); err != nil {
-		return err
-	}
-	a.log.Info("auth: invites loaded", "codes", len(invs), "file", a.cfg.Auth.Invites.File)
-	return nil
-}
-
 func (a *App) buildSessions(ctx context.Context) error {
 	cfg := a.cfg
 	mem, err := config.ParseSize(cfg.Sessions.Limits.Memory)
@@ -173,6 +160,7 @@ func (a *App) buildSessions(ctx context.Context) error {
 		IdleStop:        time.Duration(cfg.Sessions.IdleStopMinutes) * time.Minute,
 		VolumeRetention: time.Duration(cfg.Sessions.VolumeRetentionDays) * 24 * time.Hour,
 		MaxSessions:     cfg.Sessions.MaxSessions,
+		Quota:           a.groupQuota(),
 		StaticWait:      a.o.StaticWait,
 		Health:          a.o.SessionHealth,
 		Logger:          a.log,
@@ -265,6 +253,26 @@ func (a *App) buildSessions(ctx context.Context) error {
 	return nil
 }
 
+// groupQuota returns the sessions.groupLimits quota of a user from the
+// groups stored at their last login, or nil without group limits.
+func (a *App) groupQuota() func(context.Context, string) (sessions.Quota, error) {
+	s := a.cfg.Sessions
+	if len(s.GroupLimits) == 0 && s.DefaultGroupMaxActiveSessions == 0 {
+		return nil
+	}
+	return func(ctx context.Context, userID string) (sessions.Quota, error) {
+		var groups []string
+		u, err := a.Store.Users().Get(ctx, userID)
+		switch {
+		case err == nil:
+			groups = u.Groups
+		case !errors.Is(err, store.ErrNotFound):
+			return sessions.Quota{}, err
+		}
+		return sessions.QuotaFor(groups, s.GroupLimits, s.DefaultGroupMaxActiveSessions), nil
+	}
+}
+
 // ProxyKeyFile, in the data directory, holds the key the per-session proxy
 // secrets derive from (sessions.ProxySecret); created on first use.
 const ProxyKeyFile = "session-proxy.secret"
@@ -299,8 +307,7 @@ func (a *App) Close() error {
 
 // Run serves cfg.listen (and metrics.listen when enabled) and runs the
 // reaper and the proxy cache pruning until ctx ends, then shuts down
-// gracefully (10 s drain). SIGHUP reloads the curriculum bundle and the
-// invites file.
+// gracefully (10 s drain). SIGHUP reloads the curriculum bundle.
 func (a *App) Run(ctx context.Context) error {
 	srv := httpx.NewServer(a.cfg.Listen, a.handler, a.log)
 	ln, err := net.Listen("tcp", a.cfg.Listen)
@@ -311,6 +318,15 @@ func (a *App) Run(ctx context.Context) error {
 		"sessions", a.cfg.Sessions.Backend, "public_url", a.cfg.PublicURL, "version", buildinfo.Version)
 	errc := make(chan error, 2)
 	go func() { errc <- srv.Serve(ln) }()
+	if d, ok := a.Auth.(interface{ Discover(context.Context) error }); ok {
+		// Report a wrong issuer early without delaying the start; sign-ins
+		// share this attempt and retry after a failure.
+		go func() {
+			if err := d.Discover(ctx); err != nil {
+				a.log.Warn("auth: the OIDC provider is not reachable yet", "err", err)
+			}
+		}()
+	}
 
 	var msrv *http.Server
 	if a.cfg.Metrics.Enabled {
@@ -333,7 +349,7 @@ func (a *App) Run(ctx context.Context) error {
 	for ctx.Err() == nil {
 		select {
 		case <-hup:
-			a.reload(ctx)
+			a.reload()
 		case err := <-errc:
 			if errors.Is(err, http.ErrServerClosed) {
 				return nil
@@ -351,13 +367,10 @@ func (a *App) Run(ctx context.Context) error {
 	return srv.Shutdown(sctx)
 }
 
-// reload re-reads the curriculum bundle and the invites file (SIGHUP).
-func (a *App) reload(ctx context.Context) {
+// reload re-reads the curriculum bundle (SIGHUP).
+func (a *App) reload() {
 	if err := a.Curriculum.Reload(); err != nil {
 		a.log.Error("gateway: curriculum reload", "err", err)
-	}
-	if err := a.SyncInvites(ctx); err != nil {
-		a.log.Error("gateway: invites reload", "err", err)
 	}
 }
 
@@ -428,6 +441,7 @@ func (a *App) authConfig(w http.ResponseWriter, r *http.Request) error {
 	info := protocol.AuthConfigInfo{Mode: a.cfg.Mode, AuthMode: a.cfg.Auth.Mode}
 	if a.cfg.Auth.Mode == protocol.AuthOIDC {
 		info.OIDCStartURL = auth.PathOIDCStart
+		info.OIDCDisplayName = a.cfg.Auth.OIDC.DisplayName
 	}
 	httpx.WriteJSON(w, http.StatusOK, info)
 	return nil

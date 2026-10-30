@@ -8,7 +8,8 @@
 // sessions.limits.memory → PG_SESSIONS_LIMITS_MEMORY, publicUrl →
 // PG_PUBLIC_URL, sessions.idleStopMinutes → PG_SESSIONS_IDLE_STOP_MINUTES.
 // The unsplit form (PG_PUBLICURL) and the short aliases in Aliases are also
-// accepted. List values are comma-separated.
+// accepted. List values are comma-separated or a JSON array (the only form
+// for lists of objects such as sessions.groupLimits).
 package config
 
 import (
@@ -38,8 +39,9 @@ const DefaultPath = "/etc/playground/config.json"
 const EnvPrefix = "PG_"
 
 // Defaults returns the built-in defaults (deployment.md §3). Fields whose
-// default depends on other fields (sessions.backend, auth.cookieSecretFile)
-// are resolved by Resolve after all sources are applied.
+// default depends on other fields (auth.mode, sessions.backend,
+// auth.cookieSecretFile) are resolved by Resolve after all sources are
+// applied.
 func Defaults() protocol.Config {
 	return protocol.Config{
 		Mode:      protocol.ModeLocal,
@@ -47,7 +49,13 @@ func Defaults() protocol.Config {
 		PublicURL: "http://localhost:8080",
 		DataDir:   "/data",
 		Auth: protocol.AuthConfig{
-			Mode:        protocol.AuthNone,
+			OIDC: protocol.OIDCConfig{
+				Scopes:         []string{"openid", "email", "profile"},
+				DisplayName:    "SSO",
+				UsernameClaim:  "preferred_username",
+				GroupsClaim:    "groups",
+				ProviderLogout: true,
+			},
 			SessionDays: 30,
 		},
 		Sessions: protocol.SessionsConfig{
@@ -175,8 +183,16 @@ func Decode(cfg *protocol.Config, data []byte) error {
 	return nil
 }
 
-// Resolve fills defaults that depend on other fields.
+// Resolve fills defaults that depend on other fields: auth.mode is oidc in
+// server mode and none in local mode.
 func Resolve(cfg *protocol.Config) {
+	if cfg.Auth.Mode == "" {
+		if cfg.Mode == protocol.ModeServer {
+			cfg.Auth.Mode = protocol.AuthOIDC
+		} else {
+			cfg.Auth.Mode = protocol.AuthNone
+		}
+	}
 	if cfg.Sessions.Backend == "" {
 		if cfg.Mode == protocol.ModeServer {
 			cfg.Sessions.Backend = protocol.BackendDocker
@@ -210,6 +226,9 @@ func Validate(cfg *protocol.Config) error {
 	}
 	if u, err := url.Parse(cfg.PublicURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		bad("publicUrl: %q is not an absolute http(s) URL", cfg.PublicURL)
+	} else if cfg.Mode == protocol.ModeServer && u.Scheme != "https" && !loopback(u) {
+		// Cookies are Secure only on https.
+		bad("publicUrl: %q must be https in server mode", cfg.PublicURL)
 	}
 	if cfg.DataDir == "" {
 		bad("dataDir: required")
@@ -217,18 +236,12 @@ func Validate(cfg *protocol.Config) error {
 	switch cfg.Auth.Mode {
 	case protocol.AuthNone:
 		if cfg.Mode != protocol.ModeLocal {
-			bad("auth.mode: none is only allowed in local mode")
-		}
-	case protocol.AuthInvite:
-		if cfg.Auth.Invites.File == "" {
-			bad("auth.invites.file: required when auth.mode is invite")
+			bad("auth.mode: none is only allowed in local mode; server mode signs in with OpenID Connect")
 		}
 	case protocol.AuthOIDC:
-		if cfg.Auth.OIDC.Issuer == "" || cfg.Auth.OIDC.ClientID == "" || cfg.Auth.OIDC.ClientSecretFile == "" {
-			bad("auth.oidc: issuer, clientId and clientSecretFile are required when auth.mode is oidc")
-		}
+		validateOIDC(cfg, bad)
 	default:
-		bad("auth.mode: %q is not none, invite or oidc", cfg.Auth.Mode)
+		bad("auth.mode: %q is not none or oidc", cfg.Auth.Mode)
 	}
 	if cfg.Auth.SessionDays < 1 {
 		bad("auth.sessionDays: must be at least 1")
@@ -289,6 +302,22 @@ func Validate(cfg *protocol.Config) error {
 	if s.MaxSessions < 1 {
 		bad("sessions.maxSessions: must be at least 1")
 	}
+	seen := map[string]bool{}
+	for i, gl := range s.GroupLimits {
+		switch {
+		case gl.Group == "":
+			bad("sessions.groupLimits[%d].group: required", i)
+		case seen[gl.Group]:
+			bad("sessions.groupLimits[%d]: group %q is listed twice", i, gl.Group)
+		}
+		seen[gl.Group] = true
+		if gl.MaxActiveSessions < 0 {
+			bad("sessions.groupLimits[%d].maxActiveSessions: must not be negative", i)
+		}
+	}
+	if s.DefaultGroupMaxActiveSessions < 0 {
+		bad("sessions.defaultGroupMaxActiveSessions: must not be negative")
+	}
 	switch s.Egress {
 	case protocol.EgressNone, protocol.EgressRegistries, protocol.EgressAll:
 	default:
@@ -316,6 +345,45 @@ func Validate(cfg *protocol.Config) error {
 		return nil
 	}
 	return fmt.Errorf("config: %w", errors.Join(errs...))
+}
+
+func validateOIDC(cfg *protocol.Config, bad func(string, ...any)) {
+	o := cfg.Auth.OIDC
+	if o.Issuer == "" || o.ClientID == "" {
+		what := "mode " + string(cfg.Mode)
+		if cfg.Mode == protocol.ModeServer {
+			what = "server mode (which signs in with OpenID Connect)"
+		}
+		bad("auth.oidc.issuer and auth.oidc.clientId: required when auth.mode is oidc, in %s; "+
+			"register the client at your provider with the redirect URI %s/api/v1/auth/oidc/callback",
+			what, strings.TrimRight(cfg.PublicURL, "/"))
+	}
+	if o.Issuer != "" {
+		if u, err := url.Parse(o.Issuer); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			bad("auth.oidc.issuer: %q is not an absolute http(s) URL", o.Issuer)
+		} else if u.Scheme != "https" && !loopback(u) && !o.AllowInsecureIssuer {
+			// Discovery, keys and tokens over http could be forged.
+			bad("auth.oidc.issuer: %q must be https (or set auth.oidc.allowInsecureIssuer for a provider on a trusted internal network)", o.Issuer)
+		}
+	}
+	if o.UsernameClaim == "" || o.GroupsClaim == "" {
+		bad("auth.oidc.usernameClaim and auth.oidc.groupsClaim: must not be empty")
+	}
+	for _, d := range o.AllowedEmailDomains {
+		if d == "" || strings.ContainsAny(d, "@ ") {
+			bad("auth.oidc.allowedEmailDomains: %q is not a domain", d)
+		}
+	}
+}
+
+// loopback reports whether u's host is localhost or a loopback address.
+func loopback(u *url.URL) bool {
+	h := u.Hostname()
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	ip, err := netip.ParseAddr(h)
+	return err == nil && ip.IsLoopback()
 }
 
 // ParseSize parses a Docker-style size ("3g", "512m", "1024k", "100") into
@@ -491,7 +559,7 @@ func envMap(env []string) map[string]string {
 }
 
 // Set assigns a string value to the field at a dotted path (case-insensitive
-// segment match). Lists are comma-separated.
+// segment match). Lists are comma-separated or a JSON array.
 func Set(cfg *protocol.Config, path, value string) error {
 	v := reflect.ValueOf(cfg).Elem()
 	segs := strings.Split(path, ".")
@@ -545,8 +613,20 @@ func setValue(f reflect.Value, path, value string) error {
 		}
 		f.SetFloat(n)
 	case reflect.Slice:
+		if t := strings.TrimSpace(value); strings.HasPrefix(t, "[") {
+			// A JSON array: the only form for lists of objects
+			// (sessions.groupLimits).
+			p := reflect.New(f.Type())
+			dec := json.NewDecoder(strings.NewReader(t))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(p.Interface()); err != nil {
+				return fmt.Errorf("config: %s: %v", path, err)
+			}
+			f.Set(p.Elem())
+			return nil
+		}
 		if f.Type().Elem().Kind() != reflect.String {
-			return fmt.Errorf("config: %s: unsupported list type", path)
+			return fmt.Errorf("config: %s: want a JSON array", path)
 		}
 		var items []string
 		for _, p := range strings.Split(value, ",") {

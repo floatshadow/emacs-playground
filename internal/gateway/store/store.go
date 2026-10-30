@@ -8,34 +8,27 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
-// Errors.
-var (
-	ErrNotFound      = errors.New("store: not found")
-	ErrInviteExpired = errors.New("store: invite expired")
-	ErrInviteUsedUp  = errors.New("store: invite used up")
-)
+// ErrNotFound is returned for missing rows.
+var ErrNotFound = errors.New("store: not found")
 
 // User is a learner (users table).
 type User struct {
 	ID   string            `json:"id"`
 	Kind protocol.UserKind `json:"kind"`
-	// Subject is the external identity (OIDC issuer plus sub); "" for local
-	// and invite users.
+	// Subject is the external identity (OIDC issuer + "|" + sub); "" for
+	// the local user.
 	Subject     string `json:"subject,omitempty"`
 	DisplayName string `json:"displayName"`
-	CreatedAt   int64  `json:"createdAt"`
-	LastSeenAt  int64  `json:"lastSeenAt,omitempty"`
-}
-
-// Invite is an invite code (invites table). Codes are stored as hashes only.
-type Invite struct {
-	CodeHash string `json:"codeHash"`
-	Label    string `json:"label,omitempty"`
-	// MaxUses 0 means unlimited.
-	MaxUses int `json:"maxUses,omitempty"`
-	Uses    int `json:"uses"`
-	// ExpiresAt 0 means never (ms).
-	ExpiresAt int64 `json:"expiresAt,omitempty"`
+	// Username, Email and Groups come from the ID token, refreshed at every
+	// login.
+	Username   string   `json:"username,omitempty"`
+	Email      string   `json:"email,omitempty"`
+	Groups     []string `json:"groups,omitempty"`
+	CreatedAt  int64    `json:"createdAt"`
+	LastSeenAt int64    `json:"lastSeenAt,omitempty"`
+	// SessionEpoch is signed into the user's session cookies; RevokeSessions
+	// increments it, so every earlier cookie stops verifying.
+	SessionEpoch int64 `json:"sessionEpoch,omitempty"`
 }
 
 // Session is a session registry row (sessions table).
@@ -101,23 +94,13 @@ type AuditEvent struct {
 type UserRepo interface {
 	Get(ctx context.Context, id string) (*User, error)
 	BySubject(ctx context.Context, subject string) (*User, error)
-	// Put inserts or replaces a user.
+	// Put inserts or replaces a user; an existing user keeps its session
+	// epoch.
 	Put(ctx context.Context, u *User) error
 	// Touch sets last_seen_at.
 	Touch(ctx context.Context, id string, at int64) error
-}
-
-// InviteRepo stores invite codes.
-type InviteRepo interface {
-	// Sync makes the stored invites equal to list (from the invites file):
-	// new codes are added, label, max uses and expiry are updated, use
-	// counts are kept, and codes no longer listed are removed.
-	Sync(ctx context.Context, list []Invite) error
-	// Redeem checks the code hash (constant-time), expiry and use count and
-	// counts one use. It returns ErrNotFound, ErrInviteExpired or
-	// ErrInviteUsedUp.
-	Redeem(ctx context.Context, codeHash string, now int64) (*Invite, error)
-	List(ctx context.Context) ([]Invite, error)
+	// RevokeSessions increments the user's session epoch (logout).
+	RevokeSessions(ctx context.Context, id string) error
 }
 
 // SessionRepo stores the session registry.
@@ -161,20 +144,8 @@ type Store interface {
 	Sessions() SessionRepo
 	Progress() ProgressRepo
 	Stuck() StuckRepo
-	Invites() InviteRepo
 	Audit(ctx context.Context, e AuditEvent) error
 	// AuditLog returns the newest entries first (operators, tests).
 	AuditLog(ctx context.Context, limit int) ([]AuditEvent, error)
 	Close() error
-}
-
-// redeemable checks expiry and use count.
-func redeemable(inv *Invite, now int64) error {
-	if inv.ExpiresAt > 0 && now >= inv.ExpiresAt {
-		return ErrInviteExpired
-	}
-	if inv.MaxUses > 0 && inv.Uses >= inv.MaxUses {
-		return ErrInviteUsedUp
-	}
-	return nil
 }

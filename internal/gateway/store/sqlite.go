@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"crypto/subtle"
 	"database/sql"
 	"embed"
 	"encoding/json"
@@ -110,7 +109,6 @@ func (s *sqlStore) Users() UserRepo        { return sqlUsers{s.db} }
 func (s *sqlStore) Sessions() SessionRepo  { return sqlSessions{s.db} }
 func (s *sqlStore) Progress() ProgressRepo { return sqlProgress{s.db} }
 func (s *sqlStore) Stuck() StuckRepo       { return sqlStuck{s.db} }
-func (s *sqlStore) Invites() InviteRepo    { return sqlInvites{s.db} }
 func (s *sqlStore) Close() error           { return s.db.Close() }
 
 func (s *sqlStore) Audit(ctx context.Context, e AuditEvent) error {
@@ -153,18 +151,24 @@ func notFound(err error) error {
 
 type sqlUsers struct{ db *sql.DB }
 
-const userCols = `id, kind, subject, display_name, created_at, last_seen_at`
+const userCols = `id, kind, subject, display_name, username, email, groups_json, created_at, last_seen_at, session_epoch`
 
 func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 	var u User
-	var subj, name sql.NullString
+	var subj, name, username, email, groups sql.NullString
 	var seen sql.NullInt64
 	var kind string
-	if err := row.Scan(&u.ID, &kind, &subj, &name, &u.CreatedAt, &seen); err != nil {
+	if err := row.Scan(&u.ID, &kind, &subj, &name, &username, &email, &groups, &u.CreatedAt, &seen, &u.SessionEpoch); err != nil {
 		return nil, notFound(err)
 	}
 	u.Kind = userKind(kind)
 	u.Subject, u.DisplayName, u.LastSeenAt = subj.String, name.String, seen.Int64
+	u.Username, u.Email = username.String, email.String
+	if groups.String != "" {
+		if err := json.Unmarshal([]byte(groups.String), &u.Groups); err != nil {
+			return nil, fmt.Errorf("store: user %s groups: %w", u.ID, err)
+		}
+	}
 	return &u, nil
 }
 
@@ -180,15 +184,33 @@ func (r sqlUsers) BySubject(ctx context.Context, subject string) (*User, error) 
 }
 
 func (r sqlUsers) Put(ctx context.Context, u *User) error {
-	_, err := r.db.ExecContext(ctx, `INSERT INTO users (`+userCols+`) VALUES (?, ?, ?, ?, ?, ?)
+	var groups sql.NullString
+	if len(u.Groups) > 0 {
+		b, err := json.Marshal(u.Groups)
+		if err != nil {
+			return err
+		}
+		groups = nullStr(string(b))
+	}
+	_, err := r.db.ExecContext(ctx, `INSERT INTO users (`+userCols+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, subject = excluded.subject,
-  display_name = excluded.display_name, created_at = excluded.created_at, last_seen_at = excluded.last_seen_at`,
-		u.ID, string(u.Kind), nullStr(u.Subject), nullStr(u.DisplayName), u.CreatedAt, nullInt(u.LastSeenAt))
+  display_name = excluded.display_name, username = excluded.username, email = excluded.email,
+  groups_json = excluded.groups_json, created_at = excluded.created_at, last_seen_at = excluded.last_seen_at`,
+		u.ID, string(u.Kind), nullStr(u.Subject), nullStr(u.DisplayName), nullStr(u.Username), nullStr(u.Email), groups,
+		u.CreatedAt, nullInt(u.LastSeenAt), u.SessionEpoch)
 	return err
 }
 
 func (r sqlUsers) Touch(ctx context.Context, id string, at int64) error {
-	res, err := r.db.ExecContext(ctx, `UPDATE users SET last_seen_at = ? WHERE id = ?`, at, id)
+	return affected(r.db.ExecContext(ctx, `UPDATE users SET last_seen_at = ? WHERE id = ?`, at, id))
+}
+
+func (r sqlUsers) RevokeSessions(ctx context.Context, id string) error {
+	return affected(r.db.ExecContext(ctx, `UPDATE users SET session_epoch = session_epoch + 1 WHERE id = ?`, id))
+}
+
+// affected returns ErrNotFound when an update matched no row.
+func affected(res sql.Result, err error) error {
 	if err != nil {
 		return err
 	}
@@ -196,98 +218,6 @@ func (r sqlUsers) Touch(ctx context.Context, id string, at int64) error {
 		return ErrNotFound
 	}
 	return nil
-}
-
-type sqlInvites struct{ db *sql.DB }
-
-func (r sqlInvites) Sync(ctx context.Context, list []Invite) error {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	keep := map[string]bool{}
-	for _, inv := range list {
-		keep[inv.CodeHash] = true
-		if _, err := tx.ExecContext(ctx, `INSERT INTO invites (code_hash, label, max_uses, uses, expires_at) VALUES (?, ?, ?, 0, ?)
-ON CONFLICT(code_hash) DO UPDATE SET label = excluded.label, max_uses = excluded.max_uses, expires_at = excluded.expires_at`,
-			inv.CodeHash, nullStr(inv.Label), nullInt(int64(inv.MaxUses)), nullInt(inv.ExpiresAt)); err != nil {
-			return err
-		}
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT code_hash FROM invites`)
-	if err != nil {
-		return err
-	}
-	var drop []string
-	for rows.Next() {
-		var h string
-		if err := rows.Scan(&h); err != nil {
-			rows.Close()
-			return err
-		}
-		if !keep[h] {
-			drop = append(drop, h)
-		}
-	}
-	rows.Close()
-	for _, h := range drop {
-		if _, err := tx.ExecContext(ctx, `DELETE FROM invites WHERE code_hash = ?`, h); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
-}
-
-func scanInvite(row interface{ Scan(...any) error }) (*Invite, error) {
-	var inv Invite
-	var label sql.NullString
-	var maxUses, exp sql.NullInt64
-	if err := row.Scan(&inv.CodeHash, &label, &maxUses, &inv.Uses, &exp); err != nil {
-		return nil, notFound(err)
-	}
-	inv.Label, inv.MaxUses, inv.ExpiresAt = label.String, int(maxUses.Int64), exp.Int64
-	return &inv, nil
-}
-
-func (r sqlInvites) Redeem(ctx context.Context, codeHash string, now int64) (*Invite, error) {
-	tx, err := r.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	inv, err := scanInvite(tx.QueryRowContext(ctx, `SELECT code_hash, label, max_uses, uses, expires_at FROM invites WHERE code_hash = ?`, codeHash))
-	if err != nil {
-		return nil, err
-	}
-	if subtle.ConstantTimeCompare([]byte(inv.CodeHash), []byte(codeHash)) != 1 {
-		return nil, ErrNotFound
-	}
-	if err := redeemable(inv, now); err != nil {
-		return nil, err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE invites SET uses = uses + 1 WHERE code_hash = ?`, codeHash); err != nil {
-		return nil, err
-	}
-	inv.Uses++
-	return inv, tx.Commit()
-}
-
-func (r sqlInvites) List(ctx context.Context) ([]Invite, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT code_hash, label, max_uses, uses, expires_at FROM invites ORDER BY code_hash`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []Invite
-	for rows.Next() {
-		inv, err := scanInvite(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, *inv)
-	}
-	return out, rows.Err()
 }
 
 type sqlSessions struct{ db *sql.DB }

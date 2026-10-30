@@ -16,7 +16,9 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -111,6 +113,9 @@ type Options struct {
 	// (0: never).
 	VolumeRetention time.Duration
 	MaxSessions     int
+	// Quota returns the group quota a user's sessions count against
+	// (sessions.groupLimits); nil means no group limits.
+	Quota func(ctx context.Context, userID string) (Quota, error)
 	// StartTimeout bounds the /healthz wait after starting, default 30 s.
 	StartTimeout time.Duration
 	// StaticWait bounds the /healthz wait of Ensure in static mode,
@@ -132,6 +137,9 @@ type entry struct {
 	h        Handle
 	endpoint *url.URL
 	ws       int
+	// group is the Quota.Group the session counts against, set when it is
+	// (re-)created or rebuilt.
+	group string
 	// lastActivity is the last WebSocket presence, heartbeat with
 	// WebSockets, touch, or start.
 	lastActivity  time.Time
@@ -440,15 +448,78 @@ func VolumeName(userID string) string {
 	return "pg-ws-" + hex.EncodeToString(sum[:8])
 }
 
+func active(st protocol.SessionState) bool {
+	switch st {
+	case protocol.SessionCreating, protocol.SessionStarting, protocol.SessionReady, protocol.SessionIdle, protocol.SessionStopping:
+		return true
+	}
+	return false
+}
+
 func (s *Service) activeCount() int {
 	n := 0
 	for _, e := range s.entries {
-		switch e.rec.State {
-		case protocol.SessionCreating, protocol.SessionStarting, protocol.SessionReady, protocol.SessionIdle, protocol.SessionStopping:
+		if active(e.rec.State) {
 			n++
 		}
 	}
 	return n
+}
+
+// Quota is the active-session limit a user counts against.
+type Quota struct {
+	// Group is the sessions.groupLimits entry's group, or "" for users in
+	// no listed group (sessions.defaultGroupMaxActiveSessions).
+	Group string
+	// Max is the limit; 0 means none.
+	Max int
+}
+
+// QuotaFor returns the quota of a user in groups: the first entry of
+// limits whose group they are in, else the default limit.
+func QuotaFor(groups []string, limits []protocol.GroupLimit, defaultMax int) Quota {
+	for _, l := range limits {
+		if slices.Contains(groups, l.Group) {
+			return Quota{Group: l.Group, Max: l.MaxActiveSessions}
+		}
+	}
+	return Quota{Max: defaultMax}
+}
+
+// quotaError is the 429 for a full group quota.
+func quotaError(q Quota) error {
+	who := "group " + strconv.Quote(q.Group)
+	if q.Group == "" {
+		who = "learners outside the listed groups"
+	}
+	return &httpx.Error{
+		Status: http.StatusTooManyRequests, Code: protocol.ErrGroupQuotaExceeded,
+		Message: fmt.Sprintf("all %d active sessions allowed for %s are in use; try again in a few minutes", q.Max, who),
+		Details: map[string]any{"group": q.Group, "maxActiveSessions": q.Max},
+	}
+}
+
+// groupActive counts active sessions in group other than except; callers
+// hold mu.
+func (s *Service) groupActive(group, except string) int {
+	n := 0
+	for _, e := range s.entries {
+		if e.rec.ID != except && e.group == group && active(e.rec.State) {
+			n++
+		}
+	}
+	return n
+}
+
+func (s *Service) quota(ctx context.Context, userID string) (Quota, error) {
+	if s.o.Quota == nil {
+		return Quota{}, nil
+	}
+	q, err := s.o.Quota(ctx, userID)
+	if err != nil {
+		return Quota{}, fmt.Errorf("sessions: quota of %s: %w", userID, err)
+	}
+	return q, nil
 }
 
 func (s *Service) ensureDocker(ctx context.Context, userID string) (*Session, error) {
@@ -497,11 +568,22 @@ func (s *Service) ensureDocker(ctx context.Context, userID string) (*Session, er
 		}
 	}
 
+	q, err := s.quota(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	// The limits are checked and the new session counted under one lock,
+	// so simultaneous starts cannot exceed them.
 	s.mu.Lock()
 	if s.activeCount() >= s.o.MaxSessions {
 		s.mu.Unlock()
 		return nil, httpx.SessionLimit("the playground is full right now; try again in a few minutes").
 			WithDetails(map[string]int{"maxSessions": s.o.MaxSessions})
+	}
+	if q.Max > 0 && s.groupActive(q.Group, curID) >= q.Max {
+		s.mu.Unlock()
+		s.audit(ctx, userID, "session.quota", fmt.Sprintf("group=%q max=%d", q.Group, q.Max))
+		return nil, quotaError(q)
 	}
 	now := s.now()
 	token := newID(32)
@@ -517,6 +599,7 @@ func (s *Service) ensureDocker(ctx context.Context, userID string) (*Session, er
 		e.rec.StoppedAt = 0
 		e.rec.LastActiveAt = now.UnixMilli()
 		e.lastActivity = now
+		e.group = q.Group
 	} else {
 		id, volume = newID(8), VolumeName(userID)
 		rec := store.Session{
@@ -524,7 +607,7 @@ func (s *Service) ensureDocker(ctx context.Context, userID string) (*Session, er
 			TokenHash: HashToken(token), CreatedAt: now.UnixMilli(), LastActiveAt: now.UnixMilli(),
 		}
 		h := Handle{ID: id, UserID: userID, Volume: volume, Image: s.o.Image}
-		s.entries[id] = &entry{rec: rec, h: h, endpoint: s.o.Backend.Endpoint(h), lastActivity: now}
+		s.entries[id] = &entry{rec: rec, h: h, endpoint: s.o.Backend.Endpoint(h), lastActivity: now, group: q.Group}
 	}
 	if volume == "" {
 		volume = VolumeName(userID)
@@ -538,7 +621,7 @@ func (s *Service) ensureDocker(ctx context.Context, userID string) (*Session, er
 		ID: id, UserID: userID, Token: token, ProxySecret: s.proxySecret(id), Image: s.o.Image, RemoteImage: s.o.RemoteImage,
 		Limits: s.o.Limits, Network: s.o.Network, Runtime: s.o.Runtime, Volume: volume, Env: s.o.Env,
 	}
-	h, err := s.o.Backend.Create(ctx, spec)
+	h, err = s.o.Backend.Create(ctx, spec)
 	if err != nil {
 		return nil, s.fail(ctx, id, h, "could not create the session container", err)
 	}
@@ -861,6 +944,19 @@ func (s *Service) Rebuild(ctx context.Context) error {
 	for _, h := range handles {
 		byID[h.ID] = h
 	}
+	// Sessions that may still run count against their user's current
+	// group quota.
+	groups := map[string]string{}
+	for _, rec := range recs {
+		if _, done := groups[rec.UserID]; done || !active(rec.State) {
+			continue
+		}
+		q, err := s.quota(ctx, rec.UserID)
+		if err != nil {
+			return err
+		}
+		groups[rec.UserID] = q.Group
+	}
 	now := s.now()
 	s.mu.Lock()
 	for _, rec := range recs {
@@ -868,7 +964,7 @@ func (s *Service) Rebuild(ctx context.Context) error {
 		if bh, ok := byID[rec.ID]; ok {
 			h.ContainerID = bh.ContainerID
 		}
-		s.entries[rec.ID] = &entry{rec: rec, h: h, endpoint: s.o.Backend.Endpoint(h), lastActivity: now}
+		s.entries[rec.ID] = &entry{rec: rec, h: h, endpoint: s.o.Backend.Endpoint(h), lastActivity: now, group: groups[rec.UserID]}
 	}
 	s.mu.Unlock()
 

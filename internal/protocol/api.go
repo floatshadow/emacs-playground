@@ -18,16 +18,19 @@ type UserKind string
 
 // User kinds.
 const (
-	UserLocal  UserKind = "local"
-	UserInvite UserKind = "invite"
-	UserOIDC   UserKind = "oidc"
+	UserLocal UserKind = "local"
+	UserOIDC  UserKind = "oidc"
 )
 
-// User is the authenticated learner.
+// User is the authenticated learner. Username, Email and Groups come from
+// the OIDC ID token and are refreshed at every login.
 type User struct {
 	ID          string   `json:"id"`
 	DisplayName string   `json:"displayName"`
 	Kind        UserKind `json:"kind"`
+	Username    string   `json:"username,omitempty"`
+	Email       string   `json:"email,omitempty"`
+	Groups      []string `json:"groups,omitempty"`
 }
 
 // MeFeatures tells the browser which optional features are available.
@@ -55,13 +58,39 @@ type Me struct {
 type AuthConfigInfo struct {
 	Mode     DeployMode `json:"mode"`
 	AuthMode AuthMode   `json:"authMode"`
-	// OIDCStartURL is the path of GET /auth/oidc/start when AuthMode is oidc.
+	// OIDCStartURL is the path of GET /auth/oidc/start when AuthMode is
+	// oidc. It accepts ?next=<path> (a same-origin path) to return to after
+	// signing in.
 	OIDCStartURL string `json:"oidcStartUrl,omitempty"`
+	// OIDCDisplayName labels the login button (auth.oidc.displayName).
+	OIDCDisplayName string `json:"oidcDisplayName,omitempty"`
 }
 
-// InviteLoginRequest is POST /api/v1/auth/invite.
-type InviteLoginRequest struct {
-	Code string `json:"code"`
+// LoginError is the error query parameter of /login when the OIDC
+// callback fails (the callback redirects there instead of answering JSON).
+type LoginError string
+
+// Login errors.
+const (
+	// LoginErrorState: the sign-in expired, was started in another browser
+	// or was tampered with; starting again fixes it.
+	LoginErrorState LoginError = "state"
+	// LoginErrorProvider: the provider refused (the user cancelled) or is
+	// unreachable.
+	LoginErrorProvider LoginError = "provider"
+	// LoginErrorToken: the code exchange or the ID token verification
+	// failed (issuer, audience, signature, expiry, nonce).
+	LoginErrorToken LoginError = "token"
+	// LoginErrorForbidden: the account is not allowed here
+	// (auth.oidc.allowedEmailDomains, allowedGroups).
+	LoginErrorForbidden LoginError = "forbidden"
+)
+
+// LogoutResult is the 200 body of POST /api/v1/auth/logout when the
+// browser should also visit the provider's end-session endpoint; without
+// one the answer is 204.
+type LogoutResult struct {
+	RedirectURL string `json:"redirectUrl"`
 }
 
 // SessionState is the gateway's session lifecycle state (architecture.md

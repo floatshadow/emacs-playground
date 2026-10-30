@@ -10,6 +10,7 @@
 //	err = app.Run(ctx)  // serves until ctx ends, then drains for 10 s
 //
 // Build opens the store (JSON in local mode, SQLite in server mode), the
-// cookie secret, the invites file, the curriculum bundle and the session
-// backend (static or docker), and rebuilds the session registry.
+// cookie secret and the OIDC client secret, the curriculum bundle and the
+// session backend (static or docker) with the group quotas, and rebuilds
+// the session registry.
 package gateway

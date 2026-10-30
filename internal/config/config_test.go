@@ -71,22 +71,133 @@ func TestStrictFile(t *testing.T) {
 	}
 }
 
+func TestAuthModeDefaults(t *testing.T) {
+	local := Defaults()
+	Resolve(&local)
+	if local.Auth.Mode != protocol.AuthNone || Validate(&local) != nil {
+		t.Fatalf("local: %s %v", local.Auth.Mode, Validate(&local))
+	}
+	o := local.Auth.OIDC
+	if strings.Join(o.Scopes, " ") != "openid email profile" || o.UsernameClaim != "preferred_username" ||
+		o.GroupsClaim != "groups" || o.DisplayName == "" || !o.ProviderLogout {
+		t.Fatalf("oidc defaults %+v", o)
+	}
+
+	// Server mode defaults to oidc and says what is missing.
+	srv := Defaults()
+	srv.Mode = protocol.ModeServer
+	Resolve(&srv)
+	if srv.Auth.Mode != protocol.AuthOIDC {
+		t.Fatalf("server auth mode %s", srv.Auth.Mode)
+	}
+	err := Validate(&srv)
+	if err == nil || !strings.Contains(err.Error(), "auth.oidc.issuer and auth.oidc.clientId: required") ||
+		!strings.Contains(err.Error(), "server mode") || !strings.Contains(err.Error(), "/api/v1/auth/oidc/callback") {
+		t.Fatalf("want missing issuer error, got %v", err)
+	}
+	srv.Auth.OIDC.Issuer = "https://login.example.edu/realms/main"
+	srv.Auth.OIDC.ClientID = "emacs-playground"
+	if err := Validate(&srv); err != nil {
+		t.Fatalf("public client (no secret file) refused: %v", err)
+	}
+
+	// none is refused in server mode, even when set explicitly.
+	srv.Auth.Mode = protocol.AuthNone
+	if err := Validate(&srv); err == nil || !strings.Contains(err.Error(), "auth.mode: none is only allowed in local mode") {
+		t.Fatalf("want auth none error, got %v", err)
+	}
+	srv.Auth.Mode = "password"
+	if err := Validate(&srv); err == nil || !strings.Contains(err.Error(), "is not none or oidc") {
+		t.Fatalf("removed mode accepted: %v", err)
+	}
+
+	// An explicit mode from the environment wins over the derived default.
+	cfg, err := Load(Sources{Env: []string{"PG_MODE=local", "PG_AUTH_MODE=oidc", "PG_AUTH_OIDC_ISSUER=http://127.0.0.1:5556/dex", "PG_AUTH_OIDC_CLIENT_ID=pg"}})
+	if err != nil || cfg.Auth.Mode != protocol.AuthOIDC {
+		t.Fatalf("local oidc: %v %+v", err, cfg)
+	}
+	if _, err := Load(Sources{Env: []string{"PG_MODE=server", "PG_AUTH_OIDC_ISSUER=not a url", "PG_AUTH_OIDC_CLIENT_ID=pg"}}); err == nil || !strings.Contains(err.Error(), "auth.oidc.issuer") {
+		t.Fatalf("bad issuer: %v", err)
+	}
+}
+
+func TestServerModeNeedsHTTPS(t *testing.T) {
+	cfg := Defaults()
+	cfg.Mode = protocol.ModeServer
+	cfg.Auth.OIDC.ClientID = "pg"
+	Resolve(&cfg)
+	for _, tc := range []struct {
+		publicURL, issuer string
+		insecure          bool
+		want              string // "" = valid
+	}{
+		{"https://emacs.example.edu", "https://idp.example.edu", false, ""},
+		{"http://localhost:8080", "http://127.0.0.1:5556/dex", false, ""},
+		{"http://[::1]:8080", "http://localhost/dex", false, ""},
+		{"http://emacs.example.edu", "https://idp.example.edu", false, "publicUrl: \"http://emacs.example.edu\" must be https in server mode"},
+		{"https://emacs.example.edu", "http://idp.example.edu", false, "auth.oidc.issuer: \"http://idp.example.edu\" must be https"},
+		{"https://emacs.example.edu", "http://dex:5556/dex", true, ""},
+	} {
+		cfg.PublicURL, cfg.Auth.OIDC.Issuer, cfg.Auth.OIDC.AllowInsecureIssuer = tc.publicURL, tc.issuer, tc.insecure
+		err := Validate(&cfg)
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s with issuer %s: want %q, got %v", tc.publicURL, tc.issuer, tc.want, err)
+		}
+	}
+	// Local mode keeps any http publicUrl.
+	local := Defaults()
+	local.PublicURL = "http://emacs.lan:8080"
+	Resolve(&local)
+	if err := Validate(&local); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGroupLimits(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.json")
+	_ = os.WriteFile(p, []byte(`{"mode":"local","sessions":{"groupLimits":[{"group":"staff","maxActiveSessions":0},{"group":"cs101","maxActiveSessions":30}],"defaultGroupMaxActiveSessions":5}}`), 0o644)
+	cfg, err := LoadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []protocol.GroupLimit{{Group: "staff"}, {Group: "cs101", MaxActiveSessions: 30}}
+	if !reflect.DeepEqual(cfg.Sessions.GroupLimits, want) || cfg.Sessions.DefaultGroupMaxActiveSessions != 5 {
+		t.Fatalf("%+v", cfg.Sessions)
+	}
+	// The environment takes a JSON array.
+	cfg, err = Load(Sources{Env: []string{`PG_SESSIONS_GROUP_LIMITS=[{"group":"cs101","maxActiveSessions":2}]`, "PG_SESSIONS_DEFAULT_GROUP_MAX_ACTIVE_SESSIONS=1"}})
+	if err != nil || len(cfg.Sessions.GroupLimits) != 1 || cfg.Sessions.GroupLimits[0].MaxActiveSessions != 2 || cfg.Sessions.DefaultGroupMaxActiveSessions != 1 {
+		t.Fatalf("env: %v %+v", err, cfg)
+	}
+	if _, err := Load(Sources{Env: []string{"PG_SESSIONS_GROUP_LIMITS=cs101"}}); err == nil {
+		t.Fatal("non-JSON group limits accepted")
+	}
+	if _, err := Load(Sources{Env: []string{`PG_SESSIONS_GROUP_LIMITS=[{"group":"a","max":1}]`}}); err == nil {
+		t.Fatal("unknown group limit key accepted")
+	}
+	bad := Defaults()
+	bad.Sessions.GroupLimits = []protocol.GroupLimit{{Group: "a", MaxActiveSessions: 1}, {Group: "a"}, {MaxActiveSessions: -1}}
+	bad.Sessions.DefaultGroupMaxActiveSessions = -1
+	Resolve(&bad)
+	err = Validate(&bad)
+	for _, want := range []string{"listed twice", "groupLimits[2].group: required", "groupLimits[2].maxActiveSessions", "defaultGroupMaxActiveSessions"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("want %q in %v", want, err)
+		}
+	}
+}
+
 func TestValidate(t *testing.T) {
 	cfg := Defaults()
 	cfg.Mode = protocol.ModeServer
+	cfg.Auth.OIDC.Issuer, cfg.Auth.OIDC.ClientID = "https://idp.example.edu", "pg"
 	Resolve(&cfg)
-	err := Validate(&cfg)
-	if err == nil || !strings.Contains(err.Error(), "auth.mode: none") {
-		t.Fatalf("want auth none error, got %v", err)
-	}
-	cfg.Auth.Mode = protocol.AuthInvite
-	cfg.Auth.Invites.File = "/etc/playground/invites.txt"
 	if err := Validate(&cfg); err != nil {
 		t.Fatal(err)
 	}
 	cfg.Sessions.Limits.Memory = "lots"
 	cfg.Sessions.GUI.Geometry = "big"
-	err = Validate(&cfg)
+	err := Validate(&cfg)
 	if err == nil || !strings.Contains(err.Error(), "memory") || !strings.Contains(err.Error(), "geometry") {
 		t.Fatalf("got %v", err)
 	}
@@ -102,6 +213,7 @@ func TestEnvNames(t *testing.T) {
 		"sessions.gui.geometry":         "PG_SESSIONS_GUI_GEOMETRY",
 		"auth.oidc.allowedEmailDomains": "PG_AUTH_OIDC_ALLOWED_EMAIL_DOMAINS",
 		"sessions.limits.cpus":          "PG_SESSIONS_LIMITS_CPUS",
+		"sessions.groupLimits":          "PG_SESSIONS_GROUP_LIMITS",
 	}
 	for path, want := range cases {
 		if got := EnvName(path); got != want {
