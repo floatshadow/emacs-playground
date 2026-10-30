@@ -57,7 +57,7 @@ sessiond listens on `:7000` and on the Unix socket `/run/playground/agent.sock` 
 | Checkpoints | sessiond | `refs/playground/*` in `/work/.git`, metadata in `/work/.playground/checkpoints/` | with the workspace |
 | Playground state (module set, scenario cache, buffer snapshot, event log) | sessiond | `/work/.playground/`, `/work/emacs.d/modules.el` | with the workspace |
 | Progress (steps done, demonstrated, skipped; hints used; resets) | gateway | `<dataDir>/local.json` (local) or `<dataDir>/playground.db` (SQLite, server) | until the user is deleted |
-| Users, session registry, invite codes | gateway | same store | operator-managed |
+| Users (OIDC claims), session registry | gateway | same store | operator-managed |
 | Curriculum bundle | gateway | `curriculum.dir`: `curriculum.json`, per-lesson bundles, `fixtures/<id>.tar.zst`; built into the gateway image | replaced on upgrade |
 | Session container, tmux, Xvnc | gateway, sessiond | ephemeral | recreated at will |
 

@@ -103,7 +103,7 @@ Go 1.27 with the stdlib mux, `coder/websocket`, `creack/pty`, the Docker client,
 - ADR-008 Layered hints, state first: exits table over real state, habit and stuck rules over keys, ordered step conditions, reset. Authors write goals, not mistakes.
 - ADR-009 Git checkpoints `refs/playground/<lesson>/<step>` via a temporary index, plus window spec, unsaved text and undo of file buffers, and the session variables steps rely on (add one when a lesson needs it, backend.md §3.9). Restores keep build directories, `modules.el` and the learner's git index.
 - ADR-010 The curriculum bundle ships apart from images; sessiond fetches and caches fixtures from the gateway.
-- ADR-011 Gateway-native auth (invite codes, OIDC); Caddy only terminates TLS.
+- ADR-011 Gateway-native auth: generic OpenID Connect (code flow with PKCE) in server mode, none locally; Caddy only terminates TLS.
 - ADR-012 Steps are evaluated in sessiond (Elisp, files, shells; progress survives a closed tab); the browser renders and picks hints, and only it evaluates `session.*` exit rows.
 - ADR-013 sessiond's input tap gives prefix feedback even when Emacs is busy; the agent stays authoritative for command names.
 - ADR-014 CSS Modules over the demo's design tokens.

@@ -55,7 +55,7 @@ docker compose exec session tmux attach -t emacs</pre>
 <pre>cp .env.example .env     # DOMAIN, auth mode, limits
 docker compose --profile server up -d
 # Caddy terminates TLS; gateway talks to Docker through a socket proxy</pre>
-      <ul><li>Per-learner named volume for the workspace; progress in the gateway's SQLite database.</li><li>Invite codes or OIDC login; CPU, memory, pids and disk limits per session; idle stop after 30 minutes, volume kept for 30 days.</li><li>Session containers: read-only root, dropped capabilities, no Docker socket, egress only to package registries.</li></ul>
+      <ul><li>Per-learner named volume for the workspace; progress in the gateway's SQLite database.</li><li>OpenID Connect login with any provider; CPU, memory, pids and disk limits per session, active-session quotas per group; idle stop after 30 minutes, volume kept for 30 days.</li><li>Session containers: read-only root, dropped capabilities, no Docker socket, egress only to package registries.</li></ul>
     </div>
   </div>
 

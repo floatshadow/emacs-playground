@@ -18,7 +18,7 @@ DESIGN.md maps topics to documents; third-party.md lists every dependency and pi
 ```sh
 go run ./cmd/gateway -config deploy/config.dev.json -web web/dist -fonts .dev/fonts -set sessions.limits.memory=4g
 go test -tags dockerintegration ./internal/docker/       # docker backend against the real Engine
-images/gateway/test/server-mode.sh ghcr.io/floatshadow/emacs-playground/gateway:dev   # network isolation, proxy secret, gateway re-attach
+images/gateway/test/server-mode.sh ghcr.io/floatshadow/emacs-playground/gateway:dev   # server stack with Dex: sign-in, quotas, isolation, re-attach
 ```
 
 **sessiond against the real image:**

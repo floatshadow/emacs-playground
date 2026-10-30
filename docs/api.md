@@ -6,7 +6,7 @@ Contracts between browser, gateway, sessiond and the Emacs agent. The Go types i
 
 - Session endpoints live under the gateway's `/s/{sessionId}/`. JSON, UTF-8, Unix-millisecond timestamps.
 - Lesson ids are the lesson directory under `curriculum/`, with one slash (`02-buffers-and-files/03-opening-files`), put into URLs literally; routes use trailing wildcards.
-- Errors: `application/problem+json` `{status, code, message, details?}`, codes from `protocol.ErrorCode`: `unauthenticated` 401, `forbidden` 403, `not_found` 404, `invalid_request` 400, `conflict` 409, `rate_limited` 429, `session_limit` 429/503, `session_unavailable` 502/503, `emacs_unavailable` 503, `timeout` 504, `not_implemented` 501, `internal` 500 (also for unknown codes).
+- Errors: `application/problem+json` `{status, code, message, details?}`, codes from `protocol.ErrorCode`: `unauthenticated` 401, `forbidden` 403, `not_found` 404, `invalid_request` 400, `conflict` 409, `rate_limited` 429, `session_limit` 429/503, `group_quota_exceeded` 429 (details `{group, maxActiveSessions}`, `group` empty for learners in no listed group), `session_unavailable` 502/503, `emacs_unavailable` 503, `timeout` 504, `not_implemented` 501, `internal` 500 (also for unknown codes).
 - Auth: cookie `pg_session`. State-changing requests and WebSocket upgrades need `Origin` equal to the public URL's (local mode: `localhost` ≡ `127.0.0.1`).
 - Versioning: REST under `/api/v1`; WebSocket and agent `hello` carry `protocol: 1`; breaking changes bump both.
 
@@ -14,10 +14,10 @@ Contracts between browser, gateway, sessiond and the Emacs agent. The Go types i
 
 ### 2.1 Authentication
 
-- `GET /auth/config` (public) → `{mode, authMode, oidcStartUrl?}`.
-- `POST /auth/invite {code}` → `204` and cookie; `403` bad, expired or used-up code; `429`; `409` unless auth mode is `invite`.
-- `GET /auth/oidc/start|callback` → `501` (`404` outside `oidc` mode). `POST /auth/logout` → `204`.
-- `GET /me` → `{user:{id, displayName, kind}, mode, authMode, features:{gui, remoteBox, stuckReports, authorMode}, version}`.
+- `GET /auth/config` (public) → `{mode, authMode, oidcStartUrl?, oidcDisplayName?}`; `authMode` is `none` or `oidc`.
+- `GET /auth/oidc/start?next=/path` → `302` to the provider (`oidcStartUrl` has no query; `next` must be a same-origin path). `GET /auth/oidc/callback` → `302` to `next` (default `/`) with the cookie, or to `/login?error=` `state`, `provider`, `token` or `forbidden` (`protocol.LoginError`). Both `404` outside `oidc` mode.
+- `POST /auth/logout` → `204`, or `200 {redirectUrl}` (`protocol.LogoutResult`) to continue at the provider; revokes every cookie of the user.
+- `GET /me` → `{user:{id, displayName, kind, username?, email?, groups?}, mode, authMode, features:{gui, remoteBox, stuckReports, authorMode}, version}`; `kind` is `local` or `oidc`.
 
 ### 2.2 Curriculum
 
@@ -25,7 +25,7 @@ Contracts between browser, gateway, sessiond and the Emacs agent. The Go types i
 
 ### 2.3 Sessions
 
-`POST /sessions` → `201 SessionInfo` (idempotent per user, rate limited); `GET /sessions/{id}` (`emacs`, `mode`, `step` from sessiond's `/status`); `DELETE /sessions/{id}` → `204` (volume kept); `POST /sessions/{id}/restart-emacs`.
+`POST /sessions` → `201 SessionInfo` (idempotent per user, rate limited; `429 session_limit` or `group_quota_exceeded` when full); `GET /sessions/{id}` (`emacs`, `mode`, `step` from sessiond's `/status`); `DELETE /sessions/{id}` → `204` (volume kept); `POST /sessions/{id}/restart-emacs`.
 
 `SessionInfo` = `{id, state, createdAt, lastActiveAt?, image?, gui, failure?, emacs?, mode?, step?, updateAvailable?}`. States: `creating`, `starting`, `ready`, `idle`, `stopping`, `stopped`, `failed`, `removed`.
 

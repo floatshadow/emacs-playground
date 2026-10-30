@@ -12,11 +12,11 @@ React 19, TypeScript, Vite, TanStack Query (server state), Zustand (live state),
 
 | Route | Screen |
 |---|---|
-| `/login` | invite code or OIDC |
+| `/login` | "Sign in with <displayName>" (OIDC), back to the requested page; a message per `?error=` (`state`, `provider`, `token`, `forbidden`) |
 | `/` | course map (§10) |
 | `/lesson/*` | lesson pane, screen, rail; the rest of the path is the lesson id (it contains a slash) |
 | `/project/:projectId/:taskId?` | file tree, tasks, screen, preview, rail |
-| `/session` | status, frame mode, modules, restart, export, Start over, preferences |
+| `/session` | status, frame mode, modules, restart, export, Start over, preferences; account (name, email, Sign out, following the logout `redirectUrl`) outside auth mode `none` |
 
 The connection layer sits above the router, so navigation keeps the WebSockets open.
 
@@ -55,7 +55,7 @@ Keys: xterm.js encodes, sessiond's tap decodes. tmux never forwards Emacs's kitt
 
 Focus mode is in-page first: the stage takes the full width and a `role="status"` banner says whether the keyboard is locked and how to leave (its button, the top-bar button, Shift+Esc). Then document fullscreen and `navigator.keyboard.lock()` are tried, each abandoned after 1.5 s; leaving that fullscreen ends focus mode.
 
-Overlays mirror `emacs` events and connection state. Only the window changes the stage's size: the screen header is one line and the strip under the screen keeps its height for ticker or caption, so a demo never refits the terminal.
+Overlays mirror `emacs` events and connection state. A session that cannot start shows why with a Retry button; `group_quota_exceeded` names the group and its limit (also on `/session`). Only the window changes the stage's size: the screen header is one line and the strip under the screen keeps its height for ticker or caption, so a demo never refits the terminal.
 
 ## 6. Live panels and the advice engine
 
