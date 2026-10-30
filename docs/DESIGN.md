@@ -132,7 +132,7 @@ workspace/  artifacts/  .dev/   (git-ignored)
 
 ## 10. Roadmap
 
-Slice 1 delivers M1 to M3 and the GUI and preview panes. The slice-2 platform adds M0 for every toolchain and module, project scenarios with laps, and the per-session remote box; curriculum Parts 4–14 and P1–P8 run on it (M4–M6). The server-mode docker backend is experimental and OIDC answers 501.
+Slice 1 delivers M1 to M3 and the GUI and preview panes. The slice-2 platform adds M0 for every toolchain and module, project scenarios with laps, and the per-session remote box; curriculum Parts 4–14 and P1–P8 run on it (M4–M6). Server mode (docker backend, OIDC sign-in, group quotas) is experimental.
 
 | Milestone | Deliverable | Done when |
 |---|---|---|
@@ -143,7 +143,7 @@ Slice 1 delivers M1 to M3 and the GUI and preview panes. The slice-2 platform ad
 | M4 | preview, Parts 4–10 | previews reload on save; Babel runs four languages |
 | M5 | GUI frame, Parts 8.4, 8.5, 11 | pdf-tools and image lessons over noVNC |
 | M6 | remote box, Parts 12–13, P1–P8 | TRAMP lessons and every project pass |
-| M7 | server mode | auth, limits, reaping, egress policy; 20 sessions per host |
+| M7 | server mode | OIDC auth, limits and group quotas, reaping, egress policy; 20 sessions per host |
 
 ## 11. Glossary
 

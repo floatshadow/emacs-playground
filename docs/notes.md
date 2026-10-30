@@ -43,7 +43,7 @@ Go 1.27.3 from go.dev into `~/.local/go` (`go1.27.3.linux-amd64.tar.gz`, sha256 
 
 ## 5. Scope
 
-Done: the session image with all eighteen modules; sessiond with projects, laps and the remote box; gateway local mode (docker backend experimental, OIDC 501); playctl; every web screen; Parts 0 to 14 with P1–P8. Everything else is a `TODO` with its doc section (DESIGN.md §10).
+Done: the session image with all eighteen modules; sessiond with projects, laps and the remote box; gateway local mode (server mode with OIDC experimental); playctl; every web screen; Parts 0 to 14 with P1–P8. Everything else is a `TODO` with its doc section (DESIGN.md §10).
 
 ## 6. Known limitations
 

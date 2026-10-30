@@ -44,7 +44,7 @@ Rust through rustup (rustc, cargo, rust-analyzer, clippy, rustfmt, rust-src), ca
 | moby/moby/client, moby/moby/api | Engine API | not `docker/docker/client`; `containerd/errdefs` classifies errors |
 | fsnotify | workspace watching | not recursive: watch new directories |
 | modernc.org/sqlite | server store without cgo | single writer |
-| coreos/go-oidc/v3, x/oauth2 | OIDC (*planned*: 501) | |
+| coreos/go-oidc/v3, x/oauth2 | OIDC sign-in | |
 | invopop/jsonschema | `deploy/config.schema.json` | TypeScript types: api.md §8 |
 | goccy/go-yaml; klauspost/compress | curriculum YAML; zstd fixtures | |
 | prometheus/client_golang; testcontainers-go | metrics; sessiond integration test | |

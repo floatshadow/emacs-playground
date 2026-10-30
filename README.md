@@ -36,7 +36,7 @@ $EDITOR deploy/secrets/oidc_client_secret   # empty for a public client
 docker compose up -d
 ```
 
-Learners sign in with any OpenID Connect provider (Keycloak, Authentik, Dex, Google, GitLab, Entra ID…); register `https://<DOMAIN>/api/v1/auth/oidc/callback` as its redirect URI. Caddy obtains the TLS certificate; the gateway starts one isolated session container per learner. Resource limits, allow-lists and per-group session quotas are in `deploy/config.json` (`deploy/config.example.json` shows them). See `docs/deployment.md`.
+Learners sign in with any OpenID Connect provider (Keycloak, Authentik, Dex, Google, GitLab, Entra ID…); register `https://<DOMAIN>/api/v1/auth/oidc/callback` as its redirect URI. Caddy obtains the TLS certificate; the gateway starts one isolated session container per learner. Resource limits, allow-lists and group quotas: `deploy/config.example.json`, `docs/deployment.md`.
 
 ## Images
 

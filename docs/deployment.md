@@ -12,7 +12,7 @@
 
 Dockerfiles: `images/<name>/Dockerfile`, context the repository root. Pins: third-party.md; `images/session/versions.env` is reported by sessiond's `/status`.
 
-GitHub Actions: `ci.yml` (Go, web and curriculum checks) and `images.yml` (one matrix job per image, then `images/<image>/test/ci-smoke.sh`: the session's ERT suites, the gateway in local mode; a cold session build takes over an hour). Pull requests build without pushing. No provenance or SBOM attestations; the session and remote-box build caches live in a separate `buildcache` package.
+CI: `ci.yml` (Go, web, curriculum) and `images.yml` (a matrix job per image, then `images/<image>/test/ci-smoke.sh`: session ERT suites, gateway in local mode; a cold session build takes over an hour). Pull requests build without pushing; no provenance or SBOM attestations; session and remote-box build caches live in the `buildcache` package.
 
 Tags: the short commit sha and `latest` for pushes to main; `vX.Y.Z` for release tags. Forks set `IMAGE_BASE` in `.env`. *Planned:* the gateway refuses a session image of another major version.
 
@@ -22,7 +22,7 @@ Tags: the short commit sha and `latest` for pushes to main; `vX.Y.Z` for release
 |---|---|
 | `compose.yaml` | gateway with `gateway-data` and `deploy/config.json`; networks `front`, internal `sessions` |
 | `compose.local.yaml` | local mode on `127.0.0.1:8080`; session (`./workspace:/work`, id and token `local`); remote box (alias `box`) |
-| `compose.server.yaml` | server mode; Caddy (80, 443); Docker socket proxy on the internal `docker` network; OIDC client secret (`deploy/secrets/oidc_client_secret`) |
+| `compose.server.yaml` | server mode; Caddy (80, 443); Docker socket proxy on the internal `docker` network; OIDC client secret |
 | `compose.dev.yaml` | `make dev`: session on the host network, `127.0.0.1:7000`; remote box on `127.0.0.1:2222` |
 
 `.env` holds only `COMPOSE_FILE`, `TAG`, `IMAGE_BASE`, `DOMAIN`. Never set `hostname:` on the gateway in server mode: it finds its own container by hostname (§7). Caddy answers `/internal/*` with 404; the server-mode gateway also refuses `/internal` requests with forwarding headers.
@@ -31,32 +31,27 @@ Server-mode session containers (backend.md §2.3) get the §9.2 profile and `PG_
 
 ## 3. Configuration file
 
-File: `-config`, else `$PG_CONFIG`, else `/etc/playground/config.json`. Precedence: defaults < file < `PG_*` environment < flags (`-set key.path=value`). Environment names split camelCase (`sessions.limits.memory` → `PG_SESSIONS_LIMITS_MEMORY`); unsplit names and `config.Aliases` also work. Lists are comma-separated or a JSON array, the only form for lists of objects (`PG_SESSIONS_GROUP_LIMITS='[{"group":"cs101","maxActiveSessions":30}]'`). Unknown keys are errors; secrets are files (`*File` keys). All keys and defaults: `config.Defaults`, the generated `deploy/config.schema.json`, `deploy/config.example.json`; `gateway config` prints the effective configuration, secrets redacted.
+File: `-config`, else `$PG_CONFIG`, else `/etc/playground/config.json`. Precedence: defaults < file < `PG_*` environment < flags (`-set key.path=value`). Environment names split camelCase (`sessions.limits.memory` → `PG_SESSIONS_LIMITS_MEMORY`); unsplit names and `config.Aliases` also work. Lists: comma-separated or JSON (`PG_SESSIONS_GROUP_LIMITS='[{"group":"cs101","maxActiveSessions":30}]'`). Unknown keys are errors; secrets are files (`*File` keys). All keys and defaults: `config.Defaults`, the generated `deploy/config.schema.json`, `deploy/config.example.json`; `gateway config` prints the effective configuration, secrets redacted.
 
 Keys with non-obvious behaviour:
 
 | Key | Default | Notes |
 |---|---|---|
-| `publicUrl` | `http://localhost:8080` | cookies, OIDC redirect, Origin checks; locally `localhost` and `127.0.0.1` are interchangeable; https in server mode unless loopback |
+| `publicUrl` | `http://localhost:8080` | cookies, OIDC redirect, Origin checks; https in server mode unless loopback; locally `localhost` ≡ `127.0.0.1` |
 | `auth.mode` | `none` local, `oidc` server | `none` is refused in server mode |
-| `auth.oidc.issuer`, `clientId` | | required with `oidc`; discovery from `<issuer>/.well-known/openid-configuration`; https unless loopback or `allowInsecureIssuer` (a provider on a trusted internal network) |
-| `auth.oidc.clientSecretFile` | | empty: public client (PKCE only) |
-| `auth.oidc.scopes` | `openid`, `email`, `profile` | add `groups` when the provider needs it for the groups claim |
-| `auth.oidc.displayName` | `SSO` | "Sign in with …" |
-| `auth.oidc.usernameClaim`, `groupsClaim` | `preferred_username` (then `email`), `groups` | the groups claim may be a list or one string; it is read from the ID token only |
-| `auth.oidc.allowedEmailDomains` | any | exact, case-insensitive; needs `email_verified` true (Entra ID omits it: use `allowedGroups` or a tenant issuer) |
-| `auth.oidc.allowedGroups` | any | one match suffices |
-| `auth.oidc.providerLogout` | `true` | logout continues at the provider's `end_session_endpoint` if it has one |
-| `auth.sessionDays` | `30` | cookie lifetime from the sign-in, never extended |
+| `auth.oidc.issuer`, `clientId` | | required with `oidc`; discovery at `<issuer>/.well-known/openid-configuration`; https unless loopback or `allowInsecureIssuer` |
+| `auth.oidc.clientSecretFile`, `scopes`, `displayName`, `providerLogout` | none, `openid email profile`, `SSO`, `true` | no secret: public client (PKCE); add scope `groups` if the provider needs it; "Sign in with <displayName>"; logout continues at the provider's `end_session_endpoint`, if any |
+| `auth.oidc.usernameClaim`, `groupsClaim` | `preferred_username` (else `email`), `groups` | groups: list or string, ID token only |
+| `auth.oidc.allowedEmailDomains`, `allowedGroups` | any | domains need `email_verified` (Entra ID omits it: use groups); one match suffices |
 | `sessions.backend` | `static` local, `docker` server | |
 | `sessions.isolation` | `network` | per-session networks (§7); `shared` uses `sessions.network` |
 | `sessions.subnetPool` | `10.231.0.0/16` | per-session `/28`s; empty falls back to the daemon's pools (about 30 networks) |
 | `sessions.gatewayContainer` | own hostname | joins every session network |
 | `sessions.runtime` | `runc` | `runsc` for gVisor |
-| `sessions.limits.disk` | `4g` | enforced only by storage drivers with quotas; `sessions.limits` (CPUs, memory, pids, disk) applies to every session |
-| `sessions.maxSessions` | `50` | active sessions overall; `429 session_limit` |
-| `sessions.groupLimits` | `[]` | ordered `{group, maxActiveSessions}` (0: no limit); a learner counts against the first group they are in; `429 group_quota_exceeded` |
-| `sessions.defaultGroupMaxActiveSessions` | `0` (none) | one shared pool for learners in no listed group |
+| `sessions.limits` | 2 CPUs, `3g`, 1024 pids, `4g` disk | every session; disk only with storage-driver quotas |
+| `sessions.maxSessions` | `50` | active sessions overall (`429 session_limit`) |
+| `sessions.groupLimits` | `[]` | ordered `{group, maxActiveSessions}` (0: unlimited); a learner counts against their first listed group (`429 group_quota_exceeded`) |
+| `sessions.defaultGroupMaxActiveSessions` | `0` (none) | shared pool of learners in no listed group |
 | `sessions.egress` | `registries` | §9.2 |
 | `local.sessionId`, `sessionToken` | `local` | must match `compose.local.yaml` |
 | `features.authorMode` | `false` | raw conditions and state, `rpc eval`, hot reload |
@@ -71,7 +66,13 @@ sessiond reads environment only (backend.md §3.13). `PG_PROXY_SECRET` is derive
 
 ## 5. Server mode (experimental)
 
-Learners sign in with OpenID Connect (backend.md §2.6). Register a confidential or public client at the provider with redirect URI `https://<DOMAIN>/api/v1/auth/oidc/callback` and post-logout redirect URI `https://<DOMAIN>/login`, then `make server DOMAIN=… OIDC_ISSUER=… OIDC_CLIENT_ID=…` (writes a minimal `deploy/config.json` when it is not yet a server config; `deploy/config.example.json` shows allow-lists, group limits and resource limits), put the client secret in `deploy/secrets/oidc_client_secret` (empty for a public client) and `docker compose up -d`. Compose bind-mounts file secrets with their host owner and mode, so the secret is 644 inside the 700 `deploy/secrets` for the gateway (uid 65532) to read it.
+Learners sign in with OpenID Connect (backend.md §2.6). Register a client, confidential or public, with redirect URI `https://<DOMAIN>/api/v1/auth/oidc/callback` and post-logout URI `https://<DOMAIN>/login`; ID tokens carry `sub`, and `email_verified` or the groups claim for rules that use them. Run `make server DOMAIN=… OIDC_ISSUER=… OIDC_CLIENT_ID=…` (writes a minimal `deploy/config.json` unless it is a server config already), put any client secret in `deploy/secrets/oidc_client_secret` (kept 644 for the gateway's uid 65532), then `docker compose up -d`. Allow-lists and quotas (all keys: `deploy/config.example.json`):
+
+```json
+{"auth": {"oidc": {"issuer": "https://idp.example.edu/realms/main", "clientId": "emacs-playground",
+   "scopes": ["openid","email","profile","groups"], "allowedEmailDomains": ["example.edu"]}},
+ "sessions": {"groupLimits": [{"group":"cs101","maxActiveSessions":30}], "defaultGroupMaxActiveSessions": 5}}
+```
 
 - Host: 4 GB RAM plus about 1.5 GB and a quarter core per concurrent session; 10 GB disk plus 2–4 GB per learner; ports 80 and 443; `DOMAIN` resolving before first start.
 - Upgrade: `TAG=vX.Y.Z docker compose pull && docker compose up -d`; running sessions keep their image until they stop.
@@ -81,7 +82,7 @@ Learners sign in with OpenID Connect (backend.md §2.6). Register a confidential
 
 ## 6. Remote box
 
-sshd, a `deploy` user (passwordless sudo, for `/ssh:box|sudo::`), Emacs with the pinned packages (lesson 13.6), Rust and Python running offline like the session's (emacs.md §9), nginx serving `/srv/www`; TRAMP lessons use `/ssh:box:`, P5 deploys to `/srv/www`, P6 to `/srv/app`. Each session has an ed25519 key pair in `/work/.playground/ssh` and a `box` alias in `~/.ssh/config` (`HostName` `PG_BOX_HOST`, user `deploy`, `BatchMode`, no host-key checks: a re-created box has new host keys), so `ssh box` and TRAMP never prompt; `/status` reports `remoteBox` once written. Locally sessiond generates the pair and one box, started with the stack, reads `authorized_keys` from that directory (mounted read-only) at every login. On servers each session gets its own box with a fresh pair (backend.md §2.3, public half as `AUTHORIZED_KEYS`), which keeps nothing across re-creation.
+sshd, a `deploy` user (passwordless sudo, for `/ssh:box|sudo::`), Emacs with the pinned packages (lesson 13.6), offline Rust and Python like the session's (emacs.md §9), nginx serving `/srv/www`; TRAMP lessons use `/ssh:box:`, P5 deploys to `/srv/www`, P6 to `/srv/app`. Each session has an ed25519 key pair in `/work/.playground/ssh` and a `box` alias in `~/.ssh/config` (`HostName` `PG_BOX_HOST`, user `deploy`, `BatchMode`, no host-key checks: a re-created box has new host keys), so `ssh box` and TRAMP never prompt; `/status` reports `remoteBox` once written. Locally sessiond generates the pair, and the one box started with the stack reads `authorized_keys` from that directory (read-only) at every login. On servers each session gets its own box with a fresh pair (backend.md §2.3, public half as `AUTHORIZED_KEYS`), keeping nothing across re-creation.
 
 ## 7. Networking
 
@@ -128,7 +129,7 @@ Egress: session networks have no route unless `egress: all` (NAT, and cargo and 
 
 ### 9.3 Gateway and web application
 
-- Cookies and login: backend.md §2.6. CSRF: `Origin` must match `publicUrl` on state-changing requests and WebSocket upgrades; no CORS.
+- Login (backend.md §2.6): code flow with PKCE, state and nonce in a signed 10-minute cookie, verified ID tokens; allow-lists rechecked per request; logout revokes all the user's cookies. CSRF: `Origin` must match `publicUrl` on state-changing requests and WebSocket upgrades; no CORS.
 - `/s/{id}` only for its owner, through the proxy of backend.md §2.5 (credentials stripped, `rpc eval` only in author mode, internal ops refused); `/internal` tokens are random 256-bit, stored hashed, per session.
 - sessiond requires the proxy secret (backend.md §3.13); with §7, one learner cannot reach another's Emacs, previews or RPCs.
 - Previews: read through `os.Root`; active content gets a sandboxing CSP, `nosniff`, a sandboxed iframe. Open (DESIGN.md §12): the CSP keeps `allow-same-origin`, so a learner's HTML opened directly can make credentialed requests to `/api` and `/s`; closing it needs a separate origin or dropping that flag.
