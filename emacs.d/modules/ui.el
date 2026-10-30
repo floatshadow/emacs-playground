@@ -124,7 +124,9 @@ signal an error on every redisplay."
 ;; sits in a window above the echo area (`lv', the default display,
 ;; which works in the terminal frame and sends nothing to the echo
 ;; area), and its keys win over every other keymap until it closes.
-;; Heads are complete keys, so which-key never pops up inside one.
+;; Heads are complete keys, so which-key does not pop up for them; a
+;; prefix key that is no head (ESC in the terminal) still shows its
+;; popup, under the hint.
 
 (defun playground-hydra-active-p (&rest _)
   "Non-nil while a hydra's keys are active.

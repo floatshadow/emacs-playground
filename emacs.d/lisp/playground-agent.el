@@ -253,6 +253,14 @@ client frame exists; the layout then goes to the first client frame.")
   "Function that leaves every minibuffer and recursive edit.
 It must not return (it throws to the command loop).  Tests replace it.")
 
+(defvar playground-reset-step-hook nil
+  "Normal hook run at the end of every `reset-step' (each checkpoint restore).
+The files, buffers and windows go back to the step's start, but what
+evaluating a file did stays in memory.  `setup' empties this hook
+before a scenario's eval, so a lesson whose steps evaluate a file adds
+here what puts memory back in line with the restored file (lesson 13.5
+loads its menus again).")
+
 (defvar playground-agent-ops nil
   "Alist of (OP-NAME . FUNCTION) for calls from sessiond.
 Each FUNCTION takes the call's argument object (an alist) and returns
@@ -2185,7 +2193,8 @@ build output made since is killed (`playground--kill-later-runs'),
 then the spec is opened: its tab, files,
 points and windows, each window on the file it showed (whatever the
 buffer is called now) or on its Dired listing, ibuffer or buffer list
-made again, the selected window last."
+made again, the selected window last.  Last, `playground-reset-step-hook'
+runs."
   (let ((reverted 0) (killed 0))
     (dolist (b (buffer-list))
       (let ((file (buffer-file-name b)))
@@ -2217,6 +2226,8 @@ made again, the selected window last."
         (cl-incf killed (playground--kill-later-runs spec))
         (playground--sync-tabs spec)
         (playground--op-open spec)))
+    (playground--safely "reset-step hook"
+      (playground--in-user-window (run-hooks 'playground-reset-step-hook)))
     `((reverted . ,reverted) (killed . ,killed))))
 
 (defun playground--sync-changed-buffers (root)
@@ -2367,6 +2378,8 @@ buffers and in the windows that show them, before the setup's eval
          (reset (eq (alist-get 'reset args) t))
          (opened nil)
          (first nil))
+    ;; What the previous lesson redid after a restore is not this one's.
+    (setq playground-reset-step-hook nil)
     (playground--sync-changed-buffers playground-agent-workspace)
     (when reset
       (playground--restore-auto-save)

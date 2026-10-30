@@ -926,6 +926,22 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (should (= (length (window-list)) 2))
       (should (equal (playground--layout-string (playground--tree (selected-frame))) "(hsplit a.txt b.txt)")))))
 
+(defvar pg-test--restored 0)
+(ert-deftest pg-agent/reset-step-runs-the-lesson-hook ()
+  "reset-step runs `playground-reset-step-hook' last; setup empties it before its eval."
+  (pg-test-with-agent
+    (pg-test-file "a.txt" "a\n")
+    (setq pg-test--restored 0)
+    (add-hook 'playground-reset-step-hook (lambda () (setq pg-test--restored -100)))
+    (pg-test-value (pg-test-call "setup" `((open . ,(vector "a.txt"))
+                                           (eval . "(add-hook 'playground-reset-step-hook (lambda () (cl-incf pg-test--restored)))")
+                                           (workspace . ,pg-test--dir))))
+    (should (= pg-test--restored 0))
+    (pg-test-value (pg-test-call "reset-step" `((spec . ((files . ,(vector '((path . "a.txt") (point . 1) (visible . t)))))))))
+    (pg-test-value (pg-test-call "reset-step" `((spec . ((files . ,(vector '((path . "a.txt") (point . 1) (visible . t)))))))))
+    (should (= pg-test--restored 2))
+    (setq playground-reset-step-hook nil)))
+
 (ert-deftest pg-agent/op-reset-step-cancels-a-pending-prefix ()
   "With a prefix key waiting (C-c), reset-step unwinds first, then resets and replies."
   (pg-test-with-agent
