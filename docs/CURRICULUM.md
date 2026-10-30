@@ -263,7 +263,7 @@ steps:
 - save-place positions under the root are forgotten, so the `open` files start on line 1;
 - `auto-save-visited-mode` is turned back on (when the base module is loaded) before `eval`, so a lesson whose `eval` turns it off does not leave it off for the next one.
 
-**Steps.** A step completes when all its top-level conditions hold at once; sessiond's engine evaluates them after relevant events (debounced) and every 2 s. A checkpoint (workspace files, buffers, windows, unsaved text and the session variables steps rely on) is taken when a step starts; Reset this step, Do it yourself and Go to this step restore it.
+**Steps.** A step completes when all its top-level conditions hold at once; sessiond's engine evaluates them after relevant events (debounced) and every 2 s. A checkpoint (workspace files, buffers, windows, unsaved text and the session variables steps rely on) is taken when a step starts; Reset this step, Do it yourself and Go to this step restore it. What evaluating a file did stays in memory: a setup `eval` that adds to `playground-reset-step-hook` redoes it after every restore (13.5 reloads `my-hydras.el`), and the next lesson's setup empties the hook.
 
 **Conditions.** Exactly one kind field per condition. Top-level conditions carry `text` (shown in the step list) and `hint`; nested ones inside `all`, `any`, `not` only need the kind. Ids default to `<stepId>/<n>`, 1-based (`open/1`); an explicit `id` overrides.
 
