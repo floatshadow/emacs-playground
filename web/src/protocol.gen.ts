@@ -287,10 +287,11 @@ export const UserLocal = "local" satisfies UserKind;
 export const UserOIDC = "oidc" satisfies UserKind;
 
 /** WaitingKind names the loop of State.Waiting. */
-export type WaitingKind = "menu" | "avy" | "which-key";
+export type WaitingKind = "menu" | "avy" | "which-key" | "hydra";
 export const WaitingMenu = "menu" satisfies WaitingKind;
 export const WaitingAvy = "avy" satisfies WaitingKind;
 export const WaitingWhichKey = "which-key" satisfies WaitingKind;
+export const WaitingHydra = "hydra" satisfies WaitingKind;
 
 /** CheatRow is [keys, description]; YAML `- [M-., go to definition]`. */
 export type CheatRow = [keys: string, description: string];
@@ -1994,8 +1995,8 @@ export interface State {
   diagAtPoint: Diagnostic | null;
   /**
    * Waiting names a loop that reads keys of its own (a menu-bar menu,
-   * avy, which-key's pages), or null. Such a loop is neither a prompt nor
-   * a recursive edit, and every key goes to it.
+   * avy, which-key's pages) or an open hydra, or null. Such a loop is
+   * neither a prompt nor a recursive edit, and keys go to it first.
    */
   waiting: Waiting | null;
 }
