@@ -9,7 +9,7 @@ DESIGN.md maps topics to documents; third-party.md lists every dependency and pi
 ## 2. Development workflow
 
 - **Config files:** `deploy/config.json` (minimal local); `deploy/config.dev.json` (`make dev`: `publicUrl` is Vite's `:5173` so proxied Origins pass, state under `.dev/`, author mode); `deploy/config.example.json` (server).
-- **Emacs configuration** changes: rebuild the session image (about 15 s for config only) and `make reset-workspace`.
+- **Emacs configuration:** rebuild the session image (about 15 s) and `make reset-workspace`.
 - **Without rebuilding images:** bind-mount `CGO_ENABLED=0` binaries over `/gateway` and `/usr/local/bin/sessiond` in a Compose overlay (also `web/dist` with `PG_WEB_DIR`, a built curriculum over `/srv/curriculum`); `up -d --force-recreate`.
 - **Without the stack:** `sessiond -fake` (backend.md §3.1); `pnpm preview --port 8080 --host 127.0.0.1 --strictPort`; `pnpm dev:fake` (`web/dev/README.md`).
 
@@ -31,11 +31,11 @@ PG_SESSIOND_URL=http://127.0.0.1:17200 PG_TEST_FAKE_GATEWAY=127.0.0.1:17180 PG_T
   go test -tags integration ./internal/sessiond/ -run Integration -v
 ```
 
-Without `PG_SESSIOND_URL` it uses testcontainers (`PG_SESSION_IMAGE`), skipping the lesson and GUI parts.
+Without `PG_SESSIOND_URL`: testcontainers (`PG_SESSION_IMAGE`), no lesson or GUI parts.
 
-**Browser scripts** (`web/e2e/`; `PG_CDP`, `PG_URL`, `PG_WORKSPACE`): `smoke.mjs` (`make e2e`; `PG_SMOKE_ONLY=3,4`, `PG_SMOKE_PLAY=0`), `review.mjs` (one check per UX contract; `PG_REVIEW_ONLY`), `lesson.mjs` (fake session), `shots.mjs`, `demo-focus.mjs`. They write to `artifacts/`, reset the progress they touch and stay under ten page loads a minute (deployment.md §9.3); `*.local.mjs` are git-ignored.
+**Browser scripts** (`web/e2e/`; `PG_CDP`, `PG_URL`, `PG_WORKSPACE`): `smoke.mjs` (`make e2e`; `PG_SMOKE_ONLY=3,4`, `PG_SMOKE_PLAY=0`), `review.mjs` (one check per UX contract; `PG_REVIEW_ONLY`), `lesson.mjs` (fake session), `shots.mjs`, `demo-focus.mjs`. They write to `artifacts/`, reset the progress they touch and stay under ten page loads a minute (deployment.md §9.3); `*.local.mjs` is git-ignored.
 
-**Parallel QA.** Browser agents sharing the one local session corrupt each other's state, so each gets its own Compose project (`-p`; an overlay with its own port via `ports: !override`; `PG_PUBLIC_URL` on that port, or POSTs are refused as cross-origin; its own world-writable workspace with `.playground/ssh` made before `up`) and Chrome container, and the scripts point at it (`PG_URL`, `PG_CDP`, `PG_WORKSPACE`, `PG_PLAY_SESSION`). Drive with real keys; inspect Emacs with `emacsclient --eval`. A change is accepted when `make check`, `make emacs-test`, `smoke.mjs` and `review.mjs` pass, and `play all` then `play -watch all` pass on a fresh workspace.
+**Parallel QA.** Browser agents sharing a session corrupt each other's state; each gets its own Compose project (`-p`; an overlay with its own port via `ports: !override`; `PG_PUBLIC_URL` on that port, or POSTs are refused as cross-origin; its own world-writable workspace with `.playground/ssh` made before `up`) and Chrome container, and the scripts point at it (`PG_URL`, `PG_CDP`, `PG_WORKSPACE`, `PG_PLAY_SESSION`). Drive with real keys; inspect with `emacsclient --eval`. Accepted when `make check`, `make emacs-test`, `smoke.mjs` and `review.mjs` pass, and `play all` then `play -watch all` pass on a fresh workspace.
 
 ## 4. Toolchain
 
@@ -61,19 +61,19 @@ Rules: CURRICULUM.md B.3 and B.4. Beyond them:
 - **One action per step.**
 - **Every sentence true on the learner's screen**, in the shipped theme and with any later module set; name or hide every mode-line token the learner sees.
 - **Say how often and how to page**: `ESC ESC ESC` undoes one thing at a time; which-key's "(1 of 2)" pages with `C-h n`.
-- **Name the copy** by absolute path (`/work/hello` or `/work/projects/hello`): a wrong copy renames buffers through uniquify and breaks demos that type buffer names.
-- **Demos and hints start from the step's checkpoint**, not where the previous demo left off: type absolute paths, never rely on the prompt's directory or point.
+- **Name the copy** by absolute path (`/work/hello` or `/work/projects/hello`): a wrong copy uniquifies buffer names and breaks demos that type them.
+- **Demos and hints start from the step's checkpoint**, not the previous demo's end: type absolute paths, never rely on the prompt's directory or point.
 - **Commands that read their own keys** (`help-for-help`, `query-replace`, which-key paging) send `key` only when they finish: check the screen state (`{"windows.buf": " *Metahelp*"}`).
-- **Session state:** add to `sessiond.GlobalVars` when a lesson relies on more (backend.md §3.9). Demos never depend on the learner's history (2.2 finds its command with `M-r`; 1.6 sets the macro counter first).
-- **Setups never ask:** bind `kill-buffer-query-functions` to nil when killing a buffer with a process.
+- **Session state:** add to `sessiond.GlobalVars` what a lesson relies on (backend.md §3.9). Demos never depend on the learner's history (2.2 finds its command with `M-r`; 1.6 sets the macro counter first).
+- **Setups never ask:** bind `kill-buffer-query-functions` to nil to kill a buffer with a process.
 - **Write the keys out:** keys in the lesson or step text silence habit cards, paraphrased ones do not. `:try` clicks are learner input.
 - **Command names:** keep older names (`kill-region` for `C-k`) as alternatives; `M-y` is `consult-yank-pop` only from lesson 4.2.
-- **Test with every module on:** with a language server, imenu positions can land on doc comments and corfu's popup opens inside snippet fields.
+- **Test with every module on:** with a language server, imenu can land on doc comments and corfu's popup opens in snippet fields.
 - **No newline right after a symbol** in code buffers: corfu-auto with cape-dabbrev can take the RET. Prose buffers open the popup only on request.
-- **Magit** buffers survive restores and Magit remembers open sections: setups clear `magit-repository-local-cache`, demos fold first (`M-2`, `M-4`). Opening a conflicted file puts point in its first conflict, so `C-c ^ n` goes to the second.
+- **Magit** buffers survive restores and remember open sections: setups clear `magit-repository-local-cache`, demos fold first (`M-2`, `M-4`). A conflicted file opens at its first conflict, so `C-c ^ n` goes to the second.
 - **setup.run rebuilding `.git`** races with git run by the previous lesson's buffers (diff-hl, Magit): retry `rm`, `add` and `commit`. Box state comes from setup.run; checkpoints do not cover the box.
-- **No TRAMP calls from timers or process callbacks:** nested in another operation on the same connection, they break it.
-- **user-lisp files that call package macros** (`pretty-hydra-define`) need `no-byte-compile: t`: Emacs 31 compiles `user-lisp/` before packages are activated. Load them from `after-init-hook` inside `with-demoted-errors`, or a deleted or broken file stops the daemon at start.
-- **Hydras:** heads set `this-command` (ui.el keeps repeat-mode out of an open hydra); `defhydra` docstring hints start with a newline. Saving Lisp re-indents through format-on-save, so a lost parenthesis shifts every line below and needs an extra `C-/`. A menu is in memory, so 13.5's setup reloads its file from `playground-reset-step-hook` after every restore; its "closed" conditions also need a head pressed, since `waiting` is null before the menu opens. A demo that adds to a seeded file replaces a line (`C-SPC C-e`, `C-k`) rather than inserting one, so Watch it or Skip on a later visit does not duplicate it.
+- **No TRAMP calls from timers or process callbacks:** nested in another operation on the connection, they break it.
+- **user-lisp calling package macros** (`pretty-hydra-define`) needs `no-byte-compile: t` (compiled before packages activate) and loads from `after-init-hook` in `with-demoted-errors`, so a broken file cannot stop the daemon.
+- **Idempotent demos:** adding to a seeded file replaces a line, so a revisit's Watch it or Skip adds nothing. A "hydra closed" condition needs a head pressed: `waiting` is null before it opens.
 - **Lessons that edit `emacs.d/modules`** (13.1, 13.7) cannot replay on a stack that mounts the modules read-only.
-- **Check:** `play` and `play -watch`, `-repeat 2`, on a fresh workspace (`make curriculum-play`, `make curriculum-watch`); `play all` in course order, since Part 13's settings (a 2 s auto-save) stay on for the projects; replay Part 3 then Parts 0-2 for more modules than listed; pause `~1000` before a `C-g` that follows an edit (emacs.md §10.4).
+- **Check:** `play`, `play -watch`, `-repeat 2` on a fresh workspace (`make curriculum-play`, `curriculum-watch`); `play all` in course order, since Part 13's settings (a 2 s auto-save) stay on for the projects; Part 3 then Parts 0-2 for more modules than listed; pause `~1000` before a `C-g` that follows an edit (emacs.md §10.4).
