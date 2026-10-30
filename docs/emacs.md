@@ -77,7 +77,7 @@ A global minor mode (built-in libraries only) that reports and answers sessiond'
 - Minibuffer and isearch start and end → `minibuffer` (`kind: isearch` for isearch) and `state`.
 - Window, buffer, mode and macro changes → one coalesced `state` per command.
 - Frame creation and deletion → `frame`; `closed` only when the last frame of its terminal goes. A new client frame gets the learner's windows; when the last graphical frame goes, its windows return to the terminal frame.
-- Loops that read their own keys (`popup-menu`, avy, which-key paging; `playground-agent-waiting-loops`) set the state's `waiting` with the keys that leave them.
+- Loops that read their own keys (`popup-menu`, avy, which-key paging; `playground-agent-waiting-loops`) set the state's `waiting` with the keys that leave them; so does an open hydra (`kind: hydra`, leave `C-g`: `hydra-curr-map` set and hydra's clear function on `pre-command-hook`), reported again when `hydra-disable` runs (a `:timeout`). Hydra heads are reported by their command names (`my-menu/other-window`); a key an amaranth hydra swallows is `hydra-amaranth-warn`.
 - `compilation-start-hook` stamps each run's start (for `reset-step`).
 
 ### 10.2 State snapshot
@@ -90,13 +90,13 @@ Ops run in the learner's window of the learner's frame (the newest graphical fra
 
 - `check {forms}`: each form under `condition-case` and a 1 s timeout → `t`, `false` or `"unknown"`.
 - `eval {form}`: value as JSON (symbol-keyed alists become objects).
-- `rescue`: leaves a waiting loop by queueing its leave keys (a throw would leave a tty menu drawn), then minibuffers, recursive edits, isearch, macro recording, overwrite mode, narrowing, multiple cursors, iedit, extra windows (keeping a file window), `special-mode` buffers, the selection and pending input; returns its actions as sentences. Never saves, kills file buffers or reverts.
+- `rescue`: closes an open hydra first (`hydra-keyboard-quit`, "closed the NAME hydra"), leaves a waiting loop by queueing its leave keys (a throw would leave a tty menu drawn), then minibuffers, recursive edits, isearch, macro recording, overwrite mode, narrowing, multiple cursors, iedit, extra windows (keeping a file window), `special-mode` buffers, the selection and pending input; returns its actions as sentences. Never saves, kills file buffers or reverts.
 - `snapshot`: the `WindowSpec` (api.md §7). `windowState` is `window-state-get` with each buffer entry's file added, stripped of text properties (uniquify can leave buffer objects in names); files, not buffer names, identify buffers across a step. Dired, ibuffer and buffer-list windows record how to remake them (directory or filters, marks, line); `tabs`/`tabIndex` and `specialBuffers` (help buffers with their `help-xref-stack-item`) complete it.
 - `open {spec}`: visits files, selects the spec's tab, then `window-state-put` with buffer entries renamed to the buffers now visiting those files and list buffers remade; else applies `layout`. Without a client frame the layout waits for the next one (`layoutDeferred`).
-- `reset-step {spec}` (every checkpoint restore): leaves any prompt or pending prefix key, as `setup`; reverts changed or modified file buffers; kills buffers of vanished files and unmodified workspace file buffers the spec does not list (conditions are false again, names un-uniquify); remakes help buffers; kills compilation runs started after the spec unless a spec window shows them (a demo's build must not satisfy the learner's step); restores the spec's tabs; then `open`s it.
-- `setup {open, layout, eval, compile, workspace, reset, root}`: leaves any prompt or pending prefix key; reverts buffers whose files changed on disk, kills those whose files are gone. With `reset`: re-enables `auto-save-visited-mode`, closes other tabs, clears unmodified leftover buffers, forgets save-place positions under `root`, opens files at line 1. Then opens, lays out, evaluates `eval` in the learner's window and runs `compile` in the first file's project root.
+- `reset-step {spec}` (every checkpoint restore): leaves any open hydra, prompt or pending prefix key, as `setup`; reverts changed or modified file buffers; kills buffers of vanished files and unmodified workspace file buffers the spec does not list (conditions are false again, names un-uniquify); remakes help buffers; kills compilation runs started after the spec unless a spec window shows them (a demo's build must not satisfy the learner's step); restores the spec's tabs; then `open`s it.
+- `setup {open, layout, eval, compile, workspace, reset, root}`: closes an open hydra silently and leaves any prompt or pending prefix key; reverts buffers whose files changed on disk, kills those whose files are gone. With `reset`: re-enables `auto-save-visited-mode`, closes other tabs, clears unmodified leftover buffers, forgets save-place positions under `root`, opens files at line 1. Then opens, lays out, evaluates `eval` in the learner's window and runs `compile` in the first file's project root.
 - `set-modules {enabled}`: writes `modules.el` atomically; sessiond restarts.
-- `describe {keys}` or `{cmd}`: binding and first docstring line. `frame {display?}`: the GUI frame (§6).
+- `describe {keys}` or `{cmd}`: binding and first docstring line; hydra's generated commands get sentences ("Open the NAME hydra…", "CMD from the NAME hydra: …"). `frame {display?}`: the GUI frame (§6).
 
 Side windows: layouts, window states, `single` setups and Rescue select a normal window before deleting the others and make a sole window still marked as a side window ordinary; splitting such a window recurses to `max-lisp-eval-depth`.
 
@@ -120,4 +120,4 @@ C-g during redisplay: a C-g read while redisplay runs Lisp (typically `jit-lock-
 
 ## 11. Standalone use
 
-The image works as a plain Emacs (`docker run -it --rm -v "$PWD:/work" …/session emacs -nw`); `PLAYGROUND=0` turns off the agent and the frame-only `C-x C-c`. The config runs on any Emacs 31 with the toolchains (lesson 13.6 starts it on the remote box).
+The image works as a plain Emacs (`docker run -it --rm -v "$PWD:/work" …/session emacs -nw`); `PLAYGROUND=0` turns off the agent and the frame-only `C-x C-c`. The config runs on any Emacs 31 with the toolchains (lesson 13.7 starts it on the remote box).

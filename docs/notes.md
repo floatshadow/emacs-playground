@@ -73,5 +73,7 @@ Rules: CURRICULUM.md B.3 and B.4. Beyond them:
 - **Magit** buffers survive restores and Magit remembers open sections: setups clear `magit-repository-local-cache`, demos fold first (`M-2`, `M-4`). Opening a conflicted file puts point in its first conflict, so `C-c ^ n` goes to the second.
 - **setup.run rebuilding `.git`** races with git run by the previous lesson's buffers (diff-hl, Magit): retry `rm`, `add` and `commit`. Box state comes from setup.run; checkpoints do not cover the box.
 - **No TRAMP calls from timers or process callbacks:** nested in another operation on the same connection, they break it.
-- **Lessons that edit `emacs.d/modules`** (13.1, 13.6) cannot replay on a stack that mounts the modules read-only.
+- **user-lisp files that call package macros** (`pretty-hydra-define`) need `no-byte-compile: t`: Emacs 31 compiles `user-lisp/` before packages are activated. Load them from `after-init-hook` inside `with-demoted-errors`, or a deleted or broken file stops the daemon at start.
+- **Hydras:** heads set `this-command` (ui.el keeps repeat-mode out of an open hydra); `defhydra` docstring hints start with a newline. Saving Lisp re-indents through format-on-save, so a lost parenthesis shifts every line below and needs an extra `C-/`.
+- **Lessons that edit `emacs.d/modules`** (13.1, 13.7) cannot replay on a stack that mounts the modules read-only.
 - **Check:** `play` and `play -watch`, `-repeat 2`, on a fresh workspace (`make curriculum-play`, `make curriculum-watch`); `play all` in course order, since Part 13's settings (a 2 s auto-save) stay on for the projects; replay Part 3 then Parts 0-2 for more modules than listed; pause `~1000` before a `C-g` that follows an edit (emacs.md §10.4).

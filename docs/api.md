@@ -146,7 +146,7 @@ From the agent, plus `seq` and `ts`. Field names are the paths `state` predicate
 - `windows[].id` is stable per window; `side` is `window-side`.
 - `layout`: a window id or `["vsplit"|"hsplit", child, …]`; `vsplit` stacks (C-x 2), `hsplit` is side by side (C-x 3).
 - `minibuffer` when open: `{depth, prompt, contents, kind}`. `frames` includes the daemon's invisible frame.
-- `waiting` while a loop reads its own keys: `{kind: menu|avy|which-key, what, leave}`; Rescue sends `leave` first (`a` for which-key, where C-g only returns to the prefix).
+- `waiting` while a loop reads its own keys or a hydra is open: `{kind: menu|avy|which-key|hydra, what, leave}`; Rescue sends `leave` first (`a` for which-key, where C-g only returns to the prefix; a hydra it closes directly).
 
 ## 6. Scenario object
 
