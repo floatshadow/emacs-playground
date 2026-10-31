@@ -1886,15 +1886,16 @@ Returns the number killed."
     (when (and (integerp taken) (> taken 0))
       (let ((shown (playground--spec-shown-buffers spec)))
         (dolist (b (buffer-list))
-          (let ((started (buffer-local-value 'playground--run-started b)))
-            (when (and (integerp started) (> started taken)
-                       (provided-mode-derived-p (buffer-local-value 'major-mode b)
-                                                'compilation-mode)
-                       (not (member (buffer-name b) shown)))
-              (when-let* ((proc (get-buffer-process b)))
-                (set-process-query-on-exit-flag proc nil))
-              (playground--kill-quietly b)
-              (cl-incf n))))))
+          (when (buffer-live-p b)
+            (let ((started (buffer-local-value 'playground--run-started b)))
+              (when (and (integerp started) (> started taken)
+                         (provided-mode-derived-p (buffer-local-value 'major-mode b)
+                                                  'compilation-mode)
+                         (not (member (buffer-name b) shown)))
+                (when-let* ((proc (get-buffer-process b)))
+                  (set-process-query-on-exit-flag proc nil))
+                (playground--kill-quietly b)
+                (cl-incf n)))))))
     n))
 
 (defun playground--tab-spec (frame)
@@ -2139,12 +2140,13 @@ closes it.  Returns the number killed."
         (keep (mapcar #'expand-file-name files))
         (n 0))
     (dolist (b (buffer-list))
-      (let ((file (buffer-file-name b)))
-        (when (and file (buffer-live-p b) (not (buffer-modified-p b))
-                   (string-prefix-p root (expand-file-name file))
-                   (not (member (expand-file-name file) keep)))
-          (playground--kill-quietly b)
-          (cl-incf n))))
+      (when (buffer-live-p b)
+        (let ((file (buffer-file-name b)))
+          (when (and file (not (buffer-modified-p b))
+                     (string-prefix-p root (expand-file-name file))
+                     (not (member (expand-file-name file) keep)))
+            (playground--kill-quietly b)
+            (cl-incf n)))))
     n))
 
 (defun playground--prefix-pending-p ()
@@ -2185,8 +2187,8 @@ while they stay active."
 
 (defun playground--reset-step-now (args)
   "Put the files and windows back to the spec in ARGS (the step's start).
-Edited buffers are reverted to the restored files, buffers of files
-that are gone are killed, unmodified file buffers the step did not
+Edited workspace buffers are reverted to the restored files, buffers of
+files that are gone are killed, unmodified file buffers the step did not
 start with are closed, the help buffers and the tabs are made those
 of the spec (`playground--sync-special-buffers', `playground--sync-tabs'),
 build output made since is killed (`playground--kill-later-runs'),
@@ -2195,25 +2197,29 @@ points and windows, each window on the file it showed (whatever the
 buffer is called now) or on its Dired listing, ibuffer or buffer list
 made again, the selected window last.  Last, `playground-reset-step-hook'
 runs."
-  (let ((reverted 0) (killed 0))
+  (let ((root (file-name-as-directory (expand-file-name playground-agent-workspace)))
+        (reverted 0) (killed 0))
     (dolist (b (buffer-list))
-      (let ((file (buffer-file-name b)))
-        (cond
-         ((null file)
-          (with-current-buffer b
-            (when (and (derived-mode-p 'dired-mode) (stringp default-directory)
-                       (not (file-directory-p default-directory)))
-              (kill-buffer b)
-              (cl-incf killed))))
-         ((file-exists-p file)
-          (with-current-buffer b
-            (when (or (buffer-modified-p) (not (verify-visited-file-modtime b)))
-              (revert-buffer t t t)
-              (cl-incf reverted))))
-         (t
-          (with-current-buffer b (set-buffer-modified-p nil))
-          (playground--kill-quietly b)
-          (cl-incf killed)))))
+      (when (buffer-live-p b)
+        (let ((file (buffer-file-name b)))
+          (cond
+           ((null file)
+            (with-current-buffer b
+              (when (and (derived-mode-p 'dired-mode) (stringp default-directory)
+                         (string-prefix-p root (expand-file-name default-directory))
+                         (not (file-directory-p default-directory)))
+                (kill-buffer b)
+                (cl-incf killed))))
+           ((not (string-prefix-p root (expand-file-name file))))
+           ((file-exists-p file)
+            (with-current-buffer b
+              (when (or (buffer-modified-p) (not (verify-visited-file-modtime b)))
+                (revert-buffer t t t)
+                (cl-incf reverted))))
+           (t
+            (with-current-buffer b (set-buffer-modified-p nil))
+            (playground--kill-quietly b)
+            (cl-incf killed))))))
     (let ((spec (alist-get 'spec args)))
       ;; A spec without files is not a snapshot (sessiond sends an empty
       ;; one when the checkpoint has none): close nothing then.
@@ -2241,18 +2247,19 @@ fixture.  Returns the number of buffers reverted or killed."
   (let ((root (file-name-as-directory (expand-file-name root)))
         (n 0))
     (dolist (b (buffer-list))
-      (let ((file (buffer-file-name b)))
-        (when (and file (string-prefix-p root (expand-file-name file)))
-          (cond
-           ((not (file-exists-p file))
-            (with-current-buffer b (set-buffer-modified-p nil))
-            (playground--kill-quietly b)
-            (cl-incf n))
-           ((not (verify-visited-file-modtime b))
-            (with-current-buffer b
-              (let ((revert-without-query '(".")))
-                (revert-buffer t t t)))
-            (cl-incf n))))))
+      (when (buffer-live-p b)
+        (let ((file (buffer-file-name b)))
+          (when (and file (string-prefix-p root (expand-file-name file)))
+            (cond
+             ((not (file-exists-p file))
+              (with-current-buffer b (set-buffer-modified-p nil))
+              (playground--kill-quietly b)
+              (cl-incf n))
+             ((not (verify-visited-file-modtime b))
+              (with-current-buffer b
+                (let ((revert-without-query '(".")))
+                  (revert-buffer t t t)))
+              (cl-incf n)))))))
     n))
 
 (defun playground--op-setup (args &optional id)

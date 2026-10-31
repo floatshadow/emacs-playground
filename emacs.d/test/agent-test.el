@@ -926,6 +926,54 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (should (= (length (window-list)) 2))
       (should (equal (playground--layout-string (playground--tree (selected-frame))) "(hsplit a.txt b.txt)")))))
 
+(ert-deftest pg-agent/restore-skips-buffers-killed-by-hooks ()
+  "Restore and setup skip buffers killed by an earlier buffer's hook."
+  (pg-test-with-agent
+    (dolist (op '(reset-step sync-changed kill-unlisted kill-later-runs))
+      (let ((first (find-file-noselect (expand-file-name "gone.txt" playground-agent-workspace)))
+            (second (generate-new-buffer "pg-sibling")))
+        (unwind-protect
+            (progn
+              (with-current-buffer first
+                (setq major-mode 'compilation-mode)
+                (setq-local playground--run-started 2)
+                (add-hook 'kill-buffer-hook (lambda () (kill-buffer second)) nil t))
+              (cl-letf (((symbol-function 'buffer-list) (lambda (&optional _) (list first second))))
+                (pcase op
+                  ('reset-step (playground--reset-step-now nil))
+                  ('sync-changed (playground--sync-changed-buffers playground-agent-workspace))
+                  ('kill-unlisted (playground--kill-unlisted nil))
+                  ('kill-later-runs (playground--kill-later-runs '((takenAt . 1))))))
+              (should-not (buffer-live-p first))
+              (should-not (buffer-live-p second)))
+          (when (buffer-live-p first) (kill-buffer first))
+          (when (buffer-live-p second) (kill-buffer second)))))))
+
+(ert-deftest pg-agent/reset-step-keeps-external-buffers ()
+  "reset-step leaves edited files outside the workspace alone."
+  (pg-test-with-agent
+    (let* ((dir (make-temp-file "pg-external" t))
+           (existing (expand-file-name "existing.txt" dir))
+           (missing (expand-file-name "missing.txt" dir)))
+      (unwind-protect
+          (progn
+            (with-temp-file existing (insert "original"))
+            (dolist (file (list existing missing))
+              (with-current-buffer (find-file-noselect file)
+                (erase-buffer)
+                (insert "unsaved")))
+            (pg-test-value (pg-test-call "reset-step" nil))
+            (dolist (file (list existing missing))
+              (should (buffer-live-p (get-file-buffer file)))
+              (with-current-buffer (get-file-buffer file)
+                (should (buffer-modified-p))
+                (should (equal (buffer-string) "unsaved")))))
+        (dolist (file (list existing missing))
+          (when-let* ((buf (get-file-buffer file)))
+            (with-current-buffer buf (set-buffer-modified-p nil))
+            (kill-buffer buf)))
+        (delete-directory dir t)))))
+
 (defvar pg-test--restored 0)
 (ert-deftest pg-agent/reset-step-runs-the-lesson-hook ()
   "reset-step runs `playground-reset-step-hook' last; setup empties it before its eval."
