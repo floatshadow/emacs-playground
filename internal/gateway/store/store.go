@@ -121,9 +121,11 @@ type ProgressRepo interface {
 	// Put inserts or replaces one step record.
 	Put(ctx context.Context, r StepRecord) error
 	// DeleteLesson removes a user's records (laps too) for one lesson.
-	DeleteLesson(ctx context.Context, userID, lessonID string) error
+	DeleteLesson(ctx context.Context, userID, lessonID string, generation int64) error
 	// DeleteAll removes every record of a user ("Start over").
-	DeleteAll(ctx context.Context, userID string) error
+	DeleteAll(ctx context.Context, userID string, generation int64) error
+	// Generations returns the user and lesson reset generations.
+	Generations(ctx context.Context, userID string) (protocol.ProgressGenerations, error)
 	// Laps returns a user's lap summaries.
 	Laps(ctx context.Context, userID string) ([]LapRecord, error)
 	// PutLap inserts or replaces one lap summary.

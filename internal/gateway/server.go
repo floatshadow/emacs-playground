@@ -137,7 +137,7 @@ func Build(ctx context.Context, cfg *protocol.Config, o Options) (*App, error) {
 	if err := a.buildSessions(ctx); err != nil {
 		return nil, err
 	}
-	a.Progress = &progress.Service{Store: a.Store, Steps: a.Curriculum, Now: o.Now}
+	a.Progress = &progress.Service{Store: a.Store, Steps: a.Curriculum, Now: o.Now, Logger: o.Logger}
 	a.Stuck = progress.NewStuck(a.Store)
 	a.Proxy = proxy.New(proxy.Options{Sessions: a.Sessions, AuthorMode: cfg.Features.AuthorMode, Logger: o.Logger})
 	a.handler = a.routes()
@@ -410,6 +410,7 @@ func (a *App) routes() http.Handler {
 	mux.Handle("/s/{id}/{rest...}", protect(a.Proxy))
 
 	// sessiond → gateway.
+	mux.Handle("GET "+protocol.InternalSessionsPath+"{id}/progress-generations", a.internalAuth(httpx.Handle(a.internalProgressGenerations)))
 	mux.Handle("POST "+protocol.InternalSessionsPath+"{id}/progress", a.internalAuth(httpx.Handle(a.internalProgress)))
 	mux.Handle("POST "+protocol.InternalSessionsPath+"{id}/stuck", a.internalAuth(httpx.Handle(a.internalStuck)))
 	mux.Handle("POST "+protocol.InternalSessionsPath+"{id}/heartbeat", a.internalAuth(httpx.Handle(a.internalHeartbeat)))
@@ -588,7 +589,8 @@ func (a *App) resetProgress(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(w, r, &req); err != nil {
 		return err
 	}
-	if err := a.Progress.Reset(r.Context(), u.ID, req.LessonID); err != nil {
+	generation, err := a.Progress.Reset(r.Context(), u.ID, req.LessonID)
+	if err != nil {
 		return err
 	}
 	// Tell the user's running session to forget the step and its saved
@@ -596,7 +598,7 @@ func (a *App) resetProgress(w http.ResponseWriter, r *http.Request) error {
 	if sess, err := a.Sessions.ForUser(r.Context(), u.ID); err == nil && sess.Usable() {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		if err := a.Sessions.Call(ctx, sess, protocol.OpDropStep, protocol.DropStepRequest{LessonID: req.LessonID}, nil); err != nil {
+		if err := a.Sessions.Call(ctx, sess, protocol.OpDropStep, protocol.DropStepRequest{LessonID: req.LessonID, Generation: generation}, nil); err != nil {
 			httpx.Logger(r.Context()).Warn("progress reset: drop-step", "session_id", sess.ID, "err", err)
 		}
 	}
@@ -670,6 +672,15 @@ func (a *App) internalAuth(next http.Handler) http.Handler {
 func internalSession(r *http.Request) *sessions.Session {
 	s, _ := r.Context().Value(sessionCtxKey{}).(*sessions.Session)
 	return s
+}
+
+func (a *App) internalProgressGenerations(w http.ResponseWriter, r *http.Request) error {
+	generations, err := a.Progress.Store.Progress().Generations(r.Context(), internalSession(r).UserID)
+	if err != nil {
+		return err
+	}
+	httpx.WriteJSON(w, http.StatusOK, generations)
+	return nil
 }
 
 func (a *App) internalProgress(w http.ResponseWriter, r *http.Request) error {

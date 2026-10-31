@@ -1,9 +1,12 @@
 package progress
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -84,7 +87,7 @@ func TestProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Reset clears one lesson only.
-	if err := s.Reset(ctx, "u1", "00-a/01-b"); err != nil {
+	if _, err := s.Reset(ctx, "u1", "00-a/01-b"); err != nil {
 		t.Fatal(err)
 	}
 	p, _ = s.Get(ctx, "u1")
@@ -239,5 +242,242 @@ func TestStuckDedupeConcurrent(t *testing.T) {
 	}
 	if g.adds != 3 {
 		t.Fatalf("%d adds, want 3 (a failed report is written again)", g.adds)
+	}
+}
+
+func TestProgressRetryAndReset(t *testing.T) {
+	for _, kind := range []string{"json", "sqlite"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			open := func() store.Store {
+				var st store.Store
+				var err error
+				if kind == "json" {
+					st, err = store.OpenJSON(dir)
+				} else {
+					st, err = store.OpenSQLite(filepath.Join(dir, "test.db"))
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				return st
+			}
+			st := open()
+			now := time.UnixMilli(200)
+			s := &Service{Store: st, Steps: steps{"a/b": {"one"}, "a/c": {"one"}}, Now: func() time.Time { return now }}
+			ctx := context.Background()
+			rep := protocol.ProgressReport{LessonID: "a/b", StepID: "one", Status: protocol.ProgressDone, At: 100, LapMs: 50}
+			for range 2 {
+				if err := s.Apply(ctx, "u", rep); err != nil {
+					t.Fatal(err)
+				}
+			}
+			laps, _ := st.Progress().Laps(ctx, "u")
+			if len(laps) != 1 || laps[0].Count != 1 {
+				t.Fatalf("duplicate lap %+v", laps)
+			}
+			rep.At = 150
+			if err := s.Apply(ctx, "u", rep); err != nil {
+				t.Fatal(err)
+			}
+			laps, _ = st.Progress().Laps(ctx, "u")
+			if len(laps) != 1 || laps[0].Count != 2 {
+				t.Fatalf("second lap %+v", laps)
+			}
+			for _, lessonID := range []string{"a/b", ""} {
+				generation, err := s.Reset(ctx, "u", lessonID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := st.Close(); err != nil {
+					t.Fatal(err)
+				}
+				st = open()
+				s.Store = st
+				for _, at := range []int64{0, 150, 9_000_000_000_000} {
+					rep.At = at
+					if err := s.Apply(ctx, "u", rep); err != nil {
+						t.Fatal(err)
+					}
+				}
+				records, _ := st.Progress().List(ctx, "u")
+				laps, _ = st.Progress().Laps(ctx, "u")
+				if len(records) != 0 || len(laps) != 0 {
+					t.Fatalf("stale report survived reset: %+v %+v", records, laps)
+				}
+				rep.Generation = generation
+				rep.At = 1
+				if err := s.Apply(ctx, "u", rep); err != nil {
+					t.Fatal(err)
+				}
+				records, _ = st.Progress().List(ctx, "u")
+				if len(records) != 1 {
+					t.Fatalf("new report lost: %+v", records)
+				}
+				// Without a production timestamp, completion uses receipt time.
+				generation, err = s.Reset(ctx, "u", lessonID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				rep.Generation = generation
+				rep.At = 0
+				if err := s.Apply(ctx, "u", rep); err != nil {
+					t.Fatal(err)
+				}
+				records, _ = st.Progress().List(ctx, "u")
+				if len(records) != 1 || records[0].CompletedAt != now.UnixMilli() {
+					t.Fatalf("report without a timestamp: %+v", records)
+				}
+			}
+			st.Close()
+		})
+	}
+}
+
+func TestProgressAbsoluteTotals(t *testing.T) {
+	st, err := store.OpenJSON(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s := &Service{Store: st}
+	for _, n := range []int{5, 1, 0} {
+		if err := s.Apply(context.Background(), "u", protocol.ProgressReport{LessonID: "a/b", StepID: "one", Status: protocol.ProgressInProgress, HintsUsed: &n, Resets: &n}); err != nil {
+			t.Fatal(err)
+		}
+		p, err := s.Get(context.Background(), "u")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if step := p.Lessons["a/b"].Steps["one"]; step.HintsUsed != n || step.Resets != n {
+			t.Fatalf("totals %+v, want %d", step, n)
+		}
+	}
+}
+
+func TestProgressLocksPerUser(t *testing.T) {
+	st, err := store.OpenJSON(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s := &Service{Store: st}
+	unlock := s.lockUser("one")
+	defer func() {
+		if unlock != nil {
+			unlock()
+		}
+	}()
+	done := make(chan error, 1)
+	go func() {
+		done <- s.Apply(context.Background(), "two", protocol.ProgressReport{LessonID: "a/b", StepID: "one", Status: protocol.ProgressDone})
+	}()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("another user is blocked")
+	}
+	unlock()
+	unlock = nil
+	if len(s.users) != 0 {
+		t.Fatal("idle user locks retained")
+	}
+}
+
+func TestGatewayGenerationRecovery(t *testing.T) {
+	for _, kind := range []string{"json", "sqlite"} {
+		for _, scope := range []string{"", "a/b"} {
+			t.Run(kind+"/"+scope, func(t *testing.T) {
+				var st store.Store
+				var err error
+				if kind == "json" {
+					st, err = store.OpenJSON(t.TempDir())
+				} else {
+					st, err = store.OpenSQLite(filepath.Join(t.TempDir(), "progress.db"))
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer st.Close()
+				var logs bytes.Buffer
+				now := time.UnixMilli(1_800_000_000_000)
+				s := &Service{Store: st, Logger: slog.New(slog.NewJSONHandler(&logs, nil)), Now: func() time.Time { return now }}
+				ctx := context.Background()
+				rep := protocol.ProgressReport{LessonID: "a/b", StepID: "one", Status: protocol.ProgressDone, Generation: 18}
+				if err := s.Apply(ctx, "u", rep); err != nil {
+					t.Fatal(err)
+				}
+				p, err := s.Get(ctx, "u")
+				if err != nil || p.Lessons["a/b"].Steps["one"].Status != protocol.ProgressDone {
+					t.Fatalf("progress %+v: %v", p, err)
+				}
+				generations, err := st.Progress().Generations(ctx, "u")
+				if err != nil || generations.ForLesson("a/b") != 0 {
+					t.Fatalf("gateway generations %+v: %v", generations, err)
+				}
+				generation, err := s.Reset(ctx, "u", scope)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if generation != now.UnixMilli() || generation <= rep.Generation {
+					t.Fatalf("reset generation %d does not supersede session generation %d", generation, rep.Generation)
+				}
+				rep.Generation = 0
+				if err := s.Apply(ctx, "u", rep); err != nil {
+					t.Fatal(err)
+				}
+				p, err = s.Get(ctx, "u")
+				if err != nil || len(p.Lessons) != 0 {
+					t.Fatalf("stale progress %+v: %v", p, err)
+				}
+				var entry map[string]any
+				if err := json.Unmarshal(logs.Bytes(), &entry); err != nil {
+					t.Fatal(err)
+				}
+				for key, want := range map[string]any{"level": "WARN", "user_id": "u", "lesson": "a/b", "step": "one", "report_generation": float64(0), "gateway_generation": float64(generation)} {
+					if entry[key] != want {
+						t.Errorf("log %s=%v, want %v", key, entry[key], want)
+					}
+				}
+				rep.Generation = generation
+				if err := s.Apply(ctx, "u", rep); err != nil {
+					t.Fatal(err)
+				}
+				p, err = s.Get(ctx, "u")
+				if err != nil || p.Lessons["a/b"].Steps["one"].Status != protocol.ProgressDone {
+					t.Fatalf("completion after reset %+v: %v", p, err)
+				}
+			})
+		}
+	}
+}
+
+func TestResetGenerationClock(t *testing.T) {
+	st, err := store.OpenJSON(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	s := &Service{Store: st}
+	for _, tc := range []struct {
+		name, scope string
+		now, want   int64
+	}{
+		{"first reset", "a/b", 1000, 1000},
+		{"same millisecond", "a/c", 1000, 1001},
+		{"clock behind", "a/b", 900, 1002},
+		{"clock ahead", "", 2000, 2000},
+		{"lesson after user reset", "a/b", 2000, 2001},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s.Now = func() time.Time { return time.UnixMilli(tc.now) }
+			generation, err := s.Reset(context.Background(), "u", tc.scope)
+			if err != nil || generation != tc.want {
+				t.Fatalf("generation %d, want %d: %v", generation, tc.want, err)
+			}
+		})
 	}
 }

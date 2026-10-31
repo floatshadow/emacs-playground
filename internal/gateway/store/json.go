@@ -37,6 +37,8 @@ type jsonData struct {
 	Sessions map[string]*Session `json:"sessions"`
 	// Progress is user → lesson → step → record.
 	Progress map[string]map[string]map[string]*StepRecord `json:"progress"`
+	// Generations is user → reset scope → generation (empty scope is all lessons).
+	Generations map[string]protocol.ProgressGenerations `json:"generations,omitempty"`
 	// Laps is user → lesson → lap summary.
 	Laps        map[string]map[string]*LapRecord `json:"laps,omitempty"`
 	Stuck       []StuckReport                    `json:"stuck,omitempty"`
@@ -78,6 +80,9 @@ func OpenJSON(dir string) (Store, error) {
 	}
 	if s.d.Progress == nil {
 		s.d.Progress = map[string]map[string]map[string]*StepRecord{}
+	}
+	if s.d.Generations == nil {
+		s.d.Generations = map[string]protocol.ProgressGenerations{}
 	}
 	if s.d.Laps == nil {
 		s.d.Laps = map[string]map[string]*LapRecord{}
@@ -300,9 +305,10 @@ func (r jsonProgress) Put(_ context.Context, rec StepRecord) error {
 	return r.s.save()
 }
 
-func (r jsonProgress) DeleteLesson(_ context.Context, userID, lessonID string) error {
+func (r jsonProgress) DeleteLesson(_ context.Context, userID, lessonID string, generation int64) error {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
+	r.setGeneration(userID, lessonID, generation)
 	if lessons := r.s.d.Progress[userID]; lessons != nil {
 		delete(lessons, lessonID)
 	}
@@ -312,12 +318,31 @@ func (r jsonProgress) DeleteLesson(_ context.Context, userID, lessonID string) e
 	return r.s.save()
 }
 
-func (r jsonProgress) DeleteAll(_ context.Context, userID string) error {
+func (r jsonProgress) DeleteAll(_ context.Context, userID string, generation int64) error {
 	r.s.mu.Lock()
 	defer r.s.mu.Unlock()
+	r.setGeneration(userID, "", generation)
 	delete(r.s.d.Progress, userID)
 	delete(r.s.d.Laps, userID)
 	return r.s.save()
+}
+
+// setGeneration records a reset while the store lock is held.
+func (r jsonProgress) setGeneration(userID, lessonID string, generation int64) {
+	if r.s.d.Generations[userID] == nil {
+		r.s.d.Generations[userID] = map[string]int64{}
+	}
+	r.s.d.Generations[userID][lessonID] = max(r.s.d.Generations[userID][lessonID], generation)
+}
+
+func (r jsonProgress) Generations(_ context.Context, userID string) (protocol.ProgressGenerations, error) {
+	r.s.mu.Lock()
+	defer r.s.mu.Unlock()
+	out := protocol.ProgressGenerations{}
+	for scope, generation := range r.s.d.Generations[userID] {
+		out[scope] = generation
+	}
+	return out, nil
 }
 
 func (r jsonProgress) Laps(_ context.Context, userID string) ([]LapRecord, error) {

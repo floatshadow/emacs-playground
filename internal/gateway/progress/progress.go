@@ -3,6 +3,7 @@ package progress
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -30,9 +31,42 @@ const maxIDLen = 200
 
 // Service records and aggregates progress.
 type Service struct {
-	Store store.Store
-	Steps Steps
-	Now   func() time.Time
+	mu     sync.Mutex
+	users  map[string]*userLock
+	Store  store.Store
+	Steps  Steps
+	Now    func() time.Time
+	Logger *slog.Logger
+}
+
+type userLock struct {
+	mu   sync.Mutex
+	refs int
+}
+
+// lockUser serialises a user's resets and ingestion without holding other users.
+func (s *Service) lockUser(userID string) func() {
+	s.mu.Lock()
+	if s.users == nil {
+		s.users = map[string]*userLock{}
+	}
+	l := s.users[userID]
+	if l == nil {
+		l = &userLock{}
+		s.users[userID] = l
+	}
+	l.refs++
+	s.mu.Unlock()
+	l.mu.Lock()
+	return func() {
+		l.mu.Unlock()
+		s.mu.Lock()
+		l.refs--
+		if l.refs == 0 {
+			delete(s.users, userID)
+		}
+		s.mu.Unlock()
+	}
 }
 
 func (s *Service) now() time.Time {
@@ -69,6 +103,21 @@ func (s *Service) Apply(ctx context.Context, userID string, rep protocol.Progres
 	}
 	if (rep.HintsUsed != nil && *rep.HintsUsed < 0) || (rep.Resets != nil && *rep.Resets < 0) {
 		return httpx.BadRequest("hintsUsed and resets must not be negative")
+	}
+	unlock := s.lockUser(userID)
+	defer unlock()
+	generations, err := s.Store.Progress().Generations(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if current := generations.ForLesson(rep.LessonID); rep.Generation < current {
+		log := s.Logger
+		if log == nil {
+			log = slog.Default()
+		}
+		log.Warn("discarding stale progress report", "user_id", userID, "lesson", rep.LessonID, "step", rep.StepID,
+			"report_generation", rep.Generation, "gateway_generation", current)
+		return nil
 	}
 	now := s.now().UnixMilli()
 	recs, err := s.Store.Progress().List(ctx, userID)
@@ -128,6 +177,9 @@ func (s *Service) addLap(ctx context.Context, userID string, rep protocol.Progre
 		if l.LessonID == rep.LessonID {
 			lr = l
 		}
+	}
+	if rep.At != 0 && lr.LastAt == rep.At && lr.LastMs == rep.LapMs {
+		return nil
 	}
 	lr.Count++
 	lr.LastMs = rep.LapMs
@@ -210,23 +262,34 @@ func (s *Service) Get(ctx context.Context, userID string) (protocol.Progress, er
 
 // Reset clears a lesson's progress for userID; an empty lessonID clears
 // every lesson of the user ("Start over").
-func (s *Service) Reset(ctx context.Context, userID, lessonID string) error {
+func (s *Service) Reset(ctx context.Context, userID, lessonID string) (int64, error) {
+	if len(lessonID) > maxIDLen {
+		return 0, httpx.BadRequest("lessonId must be shorter than 200 bytes")
+	}
+	unlock := s.lockUser(userID)
+	defer unlock()
+	generations, err := s.Store.Progress().Generations(ctx, userID)
+	if err != nil {
+		return 0, err
+	}
+	var generation int64
+	for _, n := range generations {
+		generation = max(generation, n)
+	}
+	// Gateway time keeps resets ahead of generations surviving a store loss.
+	generation = max(generation+1, s.now().UnixMilli())
 	details := "lesson=" + lessonID
 	if lessonID == "" {
-		if err := s.Store.Progress().DeleteAll(ctx, userID); err != nil {
-			return err
-		}
+		err = s.Store.Progress().DeleteAll(ctx, userID, generation)
 		details = "lesson=*"
 	} else {
-		if len(lessonID) > maxIDLen {
-			return httpx.BadRequest("lessonId must be shorter than 200 bytes")
-		}
-		if err := s.Store.Progress().DeleteLesson(ctx, userID, lessonID); err != nil {
-			return err
-		}
+		err = s.Store.Progress().DeleteLesson(ctx, userID, lessonID, generation)
+	}
+	if err != nil {
+		return 0, err
 	}
 	_ = s.Store.Audit(ctx, store.AuditEvent{At: s.now().UnixMilli(), UserID: userID, Action: "progress.reset", Details: details})
-	return nil
+	return generation, nil
 }
 
 // Bounds on what one stuck report stores: the last 200 events (api.md

@@ -28,8 +28,9 @@ func TestLaps(t *testing.T) {
 			id := "projects/p1-hello-cargo"
 			s := &Service{Store: st, Steps: steps{id: {"scaffold", "commit"}}, Now: func() time.Time { return now }}
 			ctx := context.Background()
+			var generation int64
 			lap := func(ms int64, at int64) error {
-				return s.Apply(ctx, "u", protocol.ProgressReport{LessonID: id, StepID: "commit", Status: protocol.ProgressDone, LapMs: ms, At: at})
+				return s.Apply(ctx, "u", protocol.ProgressReport{LessonID: id, StepID: "commit", Status: protocol.ProgressDone, LapMs: ms, At: at, Generation: generation})
 			}
 			if err := lap(90_000, 10); err != nil {
 				t.Fatal(err)
@@ -51,15 +52,22 @@ func TestLaps(t *testing.T) {
 				t.Fatalf("lap on another step: %v", err)
 			}
 			// A lesson reset clears its laps.
-			if err := s.Reset(ctx, "u", id); err != nil {
+			generation, err = s.Reset(ctx, "u", id)
+			if err != nil {
 				t.Fatal(err)
 			}
 			p, _ = s.Get(ctx, "u")
 			if p.Lessons[id].Laps != nil {
 				t.Fatalf("laps after reset %+v", p.Lessons[id])
 			}
-			_ = lap(1000, 40)
-			_ = s.Reset(ctx, "u", "")
+			if err := lap(1000, 40); err != nil {
+				t.Fatal(err)
+			}
+			p, _ = s.Get(ctx, "u")
+			if l := p.Lessons[id].Laps; l == nil || l.Count != 1 {
+				t.Fatalf("new lap after reset %+v", l)
+			}
+			_, _ = s.Reset(ctx, "u", "")
 			if p, _ = s.Get(ctx, "u"); len(p.Lessons) != 0 {
 				t.Fatalf("after start over %+v", p.Lessons)
 			}

@@ -252,6 +252,8 @@ func TestLocalModeEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer app.Close()
+	resetTime := time.UnixMilli(1_800_000_000_000)
+	app.Progress.Now = func() time.Time { return resetTime }
 	gw := httptest.NewServer(app.Handler())
 	defer gw.Close()
 	c := newClient(t, gw.URL)
@@ -348,9 +350,14 @@ func TestLocalModeEndToEnd(t *testing.T) {
 	if len(prog.Lessons) != 0 {
 		t.Fatalf("after reset %+v", prog)
 	}
+	var generations protocol.ProgressGenerations
+	c.json("GET", "/internal/sessions/local/progress-generations", nil, &generations, 200, "Authorization", "Bearer local")
+	if generations.ForLesson("00-orientation/01-first") != resetTime.UnixMilli() || generations.ForLesson("other/lesson") != 0 {
+		t.Fatalf("reset generations %+v", generations)
+	}
 	// Start over: a reset with no body clears every lesson and tells
 	// sessiond drop-step {}.
-	c.json("POST", "/internal/sessions/local/progress", protocol.ProgressReport{LessonID: "00-orientation/01-first", StepID: "open", Status: protocol.ProgressSkipped}, nil, 204, "Authorization", "Bearer local")
+	c.json("POST", "/internal/sessions/local/progress", protocol.ProgressReport{LessonID: "00-orientation/01-first", StepID: "open", Status: protocol.ProgressSkipped, Generation: generations.ForLesson("00-orientation/01-first")}, nil, 204, "Authorization", "Bearer local")
 	c.json("GET", "/api/v1/progress", nil, &prog, 200)
 	if lp := prog.Lessons["00-orientation/01-first"]; lp.Steps["open"].Status != protocol.ProgressSkipped || lp.Counts.Skipped != 1 || lp.Counts.Total != 3 {
 		t.Fatalf("skipped %+v", lp)
@@ -376,7 +383,7 @@ func TestLocalModeEndToEnd(t *testing.T) {
 		t.Fatalf("stuck reports %+v", reps)
 	}
 	calls := strings.Join(sd.calls(), "\n")
-	for _, want := range []string{"restart-emacs {} user=local", `drop-step {"lessonId":"00-orientation/01-first"} user=local`, `drop-step {} user=local`, `stuck {"note":"lost"} user=local`} {
+	for _, want := range []string{"restart-emacs {} user=local", fmt.Sprintf(`drop-step {"generation":%d,"lessonId":"00-orientation/01-first"} user=local`, resetTime.UnixMilli()), fmt.Sprintf(`drop-step {"generation":%d} user=local`, resetTime.UnixMilli()+1), `stuck {"note":"lost"} user=local`} {
 		if !strings.Contains(calls, want) {
 			t.Errorf("sessiond did not get %q; got:\n%s", want, calls)
 		}

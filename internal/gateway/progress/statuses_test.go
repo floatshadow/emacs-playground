@@ -76,7 +76,7 @@ func TestStatusesRiseAndCount(t *testing.T) {
 		_ = s.Apply(ctx, "u2", protocol.ProgressReport{LessonID: "00-a/02-c", StepID: "x", Status: protocol.ProgressDone})
 
 		// Start over: every lesson of the user, no one else's.
-		if err := s.Reset(ctx, "u1", ""); err != nil {
+		if _, err := s.Reset(ctx, "u1", ""); err != nil {
 			t.Fatal(err)
 		}
 		if p, _ := s.Get(ctx, "u1"); len(p.Lessons) != 0 {

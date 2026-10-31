@@ -168,7 +168,7 @@ func testStore(t *testing.T, s Store) {
 	if got[1].StepID != "save" || got[1].Status != protocol.ProgressDone || got[1].CompletedAt != 700 || got[2].Resets != 2 || got[0].HintsUsed != 1 {
 		t.Fatalf("progress rows %+v", got)
 	}
-	if err := s.Progress().DeleteLesson(ctx, "u1", "00-a/02-c"); err != nil {
+	if err := s.Progress().DeleteLesson(ctx, "u1", "00-a/02-c", 0); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.Progress().List(ctx, "u1"); len(got) != 2 {
@@ -260,6 +260,7 @@ func TestSQLiteDropsOldSignInCodes(t *testing.T) {
 		`ALTER TABLE users DROP COLUMN session_epoch`,
 		`INSERT INTO users (id, kind, display_name, created_at) VALUES ('u-old', 'oidc', 'Old', 1)`,
 		`DELETE FROM schema_migrations WHERE version >= 3`,
+		`DROP TABLE progress_resets`,
 	} {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)

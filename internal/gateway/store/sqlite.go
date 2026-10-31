@@ -307,12 +307,44 @@ ON CONFLICT(user_id, lesson_id, step_id) DO UPDATE SET status = excluded.status,
 	return err
 }
 
-func (r sqlProgress) DeleteLesson(ctx context.Context, userID, lessonID string) error {
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM laps WHERE user_id = ? AND lesson_id = ?`, userID, lessonID); err != nil {
+func (r sqlProgress) DeleteLesson(ctx context.Context, userID, lessonID string, generation int64) error {
+	return r.reset(ctx, userID, lessonID, generation)
+}
+
+func (r sqlProgress) Generations(ctx context.Context, userID string) (protocol.ProgressGenerations, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT lesson_id, generation FROM progress_resets WHERE user_id = ?`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := protocol.ProgressGenerations{}
+	for rows.Next() {
+		var scope string
+		var generation int64
+		if err := rows.Scan(&scope, &generation); err != nil {
+			return nil, err
+		}
+		out[scope] = generation
+	}
+	return out, rows.Err()
+}
+
+func (r sqlProgress) reset(ctx context.Context, userID, lessonID string, generation int64) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
 		return err
 	}
-	_, err := r.db.ExecContext(ctx, `DELETE FROM progress WHERE user_id = ? AND lesson_id = ?`, userID, lessonID)
-	return err
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `INSERT INTO progress_resets (user_id, lesson_id, generation) VALUES (?, ?, ?)
+ON CONFLICT(user_id, lesson_id) DO UPDATE SET generation = MAX(generation, excluded.generation)`, userID, lessonID, generation); err != nil {
+		return err
+	}
+	for _, table := range []string{"laps", "progress"} {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM "+table+" WHERE user_id = ? AND (? = '' OR lesson_id = ?)", userID, lessonID, lessonID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (r sqlProgress) Laps(ctx context.Context, userID string) ([]LapRecord, error) {
@@ -339,12 +371,8 @@ ON CONFLICT (user_id, lesson_id) DO UPDATE SET count = excluded.count, best_ms =
 	return err
 }
 
-func (r sqlProgress) DeleteAll(ctx context.Context, userID string) error {
-	if _, err := r.db.ExecContext(ctx, `DELETE FROM laps WHERE user_id = ?`, userID); err != nil {
-		return err
-	}
-	_, err := r.db.ExecContext(ctx, `DELETE FROM progress WHERE user_id = ?`, userID)
-	return err
+func (r sqlProgress) DeleteAll(ctx context.Context, userID string, generation int64) error {
+	return r.reset(ctx, userID, "", generation)
 }
 
 type sqlStuck struct{ db *sql.DB }
