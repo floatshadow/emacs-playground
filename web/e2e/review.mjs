@@ -520,12 +520,26 @@ await check('B5', 'Start over and honest step ticks', async (h, note) => {
   )
   assert(started.length === 0, `progress not empty: ${started.map(([id]) => id).join(' ')}`)
   const all = await steps(L03)
+  const generations = await api('/internal/sessions/local/progress-generations', {
+    headers: { authorization: `Bearer ${sessionToken}` },
+  })
+  assert(generations.status === 200, `progress generations: ${generations.status}`)
+  const generation = Math.max(generations.body[''] ?? 0, generations.body[L03] ?? 0)
   for (const s of all) {
-    await api('/internal/sessions/local/progress', {
+    const report = await api('/internal/sessions/local/progress', {
       method: 'POST',
       headers: { authorization: `Bearer ${sessionToken}` },
-      body: JSON.stringify({ lessonId: L03, stepId: s.id, status: 'done' }),
+      body: JSON.stringify({ lessonId: L03, stepId: s.id, status: 'done', generation }),
     })
+    assert(report.status === 204, `progress report ${s.id}: ${report.status}`)
+  }
+  p = await api('/api/v1/progress')
+  assert(p.status === 200, `progress readback: ${p.status}`)
+  for (const s of all) {
+    assert(
+      p.body?.lessons?.[L03]?.steps?.[s.id]?.status === 'done',
+      `step ${s.id} was not recorded done`,
+    )
   }
   await rpc('scenario', { lessonId: L03, stepId: all[0].id, reset: true })
   await h.open(L03)
