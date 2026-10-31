@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -384,5 +385,44 @@ func readJSON(t *testing.T, path string, v any) {
 	}
 	if err := json.Unmarshal(data, v); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestBuildPublishesIndexLast(t *testing.T) {
+	src, diags := Load("testdata/good")
+	if diags.HasErrors() {
+		t.Fatal(diags.Err())
+	}
+	out := t.TempDir()
+	if err := Build(src, out, BuildOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	index, err := os.Stat(filepath.Join(out, protocol.BundleIndexFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(out, protocol.BundleIndexFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker, err := os.ReadFile(filepath.Join(out, protocol.BundleCompleteFile))
+	if err != nil || strings.TrimSpace(string(marker)) != fmt.Sprintf("%x", sha256.Sum256(data)) {
+		t.Fatalf("publication marker %q: %v", marker, err)
+	}
+	published, err := os.Stat(filepath.Join(out, protocol.BundleCompleteFile))
+	if err != nil || published.ModTime().Before(index.ModTime()) {
+		t.Fatalf("marker precedes index: %v", err)
+	}
+	for _, id := range src.Order {
+		if src.Lessons[id] == nil {
+			continue
+		}
+		scenario, err := os.Stat(filepath.Join(out, protocol.LessonDir(id), protocol.BundleScenario))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if index.ModTime().Before(scenario.ModTime()) {
+			t.Fatalf("index published before %s", id)
+		}
 	}
 }

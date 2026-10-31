@@ -3,6 +3,7 @@ package curriculum
 import (
 	"archive/tar"
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,8 +31,8 @@ type BuildOptions struct {
 
 // Build writes the bundle for src into out (protocol/curriculum.go layout).
 // Callers must not build a source whose Load reported errors. Existing
-// curriculum*.json, lessons/ and fixtures/ in out are replaced; other files
-// are left alone.
+// curriculum*.json, curriculum.complete, lessons/ and fixtures/ in out
+// are replaced; other files are left alone.
 func Build(src *Source, out string, opt BuildOptions) error {
 	if opt.BuiltAt.IsZero() {
 		opt.BuiltAt = time.Now().UTC()
@@ -42,22 +43,21 @@ func Build(src *Source, out string, opt BuildOptions) error {
 	if err := os.MkdirAll(out, 0o755); err != nil {
 		return err
 	}
+	if err := os.Remove(filepath.Join(out, protocol.BundleCompleteFile)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	old, _ := filepath.Glob(filepath.Join(out, "curriculum*.json"))
+	for _, f := range old {
+		if err := os.Remove(f); err != nil {
+			return err
+		}
+	}
 	for _, d := range []string{protocol.BundleLessonsDir, protocol.BundleFixturesDir} {
 		if err := os.RemoveAll(filepath.Join(out, d)); err != nil {
 			return err
 		}
 	}
-	old, _ := filepath.Glob(filepath.Join(out, "curriculum*.json"))
-	for _, f := range old {
-		_ = os.Remove(f)
-	}
 
-	for _, loc := range append([]string{protocol.DefaultLocale}, src.Locales...) {
-		idx := BuildIndex(src, loc, opt)
-		if err := writeJSON(filepath.Join(out, protocol.BundleIndexName(loc)), idx); err != nil {
-			return err
-		}
-	}
 	for _, id := range src.Order {
 		l := src.Lessons[id]
 		if l == nil {
@@ -67,7 +67,27 @@ func Build(src *Source, out string, opt BuildOptions) error {
 			return fmt.Errorf("lesson %s: %w", id, err)
 		}
 	}
-	return nil
+	// Indexes precede the completion marker so readers never publish a partial build.
+	locales := append([]string(nil), src.Locales...)
+	for _, loc := range append(locales, protocol.DefaultLocale) {
+		idx := BuildIndex(src, loc, opt)
+		name := filepath.Join(out, protocol.BundleIndexName(loc))
+		if err := writeJSON(name+".tmp", idx); err != nil {
+			return err
+		}
+		if err := os.Rename(name+".tmp", name); err != nil {
+			return err
+		}
+	}
+	index, err := os.ReadFile(filepath.Join(out, protocol.BundleIndexFile))
+	if err != nil {
+		return err
+	}
+	marker := filepath.Join(out, protocol.BundleCompleteFile)
+	if err := os.WriteFile(marker+".tmp", []byte(fmt.Sprintf("%x\n", sha256.Sum256(index))), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(marker+".tmp", marker)
 }
 
 // BuildIndex returns curriculum.json for locale: index.yaml with lesson
