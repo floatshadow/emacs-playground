@@ -77,7 +77,7 @@ sessiond reports progress (step start, completions, hints, resets, finished laps
 
 ### 3.1 Responsibilities
 
-Keep Emacs, tmux and Xvnc alive; serve PTY, events, VNC, RPC and preview; tap input; evaluate the active step; checkpoint and restore; load scenarios; report progress. Runs as `learner` under `tini`. `sessiond -fake` replaces Emacs, tmux and Xvnc with bash and a fake agent.
+Keep Emacs, tmux and Xvnc alive; serve PTY, events, VNC, RPC and preview; tap input; evaluate the active step; checkpoint and restore; load scenarios; report progress. Runs as `learner` under `tini`. `sessiond -fake` replaces Emacs and Xvnc with bash and the agent and tmux with the fake editor.
 
 ### 3.2 Startup sequence
 
@@ -194,7 +194,7 @@ Environment only: `protocol.SessiondConfig` (names and defaults in its tags), ea
 
 ## 6. Testing
 
-`go test ./...` needs no Docker, Emacs or tmux (subprocesses and the Engine are faked); the `dockerintegration` and `integration` tags, `server-mode.sh`, ERT (emacs.md §10.6) and the browser scripts run against real images (notes.md §3).
+`go test ./...` needs no Docker, Emacs or tmux (subprocesses and the Engine are faked; sessiond's fake editor is validated against fixtures recorded from the agent, and its lifecycle traces pin the order of events and progress reports, notes.md §3); the `dockerintegration` and `integration` tags, `server-mode.sh`, ERT (emacs.md §10.6) and the browser scripts run against real images (notes.md §3).
 
 ## 7. Conventions
 

@@ -44,7 +44,8 @@ The specification is in `docs/`: start with `DESIGN.md` (overview, decisions, ro
 | `make images`, `image-gateway`, `image-session` | build images (`TAG=dev` for a local tag) |
 | `make dev` | session container on the host network and remote box, gateway from source, Vite on :5173 |
 | `make shell` / `make reset-workspace` | attach to the local Emacs / start with a fresh `./workspace` |
-| `make emacs-test` | agent and configuration ERT tests in the session image |
+| `make emacs-test` | agent and configuration ERT tests in the session image (replays the agent contract fixtures) |
+| `make agent-fixtures` | re-record the agent contract fixtures (`emacs.d/test/fixtures/agent`) in the session image |
 | `make e2e` | browser smoke test against the running stack (Chrome on CDP :9222) |
 | `make curriculum-play` / `curriculum-watch` | replay every lesson twice / Part 0 (`PART=…`) as Watch it, then as the learner |
 
