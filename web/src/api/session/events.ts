@@ -2,7 +2,7 @@
  * EventsClient (frontend.md §4): /s/{id}/events?after=<lastSeq>, one JSON
  * event per frame, dispatched to applyEvent. Reconnects with backoff
  * (250 ms to 8 s, jitter), pings every 20 s, and reports gap events so the
- * caller can request a fresh check.
+ * caller can reconnect for replay.
  */
 import type { Event, GapEvent } from '../../protocol.gen'
 import type { ConnState } from '../../store/session'
@@ -63,6 +63,7 @@ export class EventsClient {
   /** Drops the connection and reconnects now (used after a gap). */
   reconnect(): void {
     if (this.stopped) return
+    if (this.ws) this.ws.onmessage = null
     this.ws?.close(4100, 'reconnect')
   }
 

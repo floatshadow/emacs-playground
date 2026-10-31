@@ -25,6 +25,9 @@ export function onSessionEvent(fn: (ev: Event) => void): () => void {
 
 function sideEffects(ev: Event) {
   switch (ev.t) {
+    case 'hello':
+      if (ev.step && !ev.replayed) void rpc('check', {}, { silent: true }).catch(() => undefined)
+      break
     case 'error':
       toast(ev.message, 'error')
       break
@@ -38,8 +41,8 @@ function sideEffects(ev: Event) {
       }
       break
     case 'gap':
-      // Events were lost: ask for a fresh evaluation (it also re-emits state).
-      void rpc('check', {}, { silent: true }).catch(() => undefined)
+      // Replay lost transitions, or receive a fresh hello when the ring expired.
+      events?.reconnect()
       break
   }
 }
