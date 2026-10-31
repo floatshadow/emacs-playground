@@ -24,9 +24,11 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
-// ErrFormat is returned when the bundle's format differs from the
-// gateway's.
+// ErrFormat is returned when the bundle's format differs from the gateway's.
 var ErrFormat = errors.New("curriculum: bundle format mismatch")
+
+// ErrIncomplete means the publisher has not committed the current index.
+var ErrIncomplete = errors.New("curriculum: incomplete publication")
 
 var lessonIDRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9-]*$`)
 
@@ -63,7 +65,7 @@ type etagEntry struct {
 	etag  string
 }
 
-// Open loads the bundle. A missing directory or curriculum.json is not an
+// Open loads the bundle. A missing or incomplete publication is not an
 // error (the server answers 503 until Reload finds it); a format mismatch
 // or a corrupt index is.
 func Open(o Options) (*Server, error) {
@@ -75,10 +77,12 @@ func Open(o Options) (*Server, error) {
 	}
 	s := &Server{o: o, etags: map[string]etagEntry{}}
 	err := s.Reload()
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) && !errors.Is(err, ErrIncomplete) {
 		return nil, err
 	}
-	if err != nil {
+	if errors.Is(err, ErrIncomplete) {
+		o.Logger.Warn("curriculum: publication is incomplete; curriculum endpoints answer 503 until publication finishes", "dir", o.Dir)
+	} else if err != nil {
 		o.Logger.Warn("curriculum: no bundle yet; curriculum endpoints answer 503 until it is built",
 			"dir", o.Dir, "hint", "playctl curriculum build curriculum -o "+o.Dir)
 	}
@@ -113,6 +117,11 @@ func (s *Server) Reload() error {
 		s.setErr(err)
 		return err
 	}
+	if err := completePublication(root, data); err != nil {
+		root.Close()
+		s.setErr(err)
+		return err
+	}
 	lessons := map[string][]string{}
 	ids := []string{}
 	for _, p := range idx.Parts {
@@ -131,18 +140,18 @@ func (s *Server) Reload() error {
 		if !lessonIDRe.MatchString(id) {
 			continue
 		}
-		raw, err := root.ReadFile(protocol.LessonDir(id) + "/" + protocol.BundleScenario)
-		if err != nil {
-			s.o.Logger.Warn("curriculum: ready lesson without scenario.json", "lesson", id, "err", err)
-			continue
-		}
+		name := protocol.LessonDir(id) + "/" + protocol.BundleScenario
+		raw, err := root.ReadFile(name)
 		var sc struct {
 			Steps []struct {
 				ID string `json:"id"`
 			} `json:"steps"`
 		}
-		if err := json.Unmarshal(raw, &sc); err != nil {
-			s.o.Logger.Warn("curriculum: bad scenario.json", "lesson", id, "err", err)
+		if err == nil {
+			err = json.Unmarshal(raw, &sc)
+		}
+		if err != nil {
+			s.o.Logger.Warn("curriculum: invalid scenario.json", "lesson", id, "err", err)
 			continue
 		}
 		steps := make([]string, 0, len(sc.Steps))
@@ -162,6 +171,13 @@ func (s *Server) Reload() error {
 	}
 	sort.Strings(locales)
 
+	// A build can start after the first completeness check while scenarios are read.
+	if err := completePublication(root, data); err != nil {
+		root.Close()
+		s.setErr(err)
+		return err
+	}
+
 	s.mu.Lock()
 	old := s.root
 	s.root, s.loaded, s.loadErr = root, true, nil
@@ -179,6 +195,17 @@ func (s *Server) Reload() error {
 		time.AfterFunc(time.Minute, func() { old.Close() })
 	}
 	s.o.Logger.Info("curriculum: loaded", "dir", s.o.Dir, "version", idx.Version, "lessons", len(lessons), "locales", append([]string{s.o.DefaultLocale}, locales...))
+	return nil
+}
+
+func completePublication(root *os.Root, index []byte) error {
+	marker, err := root.ReadFile(protocol.BundleCompleteFile)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrIncomplete, err)
+	}
+	if strings.TrimSpace(string(marker)) != fmt.Sprintf("%x", sha256.Sum256(index)) {
+		return ErrIncomplete
+	}
 	return nil
 }
 
@@ -213,6 +240,7 @@ func (s *Server) maybeReload() {
 	due := time.Since(s.checked) > 2*time.Second
 	mod := s.modTime
 	loaded := s.loaded
+	failed := s.loadErr != nil
 	s.mu.RUnlock()
 	if !due {
 		return
@@ -222,7 +250,7 @@ func (s *Server) maybeReload() {
 		s.setErr(err)
 		return
 	}
-	if !loaded || !st.ModTime().Equal(mod) {
+	if !loaded || failed || !st.ModTime().Equal(mod) {
 		if err := s.Reload(); err != nil {
 			s.o.Logger.Warn("curriculum: reload", "err", err)
 		}

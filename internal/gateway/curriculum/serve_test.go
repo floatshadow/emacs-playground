@@ -1,8 +1,11 @@
 package curriculum
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -192,6 +195,17 @@ func TestFormatMismatch(t *testing.T) {
 	}
 }
 
+func markComplete(t *testing.T, dir string) {
+	t.Helper()
+	index, err := os.ReadFile(filepath.Join(dir, protocol.BundleIndexFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, protocol.BundleCompleteFile), []byte(fmt.Sprintf("%x\n", sha256.Sum256(index))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAutoReload(t *testing.T) {
 	dir := buildBundle(t)
 	s, err := Open(Options{Dir: dir, AutoReload: true, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
@@ -202,6 +216,7 @@ func TestAutoReload(t *testing.T) {
 	data, _ := os.ReadFile(p)
 	data = []byte(strings.Replace(string(data), `"version": "test"`, `"version": "test2"`, 1))
 	_ = os.WriteFile(p, data, 0o644)
+	markComplete(t, dir)
 	future := time.Now().Add(time.Minute)
 	_ = os.Chtimes(p, future, future)
 	s.mu.Lock()
@@ -212,5 +227,83 @@ func TestAutoReload(t *testing.T) {
 	}
 	if _, v := s.Loaded(); v != "test2" {
 		t.Fatalf("version after auto reload %q", v)
+	}
+}
+
+func TestReloadRetriesIncompleteBundle(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "mismatched", true: "absent"}[missing], func(t *testing.T) {
+			dir := buildBundle(t)
+			s, _ := newServer(t, dir)
+			marker := filepath.Join(dir, protocol.BundleCompleteFile)
+			var err error
+			if missing {
+				err = os.Remove(marker)
+			} else {
+				err = os.WriteFile(marker, []byte("different index"), 0o644)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Reload(); !errors.Is(err, ErrIncomplete) {
+				t.Fatalf("reload: %v", err)
+			}
+			var logs bytes.Buffer
+			starting, err := Open(Options{Dir: dir, Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok, _ := starting.Loaded(); ok {
+				t.Fatal("partial publication loaded")
+			}
+			if !strings.Contains(logs.String(), "publication is incomplete") || strings.Contains(logs.String(), "no bundle yet") {
+				t.Fatalf("startup log: %s", logs.String())
+			}
+			markComplete(t, dir)
+			s.o.AutoReload = true
+			s.checked = time.Now().Add(-3 * time.Second)
+			s.maybeReload()
+			if s.loadErr != nil {
+				t.Fatal(s.loadErr)
+			}
+			if _, ok := s.StepIDs("00-orientation/01-first"); !ok {
+				t.Fatal("ready lesson missing")
+			}
+		})
+	}
+}
+
+func TestReloadSkipsInvalidLesson(t *testing.T) {
+	for _, missing := range []bool{false, true} {
+		t.Run(map[bool]string{false: "invalid", true: "missing"}[missing], func(t *testing.T) {
+			dir := buildBundle(t)
+			lesson := protocol.LessonDir("00-orientation/01-first")
+			name := filepath.Join(dir, lesson, protocol.BundleScenario)
+			var err error
+			if missing {
+				err = os.Remove(name)
+			} else {
+				err = os.WriteFile(name, []byte("{bad"), 0o644)
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			old := time.Now().Add(-time.Minute)
+			if err := os.Chtimes(filepath.Join(dir, lesson), old, old); err != nil {
+				t.Fatal(err)
+			}
+			if !missing {
+				if err := os.Chtimes(name, old, old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s, _ := newServer(t, dir)
+			if ok, _ := s.Loaded(); !ok {
+				t.Fatal("other lessons unavailable")
+			}
+			if _, ok := s.StepIDs("00-orientation/01-first"); ok {
+				t.Fatal("invalid lesson accepted")
+			}
+		})
 	}
 }
