@@ -71,14 +71,14 @@ describe('matchPredicate (port of TestPredicate)', () => {
 
 describe('RE2 patterns', () => {
   it('turns a leading flag group into RegExp flags', () => {
-    expect(translateRe2('(?i)buffer')).toEqual({ source: 'buffer', flags: 'i' })
-    expect(translateRe2('(?is)a.b')).toEqual({ source: 'a.b', flags: 'is' })
+    expect(translateRe2('(?i)buffer')).toEqual({ source: 'buffer', flags: 'ui' })
+    expect(translateRe2('(?is)a.b')).toEqual({ source: 'a.b', flags: 'uis' })
     expect(compileRe2('(?i)buffer').test('Switch to Buffer: ')).toBe(true)
   })
 
   it('spells out scoped case folding and dot-all', () => {
     const { source, flags } = translateRe2('x(?i:ab[c-e])y')
-    expect(flags).toBe('')
+    expect(flags).toBe('u')
     expect(source).toBe('x(?:[aA][bB][c-eC-E])y')
     const re = compileRe2('x(?i:ab[c-e])y')
     expect(re.test('xABDy')).toBe(true)
@@ -93,6 +93,14 @@ describe('RE2 patterns', () => {
     expect(compileRe2('[]a]').test(']')).toBe(true)
     expect(translateRe2('\\p{L}+').flags).toBe('u')
   })
+
+  it.each(['\\1', '\\2', '\\3', '\\4', '\\5', '\\6', '\\7'])(
+    'rejects RE2 backreference %s',
+    (pattern) => {
+      expect(() => compileRe2(pattern)).toThrow(/backreferences/)
+      expect(validatePredicate({ x: { regex: pattern } })).toMatch(/backreferences/)
+    },
+  )
 
   it('rejects what JavaScript cannot express', () => {
     expect(() => translateRe2('a(?i)b')).toThrow(/must start/)
@@ -154,4 +162,39 @@ describe('RE2 patterns', () => {
       expect(matching(prompt)).toEqual(want)
     })
   }
+})
+
+describe('predicate parity', () => {
+  const cases: [string, Predicate, unknown, boolean][] = [
+    ['escaped hyphen', { x: { regex: '^C\\-x$' } }, { x: 'C-x' }, true],
+    ['escaped colon', { x: { regex: '^a\\:b$' } }, { x: 'a:b' }, true],
+    ['literal opening brace', { x: { regex: '^x{$' } }, { x: 'x{' }, true],
+    ['literal closing bracket', { x: { regex: '^a]$' } }, { x: 'a]' }, true],
+    ['literal closing brace', { x: { regex: '^a}$' } }, { x: 'a}' }, true],
+    ['punctuation class', { x: { regex: '^[\\:\\-]$' } }, { x: ':' }, true],
+    ['hex rune', { x: { regex: '^\\x{1F600}$' } }, { x: '😀' }, true],
+    ['zero escape', { x: { regex: '^\\0$' } }, { x: '\0' }, true],
+    ['two-digit octal', { x: { regex: '^\\11$' } }, { x: '\t' }, true],
+    ['octal escape', { x: { regex: '^\\141$' } }, { x: 'a' }, true],
+    ['bell escape', { x: { regex: '^\\a$' } }, { x: '\u0007' }, true],
+    ['quoted metacharacters', { x: { regex: '^\\Qx{]\\E$' } }, { x: 'x{]' }, true],
+    ['quoted remainder', { x: { regex: '\\Qx{]' } }, { x: 'x{]' }, true],
+    ['absolute start', { x: { regex: '(?m)\\Ax' } }, { x: '\nx' }, false],
+    ['absolute end', { x: { regex: 'x\\z' } }, { x: 'x\n' }, false],
+    ['astral dot', { x: { regex: '^.$' } }, { x: '😀' }, true],
+    ['ASCII whitespace', { x: { regex: '^\\s$' } }, { x: '\t' }, true],
+    ['nonbreaking space', { x: { regex: '^\\s$' } }, { x: '\u00a0' }, false],
+    ['nonbreaking nonspace', { x: { regex: '^\\S$' } }, { x: '\u00a0' }, true],
+    ['whitespace class', { x: { regex: '^[\\s]$' } }, { x: '\u00a0' }, false],
+    ['nonspace class', { x: { regex: '^[\\S]$' } }, { x: '😀' }, true],
+    ['negated nonspace class', { x: { regex: '^[^\\S]$' } }, { x: '\t' }, true],
+    ['object membership', { x: { in: [{ a: 1, b: 2 }] } }, { x: { b: 2, a: 1 } }, true],
+    ['object containment', { x: { contains: { a: 1, b: 2 } } }, { x: [{ b: 2, a: 1 }] }, true],
+    ['different object', { x: { in: [{ a: 1, b: 2 }] } }, { x: { b: 3, a: 1 } }, false],
+    ['ordered array', { x: { in: [[1, 2]] } }, { x: [2, 1] }, false],
+  ]
+  it.each(cases)('%s', (_name, predicate, doc, want) => {
+    expect(validatePredicate(predicate)).toBeNull()
+    expect(matchPredicate(predicate, doc)).toBe(want)
+  })
 })

@@ -182,7 +182,20 @@ function equal(a: unknown, b: unknown): boolean {
     // undefined and null compare equal like JSON nulls.
     return (a === null || a === undefined) && (b === null || b === undefined)
   }
-  return JSON.stringify(a) === JSON.stringify(b)
+  if (Array.isArray(a) || Array.isArray(b))
+    return (
+      Array.isArray(a) &&
+      Array.isArray(b) &&
+      a.length === b.length &&
+      a.every((v, i) => equal(v, b[i]))
+    )
+  const left = a as Record<string, unknown>
+  const right = b as Record<string, unknown>
+  const keys = Object.keys(left)
+  return (
+    keys.length === Object.keys(right).length &&
+    keys.every((k) => Object.hasOwn(right, k) && equal(left[k], right[k]))
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -202,14 +215,14 @@ function equal(a: unknown, b: unknown): boolean {
  *     expanded to both cases (`a` → `[aA]`, `[a-z]` → `[a-zA-Z]`) and `.`
  *     to `[\s\S]`, which every engine understands;
  *   - `(?P<name>…)` becomes `(?<name>…)`;
- *   - `\p{…}` adds the u flag.
+ *   - patterns use Unicode code points and RE2's ASCII whitespace classes.
  *
  * Anything else RE2-specific that JavaScript cannot express (a flag group
  * that does not start the pattern, `(?m:…)`, `(?-i:…)`, the U flag) is an
  * error, so validatePredicate rejects it instead of the row never matching.
  */
 export function translateRe2(src: string): { source: string; flags: string } {
-  let flags = ''
+  let flags = 'u'
   let s = src
   const lead = /^\(\?([a-zA-Z]+)\)/.exec(s)
   if (lead) {
@@ -233,12 +246,67 @@ export function translateRe2(src: string): { source: string; flags: string } {
     if (c === '\\') {
       const next = s.charAt(i + 1)
       if (next === '') throw new Error('trailing backslash')
+      if (next === 's' || next === 'S') {
+        const space = '\\t\\n\\f\\r '
+        out += inClass
+          ? next === 's'
+            ? space
+            : '\\x00-\\x08\\x0b\\x0e-\\x1f\\x21-\\u{10ffff}'
+          : next === 's'
+            ? `[${space}]`
+            : `[^${space}]`
+        i++
+        continue
+      }
       if ((next === 'p' || next === 'P') && s.charAt(i + 2) === '{') {
         const end = s.indexOf('}', i + 3)
         if (end < 0) throw new Error('unterminated \\p{…}')
         out += s.slice(i, end + 1)
-        if (!flags.includes('u')) flags += 'u'
         i = end
+        continue
+      }
+      // RE2 permits escaped punctuation that Unicode-mode JS rejects.
+      if (!/[a-zA-Z0-9]/.test(next) && !'^$.*+?()[]{}|/\\'.includes(next)) {
+        const point = s.codePointAt(i + 1)!
+        out += `\\u{${point.toString(16)}}`
+        i += point > 0xffff ? 2 : 1
+        continue
+      }
+      if (next === 'A' || next === 'z') {
+        out += next === 'A' ? '(?<![\\s\\S])' : '(?![\\s\\S])'
+        i++
+        continue
+      }
+      if (next === 'Q') {
+        const end = s.indexOf('\\E', i + 2)
+        const quoted = s.slice(i + 2, end < 0 ? undefined : end)
+        for (const literal of quoted) {
+          out +=
+            fold && isLetter(literal)
+              ? `[${literal}${other(literal)}]`
+              : `\\u{${literal.codePointAt(0)!.toString(16)}}`
+        }
+        i = end < 0 ? s.length : end + 1
+        continue
+      }
+      if (next === 'a') {
+        out += '\\x07'
+        i++
+        continue
+      }
+      if (next === 'x' && s.charAt(i + 2) === '{') {
+        const end = s.indexOf('}', i + 3)
+        if (end < 0) throw new Error('unterminated hexadecimal escape')
+        out += `\\u${s.slice(i + 2, end + 1)}`
+        i = end
+        continue
+      }
+      const octal = /^[0-7]{1,3}/.exec(s.slice(i + 1))
+      if (octal) {
+        if (octal[0].length === 1 && next !== '0')
+          throw new Error('backreferences are not supported by RE2')
+        out += `\\u{${parseInt(octal[0], 8).toString(16)}}`
+        i += octal[0].length
         continue
       }
       out += c + next
@@ -275,6 +343,18 @@ export function translateRe2(src: string): { source: string; flags: string } {
         out += '\\]'
         i++
       }
+      continue
+    }
+    if (c === '{') {
+      const repeat = /^\{[0-9]+(?:,[0-9]*)?\}/.exec(s.slice(i))
+      if (repeat) {
+        out += repeat[0]
+        i += repeat[0].length - 1
+      } else out += '\\{'
+      continue
+    }
+    if (c === '}' || c === ']') {
+      out += `\\${c}`
       continue
     }
     if (c === '(') {
