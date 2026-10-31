@@ -26,6 +26,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/config"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 )
 
 const testLesson = `{
@@ -40,6 +41,17 @@ const testLesson = `{
     {"id": "last", "goal": "Keep the README", "conditions": [{"shell": {"run": "test -f README.md"}}]}
   ]
 }`
+
+func TestPersistOrdersSnapshots(t *testing.T) {
+	s := New(&protocol.SessiondConfig{Workspace: t.TempDir()}, Options{})
+	for _, revision := range []uint64{2, 1} {
+		s.persist(steps.Saved{Revision: revision, Active: &protocol.StepRef{LessonID: "a/b", StepID: fmt.Sprint(revision)}})
+	}
+	saved, resume := s.readState()
+	if !resume || saved.Active.StepID != "2" {
+		t.Fatalf("saved %+v, resume %v", saved, resume)
+	}
+}
 
 type fakeGateway struct {
 	mu       sync.Mutex

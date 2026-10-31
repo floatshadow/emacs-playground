@@ -6,6 +6,7 @@ import (
 	"maps"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -23,9 +24,9 @@ const (
 	DefaultTick        = 2 * time.Second
 	// DemoIdle ends a "Watch it" demonstration that has sent no keys (rpc
 	// keys) for this long: the page that played it went away without rpc
-	// demo end. Demo pauses are far shorter. The learner's own commands do
-	// not keep it alive.
-	DemoIdle = 10 * time.Second
+	// demo end. This exceeds the longest allowed demo pause (60 s).
+	// The learner's own commands do not keep it alive.
+	DemoIdle = 65 * time.Second
 )
 
 // QuitCommands count towards quits_in_window.
@@ -50,6 +51,9 @@ type Hooks struct {
 
 // Saved is the engine state kept in /work/.playground/state.json.
 type Saved struct {
+	Generations protocol.ProgressGenerations `json:"generations,omitempty"`
+	// Revision orders snapshots within this process, independently of disk state.
+	Revision uint64 `json:"-"`
 	// Active is the active step, nil when none.
 	Active *protocol.StepRef `json:"active,omitempty"`
 	// Lessons is per-lesson progress known to this session.
@@ -212,6 +216,7 @@ func (e *Engine) Restore(s Saved) {
 	if s.Lessons == nil {
 		s.Lessons = map[string]*LessonState{}
 	}
+	s.Revision = e.saved.Revision
 	e.saved = s
 }
 
@@ -222,8 +227,36 @@ func (e *Engine) Saved() Saved {
 	return e.savedLocked()
 }
 
+func (e *Engine) progressLocked(lessonID, stepID string, status protocol.ProgressStatus, at time.Time) protocol.ProgressReport {
+	r := e.lesson(lessonID).progress(lessonID, stepID, status, at)
+	r.Generation = e.saved.Generations.ForLesson(lessonID)
+	return r
+}
+
+// ProgressReports reconciles completed, skipped and demonstrated steps using
+// their original timestamps. Lap increments are sent only at completion.
+func (e *Engine) ProgressReports() []protocol.ProgressReport {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	var reports []protocol.ProgressReport
+	for _, lessonID := range slices.Sorted(maps.Keys(e.saved.Lessons)) {
+		ls := e.saved.Lessons[lessonID]
+		times := map[string]int64{}
+		for _, entries := range []map[string]int64{ls.Demonstrated, ls.Skipped, ls.Done} {
+			for id, at := range entries {
+				times[id] = at
+			}
+		}
+		for _, stepID := range slices.Sorted(maps.Keys(times)) {
+			reports = append(reports, e.progressLocked(lessonID, stepID, statusOf(ls, stepID), time.UnixMilli(times[stepID])))
+		}
+	}
+	return reports
+}
+
 func (e *Engine) savedLocked() Saved {
-	out := Saved{Lessons: map[string]*LessonState{}}
+	e.saved.Revision++
+	out := Saved{Revision: e.saved.Revision, Generations: maps.Clone(e.saved.Generations), Lessons: map[string]*LessonState{}}
 	if e.saved.Active != nil {
 		a := *e.saved.Active
 		out.Active = &a
@@ -398,7 +431,7 @@ func (e *Engine) startStepLocked(idx int, status protocol.StepStatus) []protocol
 	e.quits = nil
 	e.unboundRun = 0
 	e.lastUnbound = ""
-	e.shellCache.clear()
+	e.shellCache.reset()
 	if e.sc == nil || idx >= len(e.sc.Steps) {
 		return nil
 	}
@@ -440,7 +473,7 @@ func (e *Engine) inProgressLocked() []protocol.ProgressReport {
 		return nil
 	}
 	e.reported[key] = true
-	return []protocol.ProgressReport{{LessonID: a.LessonID, StepID: a.StepID, Status: protocol.ProgressInProgress, At: e.opt.Now().UnixMilli()}}
+	return []protocol.ProgressReport{{LessonID: a.LessonID, StepID: a.StepID, Status: protocol.ProgressInProgress, At: e.opt.Now().UnixMilli(), Generation: e.saved.Generations.ForLesson(a.LessonID)}}
 }
 
 // statusOf is the saved status of a step, for reports that carry it along
@@ -465,9 +498,23 @@ func statusOf(ls *LessonState, stepID string) protocol.ProgressStatus {
 // over"). A forgotten active step emits step {status: dropped}. It reports
 // whether an active step was forgotten.
 func (e *Engine) Drop(lessonID string) bool {
+	return e.DropGeneration(lessonID, 0)
+}
+
+// DropGeneration applies a gateway reset once, retaining any newer lesson reset.
+// Generation zero is an unconditional local drop.
+func (e *Engine) DropGeneration(lessonID string, generation int64) bool {
 	e.mu.Lock()
+	current := e.saved.Generations.ForLesson(lessonID)
+	if generation > 0 && generation <= current {
+		e.mu.Unlock()
+		return false
+	}
+	drop := func(id string) bool {
+		return (lessonID == "" || id == lessonID) && (generation == 0 || e.saved.Generations.ForLesson(id) < generation)
+	}
 	var evs []protocol.Event
-	if e.sc != nil && (lessonID == "" || e.sc.ID == lessonID) {
+	if e.sc != nil && drop(e.sc.ID) {
 		if a := e.activeLocked(); a != nil {
 			evs = append(evs, &protocol.StepEvent{LessonID: a.LessonID, StepID: a.StepID, Status: protocol.StepDropped,
 				Index: e.idx, Count: len(e.sc.Steps)})
@@ -480,22 +527,56 @@ func (e *Engine) Drop(lessonID string) bool {
 		e.saved.Active = nil
 		e.saved.Lap = nil
 	}
-	if lessonID == "" {
-		e.saved.Lessons = map[string]*LessonState{}
-		e.reported = map[string]bool{}
-	} else {
-		delete(e.saved.Lessons, lessonID)
-		for k := range e.reported {
-			if strings.HasPrefix(k, lessonID+"\x00") {
-				delete(e.reported, k)
-			}
+	if e.saved.Active != nil && drop(e.saved.Active.LessonID) {
+		e.saved.Active = nil
+	}
+	if e.saved.Lap != nil && drop(e.saved.Lap.LessonID) {
+		e.saved.Lap = nil
+	}
+	for id := range e.saved.Lessons {
+		if drop(id) {
+			delete(e.saved.Lessons, id)
 		}
+	}
+	for k := range e.reported {
+		id, _, _ := strings.Cut(k, "\x00")
+		if drop(id) {
+			delete(e.reported, k)
+		}
+	}
+	if generation > 0 {
+		if e.saved.Generations == nil {
+			e.saved.Generations = protocol.ProgressGenerations{}
+		}
+		e.saved.Generations[lessonID] = generation
 	}
 	saved := e.savedLocked()
 	e.mu.Unlock()
 	e.emit(evs...)
 	e.persist(saved)
 	return len(evs) > 0
+}
+
+// SyncGenerations adopts the gateway snapshot exactly, including lower generations.
+// Only newer gateway resets discard saved progress.
+func (e *Engine) SyncGenerations(generations protocol.ProgressGenerations) {
+	if generations[""] > 0 {
+		e.DropGeneration("", generations[""])
+	}
+	for lessonID, generation := range generations {
+		if lessonID != "" && generation > 0 {
+			e.DropGeneration(lessonID, generation)
+		}
+	}
+	e.mu.Lock()
+	if maps.Equal(e.saved.Generations, generations) {
+		e.mu.Unlock()
+		return
+	}
+	e.saved.Generations = maps.Clone(generations)
+	saved := e.savedLocked()
+	e.mu.Unlock()
+	e.persist(saved)
 }
 
 // ResetTo restarts step stepID of the active lesson after its checkpoint was
@@ -533,7 +614,7 @@ func (e *Engine) restart(lessonID, stepID string, count bool) bool {
 	delete(ls.Skipped, stepID)
 	delete(ls.Demonstrated, stepID)
 	evs := e.startStepLocked(idx, protocol.StepReset)
-	rep := ls.progress(lessonID, stepID, protocol.ProgressInProgress, e.opt.Now())
+	rep := e.progressLocked(lessonID, stepID, protocol.ProgressInProgress, e.opt.Now())
 	saved := e.savedLocked()
 	e.mu.Unlock()
 	e.emit(evs...)
@@ -679,7 +760,7 @@ func (e *Engine) FinishSkip(ctx context.Context, stepID string) (*string, bool) 
 	now := e.opt.Now()
 	ls := e.lesson(sc.ID)
 	ls.Skipped[stepID] = now.UnixMilli()
-	rep := ls.progress(sc.ID, stepID, protocol.ProgressSkipped, now)
+	rep := e.progressLocked(sc.ID, stepID, protocol.ProgressSkipped, now)
 	last := idx+1 >= len(sc.Steps)
 	ev := &protocol.StepEvent{LessonID: sc.ID, StepID: stepID, Status: protocol.StepSkipped, Index: idx, Count: len(sc.Steps), LessonComplete: last}
 	next := e.advanceLocked(ctx, sc, idx, []protocol.Event{ev}, rep)
@@ -705,7 +786,7 @@ func (e *Engine) Hint(stepID string, level int) bool {
 		return true
 	}
 	ls.Hints[stepID] = level
-	rep := ls.progress(lessonID, stepID, statusOf(ls, stepID), e.opt.Now())
+	rep := e.progressLocked(lessonID, stepID, statusOf(ls, stepID), e.opt.Now())
 	saved := e.savedLocked()
 	e.mu.Unlock()
 	e.report(rep)
@@ -976,7 +1057,7 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 		ls := e.lesson(sc.ID)
 		ls.Demonstrated[step.ID] = now.UnixMilli()
 		evs = append(evs, &protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepDemonstrated, Index: idx, Count: len(sc.Steps)})
-		rep := ls.progress(sc.ID, step.ID, protocol.ProgressDemonstrated, now)
+		rep := e.progressLocked(sc.ID, step.ID, protocol.ProgressDemonstrated, now)
 		saved := e.savedLocked()
 		e.mu.Unlock()
 		e.emit(evs...)
@@ -990,7 +1071,7 @@ func (e *Engine) evaluate(ctx context.Context, force bool) (protocol.CheckResult
 	ls.Done[step.ID] = now.UnixMilli()
 	last := idx+1 >= len(sc.Steps)
 	ev := &protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepComplete, Index: idx, Count: len(sc.Steps), LessonComplete: last, Lap: e.inLapLocked()}
-	rep := ls.progress(sc.ID, step.ID, protocol.ProgressDone, now)
+	rep := e.progressLocked(sc.ID, step.ID, protocol.ProgressDone, now)
 	if last && ev.Lap {
 		ev.LapMs = max(now.UnixMilli()-e.saved.Lap.StartedAt, 1)
 		rep.LapMs = ev.LapMs

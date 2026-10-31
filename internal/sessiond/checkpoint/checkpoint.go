@@ -20,6 +20,9 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
+// ErrMetadata means the checkpoint ref exists but its restore metadata is unreadable.
+var ErrMetadata = errors.New("checkpoint metadata unavailable")
+
 // RefPrefix is the namespace of every checkpoint ref.
 const RefPrefix = "refs/playground/"
 
@@ -651,7 +654,7 @@ func (m *Manager) Restore(ctx context.Context, ref string) ([]string, Meta, erro
 	}
 	meta, err := m.ReadMeta(ref)
 	if err != nil {
-		meta = Meta{Ref: ref, Label: strings.TrimPrefix(ref, RefPrefix)}
+		return nil, Meta{}, fmt.Errorf("%w: %v", ErrMetadata, err)
 	}
 	// Repositories made since the checkpoint lose their .git and become
 	// ordinary files; the checkpoint's own nested repositories stay out of

@@ -118,7 +118,7 @@ func extract(r io.Reader, root *os.Root, dest string, overwrite bool, seen map[s
 	defer zr.Close()
 	dest = strings.Trim(path.Clean("/"+dest), "/")
 	if dest != "" {
-		if err := root.MkdirAll(dest, 0o755); err != nil {
+		if err := fixtureDir(root, dest, overwrite); err != nil {
 			return res, fmt.Errorf("fixtures: creating %s: %w", dest, err)
 		}
 	}
@@ -149,7 +149,7 @@ func extract(r io.Reader, root *os.Root, dest string, overwrite bool, seen map[s
 		}
 		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := root.MkdirAll(target, 0o755); err != nil {
+			if err := fixtureDir(root, target, overwrite); err != nil {
 				return res, fmt.Errorf("fixtures: %w", err)
 			}
 			res.Dirs++
@@ -162,22 +162,22 @@ func extract(r io.Reader, root *os.Root, dest string, overwrite bool, seen map[s
 				return res, fmt.Errorf("fixtures: tarball larger than %d bytes", MaxFixtureTotal)
 			}
 			if st, err := root.Lstat(target); err == nil {
-				if st.IsDir() {
+				if st.IsDir() && (!overwrite || KeepOnReset[path.Base(target)]) {
 					return res, fmt.Errorf("fixtures: %s is a directory in the workspace", target)
 				}
 				if !overwrite {
 					res.Skipped++
 					continue
 				}
-				if st.Mode()&fs.ModeSymlink != 0 {
-					// Replace the link itself, never write through it.
-					if err := root.Remove(target); err != nil {
+				if !st.Mode().IsRegular() {
+					// Replace links and incompatible types before writing.
+					if err := root.RemoveAll(target); err != nil {
 						return res, fmt.Errorf("fixtures: %w", err)
 					}
 				}
 			}
 			if dir := path.Dir(target); dir != "." {
-				if err := root.MkdirAll(dir, 0o755); err != nil {
+				if err := fixtureDir(root, dir, overwrite); err != nil {
 					return res, fmt.Errorf("fixtures: %w", err)
 				}
 			}
@@ -201,4 +201,25 @@ func extract(r io.Reader, root *os.Root, dest string, overwrite bool, seen map[s
 			continue
 		}
 	}
+}
+
+// fixtureDir creates fixture parents, replacing incompatible types only on reset.
+func fixtureDir(root *os.Root, dir string, overwrite bool) error {
+	if overwrite {
+		parent := ""
+		for _, part := range strings.Split(dir, "/") {
+			parent = path.Join(parent, part)
+			st, err := root.Lstat(parent)
+			if err == nil && !st.IsDir() && st.Mode()&fs.ModeSymlink == 0 {
+				if err := root.Remove(parent); err != nil {
+					return err
+				}
+			}
+			if err := root.MkdirAll(parent, 0o755); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return root.MkdirAll(dir, 0o755)
 }

@@ -97,6 +97,24 @@ func TestDemoLatch(t *testing.T) {
 	}
 }
 
+func TestDemoLongPause(t *testing.T) {
+	for _, pause := range []time.Duration{12 * time.Second, 60 * time.Second} {
+		t.Run(pause.String(), func(t *testing.T) {
+			f := newFixture(t)
+			f.e.Activate(scenarioFromJSON(t, lessonJSON), 0)
+			f.e.StartDemo("open")
+			f.clock.add(pause)
+			f.e.Check(context.Background())
+			f.sink.clear()
+			f.completeOpen()
+			f.e.Check(context.Background())
+			if got := f.sink.statuses(); got != "open:demonstrated" {
+				t.Fatalf("after pause: %s", got)
+			}
+		})
+	}
+}
+
 func TestNoStuckRulesWhileDemoPlays(t *testing.T) {
 	f := newFixture(t)
 	sc := scenarioFromJSON(t, lessonJSON)

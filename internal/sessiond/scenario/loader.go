@@ -50,10 +50,10 @@ type Loader struct {
 	// Checkpoint takes the checkpoint of a starting step; force retakes an
 	// existing one.
 	Checkpoint func(ctx context.Context, lessonID, stepID string, force bool) error
-	// RestoreStep restores a step's checkpoint (files and windows) and
+	// RestoreStep restores a step's checkpoint and calls activate under its lock; it
 	// reports false when the step has none. "Go to this step" uses it for
 	// steps after the first.
-	RestoreStep func(ctx context.Context, lessonID, stepID string) (bool, error)
+	RestoreStep func(ctx context.Context, lessonID, stepID string, activate func()) (bool, error)
 	// PlayDemo plays a demo string into Emacs at playctl pacing; the
 	// fast-forward to a step without a checkpoint replays the earlier
 	// steps' demos with it.
@@ -76,6 +76,7 @@ type Loader struct {
 	mu sync.Mutex
 	// pending is the lesson whose load waits for a daemon restart.
 	pending string
+	gen     uint64
 	bg      sync.WaitGroup
 }
 
@@ -110,7 +111,6 @@ func (l *Loader) Load(ctx context.Context, req protocol.ScenarioRequest) (protoc
 	if res, ok := l.alreadyActive(req); ok {
 		return res, nil
 	}
-
 	sc, err := l.scenario(ctx, req.LessonID)
 	if err != nil {
 		return protocol.ScenarioResult{}, err
@@ -133,6 +133,9 @@ func (l *Loader) Load(ctx context.Context, req protocol.ScenarioRequest) (protoc
 		}
 		idx, lap = 0, steps.LapStart
 	}
+	l.gen++
+	l.pending = ""
+	gen := l.gen
 	reset := req.Reset || sc.Setup.Reset || req.Lap
 
 	extracted, err := l.fixtures(ctx, sc, reset)
@@ -168,12 +171,22 @@ func (l *Loader) Load(ctx context.Context, req protocol.ScenarioRequest) (protoc
 		l.restartForModules(want, func(bctx context.Context) {
 			l.mu.Lock()
 			defer l.mu.Unlock()
-			l.pending = ""
-			l.finish(bctx, sc, idx, reset, forceCheckpoint, lap)
+			if l.gen != gen {
+				return
+			}
+			if l.pending == sc.ID {
+				l.pending = ""
+			}
+			if err := l.finish(bctx, sc, idx, reset, forceCheckpoint, lap); err != nil {
+				l.log().Warn("loading after module restart", "err", err)
+				l.emit(&protocol.ErrorEvent{Code: protocol.ErrInternal, Message: "Could not restore the step. Try again."})
+			}
 		})
 		return res, nil
 	}
-	l.finish(ctx, sc, idx, reset, forceCheckpoint, lap)
+	if err := l.finish(ctx, sc, idx, reset, forceCheckpoint, lap); err != nil {
+		return protocol.ScenarioResult{}, err
+	}
 	if res.Lap != nil {
 		res.Lap = l.Engine.Lap()
 	}
@@ -192,6 +205,9 @@ func (l *Loader) alreadyActive(req protocol.ScenarioRequest) (protocol.ScenarioR
 		return protocol.ScenarioResult{}, false
 	}
 	if req.StepID != "" && req.StepID != act.StepID {
+		return protocol.ScenarioResult{}, false
+	}
+	if req.StepID != "" && l.Engine.Lap() != nil {
 		return protocol.ScenarioResult{}, false
 	}
 	idx, n := l.Engine.ActiveIndex()
@@ -215,18 +231,17 @@ const RehearsalSettle = 10 * time.Second
 // earlier steps' demos are replayed with nothing recorded and the
 // checkpoint is taken from the result. A later step's checkpoint is never
 // overwritten with the lesson's initial state (api.md §3.4).
-func (l *Loader) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset, forceCheckpoint bool, lap steps.LapMode) {
+func (l *Loader) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset, forceCheckpoint bool, lap steps.LapMode) error {
 	l.setup(ctx, sc, reset)
 	st := &sc.Steps[idx]
 	if idx > 0 {
 		if l.RestoreStep != nil {
-			ok, err := l.RestoreStep(ctx, sc.ID, st.ID)
+			ok, err := l.RestoreStep(ctx, sc.ID, st.ID, func() { l.Engine.ActivateLap(sc, idx, lap) })
 			if err != nil {
-				l.log().Warn("restoring the step's checkpoint", "lesson", sc.ID, "step", st.ID, "err", err)
+				return httpx.Internal("could not restore the step").Wrap(err)
 			}
 			if ok {
-				l.Engine.ActivateLap(sc, idx, lap)
-				return
+				return nil
 			}
 		}
 		l.fastForward(ctx, sc, idx)
@@ -238,6 +253,7 @@ func (l *Loader) finish(ctx context.Context, sc *protocol.Scenario, idx int, res
 		}
 	}
 	l.Engine.ActivateLap(sc, idx, lap)
+	return nil
 }
 
 // fastForward replays the demos of the steps before idx into Emacs, each
@@ -331,6 +347,8 @@ func (l *Loader) Resume(ctx context.Context, ref protocol.StepRef) error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	l.gen++
+	l.pending = ""
 	sc, err := l.scenario(ctx, ref.LessonID)
 	if err != nil {
 		return err

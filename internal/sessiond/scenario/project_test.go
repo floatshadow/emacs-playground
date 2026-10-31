@@ -106,6 +106,10 @@ func TestProjectSetupAndLap(t *testing.T) {
 	if err != nil || res.Lap == nil {
 		t.Fatalf("reload %+v %v", res, err)
 	}
+	res, err = f.l.Load(ctx, protocol.ScenarioRequest{LessonID: id, StepID: res.Step.StepID})
+	if err != nil || res.Lap != nil || f.engine.Lap() != nil {
+		t.Fatalf("stop lap %+v %v", res, err)
+	}
 	if _, err := f.l.Load(ctx, protocol.ScenarioRequest{LessonID: id, StepID: "commit", Lap: true}); httpx.AsError(err).Status != 400 {
 		t.Fatalf("lap from a later step: %v", err)
 	}

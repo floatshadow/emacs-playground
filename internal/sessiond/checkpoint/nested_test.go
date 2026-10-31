@@ -115,3 +115,42 @@ func TestNestedRepoRealGit(t *testing.T) {
 	gitOut(t, proj, "log", "--oneline")
 	gitOut(t, proj, "fsck", "--no-progress")
 }
+
+func TestRestoreRequiresMetadata(t *testing.T) {
+	for _, corrupt := range []bool{false, true} {
+		t.Run(map[bool]string{false: "missing", true: "corrupt"}[corrupt], func(t *testing.T) {
+			if _, err := exec.LookPath("git"); err != nil {
+				t.Skip("git not installed")
+			}
+			ws := t.TempDir()
+			ctx := context.Background()
+			m := New(ws, "git")
+			if err := m.Init(ctx); err != nil {
+				t.Fatal(err)
+			}
+			write(t, ws, "projects/hello/main.rs", "original")
+			proj := filepath.Join(ws, "projects/hello")
+			gitOut(t, proj, "init", "-q")
+			ref := StepRef("projects/hello", "start")
+			if _, err := m.Take(ctx, ref, "start", nil, nil); err != nil {
+				t.Fatal(err)
+			}
+			if corrupt {
+				if err := os.WriteFile(m.metaPath(ref), []byte("{"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.Remove(m.metaPath(ref)); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, err := m.Restore(ctx, ref); err == nil {
+				t.Fatal("restore accepted unreadable metadata")
+			}
+			if _, err := os.Stat(filepath.Join(proj, ".git")); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := read(t, ws, "projects/hello/main.rs"); got != "original" {
+				t.Fatalf("nested file %q", got)
+			}
+		})
+	}
+}

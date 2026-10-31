@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"regexp"
 	"strings"
@@ -210,6 +211,18 @@ func (c *Client) post(ctx context.Context, what string, v any) error {
 	return nil
 }
 
+// ProgressGenerations reads resets that the session may have missed while stopped.
+func (c *Client) ProgressGenerations(ctx context.Context) (protocol.ProgressGenerations, error) {
+	resp, err := c.do(ctx, http.MethodGet, protocol.InternalSessionsPath+c.SessionID+"/progress-generations", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var generations protocol.ProgressGenerations
+	err = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&generations)
+	return generations, err
+}
+
 // Progress posts one progress report.
 func (c *Client) Progress(ctx context.Context, r protocol.ProgressReport) error {
 	return c.post(ctx, "progress", r)
@@ -225,66 +238,177 @@ func (c *Client) Heartbeat(ctx context.Context, hb protocol.Heartbeat) error {
 	return c.post(ctx, "heartbeat", hb)
 }
 
-// Reporter queues progress reports and posts them in order on a background
-// goroutine, retrying with backoff while the gateway is unreachable.
+// Reporter queues progress reports and retries each transient failure for
+// up to an hour. Reconciliation recovers persisted progress after restart or overflow.
 type Reporter struct {
-	c     *Client
-	queue chan protocol.ProgressReport
-	done  chan struct{}
-	// mu guards closed; queue is closed only under it, so Report never
-	// sends on a closed channel.
-	mu     sync.Mutex
-	closed bool
+	c                *Client
+	queue            chan queuedReport
+	wake             chan struct{}
+	done             chan struct{}
+	ctx              context.Context
+	cancel           context.CancelFunc
+	reconcile        func() []protocol.ProgressReport
+	mu               sync.Mutex
+	closed           bool
+	epoch            uint64
+	lessons          map[string]uint64
+	generations      protocol.ProgressGenerations
+	activeGeneration int64
+	activeLesson     string
+	activeCancel     context.CancelFunc
 }
 
-// NewReporter starts a reporter; Close drains it.
-func NewReporter(c *Client) *Reporter {
-	r := &Reporter{c: c, queue: make(chan protocol.ProgressReport, 256), done: make(chan struct{})}
+type queuedReport struct {
+	report      protocol.ProgressReport
+	epoch       uint64
+	lessonEpoch uint64
+}
+
+// NewReporter starts a reporter; reconcile returns saved absolute progress
+// without lap increments. Close drains reports until its deadline.
+func NewReporter(c *Client, reconcile func() []protocol.ProgressReport) *Reporter {
+	ctx, cancel := context.WithCancel(context.Background())
+	r := &Reporter{c: c, queue: make(chan queuedReport, 256), wake: make(chan struct{}, 1),
+		done: make(chan struct{}), ctx: ctx, cancel: cancel, reconcile: reconcile, lessons: map[string]uint64{}, generations: protocol.ProgressGenerations{}}
 	go r.run()
 	return r
 }
 
-// Report queues a report; it drops the report when the queue is full or
-// the reporter is closed.
+func (r *Reporter) queued(p protocol.ProgressReport) queuedReport {
+	return queuedReport{report: p, epoch: r.epoch, lessonEpoch: r.lessons[p.LessonID]}
+}
+
+// Report queues a report without holding up the engine. An overflow schedules
+// reconciliation from the engine's saved progress.
 func (r *Reporter) Report(p protocol.ProgressReport) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
-		r.c.Log.Warn("progress reporter closed; dropping a report", "lesson", p.LessonID, "step", p.StepID)
 		return
 	}
 	select {
-	case r.queue <- p:
+	case r.queue <- r.queued(p):
 	default:
-		r.c.Log.Warn("progress queue full; dropping a report", "lesson", p.LessonID, "step", p.StepID)
+		r.c.Log.Warn("progress queue full; reconciling saved steps", "lesson", p.LessonID, "step", p.StepID)
+		r.Reconcile()
+	}
+}
+
+// Reconcile schedules replay of saved progress without blocking its caller.
+func (r *Reporter) Reconcile() {
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
+}
+
+// SyncGenerations replaces local cutoffs with the authoritative gateway snapshot.
+func (r *Reporter) SyncGenerations(generations protocol.ProgressGenerations) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.generations = maps.Clone(generations)
+	if r.generations == nil {
+		r.generations = protocol.ProgressGenerations{}
+	}
+	if r.activeCancel != nil && r.activeGeneration < generations.ForLesson(r.activeLesson) {
+		r.activeCancel()
+	}
+}
+
+// Purge invalidates queued reports and cancels the matching in-flight retry.
+// An empty lessonID invalidates every lesson.
+func (r *Reporter) Purge(lessonID string, generation int64) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if generation > 0 {
+		r.generations[lessonID] = max(r.generations[lessonID], generation)
+	} else if lessonID == "" {
+		r.epoch++
+	} else {
+		r.lessons[lessonID]++
+	}
+	if r.activeCancel != nil && (lessonID == "" || r.activeLesson == lessonID) && (generation == 0 || r.activeGeneration < generation) {
+		r.activeCancel()
+	}
+}
+
+func (r *Reporter) send(q queuedReport) {
+	r.mu.Lock()
+	if q.epoch != r.epoch || q.lessonEpoch != r.lessons[q.report.LessonID] || q.report.Generation < r.generations.ForLesson(q.report.LessonID) {
+		r.mu.Unlock()
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.ctx, time.Hour)
+	r.activeLesson, r.activeCancel = q.report.LessonID, cancel
+	r.activeGeneration = q.report.Generation
+	r.mu.Unlock()
+	defer func() {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			r.c.Log.Warn("progress report retry deadline reached; awaiting restart reconciliation", "lesson", q.report.LessonID, "step", q.report.StepID)
+		}
+		cancel()
+		r.mu.Lock()
+		r.activeCancel = nil
+		r.mu.Unlock()
+	}()
+	delay := time.Second
+	for ctx.Err() == nil {
+		attempt, stop := context.WithTimeout(ctx, 15*time.Second)
+		err := r.c.Progress(attempt, q.report)
+		stop()
+		if err == nil {
+			return
+		}
+		var se *StatusError
+		if errors.As(err, &se) && se.Status < 500 {
+			r.c.Log.Warn("progress report rejected", "status", se.Status, "err", err)
+			return
+		}
+		r.c.Log.Warn("progress report failed; retrying", "err", err, "in", delay)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		delay = min(delay*2, 30*time.Second)
 	}
 }
 
 func (r *Reporter) run() {
 	defer close(r.done)
-	for p := range r.queue {
-		delay := time.Second
-		for attempt := 0; attempt < 8; attempt++ {
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			err := r.c.Progress(ctx, p)
-			cancel()
-			if err == nil {
-				break
+	for {
+		select {
+		case <-r.ctx.Done():
+			return
+		case q, ok := <-r.queue:
+			if !ok {
+				return
 			}
-			var se *StatusError
-			if errors.As(err, &se) && se.Status < 500 {
-				r.c.Log.Warn("progress report rejected", "status", se.Status, "err", err)
-				break
+			r.send(q)
+		case <-r.wake:
+			if r.reconcile == nil {
+				continue
 			}
-			r.c.Log.Warn("progress report failed; retrying", "err", err, "in", delay)
-			time.Sleep(delay)
-			delay = min(delay*2, 30*time.Second)
+			// Capture generations with the snapshot so a later purge also
+			// invalidates the remainder of this reconciliation.
+			r.mu.Lock()
+			reports := r.reconcile()
+			pending := make([]queuedReport, len(reports))
+			for i, p := range reports {
+				pending[i] = r.queued(p)
+			}
+			r.mu.Unlock()
+			for _, q := range pending {
+				r.send(q)
+			}
 		}
 	}
 }
 
-// Close stops accepting reports and waits up to timeout for the queue to
-// drain.
+// Close stops accepting reports and drains them until timeout, then cancels
+// retries. Persisted progress is reconciled on the next startup.
 func (r *Reporter) Close(timeout time.Duration) {
 	r.mu.Lock()
 	if !r.closed {
@@ -292,8 +416,11 @@ func (r *Reporter) Close(timeout time.Duration) {
 		close(r.queue)
 	}
 	r.mu.Unlock()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	select {
 	case <-r.done:
-	case <-time.After(timeout):
+	case <-timer.C:
 	}
+	r.cancel()
 }

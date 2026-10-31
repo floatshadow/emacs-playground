@@ -405,11 +405,18 @@ func existsWord(ok bool) string {
 }
 
 func (ec *evalContext) readCapped(rel string) ([]byte, error) {
-	fh, err := ec.root.Open(rel)
+	fh, err := ec.root.OpenFile(rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer fh.Close()
+	st, err := fh.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !st.Mode().IsRegular() {
+		return nil, fmt.Errorf("%s is not a regular file", rel)
+	}
 	return io.ReadAll(io.LimitReader(fh, MaxFileRead))
 }
 
@@ -537,6 +544,7 @@ func (ec *evalContext) runShell(key, dir, script string, timeout, ttl time.Durat
 		// A run from an earlier evaluation: do not hold this one up.
 		select {
 		case <-fl.done:
+			ec.shellCache.consume(key, fl)
 			if fl.at.Before(ec.notBefore) {
 				return result{t: protocol.Unknown, detail: "running"}
 			}
@@ -580,6 +588,8 @@ func (ec *evalContext) runShell(key, dir, script string, timeout, ttl time.Durat
 	defer t.Stop()
 	select {
 	case <-fl.done:
+		ec.shellCache.consume(key, fl)
+		ec.noteShellAt(fl.at)
 		return fl.r
 	case <-t.C:
 		return result{t: protocol.Unknown, detail: "running"}
@@ -605,9 +615,10 @@ type cached struct {
 }
 
 type flight struct {
-	done chan struct{}
-	r    result
-	at   time.Time
+	done  chan struct{}
+	r     result
+	at    time.Time
+	epoch uint64
 }
 
 // noteShellAt records that a result came from a run started at at.
@@ -633,39 +644,62 @@ func (c *shellCache) start(k string, now time.Time) (*flight, bool, uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if f, ok := c.inflight[k]; ok {
-		return f, false, c.epoch
+		return f, false, f.epoch
 	}
 	if c.inflight == nil {
 		c.inflight = map[string]*flight{}
 	}
-	f := &flight{done: make(chan struct{}), at: now}
+	f := &flight{done: make(chan struct{}), at: now, epoch: c.epoch}
 	c.inflight[k] = f
 	return f, true, c.epoch
 }
 
-// finish records a run's result, unless the cache was cleared since it
-// started (the result may be stale).
+// finish delivers a run once even when file events invalidated the cache.
+// Only a run with no intervening file events is reusable by later evaluations.
 func (c *shellCache) finish(k string, epoch uint64, f *flight, r result, exp time.Time) {
 	c.mu.Lock()
-	if c.inflight[k] == f {
+	defer c.mu.Unlock()
+	if c.inflight[k] == f && epoch == c.epoch {
 		delete(c.inflight, k)
-	}
-	if epoch == c.epoch {
 		if c.m == nil {
 			c.m = map[string]cached{}
 		}
 		c.m[k] = cached{r: r, exp: exp, at: f.at}
 	}
 	f.r = r
-	c.mu.Unlock()
 	close(f.done)
+}
+
+// consume removes a completed run after its one-time delivery.
+func (c *shellCache) consume(k string, f *flight) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.inflight[k] == f {
+		delete(c.inflight, k)
+	}
 }
 
 func (c *shellCache) clear() {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.m = nil
 	c.epoch++
-	c.mu.Unlock()
+	// A file event after completion invalidates even an unconsumed result.
+	for k, f := range c.inflight {
+		select {
+		case <-f.done:
+			delete(c.inflight, k)
+		default:
+		}
+	}
+}
+
+// reset detaches runs belonging to the previous step.
+func (c *shellCache) reset() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m, c.inflight = nil, nil
+	c.epoch++
 }
 
 // patternCache caches parsed layout patterns and regular expressions.

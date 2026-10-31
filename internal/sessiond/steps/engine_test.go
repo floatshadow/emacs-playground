@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -179,6 +180,31 @@ func cond(t *testing.T, s string) protocol.Condition {
 		t.Fatal(err)
 	}
 	return c
+}
+
+func TestFileConditionRejectsFIFO(t *testing.T) {
+	f := newFixture(t)
+	p := filepath.Join(f.ws, "pipe")
+	if err := syscall.Mkfifo(p, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	ec := &evalContext{ctx: context.Background(), root: f.e.opt.Root}
+	c := cond(t, `{"file":{"path":"pipe","contains":"done"}}`)
+	done := make(chan result, 1)
+	go func() { done <- ec.eval(&c) }()
+	select {
+	case r := <-done:
+		if r.t != protocol.Unknown || !strings.Contains(r.detail, "not a regular file") {
+			t.Fatalf("FIFO result %+v", r)
+		}
+	case <-time.After(time.Second):
+		// Release a blocking reader before reporting the failed invariant.
+		writer, err := os.OpenFile(p, os.O_WRONLY|syscall.O_NONBLOCK, 0)
+		if err == nil {
+			writer.Close()
+		}
+		t.Fatal("FIFO blocks evaluation")
+	}
 }
 
 func TestConditionKinds(t *testing.T) {
@@ -762,5 +788,107 @@ func TestStaleShellResultIsConfirmed(t *testing.T) {
 	f.e.evaluate(ctx, false)
 	if f.shell.runs["test out -nt src"] != 2 {
 		t.Fatalf("fresh result re-ran: %v", f.shell.runs)
+	}
+}
+
+func TestProgressReportsAfterRestore(t *testing.T) {
+	e := New(Options{})
+	e.Restore(Saved{Lessons: map[string]*LessonState{"a/b": {
+		Done: map[string]int64{"done": 100}, Skipped: map[string]int64{"skip": 200},
+		Demonstrated: map[string]int64{"demo": 300, "done": 50}, Hints: map[string]int{"done": 2}, Resets: map[string]int{"done": 1},
+	}}})
+	reports := e.ProgressReports()
+	if len(reports) != 3 {
+		t.Fatalf("reports %+v", reports)
+	}
+	for _, r := range reports {
+		want := map[string]struct {
+			status protocol.ProgressStatus
+			at     int64
+		}{
+			"done": {protocol.ProgressDone, 100}, "skip": {protocol.ProgressSkipped, 200}, "demo": {protocol.ProgressDemonstrated, 300},
+		}[r.StepID]
+		if r.Status != want.status || r.At != want.at || r.LapMs != 0 {
+			t.Fatalf("report %+v", r)
+		}
+		if r.StepID == "done" && (r.HintsUsed == nil || *r.HintsUsed != 2 || r.Resets == nil || *r.Resets != 1) {
+			t.Fatalf("totals %+v", r)
+		}
+	}
+	e.Drop("a/b")
+	if got := e.ProgressReports(); len(got) != 0 {
+		t.Fatalf("reports after drop %+v", got)
+	}
+}
+
+func TestProgressGenerations(t *testing.T) {
+	f := newFixture(t)
+	sc := scenarioFromJSON(t, projectJSON)
+	f.e.Activate(sc, 0)
+	f.e.DropGeneration("", 2)
+	f.e.Activate(sc, 0)
+	if g := f.e.Saved().Generations.ForLesson(sc.ID); g != 2 {
+		t.Fatalf("generation %d", g)
+	}
+	f.e.DropGeneration(sc.ID, 4)
+	f.e.Activate(sc, 0)
+	f.e.DropGeneration("", 3)
+	f.e.DropGeneration(sc.ID, 4)
+	if f.e.Active() == nil {
+		t.Fatal("older or duplicate reset dropped newer lesson")
+	}
+	f.e.Hint("scaffold", 1)
+	f.e.OnKey(&protocol.KeyEvent{Cmd: "eshell"})
+	f.e.Check(context.Background())
+	if reports := f.e.ProgressReports(); len(reports) != 1 || reports[0].Generation != 4 {
+		t.Fatalf("reconciled reports %+v", reports)
+	}
+	if reports := f.sink.reports; reports[len(reports)-1].Generation != 4 {
+		t.Fatalf("completion reports %+v", reports)
+	}
+
+	if saved := f.e.Saved(); saved.Generations.ForLesson(sc.ID) != 4 {
+		t.Fatalf("saved %+v", saved)
+	}
+	g := newFixture(t)
+	g.e.Restore(f.e.Saved())
+	g.e.DropGeneration("", 5)
+	if saved := g.e.Saved(); saved.Active != nil || len(saved.Lessons) != 0 || saved.Generations.ForLesson(sc.ID) != 5 {
+		t.Fatalf("reset before resume %+v", saved)
+	}
+}
+
+func TestResetGenerationAfterGatewayLoss(t *testing.T) {
+	for _, scope := range []string{"", "projects/p1-hello-cargo"} {
+		t.Run(scope, func(t *testing.T) {
+			f := newFixture(t)
+			sc := scenarioFromJSON(t, projectJSON)
+			f.e.Restore(Saved{Generations: protocol.ProgressGenerations{sc.ID: 18}})
+			f.e.Activate(sc, 0)
+			f.e.OnKey(&protocol.KeyEvent{Cmd: "eshell"})
+			f.e.Check(context.Background())
+			if saved := f.e.Saved(); saved.Active == nil || len(saved.Lessons[sc.ID].Done) != 1 {
+				t.Fatalf("state before reset %+v", saved)
+			}
+			const generation int64 = 1_800_000_000_000
+			if !f.e.DropGeneration(scope, generation) {
+				t.Fatal("reset did not drop the active step")
+			}
+			saved := f.e.Saved()
+			if saved.Active != nil || len(saved.Lessons) != 0 || saved.Generations.ForLesson(sc.ID) != generation {
+				t.Fatalf("state after reset %+v", saved)
+			}
+			g := newFixture(t)
+			g.e.Restore(saved)
+			if reports := g.e.ProgressReports(); len(reports) != 0 {
+				t.Fatalf("reset outcomes replayed after restart: %+v", reports)
+			}
+			g.e.Activate(sc, 0)
+			g.e.OnKey(&protocol.KeyEvent{Cmd: "eshell"})
+			g.e.Check(context.Background())
+			if reports := g.e.ProgressReports(); len(reports) != 1 || reports[0].Generation != generation || reports[0].Status != protocol.ProgressDone {
+				t.Fatalf("completion after reset %+v", reports)
+			}
+		})
 	}
 }

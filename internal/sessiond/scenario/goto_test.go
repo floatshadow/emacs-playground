@@ -2,6 +2,7 @@ package scenario
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -44,10 +45,13 @@ func newDemoLoader(t *testing.T) (*loaderFixture, *[]string, *[]string) {
 		}
 		return nil
 	}
-	f.l.RestoreStep = func(ctx context.Context, lessonID, stepID string) (bool, error) {
+	f.l.RestoreStep = func(ctx context.Context, lessonID, stepID string, activate func()) (bool, error) {
 		mu.Lock()
 		defer mu.Unlock()
 		restored = append(restored, stepID)
+		if stepID == "kill" {
+			activate()
+		}
 		return stepID == "kill", nil
 	}
 	return f, &played, &restored
@@ -108,5 +112,16 @@ func TestGoToStepFastForwards(t *testing.T) {
 	}
 	if len(*restored) != 0 || len(*played) != 0 || strings.Join(f.cps, ",") != id+"/open!" {
 		t.Fatalf("first step: restored %v played %v checkpoints %v", *restored, *played, f.cps)
+	}
+}
+
+func TestGoToStepRestoreFailure(t *testing.T) {
+	f, played, _ := newDemoLoader(t)
+	f.l.RestoreStep = func(context.Context, string, string, func()) (bool, error) {
+		return false, errors.New("reset-step failed")
+	}
+	_, err := f.l.Load(context.Background(), protocol.ScenarioRequest{LessonID: "02-buffers-and-files/04-switch-save-kill", StepID: "kill"})
+	if err == nil || len(*played) != 0 || len(f.cps) != 0 || f.engine.Active() != nil {
+		t.Fatalf("error=%v played=%v checkpoints=%v active=%v", err, *played, f.cps, f.engine.Active())
 	}
 }

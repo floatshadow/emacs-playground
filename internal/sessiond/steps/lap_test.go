@@ -2,12 +2,15 @@ package steps
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/preview"
 )
 
 const projectJSON = `{
@@ -112,6 +115,7 @@ func TestLapEndsAndResumes(t *testing.T) {
 // slowShell blocks each script until released.
 type slowShell struct {
 	mu      sync.Mutex
+	started chan struct{}
 	release chan struct{}
 	runs    int
 	scripts []string
@@ -124,6 +128,9 @@ func (s *slowShell) Run(ctx context.Context, dir, script string, timeout time.Du
 	s.scripts = append(s.scripts, script)
 	ch := s.release
 	s.mu.Unlock()
+	if s.started != nil {
+		s.started <- struct{}{}
+	}
 	if ch != nil {
 		<-ch
 	}
@@ -164,6 +171,84 @@ func TestSlowShellRunsInBackground(t *testing.T) {
 	<-triggered
 	if _, _, ok := ec.shellCache.get(ec.workspace+"\x00cargo test", time.Now()); ok {
 		t.Fatal("stale result cached")
+	}
+}
+
+type shellFunc func(context.Context, string, string, time.Duration) ShellResult
+
+func (f shellFunc) Run(ctx context.Context, dir, script string, timeout time.Duration) ShellResult {
+	return f(ctx, dir, script, timeout)
+}
+
+func TestShellWritesToWatchedTree(t *testing.T) {
+	for _, wait := range []time.Duration{time.Second, time.Millisecond} {
+		t.Run(wait.String(), func(t *testing.T) {
+			dir := t.TempDir()
+			input := filepath.Join(dir, "input")
+			if err := os.WriteFile(input, []byte("ok"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cache := &shellCache{}
+			changed, triggered := make(chan struct{}, 8), make(chan struct{}, 8)
+			watcher, err := preview.NewWatcher(dir, func(*protocol.FileEvent) {
+				cache.clear()
+				changed <- struct{}{}
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer watcher.Close()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go watcher.Run(ctx)
+			sh := shellFunc(func(ctx context.Context, dir, script string, timeout time.Duration) ShellResult {
+				data, err := os.ReadFile(input)
+				if err != nil {
+					return ShellResult{Err: err}
+				}
+				if err := os.WriteFile(filepath.Join(dir, "results"), data, 0o644); err != nil {
+					return ShellResult{Err: err}
+				}
+				select {
+				case <-changed:
+				case <-time.After(3 * time.Second):
+					return ShellResult{Err: context.DeadlineExceeded}
+				}
+				return ShellResult{OK: string(data) == "ok"}
+			})
+			ec := &evalContext{ctx: ctx, workspace: dir, shell: sh, shellCache: cache,
+				shellWait: wait, trigger: func() { triggered <- struct{}{} }}
+			c := cond(t, `{"shell":{"run":"check"}}`)
+			eval := func() result {
+				r := ec.eval(&c)
+				select {
+				case <-triggered:
+				case <-time.After(4 * time.Second):
+					t.Fatal("shell did not finish")
+				}
+				if r.t == protocol.Unknown {
+					r = ec.eval(&c)
+				}
+				return r
+			}
+			if r := eval(); r.t != protocol.True {
+				t.Fatalf("own writes: %+v", r)
+			}
+			if _, _, ok := cache.get(dir+"\x00check", time.Now()); ok {
+				t.Fatal("invalidated result cached")
+			}
+			if err := os.WriteFile(input, []byte("bad"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-changed:
+			case <-time.After(3 * time.Second):
+				t.Fatal("input change not observed")
+			}
+			if r := eval(); r.t != protocol.False {
+				t.Fatalf("changed input: %+v", r)
+			}
+		})
 	}
 }
 

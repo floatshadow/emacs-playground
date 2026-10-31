@@ -84,9 +84,14 @@ type Server struct {
 
 	wsCount atomic.Int64
 	// boxReady: the box alias is set up (sshbox.Setup succeeded).
-	boxReady atomic.Bool
-	done     chan struct{}
-	stateMu  sync.Mutex
+	boxReady      atomic.Bool
+	done          chan struct{}
+	stateMu       sync.Mutex
+	stateRevision uint64
+	// progressMu serialises gateway snapshots with incoming resets.
+	progressMu sync.Mutex
+	// restoreMu covers files, Emacs state and the following step activation.
+	restoreMu sync.Mutex
 	// skipMu serialises rpc skip.
 	skipMu sync.Mutex
 	bg     sync.WaitGroup
@@ -248,7 +253,6 @@ func (s *Server) wire() {
 	log := s.log
 	if cfg.GatewayURL != "" {
 		s.gw = gwclient.New(cfg.GatewayURL, cfg.SessionToken, cfg.SessionID, log.With("component", "gateway"))
-		s.reporter = gwclient.NewReporter(s.gw)
 	}
 	s.tap = inputtap.NewTap(func(ev *protocol.PrefixEvent) { s.bus.Publish(ev) })
 
@@ -322,6 +326,9 @@ func (s *Server) wire() {
 			Persist: s.persist,
 		},
 	})
+	if s.gw != nil {
+		s.reporter = gwclient.NewReporter(s.gw, s.engine.ProgressReports)
+	}
 	var fetch scenario.Fetcher
 	if s.gw != nil {
 		fetch = s.gw
@@ -559,6 +566,9 @@ func (s *Server) statePath() string { return filepath.Join(s.playgroundDir(), "s
 func (s *Server) persist(saved steps.Saved) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
+	if saved.Revision < s.stateRevision {
+		return
+	}
 	b, err := json.MarshalIndent(stateFile{Version: 1, Saved: saved}, "", "  ")
 	if err != nil {
 		return
@@ -573,6 +583,8 @@ func (s *Server) persist(saved steps.Saved) {
 	}
 	if err != nil {
 		s.log.Warn("state.json", "err", err)
+	} else {
+		s.stateRevision = saved.Revision
 	}
 }
 
@@ -590,10 +602,35 @@ func (s *Server) readState() (saved steps.Saved, resume bool) {
 	return st.Saved, st.Active != nil
 }
 
+// syncProgress applies gateway resets missed while this session was unavailable.
+func (s *Server) syncProgress(ctx context.Context) {
+	if s.gw == nil {
+		return
+	}
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	generations, err := s.gw.ProgressGenerations(ctx)
+	if err != nil {
+		s.log.Warn("progress generations", "err", err)
+		return
+	}
+	if s.reporter != nil {
+		s.reporter.SyncGenerations(generations)
+	}
+	s.engine.SyncGenerations(generations)
+}
+
 // restoreState loads the saved progress and resumes the active step in the
 // background (Loader.Resume), then calls release (when set).
 func (s *Server) restoreState(ctx context.Context, saved steps.Saved, release func()) {
 	s.engine.Restore(saved)
+	s.syncProgress(ctx)
+	saved = s.engine.Saved()
+	if s.reporter != nil {
+		s.reporter.Reconcile()
+	}
 	if saved.Active == nil {
 		if release != nil {
 			release()

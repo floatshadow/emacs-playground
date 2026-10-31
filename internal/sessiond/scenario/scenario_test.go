@@ -257,15 +257,20 @@ func (a *fakeAgent) Call(ctx context.Context, op protocol.AgentOp, args any, tim
 }
 
 type fakeRestart struct {
-	mu sync.Mutex
-	n  int
+	release <-chan struct{}
+	mu      sync.Mutex
+	n       int
 }
 
 func (r *fakeRestart) RestartEmacs(ctx context.Context, reason string) error {
 	r.mu.Lock()
 	r.n++
 	r.mu.Unlock()
-	time.Sleep(20 * time.Millisecond)
+	if r.release != nil {
+		<-r.release
+	} else {
+		time.Sleep(20 * time.Millisecond)
+	}
 	return nil
 }
 
@@ -335,6 +340,58 @@ func (f *loaderFixture) evs() string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return strings.Join(f.events, " ")
+}
+
+func TestSupersededModuleLoad(t *testing.T) {
+	f := newLoader(t)
+	release := make(chan struct{})
+	f.restart.release = release
+	defer f.l.Wait()
+	defer close(release)
+	ctx := context.Background()
+	a, b := "02-buffers-and-files/03-opening-files", "01-moving/01-basics"
+	f.fetch.scenarios[b] = `{"id":"01-moving/01-basics","modules":["base","agent"],"steps":[{"id":"one","conditions":[{"event":{"command":"next-line"}}]}]}`
+	res, err := f.l.Load(ctx, protocol.ScenarioRequest{LessonID: a})
+	if err != nil || !res.Restarting {
+		t.Fatalf("first load %+v %v", res, err)
+	}
+	if _, err := f.l.Load(ctx, protocol.ScenarioRequest{LessonID: b}); err != nil {
+		t.Fatal(err)
+	}
+	// The callback runs when the deferred close releases the restart.
+	t.Cleanup(func() {
+		if active := f.engine.Active(); active == nil || active.LessonID != b {
+			t.Fatalf("active after restart %+v", active)
+		}
+	})
+}
+
+func TestInvalidLoadKeepsPending(t *testing.T) {
+	for _, stepID := range []string{"", "missing"} {
+		t.Run(stepID, func(t *testing.T) {
+			f := newLoader(t)
+			release := make(chan struct{})
+			f.restart.release = release
+			defer f.l.Wait()
+			defer close(release)
+			id := "02-buffers-and-files/03-opening-files"
+			if _, err := f.l.Load(context.Background(), protocol.ScenarioRequest{LessonID: id}); err != nil {
+				t.Fatal(err)
+			}
+			other := "01-moving/01-basics"
+			if stepID != "" {
+				f.fetch.scenarios[other] = `{"id":"01-moving/01-basics","steps":[{"id":"one"}]}`
+			}
+			if _, err := f.l.Load(context.Background(), protocol.ScenarioRequest{LessonID: other, StepID: stepID}); err == nil {
+				t.Fatal("invalid load succeeded")
+			}
+			t.Cleanup(func() {
+				if a := f.engine.Active(); a == nil || a.LessonID != id {
+					t.Fatalf("pending load lost: %+v", a)
+				}
+			})
+		})
+	}
 }
 
 func TestLoaderFlow(t *testing.T) {
@@ -566,5 +623,37 @@ func TestExtractResetPrunes(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(ws, "outside.txt")); err != nil {
 		t.Fatal("a reset touched files outside its root")
+	}
+}
+
+func TestExtractReplacesTypes(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		before, after []entry
+	}{
+		{"directory to file", []entry{{name: "a/", dir: true}, {name: "a/child", body: "old"}}, []entry{{name: "a", body: "new"}}},
+		{"file to directory", []entry{{name: "a", body: "old"}}, []entry{{name: "a/", dir: true}, {name: "a/child", body: "new"}}},
+		{"file to implicit parent", []entry{{name: "a", body: "old"}}, []entry{{name: "a/child", body: "new"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := openRoot(t, t.TempDir())
+			if _, err := Extract(bytes.NewReader(tarball(t, tc.before...)), root, "lesson", true); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Extract(bytes.NewReader(tarball(t, tc.after...)), root, "lesson", false); err == nil {
+				t.Fatal("type conflict accepted without overwrite")
+			}
+			if _, err := Extract(bytes.NewReader(tarball(t, tc.after...)), root, "lesson", true); err != nil {
+				t.Fatal(err)
+			}
+			for _, e := range tc.after {
+				if !e.dir {
+					b, err := root.ReadFile("lesson/" + e.name)
+					if err != nil || string(b) != e.body {
+						t.Fatalf("%s: %q %v", e.name, b, err)
+					}
+				}
+			}
+		})
 	}
 }

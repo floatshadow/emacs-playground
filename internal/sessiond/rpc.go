@@ -37,6 +37,7 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 	case protocol.OpRescue:
 		res, err = s.rpcRescue(ctx)
 	case protocol.OpScenario:
+		s.syncProgress(ctx)
 		res, err = withBody(w, r, s.loader.Load)
 	case protocol.OpCheck:
 		cr, ok := s.engine.Check(ctx)
@@ -155,7 +156,12 @@ func (s *Server) rpcDropStep(_ context.Context, req protocol.DropStepRequest) (a
 	if req.LessonID != "" && !gwclient.ValidLessonID(req.LessonID) {
 		return nil, httpx.BadRequest("lessonId is not a valid lesson id")
 	}
-	s.engine.Drop(req.LessonID)
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
+	if s.reporter != nil {
+		s.reporter.Purge(req.LessonID, req.Generation)
+	}
+	s.engine.DropGeneration(req.LessonID, req.Generation)
 	return protocol.Empty{}, nil
 }
 
@@ -357,17 +363,21 @@ func (s *Server) rpcRestore(ctx context.Context, req protocol.RestoreRequest) (a
 	if err != nil {
 		return nil, err
 	}
-	n, meta, err := s.restoreCheckpoint(ctx, ref)
+	n, _, err := s.restoreCheckpoint(ctx, ref, func(meta checkpoint.Meta) {
+		if meta.Step != nil {
+			s.engine.ResetTo(meta.Step.LessonID, meta.Step.StepID)
+		} else if lesson, step, ok := splitStepRef(ref); ok {
+			s.engine.ResetTo(lesson, step)
+		}
+	})
 	if err != nil {
+		if errors.Is(err, checkpoint.ErrMetadata) {
+			return nil, httpx.Conflict("checkpoint metadata is missing or unreadable").Wrap(err)
+		}
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, httpx.NotFound("no such checkpoint")
 		}
-		return nil, httpx.Internal("restore failed").Wrap(err)
-	}
-	if meta.Step != nil {
-		s.engine.ResetTo(meta.Step.LessonID, meta.Step.StepID)
-	} else if lesson, step, ok := splitStepRef(ref); ok {
-		s.engine.ResetTo(lesson, step)
+		return nil, httpx.Internal("restore incomplete").Wrap(err)
 	}
 	return protocol.RestoreResult{RestoredFiles: n}, nil
 }
@@ -383,8 +393,10 @@ func (s *Server) rpcRestore(ctx context.Context, req protocol.RestoreRequest) (a
 // request that asked for it goes away (a page navigating away while "Go to
 // this step" restores): files restored without reset-step, buffers and
 // session variables would leave the step half restored. Each agent call
-// keeps its own timeout.
-func (s *Server) restoreCheckpoint(ctx context.Context, ref string) (int, checkpoint.Meta, error) {
+// keeps its own timeout. after activates the restored step under the same lock.
+func (s *Server) restoreCheckpoint(ctx context.Context, ref string, after func(checkpoint.Meta)) (int, checkpoint.Meta, error) {
+	s.restoreMu.Lock()
+	defer s.restoreMu.Unlock()
 	ctx = context.WithoutCancel(ctx)
 	mods := s.modules.Current()
 	var unsaved []string
@@ -413,7 +425,7 @@ func (s *Server) restoreCheckpoint(ctx context.Context, ref string) (int, checkp
 	}
 	if s.agent.Connected() {
 		if err := s.agent.Call(ctx, protocol.AgentOpResetStep, protocol.AgentResetStepArgs{Spec: *spec}, 10*time.Second, nil); err != nil {
-			s.log.Warn("reset-step after restore", "err", err)
+			return 0, meta, fmt.Errorf("restore incomplete: reset-step: %w", err)
 		}
 		// reset-step put the buffers on the restored files; the edits
 		// that were unsaved when the checkpoint was taken, the undo
@@ -421,18 +433,21 @@ func (s *Server) restoreCheckpoint(ctx context.Context, ref string) (int, checkp
 		s.restoreBuffers(ctx, meta.Buffers, spec)
 		s.restoreGlobals(ctx, meta.Globals)
 	}
+	if after != nil {
+		after(meta)
+	}
 	return len(changed), meta, nil
 }
 
 // restoreStep restores a step's checkpoint for the scenario loader ("Go to
-// this step"): files and windows, no engine change (the loader activates
-// the step next). It reports false when the step has no checkpoint.
-func (s *Server) restoreStep(ctx context.Context, lessonID, stepID string) (bool, error) {
+// this step"): files, windows and activation under the same restore lock.
+// It reports false when the step has no checkpoint.
+func (s *Server) restoreStep(ctx context.Context, lessonID, stepID string, activate func()) (bool, error) {
 	ref := checkpoint.StepRef(lessonID, stepID)
 	if !s.ckpt.Exists(ctx, ref) {
 		return false, nil
 	}
-	if _, _, err := s.restoreCheckpoint(ctx, ref); err != nil {
+	if _, _, err := s.restoreCheckpoint(ctx, ref, func(checkpoint.Meta) { activate() }); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return false, nil
 		}
@@ -449,13 +464,16 @@ func (s *Server) restartIfDirty(ctx context.Context, act protocol.StepRef) bool 
 	if !s.engine.Dirty() {
 		return false
 	}
-	if _, _, err := s.restoreCheckpoint(ctx, checkpoint.StepRef(act.LessonID, act.StepID)); err != nil {
+	restarted := false
+	if _, _, err := s.restoreCheckpoint(ctx, checkpoint.StepRef(act.LessonID, act.StepID), func(checkpoint.Meta) {
+		restarted = s.engine.Restart(act.LessonID, act.StepID)
+	}); err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
 			s.log.Warn("restoring the step before its demo", "lesson", act.LessonID, "step", act.StepID, "err", err)
 		}
 		return false
 	}
-	return s.engine.Restart(act.LessonID, act.StepID)
+	return restarted
 }
 
 // rpcDemo brackets the browser's "Watch it" (api.md §3.4, §4.1).
