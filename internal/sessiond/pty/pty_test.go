@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http/httptest"
 	"os/exec"
 	"strings"
@@ -274,5 +275,33 @@ func TestPtyNotReadyAndDetached(t *testing.T) {
 	close(done)
 	if st := c.closeStatus(); st != protocol.CloseSessionStopping {
 		t.Fatalf("shutdown: %v", st)
+	}
+}
+
+func TestWaitOrKillEscalates(t *testing.T) {
+	cmd := exec.Command("sh", "-c", `trap '' HUP; printf ready; exec sleep 30`)
+	out, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer cmd.Process.Kill()
+	ready := make([]byte, 5)
+	if _, err := io.ReadFull(out, ready); err != nil {
+		t.Fatal(err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+	v := &viewer{cmd: cmd}
+	v.kill()
+	start := time.Now()
+	waitOrKill(cmd, exited)
+	if time.Since(start) > 5*time.Second {
+		t.Fatal("attach process was not reaped within the grace")
+	}
+	if cmd.ProcessState == nil || cmd.ProcessState.Success() {
+		t.Fatalf("process state %v", cmd.ProcessState)
 	}
 }

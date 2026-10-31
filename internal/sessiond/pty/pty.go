@@ -155,7 +155,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := httpx.WriteJSONText(ctx, c, protocol.PtyControl{T: protocol.PtyAttached}, 5*time.Second); err != nil {
 		v.kill()
-		_ = cmd.Wait()
+		_ = f.Close()
+		exited := make(chan error, 1)
+		go func() { exited <- cmd.Wait() }()
+		waitOrKill(cmd, exited)
 		return
 	}
 
