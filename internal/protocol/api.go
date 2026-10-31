@@ -227,15 +227,25 @@ type Created struct {
 	ID string `json:"id"`
 }
 
+// ProgressGenerations maps reset scopes to gateway-issued generations.
+// The empty scope applies to every lesson; a lesson uses the greater generation.
+type ProgressGenerations map[string]int64
+
+// ForLesson returns the greater of the whole-user and lesson reset generations.
+func (g ProgressGenerations) ForLesson(lessonID string) int64 {
+	return max(g[""], g[lessonID])
+}
+
 // ProgressReport is POST /internal/sessions/{id}/progress from sessiond.
 // HintsUsed and Resets, when present, are the step's absolute totals since
 // the step's progress was last reset (not increments).
 type ProgressReport struct {
-	LessonID  string         `json:"lessonId"`
-	StepID    string         `json:"stepId"`
-	Status    ProgressStatus `json:"status"`
-	HintsUsed *int           `json:"hintsUsed,omitempty"`
-	Resets    *int           `json:"resets,omitempty"`
+	Generation int64          `json:"generation,omitempty"`
+	LessonID   string         `json:"lessonId"`
+	StepID     string         `json:"stepId"`
+	Status     ProgressStatus `json:"status"`
+	HintsUsed  *int           `json:"hintsUsed,omitempty"`
+	Resets     *int           `json:"resets,omitempty"`
 	// At is when the change happened (ms); the gateway uses it as
 	// completedAt for done.
 	At int64 `json:"at,omitempty"`

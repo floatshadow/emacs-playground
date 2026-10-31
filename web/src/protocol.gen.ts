@@ -747,6 +747,7 @@ export interface Diagnostic {
  * active step emits a StepEvent with status StepDropped.
  */
 export interface DropStepRequest {
+  generation?: number;
   lessonId?: string;
 }
 
@@ -1518,6 +1519,7 @@ export interface ProgressCounts {
  * the step's progress was last reset (not increments).
  */
 export interface ProgressReport {
+  generation?: number;
   lessonId: string;
   stepId: string;
   status: ProgressStatus;
@@ -2334,6 +2336,7 @@ export const FixturesContentType = "application/zstd";
 export const InternalAuthorization = "Authorization";
 export const CheatsCommon = "common";
 export const BundleIndexFile = "curriculum.json";
+export const BundleCompleteFile = "curriculum.complete";
 export const BundleLessonsDir = "lessons";
 export const BundleFixturesDir = "fixtures";
 export const BundleLessonFile = "bundle.json";

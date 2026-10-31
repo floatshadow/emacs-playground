@@ -405,3 +405,65 @@ func TestRPCSpecsComplete(t *testing.T) {
 		t.Fatalf("got %s", b)
 	}
 }
+
+func TestPredicateParity(t *testing.T) {
+	for _, tc := range []struct {
+		name, predicate, doc string
+		want                 bool
+	}{
+		{"escaped hyphen", `{"x": {"regex": "^C\\-x$"}}`, `{"x": "C-x"}`, true},
+		{"escaped colon", `{"x": {"regex": "^a\\:b$"}}`, `{"x": "a:b"}`, true},
+		{"literal opening brace", `{"x": {"regex": "^x{$"}}`, `{"x": "x{"}`, true},
+		{"literal closing bracket", `{"x": {"regex": "^a]$"}}`, `{"x": "a]"}`, true},
+		{"literal closing brace", `{"x": {"regex": "^a}$"}}`, `{"x": "a}"}`, true},
+		{"punctuation class", `{"x": {"regex": "^[\\:\\-]$"}}`, `{"x": ":"}`, true},
+		{"hex rune", `{"x": {"regex": "^\\x{1F600}$"}}`, `{"x": "😀"}`, true},
+		{"zero escape", `{"x": {"regex": "^\\0$"}}`, `{"x": "\u0000"}`, true},
+		{"two-digit octal", `{"x": {"regex": "^\\11$"}}`, `{"x": "\t"}`, true},
+		{"octal escape", `{"x": {"regex": "^\\141$"}}`, `{"x": "a"}`, true},
+		{"bell escape", `{"x": {"regex": "^\\a$"}}`, `{"x": "\u0007"}`, true},
+		{"quoted metacharacters", `{"x": {"regex": "^\\Qx{]\\E$"}}`, `{"x": "x{]"}`, true},
+		{"quoted remainder", `{"x": {"regex": "\\Qx{]"}}`, `{"x": "x{]"}`, true},
+		{"absolute start", `{"x": {"regex": "(?m)\\Ax"}}`, `{"x": "\nx"}`, false},
+		{"absolute end", `{"x": {"regex": "x\\z"}}`, `{"x": "x\n"}`, false},
+		{"astral dot", `{"x":{"regex":"^.$"}}`, `{"x":"😀"}`, true},
+		{"ASCII whitespace", `{"x":{"regex":"^\\s$"}}`, `{"x":"\t"}`, true},
+		{"nonbreaking space", `{"x":{"regex":"^\\s$"}}`, `{"x":"\u00a0"}`, false},
+		{"nonbreaking nonspace", `{"x":{"regex":"^\\S$"}}`, `{"x":"\u00a0"}`, true},
+		{"whitespace class", `{"x":{"regex":"^[\\s]$"}}`, `{"x":"\u00a0"}`, false},
+		{"nonspace class", `{"x":{"regex":"^[\\S]$"}}`, `{"x":"😀"}`, true},
+		{"negated nonspace class", `{"x":{"regex":"^[^\\S]$"}}`, `{"x":"\t"}`, true},
+		{"object membership", `{"x":{"in":[{"a":1,"b":2}]}}`, `{"x":{"b":2,"a":1}}`, true},
+		{"object containment", `{"x":{"contains":{"a":1,"b":2}}}`, `{"x":[{"b":2,"a":1}]}`, true},
+		{"different object", `{"x":{"in":[{"a":1,"b":2}]}}`, `{"x":{"b":3,"a":1}}`, false},
+		{"ordered array", `{"x":{"in":[[1,2]]}}`, `{"x":[2,1]}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var p Predicate
+			var doc any
+			if err := json.Unmarshal([]byte(tc.predicate), &p); err != nil {
+				t.Fatal(err)
+			}
+			if err := json.Unmarshal([]byte(tc.doc), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidatePredicate(p); err != nil {
+				t.Fatal(err)
+			}
+			if got := p.Match(doc); got != tc.want {
+				t.Fatalf("match %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPredicateRejectsBackreferences(t *testing.T) {
+	for _, pattern := range []string{`\1`, `\2`, `\3`, `\4`, `\5`, `\6`, `\7`} {
+		t.Run(pattern, func(t *testing.T) {
+			p := Predicate{"x": map[string]any{"regex": pattern}}
+			if err := ValidatePredicate(p); err == nil {
+				t.Fatal("backreference accepted")
+			}
+		})
+	}
+}

@@ -168,6 +168,7 @@ type CheatRow [2]string
 // Built bundle layout: the contract between `playctl curriculum build -o DIR`
 // and the gateway's curriculum.dir (backend.md §2.8, §4).
 //
+//	DIR/curriculum.complete                     sha256 of curriculum.json, published last
 //	DIR/curriculum.json                         CurriculumIndex, default locale
 //	DIR/curriculum.<locale>.json                CurriculumIndex for another locale (optional)
 //	DIR/lessons/<lessonId>/bundle.json          LessonBundle, default locale
@@ -188,13 +189,14 @@ type CheatRow [2]string
 // answers 204 No Content. Tarballs are built reproducibly (sorted entries,
 // zero mtimes, uid/gid 0) so their sha256 is a stable ETag.
 const (
-	BundleIndexFile   = "curriculum.json"
-	BundleLessonsDir  = "lessons"
-	BundleFixturesDir = "fixtures"
-	BundleLessonFile  = "bundle.json"
-	BundleScenario    = "scenario.json"
-	BundleAssetsDir   = "assets"
-	FixtureExt        = ".tar.zst"
+	BundleIndexFile    = "curriculum.json"
+	BundleCompleteFile = "curriculum.complete"
+	BundleLessonsDir   = "lessons"
+	BundleFixturesDir  = "fixtures"
+	BundleLessonFile   = "bundle.json"
+	BundleScenario     = "scenario.json"
+	BundleAssetsDir    = "assets"
+	FixtureExt         = ".tar.zst"
 )
 
 // BundleIndexName returns the index file name for locale ("" or

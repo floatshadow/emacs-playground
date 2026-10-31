@@ -268,7 +268,8 @@ type DescribeResult struct {
 // empty LessonID it forgets all progress and the active step. A forgotten
 // active step emits a StepEvent with status StepDropped.
 type DropStepRequest struct {
-	LessonID string `json:"lessonId,omitempty"`
+	Generation int64  `json:"generation,omitempty"`
+	LessonID   string `json:"lessonId,omitempty"`
 }
 
 // DemoPhase is the phase of a "Watch it" demonstration.
