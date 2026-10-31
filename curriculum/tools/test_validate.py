@@ -27,21 +27,51 @@ class JsRegexTest(unittest.TestCase):
             "[(?]x",  # inside a class, (? is literal
             r"a\(?x",  # an escaped parenthesis is literal
             "(?:a|b)c",
+            "(?i:file)",
+            "(?is:file.)",
+            "(?P<name>a)",
+            "(?<name>a)",
+            r"\Afoo",
+            r"foo\z",
+            r"\Q(?x)[[:alpha:]]\E",
+            r"\Qliteral remainder",
+            r"\p{L}+",
+            r"\x{263a}",
+            r"\0",
+            r"\11",
+            r"\141",
+            r"C\-x",
+            r"a\:b",
+            "x{",
+            "a]",
         ]:
             self.assertIsNone(v.js_regex_problem(rx), rx)
 
     def test_not_portable(self):
         for rx in [
             "a(?i)b",
-            "(?i:file)",
-            "(?P<name>a)",
-            r"\Afoo",
-            r"foo\z",
+            "(?U)a+",
+            "(?m:^a)",
+            "(?-i:a)",
+            "(?=a)",
+            "(?<=a)",
+            r"\1", r"\2", r"\3", r"\4", r"\5", r"\6", r"\7",
             r"\pL+",
-            r"\x{263a}",
+            r"\E",
+            r"\C",
             "[[:alpha:]]+",
         ]:
             self.assertIsNotNone(v.js_regex_problem(rx), rx)
+
+    def test_browser_compiler(self):
+        if "(" not in v.js_compile_all(["("]):
+            self.skipTest("Node 24+ is not installed")
+        self.assertEqual(v.js_compile_all([
+            "(?i:file)", "(?P<name>a)", r"\Afoo\z", r"\Qx{]\E",
+            r"\x{263a}", r"\p{L}+", r"C\-x", r"a\:b", "x{", "a]",
+        ]), {})
+        bad = [r"\1", r"\2", r"\3", r"\4", r"\5", r"\6", r"\7"]
+        self.assertEqual(set(v.js_compile_all(bad)), set(bad))
 
 
 class HintTest(unittest.TestCase):

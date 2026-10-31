@@ -204,13 +204,11 @@ JS_LEADING_FLAGS = re.compile(r"^\(\?([ims]+)\)")
 def js_regex_problem(rx: str) -> str | None:
     """Why the browser cannot read RX as RE2 does, or None.
 
-    The browser (web/src/advice/predicate.ts) compiles exit-table regexes
-    with JavaScript's RegExp after turning a leading (?i), (?m) or (?s)
-    into RegExp flags. Everything else that RE2 accepts but JavaScript
-    rejects or reads differently is refused here: inline flags anywhere
-    else (including (?i:...) groups, which older browsers lack), named
-    groups, \\A \\z \\Q \\E \\C, \\p classes and \\x{...} (JavaScript needs
-    the u flag), and POSIX classes such as [[:alpha:]].
+    The browser (web/src/advice/predicate.ts) translates leading i/m/s
+    flags, scoped i/s flags, named groups, \\A, \\z, \\Q...\\E, \\x{...},
+    octal escapes and escaped punctuation for Unicode-mode RegExp, which
+    also accepts braced \\p classes. This check rejects the remaining
+    unsupported syntax; js_compile_all checks with the browser compiler.
     """
     m = JS_LEADING_FLAGS.match(rx)
     if m:
@@ -221,12 +219,20 @@ def js_regex_problem(rx: str) -> str | None:
         c = rx[i]
         if c == "\\":
             nxt = rx[i + 1:i + 2]
-            if nxt and nxt in "AzQEC":
-                return f"\\{nxt} is not JavaScript"
-            if nxt in ("p", "P"):
-                return "\\p classes need RegExp's u flag in JavaScript"
-            if rx[i + 1:i + 3] == "x{":
-                return "\\x{...} needs RegExp's u flag in JavaScript"
+            if nxt == "Q":
+                end = rx.find(r"\E", i + 2)
+                i = n if end < 0 else end + 2
+                continue
+            if nxt in ("E", "C"):
+                return f"\\{nxt} is not supported by the browser"
+            if nxt in ("p", "P") and rx[i + 2:i + 3] != "{":
+                return "Unicode classes require braces in the browser"
+            if nxt and nxt in "123456789":
+                octal = re.match(r"[0-7]{2,3}", rx[i + 1:])
+                if not octal:
+                    return "backreferences are not supported by RE2"
+                i += 1 + len(octal[0])
+                continue
             i += 2
             continue
         if in_class:
@@ -244,14 +250,15 @@ def js_regex_problem(rx: str) -> str | None:
             if rx[i:i + 1] == "]":
                 i += 1
             continue
-        if c == "(" and rx[i + 1:i + 2] == "?" and rx[i + 2:i + 3] != ":":
-            return "inline flags and special groups are not portable ((?i) is accepted only at the very start)"
+        if c == "(" and rx[i + 1:i + 2] == "?":
+            if not re.match(r"\(\?(?::|[is]+:|P?<[^=!])", rx[i:]):
+                return "unsupported flag or special group (only leading i/m/s and scoped i/s flags are accepted)"
         i += 1
     return None
 
 
 def js_compile_all(patterns: list[str]) -> dict[str, str]:
-    """Compile PATTERNS with node's RegExp when node is installed; errors by pattern."""
+    """Compile PATTERNS with the browser translator when Node 24+ is installed."""
     import json
     import shutil
     import subprocess
@@ -259,15 +266,17 @@ def js_compile_all(patterns: list[str]) -> dict[str, str]:
     node = shutil.which("node")
     if not node or not patterns:
         return {}
+    compiler = HERE.parent.parent / "web" / "src" / "advice" / "predicate.ts"
     prog = (
-        "const ps = JSON.parse(require('fs').readFileSync(0, 'utf8')); const out = {};"
-        "for (const p of ps) { const m = /^\\(\\?([ims]+)\\)/.exec(p);"
-        " try { new RegExp(m ? p.slice(m[0].length) : p, m ? m[1] : ''); }"
+        f"import {{compileRe2}} from {json.dumps(compiler.as_uri())};"
+        "import fs from 'node:fs';"
+        "const ps = JSON.parse(fs.readFileSync(0, 'utf8')); const out = {};"
+        "for (const p of ps) { try { compileRe2(p); }"
         " catch (e) { out[p] = String(e.message); } }"
         "process.stdout.write(JSON.stringify(out));"
     )
     try:
-        r = subprocess.run([node, "-e", prog], input=json.dumps(patterns), capture_output=True,
+        r = subprocess.run([node, "--input-type=module", "-e", prog], input=json.dumps(patterns), capture_output=True,
                            text=True, timeout=30)
         return json.loads(r.stdout or "{}")
     except (OSError, ValueError, subprocess.SubprocessError):
