@@ -19,8 +19,8 @@ import (
 type HelloFunc func(replayed bool) *protocol.HelloEvent
 
 // Handler serves GET /events (api.md §3.2): the first frame is hello, then
-// the latest full state, then replayed events when ?after= was given and the
-// ring buffer still covers the gap, then live events.
+// replayed events when the ring covers ?after=, or the latest full state
+// otherwise, then live events.
 type Handler struct {
 	Bus   *Bus
 	Hello HelloFunc
@@ -74,7 +74,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err := httpx.WriteJSONText(ctx, c, hello, writeTimeout); err != nil {
 		return
 	}
-	if snap.State.Seq != 0 {
+	if snap.State.Seq != 0 && !snap.Replayed {
 		if err := httpx.WriteText(ctx, c, snap.State.Data, writeTimeout); err != nil {
 			return
 		}

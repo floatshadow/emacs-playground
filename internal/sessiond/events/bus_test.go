@@ -165,9 +165,6 @@ func TestHandlerHelloStateReplay(t *testing.T) {
 	if !hello.Replayed || hello.T != protocol.EventHello || hello.Seq != 0 {
 		t.Fatalf("hello %+v", hello)
 	}
-	if st := read(c).(*protocol.State); st.Seq != 2 {
-		t.Fatalf("state seq %d", st.Seq)
-	}
 	if ev := read(c); ev.Env().Seq != 2 {
 		t.Fatalf("replay 1: %d", ev.Env().Seq)
 	}
