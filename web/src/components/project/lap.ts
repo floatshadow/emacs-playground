@@ -31,10 +31,10 @@ export async function startLap(lessonId: string): Promise<void> {
  * Stops the running lap by loading its current task again without the lap
  * (the task starts over from its checkpoint; hints come back).
  */
-export async function stopLap(lessonId: string, stepId: string | undefined): Promise<void> {
+export async function stopLap(lessonId: string, stepId: string): Promise<void> {
   try {
-    await rpc('scenario', stepId ? { lessonId, stepId } : { lessonId })
-    useSessionStore.getState().setLap(null)
+    const r = await rpc('scenario', { lessonId, stepId })
+    useSessionStore.getState().setLap(r.lap ?? null)
   } catch {
     // toasted
   } finally {

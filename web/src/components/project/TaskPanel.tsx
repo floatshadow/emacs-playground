@@ -84,9 +84,9 @@ function LapPanel({
         <Button
           size="small"
           variant="quiet"
-          disabled={busy}
+          disabled={busy || !activeStep}
           title={t('project.lapStopTitle')}
-          onClick={() => run(() => stopLap(lessonId, activeStep))}
+          onClick={() => activeStep && run(() => stopLap(lessonId, activeStep))}
         >
           {t('project.lapStop')}
         </Button>
