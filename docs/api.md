@@ -32,7 +32,9 @@ Contracts between browser, gateway, sessiond and the Emacs agent. The Go types i
 ### 2.4 Progress
 
 - `GET /progress` → `{lessons:{[id]:{status, counts:{done, demonstrated, skipped, total}, steps:{[id]:{status, hintsUsed, resets, completedAt?}}, laps?:{count, bestMs, lastMs, lastAt}}}, updatedAt}`; `laps` counts finished "again, without hints" laps.
-- `POST /progress/reset {lessonId}` clears one lesson; no body, `{}` or empty `lessonId` clears all ("Start over"). `204`; the gateway then sends the session `drop-step` with the same body. Files, checkpoints and modules stay.
+- `POST /progress/reset {lessonId}` clears one lesson; no body, `{}` or empty `lessonId` clears all ("Start over"). `204`; the gateway then sends the session `drop-step {lessonId?, generation}`. Files, checkpoints and modules stay.
+
+Each reset issues `max(stored maximum + 1, gateway time in milliseconds)` as its generation; reports older than the gateway generation for their lesson are discarded with a warning (the greater of the lesson and whole-user generations, initially 0). Newer reports are accepted, and sessiond adopts the gateway generations exactly on sync. Report timestamps do not order resets; omitted completion times default to receipt time. Retrying the latest lap with the same completion time and duration counts once.
 
 Step statuses only rise, `not-started` < `in-progress` < `demonstrated` < `skipped` < `done` (`protocol.ProgressRank`); only a reset lowers them. `hintsUsed` and `resets` are absolute totals. A lesson is `done` only when every step of the bundle's scenario is `done`; `counts.total` is 0 outside the bundle. Resume starts at the first step neither `done` nor `skipped`.
 
@@ -45,7 +47,8 @@ Step statuses only rise, `not-started` < `in-progress` < `demonstrated` < `skipp
 `Authorization: Bearer <PG_SESSION_TOKEN>` of the session in the path; in server mode, requests with `X-Forwarded-For` or `Forwarded` get `404`. Learners can read their token, so bodies are untrusted: progress only for the bundle's steps (`400`), stuck reports under the hourly limit.
 
 - `GET /internal/curriculum/scenarios/{lessonId}`; `GET /internal/curriculum/fixtures/{lessonId}` (zstd tarball, `204` if none, ETag).
-- `POST /internal/sessions/{id}/progress` `{lessonId, stepId, status, hintsUsed?, resets?, at?, lapMs?}` (`lapMs` only on the last step's `done`); `…/stuck` `{lessonId?, stepId?, note, events}`; `…/heartbeat` `{activeWebSockets}` every 30 s.
+- `GET /internal/sessions/{id}/progress-generations` → a map of lesson ids to generations; the empty key is the whole-user generation. sessiond synchronizes it at startup and before scenario requests.
+- `POST /internal/sessions/{id}/progress` `{lessonId, stepId, status, generation?, hintsUsed?, resets?, at?, lapMs?}` (`lapMs` only on the last step's `done`); `…/stuck` `{lessonId?, stepId?, note, events}`; `…/heartbeat` `{activeWebSockets}` every 30 s.
 
 ## 3. Session API (`/s/{id}`)
 
@@ -59,7 +62,7 @@ Close codes (all session WebSockets): `4000` replaced, `4001` Emacs/tmux unavail
 
 ### 3.2 `GET /events` (WebSocket)
 
-`?after=<seq>` replays from the ring. First frame `hello` (`replayed` when a replay follows), then a full `state`, then events (§4). Client may send `ping`.
+`?after=<seq>` replays from the ring. First frame `hello` (`replayed` when a replay follows), then replayed events in sequence order, or a full `state` when no replay follows (§4). Client may send `ping`.
 
 ### 3.3 `GET /vnc` (WebSocket)
 
@@ -73,7 +76,7 @@ Result `{"ok":true,"result":…}` or problem+json. *(n)*: not idempotent. Ops ne
 - `eval {form, timeoutMs?}` → `{value}`: author mode only (`403`); 2 s default, 10 s max; symbol-keyed alists become objects.
 - `open {path}` → `{buffer}`: visits a workspace file.
 - `rescue {}` → `{did}`: `playground-rescue` (emacs.md §10.3), or C-g through tmux when Emacs is unresponsive.
-- `scenario {lessonId, stepId?, reset?, lap?}` → `{step, index, count, modules, restarting, lap?}`: backend.md §3.12. Returns when the step is active, or with `restarting: true` before a daemon restart. `lap: true` starts the lap (CURRICULUM.md B.3): reset, first step, `lap {lessonId, startedAt}`; until it ends `hint`, `demo start` and `skip` answer `409`.
+- `scenario {lessonId, stepId?, reset?, lap?}` → `{step, index, count, modules, restarting, lap?}`: backend.md §3.12. Returns when the step is active, or with `restarting: true` before a daemon restart. `lap: true` starts the lap (CURRICULUM.md B.3): reset, first step, `lap {lessonId, startedAt}`; until it ends `hint`, `demo start` and `skip` answer `409`. A plain reload keeps the lap; an explicit `stepId` without `lap` ends it.
 - `check {}` → `{lessonId, stepId, conditions:[{id, ok, unknown?, detail?}], complete}`.
 - `hint {stepId, level}` → `{}`.
 - `checkpoint {label}` → `{ref, createdAt}`; `checkpoints {}` → `{items:[{label, ref, createdAt, files, step?}]}`, newest first; `files` would change on restore.
@@ -109,7 +112,7 @@ Envelope `{t, seq, ts, …}`, `seq` monotonic from 1 per process; unknown types 
 - `step`: `lessonId, stepId, status, index (0-based), count, lessonComplete?, lap?, lapMs?` (`lapMs` on the event that ends a lap).
 - `nudge`: `id` (stable per rule), `kind: calm|ask, title, body`.
 - `checkpoint`: `label, ref, createdAt`. `mode`: `mode`. `modules`: `enabled, restarting` (`true`, then `false` once the lesson that asked for the modules is set up).
-- `gap`: `from, to`; resync (`rpc check`) or reconnect.
+- `gap`: `from, to`; reconnect from the last received sequence to recover lost transitions.
 - `error`: `code, message` for the learner (fixtures, setup, `emacs_unavailable`).
 
 ### 4.1 Step lifecycle
@@ -123,7 +126,7 @@ Envelope `{t, seq, ts, …}`, `seq` monotonic from 1 per process; unknown types 
 - `skipped`: after `skip`; progress `skipped`; continues as `complete`.
 - `dropped`: `drop-step` forgot the active step.
 
-**Watch it**: `demo start` restores the checkpoint if a command ran since the step started or was reset (`restored: true`, no reset counted), then sets the latch, which lasts until `restore {}`, a reload of the step or `drop-step`. Playing ends with `demo end`, 10 s without `keys` (`steps.DemoIdle`) or the page's terminal closing; if the step had not completed, the latch is dropped then. Stuck rules pause while playing. Open: under the latch the learner's own completion gets no reaction until Do it yourself.
+**Watch it**: `demo start` restores the checkpoint if a command ran since the step started or was reset (`restored: true`, no reset counted), then sets the latch, which lasts until `restore {}`, a reload of the step or `drop-step`. Playing ends with `demo end`, 65 s without `keys` (`steps.DemoIdle`, longer than the maximum 60 s pause) or the page's terminal closing; if the step had not completed, the latch is dropped then. Stuck rules pause while playing. Open: under the latch the learner's own completion gets no reaction until Do it yourself.
 
 **Skip**: restores like `demo start`, plays the demo into the learner's frame at playctl pacing, waits ≤ 8 s for the conditions (`demoCompleted: false` is a curriculum defect), records `skipped`, advances; ≤ 60 s, even if the browser leaves.
 

@@ -37,7 +37,7 @@ Loading a lesson (`useLesson`) calls `rpc('scenario', {lessonId, stepId})` unles
 
 ## 4. Connection layer
 
-- `EventsClient`: `/s/{id}/events?after=<lastSeq>`, backoff 250 ms to 8 s with jitter, `ping` every 20 s; `gap` → `rpc('check')` and a ticker divider.
+- `EventsClient`: `/s/{id}/events?after=<lastSeq>`, backoff 250 ms to 8 s with jitter, `ping` every 20 s; `gap` → reconnect for replay and a ticker divider; a fresh hello with an active step requests `check`.
 - `PtyClient`: binary stream; `ResizeObserver` → fit → debounced `resize` frame; `replaced` (or close 4000) shows "attached elsewhere" with Reattach.
 - `VncClient`: lazy noVNC with `resizeSession = true`, so Xvnc takes the pane's size and draws at scale 1 (emacs.md §6); resizes debounced 200 ms, none for a zero-size pane; clipboard both ways.
 - `rpc`: typed `POST /s/{id}/rpc/{op}`; errors become toasts unless `silent`.
