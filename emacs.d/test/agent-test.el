@@ -34,6 +34,7 @@
 (defvar pg-test--client nil "The connection the agent opened, once accepted.")
 (defvar pg-test--messages nil "Decoded messages from the agent, newest first.")
 (defvar pg-test--partial "" "Bytes after the last newline.")
+(defvar pg-test--lines nil "Raw lines from the agent, newest first (contract fixtures).")
 (defvar pg-test--next-id 0)
 (defvar pg-test--answer-pings t "When non-nil, the fake answers pings with pong.")
 (defvar playground-config-dir)
@@ -47,6 +48,7 @@
     (while (setq pos (string-search "\n" pg-test--partial))
       (let ((line (substring pg-test--partial 0 pos)))
         (setq pg-test--partial (substring pg-test--partial (1+ pos)))
+        (push line pg-test--lines)
         (let ((msg (json-parse-string line :object-type 'alist :array-type 'list
                                       :null-object :null :false-object :false)))
           (push msg pg-test--messages)
@@ -57,7 +59,7 @@
   "Listen on the test socket."
   (let ((path (expand-file-name "agent.sock" pg-test--dir)))
     (when (file-exists-p path) (delete-file path))
-    (setq pg-test--messages nil pg-test--partial "" pg-test--client nil)
+    (setq pg-test--messages nil pg-test--lines nil pg-test--partial "" pg-test--client nil)
     (setq pg-test--server
           (make-network-process
            :name "pg-fake-sessiond" :family 'local :service path :server t
@@ -1992,6 +1994,267 @@ but whether the name is remote (no I/O on the connection)."
             buffer-read-only t)
       (should (equal (playground--read-only-reason) "file is write-protected"))
       (setq buffer-file-name nil))))
+
+;;;; Contract fixtures (test/fixtures/agent, written by record-fixtures.el)
+
+;; A fixture case is JSON: {name, setup: [{file, contents}], steps: [{press}
+;; | {type} | {call, args, as, exact} | {sleep}], calls: [{op, ok, reply,
+;; exact}], events: [key, state and minibuffer messages], eventsExact}.
+;; `pg-fixture-run' plays the steps against the agent and returns what it
+;; sent, normalised: the workspace directory reads $WS, and takenAt, pid,
+;; ts and uptime are dropped.  Fixtures are compared by shape (the same
+;; keys and JSON types, recursively) plus equality of the fields named
+;; exact.  sessiond's fake editor (internal/sessiond/agent/fakeeditor)
+;; replays the same files under the same rule.
+
+(defvar pg-fixture-dir
+  (expand-file-name "fixtures/agent"
+                    (file-name-directory (or load-file-name buffer-file-name default-directory)))
+  "Directory of the committed contract fixtures.")
+
+(defconst pg-fixture--dropped '(takenAt pid ts uptime uptimeMs)
+  "Fields left out of fixtures: they differ on every run.")
+
+(defun pg-fixture--parse (line)
+  "Parse LINE: objects as alists, arrays as vectors, :null and :false."
+  (json-parse-string line :object-type 'alist :array-type 'array
+                     :null-object :null :false-object :false))
+
+(defun pg-fixture--normalize (v)
+  "V with the test directory written $WS and the varying fields dropped."
+  (cond
+   ((stringp v)
+    (let ((dir (directory-file-name pg-test--dir)))
+      (string-replace (abbreviate-file-name dir) "$WS" (string-replace dir "$WS" v))))
+   ((vectorp v) (vconcat (mapcar #'pg-fixture--normalize v)))
+   ((and (consp v) (consp (car v)))
+    (delq nil (mapcar (lambda (kv)
+                        (unless (memq (car kv) pg-fixture--dropped)
+                          (cons (car kv) (pg-fixture--normalize (cdr kv)))))
+                      v)))
+   (t v)))
+
+(defun pg-fixture--resolve (v saved)
+  "V with \"$WS\" the test directory and \"$NAME\" the reply saved as NAME."
+  (cond
+   ((and (stringp v) (equal v "$WS")) (directory-file-name pg-test--dir))
+   ((and (stringp v) (string-prefix-p "$" v))
+    (or (cdr (assoc (substring v 1) saved)) (error "No reply saved as %s" v)))
+   ((vectorp v) (vconcat (mapcar (lambda (x) (pg-fixture--resolve x saved)) v)))
+   ((and (consp v) (consp (car v)))
+    (mapcar (lambda (kv) (cons (car kv) (pg-fixture--resolve (cdr kv) saved))) v))
+   (t v)))
+
+(defun pg-fixture--call (op args)
+  "Send call OP with ARGS and return its raw reply, parsed."
+  (let* ((id (cl-incf pg-test--next-id))
+         (msg `((t . "call") (id . ,id) (op . ,op) (args . ,(or args (make-hash-table)))
+                (timeoutMs . 5000)))
+         (want (format "\"id\":%d," id)))
+    (process-send-string pg-test--client (concat (json-serialize msg) "\n"))
+    (let ((line (pg-test-wait
+                 (lambda ()
+                   (seq-find (lambda (l) (and (string-prefix-p "{\"t\":\"reply\"" l)
+                                              (string-search want l)))
+                             pg-test--lines))
+                 8)))
+      (should line)
+      (pg-fixture--parse line))))
+
+(defun pg-fixture--fresh ()
+  "Bring Emacs back to the state a fresh daemon starts in."
+  (when (bound-and-true-p isearch-mode) (isearch-done))
+  (when (featurep 'tab-bar)
+    (when (> (length (funcall tab-bar-tabs-function)) 1) (tab-bar-close-other-tabs))
+    (when (alist-get 'explicit-name (assq 'current-tab (funcall tab-bar-tabs-function)))
+      (tab-bar-rename-tab "")))
+  (delete-other-windows)
+  (switch-to-buffer "*scratch*")
+  (dolist (b (buffer-list))
+    (unless (or (member (buffer-name b) '("*scratch*" "*Messages*" "*Warnings*"))
+                (string-prefix-p " " (buffer-name b)))
+      (with-current-buffer b (set-buffer-modified-p nil))
+      (when-let* ((p (get-buffer-process b))) (set-process-query-on-exit-flag p nil))
+      (kill-buffer b)))
+  (with-current-buffer "*scratch*"
+    (widen) (overwrite-mode -1) (deactivate-mark)
+    (setq default-directory (file-name-as-directory pg-test--dir)))
+  (setq kill-ring nil kill-ring-yank-pointer nil))
+
+(defun pg-fixture-run (case)
+  "Play fixture CASE against the agent; return (HELLO CALLS EVENTS), normalised."
+  (let (hello calls events)
+    (pg-test-with-agent
+      (put 'narrow-to-region 'disabled nil)
+      (let ((playground-config-dir (file-name-as-directory pg-test--dir))
+            (saved nil)
+            (keys []))
+        (setq hello (pg-fixture--normalize
+                     (pg-fixture--parse
+                      (seq-find (lambda (l) (string-prefix-p "{\"t\":\"hello\"" l)) pg-test--lines))))
+        (pg-fixture--fresh)
+        (seq-doseq (f (alist-get 'setup case))
+          (pg-test-file (alist-get 'file f) (alist-get 'contents f)))
+        (pg-test-settle)
+        (setq pg-test--lines nil)
+        (cl-flet ((flush ()
+                    (when (> (length keys) 0)
+                      (condition-case err (execute-kbd-macro keys)
+                        (error (message "fixture %s: keys %s: %S" (alist-get 'name case)
+                                        (key-description keys) err)))
+                      (setq keys [])
+                      (pg-test-settle))))
+          (seq-doseq (step (alist-get 'steps case))
+            (cond
+             ((alist-get 'press step)
+              (setq keys (vconcat keys (key-parse (alist-get 'press step)))))
+             ((alist-get 'type step)
+              (setq keys (vconcat keys (alist-get 'type step))))
+             ((alist-get 'sleep step)
+              (flush)
+              (sleep-for (/ (alist-get 'sleep step) 1000.0)))
+             ((alist-get 'call step)
+              (flush)
+              (let* ((op (alist-get 'call step))
+                     (reply (if (equal op "hello")
+                                `((ok . t) (value . ,hello))
+                              (pg-fixture--call op (pg-fixture--resolve (alist-get 'args step) saved))))
+                     (value (alist-get 'value reply)))
+                (when (alist-get 'as step)
+                  (push (cons (alist-get 'as step) value) saved))
+                (push `((op . ,op)
+                        (ok . ,(alist-get 'ok reply))
+                        (reply . ,(pg-fixture--normalize (if (eq (alist-get 'ok reply) t) value
+                                                           (alist-get 'error reply))))
+                        (exact . ,(or (alist-get 'exact step) [])))
+                      calls)
+                (pg-test-settle)))))
+          (flush))
+        (pg-test-settle)
+        (dolist (l (reverse pg-test--lines))
+          (let ((m (pg-fixture--parse l)))
+            (when (member (alist-get 't m) '("key" "state" "minibuffer"))
+              (push (pg-fixture--normalize m) events))))))
+    (list hello (vconcat (nreverse calls)) (vconcat (nreverse events)))))
+
+(defun pg-fixture--type (v)
+  "JSON type of V as parsed by `pg-fixture--parse'."
+  (cond ((eq v :null) 'null) ((memq v '(t :false)) 'bool) ((numberp v) 'number)
+        ((stringp v) 'string) ((vectorp v) 'array) (t 'object)))
+
+(defun pg-fixture--shape-diffs (want got path)
+  "Where GOT differs in shape from WANT (keys and JSON types), as strings."
+  (let ((tw (pg-fixture--type want)) (tg (pg-fixture--type got)))
+    (cond
+     ((not (eq tw tg)) (list (format "%s: %s, want %s" path tg tw)))
+     ((eq tw 'object)
+      (let ((kw (sort (mapcar (lambda (kv) (symbol-name (car kv))) want) #'string<))
+            (kg (sort (mapcar (lambda (kv) (symbol-name (car kv))) got) #'string<)))
+        (if (not (equal kw kg))
+            (list (format "%s: keys %S, want %S" path kg kw))
+          (mapcan (lambda (kv) (pg-fixture--shape-diffs (cdr kv) (alist-get (car kv) got)
+                                                        (format "%s.%s" path (car kv))))
+                  want))))
+     ((eq tw 'array)
+      (let (out)
+        (dotimes (i (min (length want) (length got)))
+          (setq out (nconc out (pg-fixture--shape-diffs (aref want i) (aref got i)
+                                                        (format "%s[%d]" path i)))))
+        out)))))
+
+(defun pg-fixture--values (v path)
+  "Values of V at PATH (\"files[].path\": every element's path)."
+  (let ((vals (list v)))
+    (dolist (seg (split-string path "\\." t))
+      (let* ((each (string-suffix-p "[]" seg))
+             (key (intern (string-remove-suffix "[]" seg))))
+        (setq vals (mapcan (lambda (x)
+                             (let ((y (and (listp x) (alist-get key x))))
+                               (if each (append (and (vectorp y) y) nil) (list y))))
+                           vals))))
+    vals))
+
+(defun pg-fixture--exact-diffs (want got paths where)
+  "Fields of PATHS that differ between WANT and GOT, as strings."
+  (let (out)
+    (seq-doseq (p paths)
+      (let ((w (pg-fixture--values want p)) (g (pg-fixture--values got p)))
+        (unless (equal w g)
+          (push (format "%s %s: %S, want %S" where p g w) out))))
+    (nreverse out)))
+
+(defun pg-fixture-diffs (fixture hello calls events)
+  "How HELLO, CALLS and EVENTS of a run differ from FIXTURE, as strings."
+  (let ((out '())
+        (want-calls (alist-get 'calls fixture))
+        (exact (alist-get 'eventsExact fixture)))
+    (unless (= (length want-calls) (length calls))
+      (push (format "%d calls, want %d" (length calls) (length want-calls)) out))
+    (dotimes (i (min (length want-calls) (length calls)))
+      (let* ((w (aref want-calls i)) (g (aref calls i))
+             (where (format "call %d (%s)" i (alist-get 'op w))))
+        (unless (equal (alist-get 'ok w) (alist-get 'ok g))
+          (push (format "%s: ok %S, want %S" where (alist-get 'ok g) (alist-get 'ok w)) out))
+        (when (eq (alist-get 'ok w) t)
+          (setq out (nconc (nreverse (pg-fixture--shape-diffs (alist-get 'reply w) (alist-get 'reply g) where))
+                           (nreverse (pg-fixture--exact-diffs (alist-get 'reply w) (alist-get 'reply g)
+                                                              (alist-get 'exact w) where))
+                           out)))))
+    (ignore hello)
+    (let* ((other (lambda (evs) (seq-remove (lambda (e) (equal (alist-get 't e) "state")) evs)))
+           (states (lambda (evs) (seq-filter (lambda (e) (equal (alist-get 't e) "state")) evs)))
+           (wo (funcall other (alist-get 'events fixture))) (go (funcall other events))
+           (ws (funcall states (alist-get 'events fixture))) (gs (funcall states events)))
+      (unless (= (length wo) (length go))
+        (push (format "key and minibuffer events %S, want %S"
+                      (mapcar (lambda (e) (or (alist-get 'keys e) (alist-get 'open e))) go)
+                      (mapcar (lambda (e) (or (alist-get 'keys e) (alist-get 'open e))) wo))
+              out))
+      (cl-mapc (lambda (w g)
+                 (let ((where (format "%s event" (alist-get 't w))))
+                   (if (not (equal (alist-get 't w) (alist-get 't g)))
+                       (push (format "%s: got %s" where (alist-get 't g)) out)
+                     (setq out (nconc (nreverse (pg-fixture--shape-diffs w g where))
+                                      (nreverse (pg-fixture--exact-diffs
+                                                 w g (alist-get (intern (alist-get 't w)) exact) where))
+                                      out)))))
+               wo go)
+      ;; The recorded last state must be among the run's states (sessiond's
+      ;; fake editor reports more: a batch Emacs never redisplays, so ops
+      ;; send none here).
+      (when ws
+        (let* ((w (car (last ws)))
+               (diffs (mapcar (lambda (g)
+                                (append (pg-fixture--shape-diffs w g "last state")
+                                        (pg-fixture--exact-diffs w g (alist-get 'state exact) "last state")))
+                              gs))
+               (best (if gs (car (sort diffs (lambda (a b) (< (length a) (length b)))))
+                       '("no state events"))))
+          (setq out (nconc (reverse best) out)))))
+    (nreverse out)))
+
+(defun pg-fixture-files ()
+  "The committed fixture files, sorted."
+  (and (file-directory-p pg-fixture-dir)
+       (directory-files pg-fixture-dir t "\\.json\\'")))
+
+(defun pg-fixture-read (file)
+  "Parse fixture FILE."
+  (with-temp-buffer
+    (insert-file-contents file)
+    (json-parse-buffer :object-type 'alist :array-type 'array :null-object :null :false-object :false)))
+
+(ert-deftest pg-agent/contract-fixtures ()
+  "The agent still answers every committed fixture case the same way."
+  (let ((files (pg-fixture-files)) (failures '()))
+    (should (>= (length files) 16))
+    (dolist (file files)
+      (let* ((fixture (pg-fixture-read file))
+             (run (pg-fixture-run fixture))
+             (diffs (pg-fixture-diffs fixture (nth 0 run) (nth 1 run) (nth 2 run))))
+        (when diffs
+          (push (cons (alist-get 'name fixture) diffs) failures))))
+    (should-not failures)))
 
 (provide 'agent-test)
 ;;; agent-test.el ends here

@@ -187,12 +187,15 @@ web-lint: web/node_modules
 check: go-build lint test web-build ## everything CI runs
 	cd web && $(PNPM) size
 
-.PHONY: e2e emacs-test
+.PHONY: e2e emacs-test agent-fixtures
 e2e: ## browser smoke scenarios against the running local stack (needs Chrome on CDP :9222)
 	cd web && $(PNPM) e2e:smoke
-emacs-test: ## the agent's and the config's ERT tests inside the session image
+emacs-test: ## the agent's and the config's ERT tests inside the session image (the agent replays the contract fixtures)
 	docker run --rm --entrypoint sh $(IMAGE_BASE)/session:$(TAG) -c \
 	  'cd /opt/playground/emacs.d && emacs --batch -L lisp -l playground-agent -l test/agent-test.el -f ert-run-tests-batch-and-exit && emacs --batch -l early-init.el -l test/config-test.el -f ert-run-tests-batch-and-exit'
+agent-fixtures: ## record the agent's contract fixtures into emacs.d/test/fixtures/agent with the session image's agent
+	docker run --rm --user $$(id -u):$$(id -g) -e HOME=/tmp -v $(CURDIR)/emacs.d/test:/fixtures-src --entrypoint sh $(IMAGE_BASE)/session:$(TAG) -c \
+	  'cd /opt/playground/emacs.d && emacs --batch -L lisp -l playground-agent -l /fixtures-src/agent-test.el -l /fixtures-src/record-fixtures.el -f pg-fixtures-record-batch /fixtures-src/fixtures/agent'
 
 .PHONY: clean
 clean: ## remove build output (not the workspace)

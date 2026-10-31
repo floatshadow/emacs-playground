@@ -1,0 +1,59 @@
+{
+  "name": "hello-shape",
+  "setup": [],
+  "steps": [
+    {
+      "call": "hello",
+      "exact": [
+        "protocol",
+        "agent"
+      ]
+    }
+  ],
+  "calls": [
+    {
+      "op": "hello",
+      "ok": true,
+      "reply": {
+        "t": "hello",
+        "protocol": 1,
+        "agent": "0.1.0",
+        "emacs": "31.1"
+      },
+      "exact": [
+        "protocol",
+        "agent"
+      ]
+    }
+  ],
+  "events": [],
+  "eventsExact": {
+    "key": [
+      "keys",
+      "cmd",
+      "buf",
+      "mode"
+    ],
+    "minibuffer": [
+      "open",
+      "prompt",
+      "depth",
+      "kind"
+    ],
+    "state": [
+      "buf",
+      "mode",
+      "modified",
+      "narrowed",
+      "overwrite",
+      "readonly",
+      "line",
+      "col",
+      "point",
+      "markActive",
+      "frame",
+      "isearch",
+      "recursive"
+    ]
+  }
+}

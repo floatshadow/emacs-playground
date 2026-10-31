@@ -1,0 +1,75 @@
+{
+  "name": "set-modules-writes-file",
+  "setup": [],
+  "steps": [
+    {
+      "call": "set-modules",
+      "args": {
+        "enabled": [
+          "base",
+          "agent",
+          "editing"
+        ]
+      },
+      "exact": [
+        "written"
+      ]
+    },
+    {
+      "call": "set-modules",
+      "args": {
+        "enabled": [
+          "../evil"
+        ]
+      }
+    }
+  ],
+  "calls": [
+    {
+      "op": "set-modules",
+      "ok": true,
+      "reply": {
+        "written": "$WS/modules.el"
+      },
+      "exact": [
+        "written"
+      ]
+    },
+    {
+      "op": "set-modules",
+      "ok": false,
+      "reply": "Bad module name \"../evil\"",
+      "exact": []
+    }
+  ],
+  "events": [],
+  "eventsExact": {
+    "key": [
+      "keys",
+      "cmd",
+      "buf",
+      "mode"
+    ],
+    "minibuffer": [
+      "open",
+      "prompt",
+      "depth",
+      "kind"
+    ],
+    "state": [
+      "buf",
+      "mode",
+      "modified",
+      "narrowed",
+      "overwrite",
+      "readonly",
+      "line",
+      "col",
+      "point",
+      "markActive",
+      "frame",
+      "isearch",
+      "recursive"
+    ]
+  }
+}

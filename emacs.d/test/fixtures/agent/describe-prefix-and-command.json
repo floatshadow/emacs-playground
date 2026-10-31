@@ -1,0 +1,122 @@
+{
+  "name": "describe-prefix-and-command",
+  "setup": [],
+  "steps": [
+    {
+      "call": "describe",
+      "args": {
+        "keys": "C-x C-f"
+      },
+      "exact": [
+        "cmd"
+      ]
+    },
+    {
+      "call": "describe",
+      "args": {
+        "keys": "C-x"
+      },
+      "exact": [
+        "cmd",
+        "doc"
+      ]
+    },
+    {
+      "call": "describe",
+      "args": {
+        "keys": "C-c C-z C-z"
+      },
+      "exact": [
+        "cmd",
+        "doc"
+      ]
+    },
+    {
+      "call": "describe",
+      "args": {
+        "cmd": "save-buffer"
+      },
+      "exact": [
+        "cmd"
+      ]
+    }
+  ],
+  "calls": [
+    {
+      "op": "describe",
+      "ok": true,
+      "reply": {
+        "cmd": "find-file",
+        "doc": "Edit file FILENAME."
+      },
+      "exact": [
+        "cmd"
+      ]
+    },
+    {
+      "op": "describe",
+      "ok": true,
+      "reply": {
+        "cmd": "",
+        "doc": "C-x is a prefix key"
+      },
+      "exact": [
+        "cmd",
+        "doc"
+      ]
+    },
+    {
+      "op": "describe",
+      "ok": true,
+      "reply": {
+        "cmd": "",
+        "doc": ""
+      },
+      "exact": [
+        "cmd",
+        "doc"
+      ]
+    },
+    {
+      "op": "describe",
+      "ok": true,
+      "reply": {
+        "cmd": "save-buffer",
+        "doc": "Save current buffer in visited file if modified."
+      },
+      "exact": [
+        "cmd"
+      ]
+    }
+  ],
+  "events": [],
+  "eventsExact": {
+    "key": [
+      "keys",
+      "cmd",
+      "buf",
+      "mode"
+    ],
+    "minibuffer": [
+      "open",
+      "prompt",
+      "depth",
+      "kind"
+    ],
+    "state": [
+      "buf",
+      "mode",
+      "modified",
+      "narrowed",
+      "overwrite",
+      "readonly",
+      "line",
+      "col",
+      "point",
+      "markActive",
+      "frame",
+      "isearch",
+      "recursive"
+    ]
+  }
+}
