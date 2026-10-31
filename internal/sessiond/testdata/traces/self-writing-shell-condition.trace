@@ -1,0 +1,14 @@
+# load 01-life/03-shell
+checkpoint:01-life/03-shell/flag
+step:flag:loaded
+check:flag:false
+gw:01-life/03-shell/flag:in-progress:gen0
+# the learner makes the flag
+check:flag:true
+step:flag:complete
+checkpoint:01-life/03-shell/last
+step:last:loaded
+check:last:false
+gw:01-life/03-shell/flag:done:gen0
+gw:01-life/03-shell/last:in-progress:gen0
+# later

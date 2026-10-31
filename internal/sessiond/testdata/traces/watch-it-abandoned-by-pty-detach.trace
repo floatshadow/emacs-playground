@@ -1,0 +1,14 @@
+# load 01-life/01-three
+checkpoint:01-life/01-three/open
+step:open:loaded
+check:open:false
+gw:01-life/01-three/open:in-progress:gen0
+# the page with the demo goes away
+# learner finishes the step
+check:open:true
+step:open:complete
+checkpoint:01-life/01-three/write
+step:write:loaded
+check:write:false
+gw:01-life/01-three/open:done:gen0
+gw:01-life/01-three/write:in-progress:gen0

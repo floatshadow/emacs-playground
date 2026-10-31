@@ -16,9 +16,10 @@ import (
 // JSON) or an error (reply ok=false).
 type FakeHandler func(op protocol.AgentOp, args json.RawMessage) (any, error)
 
-// Fake is a minimal agent: it connects to the socket, sends hello, pings at
-// PingInterval, and answers calls with Handle (default: DefaultFakeHandler).
-// Send emits arbitrary agent messages (key, state, frame, …).
+// Fake is the agent's transport for tests and -fake mode: it connects to
+// the socket, sends hello, pings at PingInterval, and answers calls with
+// Handle (nil answers {}); Send emits arbitrary agent messages (key,
+// state, frame, …). sessiond's fake editor (fakeeditor) is a Handle.
 type Fake struct {
 	Path         string
 	Hello        protocol.AgentHelloMsg
@@ -33,29 +34,6 @@ type Fake struct {
 	mu    sync.Mutex
 	c     net.Conn
 	calls []protocol.AgentCallMsg
-}
-
-// DefaultFakeHandler answers every op with a plausible empty result.
-func DefaultFakeHandler(op protocol.AgentOp, args json.RawMessage) (any, error) {
-	switch op {
-	case protocol.AgentOpCheck:
-		var a protocol.AgentCheckArgs
-		_ = json.Unmarshal(args, &a)
-		res := protocol.AgentCheckResult{Results: make([]protocol.Truth, len(a.Forms))}
-		for i := range res.Results {
-			res.Results[i] = protocol.Unknown
-		}
-		return res, nil
-	case protocol.AgentOpRescue:
-		return protocol.AgentRescueResult{Did: []string{}}, nil
-	case protocol.AgentOpSnapshot:
-		return protocol.WindowSpec{Files: []protocol.FileSpec{}, Layout: "single", TakenAt: time.Now().UnixMilli()}, nil
-	case protocol.AgentOpEval:
-		return protocol.AgentEvalResult{Value: nil}, nil
-	case protocol.AgentOpDescribe:
-		return protocol.DescribeResult{}, nil
-	}
-	return map[string]any{}, nil
 }
 
 // Run connects and serves until ctx ends or the connection drops.
@@ -117,7 +95,7 @@ func (f *Fake) Run(ctx context.Context) error {
 	}()
 	handle := f.Handle
 	if handle == nil {
-		handle = DefaultFakeHandler
+		handle = func(protocol.AgentOp, json.RawMessage) (any, error) { return map[string]any{}, nil }
 	}
 	sc := bufio.NewScanner(c)
 	sc.Buffer(make([]byte, 0, 64<<10), protocol.MaxAgentLine+1)
@@ -169,6 +147,15 @@ func (f *Fake) Send(v any) error {
 	}
 	_, err = f.c.Write(append(b, '\n'))
 	return err
+}
+
+// Drop closes the current connection (Run returns).
+func (f *Fake) Drop() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.c != nil {
+		_ = f.c.Close()
+	}
 }
 
 // SetSilent stops (true) or resumes (false) pings.

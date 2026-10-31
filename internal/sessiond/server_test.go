@@ -8,15 +8,16 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,7 +26,7 @@ import (
 
 	"github.com/floatshadow/emacs-playground/internal/config"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
-	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/agent/fakeeditor"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 )
 
@@ -60,6 +61,28 @@ type fakeGateway struct {
 	beats    int
 	tarball  []byte
 	auth     []string
+	// The rest models the gateway's progress store for the lifecycle
+	// traces (lifecycle_test.go).
+	lessons map[string]gwLesson
+	down    bool
+	gens    protocol.ProgressGenerations
+	store   map[[2]string]protocol.ProgressStatus
+	laps    map[string]gwLap
+	lines   []string
+	// session is the running sessiond Reset tells (drop-step), if any.
+	session func() *testServer
+}
+
+// gwLesson is a scenario the fake gateway serves, with its fixtures.
+type gwLesson struct {
+	scenario string
+	tarball  []byte
+}
+
+// gwLap is the gateway's lap record of a lesson.
+type gwLap struct {
+	count          int
+	lastAt, lastMs int64
 }
 
 func (g *fakeGateway) handler(t *testing.T) http.Handler {
@@ -68,19 +91,42 @@ func (g *fakeGateway) handler(t *testing.T) http.Handler {
 		g.mu.Lock()
 		g.auth = append(g.auth, r.Header.Get("Authorization"))
 		g.mu.Unlock()
-		if r.PathValue("id") != "00-orientation/02-first-steps" {
+		id := r.PathValue("id")
+		g.mu.Lock()
+		l, ok := g.lessons[id]
+		g.mu.Unlock()
+		switch {
+		case ok:
+			w.Header().Set("ETag", `"`+id+`"`)
+			_, _ = w.Write([]byte(l.scenario))
+		case id == "00-orientation/02-first-steps":
+			w.Header().Set("ETag", `"s1"`)
+			_, _ = w.Write([]byte(testLesson))
+		default:
 			w.Header().Set("Content-Type", protocol.ProblemContentType)
 			w.WriteHeader(404)
 			_, _ = w.Write([]byte(`{"status":404,"code":"not_found","message":"no such lesson"}`))
-			return
 		}
-		w.Header().Set("ETag", `"s1"`)
-		_, _ = w.Write([]byte(testLesson))
 	})
 	mux.HandleFunc("GET /internal/curriculum/fixtures/{id...}", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		body := g.tarball
+		if l, ok := g.lessons[r.PathValue("id")]; ok {
+			body = l.tarball
+		}
+		g.mu.Unlock()
 		w.Header().Set("Content-Type", protocol.FixturesContentType)
-		w.Header().Set("ETag", `"f1"`)
-		_, _ = w.Write(g.tarball)
+		w.Header().Set("ETag", fmt.Sprintf(`"f%d"`, len(body)))
+		_, _ = w.Write(body)
+	})
+	mux.HandleFunc("GET /internal/sessions/{id}/progress-generations", func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		gens := maps.Clone(g.gens)
+		g.mu.Unlock()
+		if gens == nil {
+			gens = protocol.ProgressGenerations{}
+		}
+		_ = json.NewEncoder(w).Encode(gens)
 	})
 	mux.HandleFunc("POST /internal/sessions/{id}/{what}", func(w http.ResponseWriter, r *http.Request) {
 		g.mu.Lock()
@@ -90,6 +136,7 @@ func (g *fakeGateway) handler(t *testing.T) http.Handler {
 			var p protocol.ProgressReport
 			_ = json.NewDecoder(r.Body).Decode(&p)
 			g.progress = append(g.progress, p)
+			g.applyLocked(p)
 		case "stuck":
 			var s protocol.InternalStuckReport
 			_ = json.NewDecoder(r.Body).Decode(&s)
@@ -99,7 +146,23 @@ func (g *fakeGateway) handler(t *testing.T) http.Handler {
 		}
 		w.WriteHeader(204)
 	})
-	return mux
+	return g.downable(mux)
+}
+
+// downable answers 503 for everything while the gateway is down.
+func (g *fakeGateway) downable(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		g.mu.Lock()
+		down := g.down
+		g.mu.Unlock()
+		if down {
+			w.Header().Set("Content-Type", protocol.ProblemContentType)
+			w.WriteHeader(503)
+			_, _ = w.Write([]byte(`{"status":503,"code":"session_unavailable","message":"gateway down"}`))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func makeTarball(t *testing.T, files map[string]string) []byte {
@@ -343,16 +406,8 @@ func TestServerFakeMode(t *testing.T) {
 	gwSrv := httptest.NewServer(gw.handler(t))
 	defer gwSrv.Close()
 
-	// Buffers with unsaved changes, as the agent reports them while
-	// unsavedBuffers is set.
-	var unsavedBuffers atomic.Bool
-	fakeAgent := func(op protocol.AgentOp, args json.RawMessage) (any, error) {
-		if op == protocol.AgentOpEval && unsavedBuffers.Load() && strings.Contains(string(args), "buffer-modified-p b") {
-			return protocol.AgentEvalResult{Value: []string{"hello/notes.txt", "hello/README.md"}}, nil
-		}
-		return agent.DefaultFakeHandler(op, args)
-	}
-	ts := startServer(t, ws, run, gw, gwSrv.URL, func(o *Options) { o.FakeAgent = fakeAgent })
+	ed := fakeeditor.New(ws)
+	ts := startServer(t, ws, run, gw, gwSrv.URL, func(o *Options) { o.Editor = ed })
 	stopped := false
 	defer func() {
 		if !stopped {
@@ -487,12 +542,21 @@ func TestServerFakeMode(t *testing.T) {
 	}
 	// The count covers the files restored on disk and the buffers whose
 	// unsaved changes the restore discarded, each file once.
+	ed.Update(func(m *fakeeditor.Model) {
+		for _, rel := range []string{"hello/notes.txt", "hello/README.md"} {
+			i := slices.IndexFunc(m.Buffers, func(b *fakeeditor.Buffer) bool { return b.Path == rel })
+			if i < 0 {
+				m.Buffers = append(m.Buffers, &fakeeditor.Buffer{Name: filepath.Base(rel), Path: rel, Mode: "text-mode", Point: 1})
+				i = len(m.Buffers) - 1
+			}
+			m.Buffers[i].Text += "unsaved"
+			m.Buffers[i].Modified = true
+		}
+	})
 	var rr protocol.RestoreResult
-	unsavedBuffers.Store(true)
 	if ts.rpc("restore", protocol.RestoreRequest{Label: "Before experiments"}, &rr) != 200 || rr.RestoredFiles != 2 {
 		t.Fatalf("restore %+v", rr)
 	}
-	unsavedBuffers.Store(false)
 	if b, _ := os.ReadFile(filepath.Join(ws, "hello", "notes.txt")); string(b) != "all done\n" {
 		t.Fatalf("notes after restore %q", b)
 	}
@@ -693,15 +757,12 @@ func TestServerFakeMode(t *testing.T) {
 	// The resume may happen before we connect: replay from the start.
 	es3 := ts2.events("?after=0")
 	es3.wait("step:write:loaded")
-	ts2.srv.fakeMu.Lock()
-	fake := ts2.srv.fake
-	ts2.srv.fakeMu.Unlock()
 	var reopened bool
-	for _, c := range fake.Calls() {
+	for _, c := range ts2.srv.editor.Calls() {
 		reopened = reopened || (c.Op == protocol.AgentOpOpen && strings.Contains(string(c.Args), `"point":7`))
 	}
 	if !reopened {
-		t.Fatalf("the snapshot was not re-opened: %+v", fake.Calls())
+		t.Fatalf("the snapshot was not re-opened: %+v", ts2.srv.editor.Calls())
 	}
 	if h := es3.first().(*protocol.HelloEvent); strings.Join(h.Modules, " ") != "base agent editing files" {
 		t.Fatalf("modules after restart %v", h.Modules)

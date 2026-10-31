@@ -1,0 +1,6 @@
+= modules restarting=true
+# rpc modules
+modules:true
+emacs:restarting
+emacs:daemon-restarted
+modules:false

@@ -1,0 +1,11 @@
+# load 01-life/01-three
+checkpoint:01-life/01-three/open
+step:open:loaded
+check:open:false
+gw:01-life/01-three/open:in-progress:gen0
+# the second tab loads 01-life/04-other
+checkpoint:01-life/04-other/quit
+step:quit:loaded
+check:quit:false
+gw:01-life/04-other/quit:in-progress:gen0
+= the second stream saw 01-life/04-other loaded

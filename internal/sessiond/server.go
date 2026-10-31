@@ -23,6 +23,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/httpx"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/agent/fakeeditor"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/events"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/gwclient"
@@ -42,8 +43,8 @@ const HeartbeatInterval = 30 * time.Second
 
 // Options adjust a Server for tests and development.
 type Options struct {
-	// Fake substitutes bash for Emacs, tmux and Xvnc and runs an in-process
-	// fake agent.
+	// Fake substitutes bash for Emacs and Xvnc and the fake editor for the
+	// agent and tmux (keys sent to Emacs reach the editor).
 	Fake bool
 	// Bash is the bash binary for Fake (default "bash").
 	Bash string
@@ -54,9 +55,14 @@ type Options struct {
 	HelloTimeout time.Duration
 	// Ready, when set, is closed once startup finished (tests).
 	Ready chan struct{}
-	// FakeAgent answers the fake agent's calls in Fake mode (tests); nil
-	// means agent.DefaultFakeHandler.
-	FakeAgent agent.FakeHandler
+	// Editor is the fake editor in Fake mode (tests drive and inspect it);
+	// nil makes one for the workspace.
+	Editor *fakeeditor.Editor
+	// Clock replaces time.Now in the step engine (tests).
+	Clock func() time.Time
+	// Debounce replaces the step engine's evaluation debounce, and three
+	// times it the longest wait (tests).
+	Debounce time.Duration
 }
 
 // Server is one sessiond.
@@ -97,9 +103,11 @@ type Server struct {
 	bg     sync.WaitGroup
 	addr   atomic.Value // string
 
+	// editor is the fake editor (Fake mode); fakeCancel stops its
+	// connection loop.
+	editor     *fakeeditor.Editor
 	fakeMu     sync.Mutex
 	fakeCancel context.CancelFunc
-	fake       *agent.Fake // fake mode's agent, for tests
 }
 
 // New builds a server from cfg; Run starts it.
@@ -261,8 +269,14 @@ func (s *Server) wire() {
 	attach := supervisor.AttachCommand(cfg)
 	supOpt := supervisor.Options{}
 	if s.opt.Fake {
+		s.editor = s.opt.Editor
+		if s.editor == nil {
+			s.editor = fakeeditor.New(cfg.Workspace)
+		}
+		s.editor.ModulesPath = s.modules.Path
+		s.editor.EmacsVersion = "fake"
 		cmds = supervisor.FakeCommands(s.opt.Bash)
-		tmux = supervisor.NoTmux{}
+		tmux = fakeeditor.FakeTmux{Editor: s.editor}
 		attach = supervisor.FakeAttach(s.opt.Bash, cfg.Workspace)
 		supOpt.OnDaemonStart = s.startFakeAgent
 		supOpt.OnDaemonExit = s.stopFakeAgent
@@ -310,6 +324,8 @@ func (s *Server) wire() {
 		Workspace: cfg.Workspace,
 		Checker:   checker{s.agent},
 		Shell:     s.shell(),
+		Now:       s.opt.Clock,
+		Debounce:  s.opt.Debounce,
 		Log:       log.With("component", "steps"),
 		Hooks: steps.Hooks{
 			Emit: func(ev protocol.Event) { s.bus.Publish(ev) },
@@ -783,30 +799,42 @@ func (s *Server) heartbeatLoop(ctx context.Context) {
 
 // --- fake mode -------------------------------------------------------------
 
+// startFakeAgent connects the fake editor, freshly started, as the agent
+// of the daemon pid; it reconnects whenever the connection drops and the
+// editor is online, like the agent's backoff.
 func (s *Server) startFakeAgent(pid int) {
 	ctx, cancel := context.WithCancel(context.Background())
-	fake := &agent.Fake{Path: s.cfg.AgentSocket, Handle: s.opt.FakeAgent,
-		Hello:   protocol.AgentHelloMsg{Emacs: "fake", PID: pid, Modules: s.modules.Current()},
+	ed := s.editor
+	ed.Restart()
+	fake := &agent.Fake{Path: s.cfg.AgentSocket, Handle: ed.Handle, Hello: ed.Hello(pid),
 		Initial: []any{protocol.AgentFrameMsg{T: protocol.AgentFrame, Event: protocol.FrameOpened, Kind: protocol.FrameTerminal}}}
+	ed.Attach(fake)
 	s.fakeMu.Lock()
 	if s.fakeCancel != nil {
 		s.fakeCancel()
 	}
 	s.fakeCancel = cancel
-	s.fake = fake
 	s.fakeMu.Unlock()
 	go func() {
-		// The socket may not accept for a moment after a restart.
-		for i := 0; i < 50 && ctx.Err() == nil; i++ {
-			if err := fake.Run(ctx); err == nil || ctx.Err() != nil {
+		for ed.WaitOnline(ctx) {
+			if err := fake.Run(ctx); ctx.Err() != nil {
 				return
+			} else if err != nil {
+				s.log.Debug("fake agent connection", "err", err)
 			}
-			time.Sleep(100 * time.Millisecond)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(100 * time.Millisecond):
+			}
 		}
 	}()
 }
 
 func (s *Server) stopFakeAgent() {
+	if s.editor != nil {
+		s.editor.Detach()
+	}
 	s.fakeMu.Lock()
 	if s.fakeCancel != nil {
 		s.fakeCancel()

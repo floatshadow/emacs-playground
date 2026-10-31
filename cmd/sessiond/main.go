@@ -7,8 +7,8 @@
 //
 // Every PG_* variable has a flag named after its JSON key (-listen,
 // -workspace, -gatewayUrl, …); flags override the environment. -fake
-// substitutes bash for Emacs, tmux and Xvnc and runs an in-process fake agent
-// (development on hosts without them).
+// substitutes bash for Emacs and Xvnc and the in-process fake editor for the
+// agent and tmux (development on hosts without them).
 package main
 
 import (
@@ -77,7 +77,7 @@ func configFlags(fs *flag.FlagSet) func() []string {
 func run(args, environ []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("sessiond", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fake := fs.Bool("fake", false, "substitute bash for Emacs, tmux and Xvnc (development without the session image)")
+	fake := fs.Bool("fake", false, "substitute bash for Emacs and Xvnc and the fake editor for the agent and tmux (development without the session image)")
 	overrides := configFlags(fs)
 	fs.Usage = func() { fmt.Fprint(fs.Output(), usage); fs.PrintDefaults() }
 	if err := fs.Parse(args); err != nil {

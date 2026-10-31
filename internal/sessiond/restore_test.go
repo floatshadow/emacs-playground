@@ -18,6 +18,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/httpx"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/agent/fakeeditor"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/gwclient"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
@@ -123,12 +124,11 @@ func TestRestoreAgentFailure(t *testing.T) {
 			}
 			defer a.Close()
 			s.agent = a
-			fake := &agent.Fake{Path: a.Path(), Handle: func(op protocol.AgentOp, args json.RawMessage) (any, error) {
-				if fail && op == protocol.AgentOpResetStep {
-					return nil, errors.New("busy")
-				}
-				return agent.DefaultFakeHandler(op, args)
-			}}
+			ed := fakeeditor.New(s.cfg.Workspace)
+			if fail {
+				ed.Fail(protocol.AgentOpResetStep, errors.New("busy"))
+			}
+			fake := &agent.Fake{Path: a.Path(), Handle: ed.Handle}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			go func() { _ = fake.Run(ctx) }()
@@ -147,7 +147,7 @@ func TestRestoreAgentFailure(t *testing.T) {
 				if !reflect.DeepEqual(saved.Active, before.Active) || !reflect.DeepEqual(saved.Lessons, before.Lessons) {
 					t.Fatalf("failed restore changed engine: %+v", saved)
 				}
-				if got := countCalls(fake, protocol.AgentOpEval); got != 1 {
+				if got := ed.CountCalls(protocol.AgentOpEval); got != 1 {
 					t.Fatalf("eval calls after failed reset: %d", got)
 				}
 			} else if saved.Active == nil || saved.Active.StepID != "one" || saved.Lessons["a/b"] == nil || saved.Lessons["a/b"].Resets["one"] != 1 {

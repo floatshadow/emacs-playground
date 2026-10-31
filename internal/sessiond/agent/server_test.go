@@ -113,7 +113,7 @@ func TestHelloEventsPingAndCalls(t *testing.T) {
 			}
 			return protocol.AgentEvalResult{Value: "*scratch*"}, nil
 		}
-		return DefaultFakeHandler(op, args)
+		return map[string]any{}, nil
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -232,10 +232,11 @@ func TestReplaceConnectionAndLimits(t *testing.T) {
 	// The replaced connection does not count as a disconnect.
 	time.Sleep(50 * time.Millisecond)
 	rec.mu.Lock()
-	if rec.discons != 0 || rec.hellos != 2 {
-		t.Fatalf("discons=%d hellos=%d", rec.discons, rec.hellos)
-	}
+	discons, hellos := rec.discons, rec.hellos
 	rec.mu.Unlock()
+	if discons != 0 || hellos != 2 {
+		t.Fatalf("discons=%d hellos=%d", discons, hellos)
+	}
 
 	// A line over 1 MB drops the connection.
 	c, err := net.Dial("unix", path)
@@ -250,12 +251,12 @@ func TestReplaceConnectionAndLimits(t *testing.T) {
 	go func() {
 		_, _ = c.Write([]byte(`{"t":"echo","text":"` + strings.Repeat("x", protocol.MaxAgentLine+10) + "\"}\n"))
 	}()
-	waitFor(t, "disconnect", func() bool { return !s.Connected() })
-	rec.mu.Lock()
-	if rec.discons != 1 {
-		t.Fatalf("discons %d", rec.discons)
-	}
-	rec.mu.Unlock()
+	// OnDisconnect runs just after Connected turns false.
+	waitFor(t, "disconnect", func() bool {
+		rec.mu.Lock()
+		defer rec.mu.Unlock()
+		return !s.Connected() && rec.discons == 1
+	})
 	// Disconnect fails calls fast.
 	if err := s.Call(ctx, protocol.AgentOpRescue, nil, 0, nil); !errors.Is(err, ErrNotConnected) {
 		t.Fatalf("after disconnect: %v", err)

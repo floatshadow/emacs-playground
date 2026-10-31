@@ -1,0 +1,13 @@
+# load 01-life/01-three
+checkpoint:01-life/01-three/open
+step:open:loaded
+check:open:false
+gw:01-life/01-three/open:in-progress:gen0
+= demo start restored=true
+# demo start after a command
+step:open:reset
+check:open:false
+# the demo plays
+check:open:true
+step:open:demonstrated
+gw:01-life/01-three/open:demonstrated:gen0

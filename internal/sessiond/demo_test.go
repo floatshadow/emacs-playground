@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/floatshadow/emacs-playground/internal/protocol"
-	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 )
 
@@ -179,30 +178,17 @@ func TestRestoreOutlivesTheRequest(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	ts.srv.fakeMu.Lock()
-	fake := ts.srv.fake
-	ts.srv.fakeMu.Unlock()
-	before := countCalls(fake, protocol.AgentOpResetStep)
+	before := ts.srv.editor.CountCalls(protocol.AgentOpResetStep)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, _, err := ts.srv.restoreCheckpoint(ctx, ref, nil); err != nil {
 		t.Fatalf("restore with a cancelled request: %v", err)
 	}
-	if got := countCalls(fake, protocol.AgentOpResetStep); got != before+1 {
+	if got := ts.srv.editor.CountCalls(protocol.AgentOpResetStep); got != before+1 {
 		t.Fatalf("reset-step calls %d, want %d", got, before+1)
 	}
 	if _, err := os.Stat(filepath.Join(ws, ".git", "index.lock")); !os.IsNotExist(err) {
 		t.Fatalf("index.lock left behind: %v", err)
 	}
-}
-
-func countCalls(f *agent.Fake, op protocol.AgentOp) int {
-	n := 0
-	for _, c := range f.Calls() {
-		if c.Op == op {
-			n++
-		}
-	}
-	return n
 }
