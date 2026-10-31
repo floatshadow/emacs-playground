@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs'
+import type { PDFDocumentProxy, RenderTask } from 'pdfjs-dist/legacy/build/pdf.mjs'
 // The legacy build runs on browsers without the newest APIs (URL.parse, Chrome < 126).
 import workerUrl from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url'
 import styles from './Preview.module.css'
@@ -81,62 +81,74 @@ export default function PdfView({
 
   useEffect(() => () => void doc?.loadingTask.destroy(), [doc])
 
-  const layout = useCallback(async () => {
-    const host = pagesEl.current
-    const sc = scroller.current
-    if (!doc || !host || !sc) return
-    const first = await doc.getPage(1)
-    const base = first.getViewport({ scale: 1 })
-    const s = scale === 'fit' ? Math.max(MIN_SCALE, (sc.clientWidth - 32) / base.width) : scale
-    setEffective(s)
-    host.replaceChildren()
-    const ratio = window.devicePixelRatio || 1
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue
-          const canvas = entry.target as HTMLCanvasElement
-          if (canvas.dataset.rendered) continue
-          canvas.dataset.rendered = '1'
-          const n = Number(canvas.dataset.page)
-          void doc.getPage(n).then((page) => {
-            const vp = page.getViewport({ scale: s * ratio })
-            canvas.width = vp.width
-            canvas.height = vp.height
-            void page.render({ canvas, viewport: vp }).promise.catch(() => undefined)
-          })
-        }
-      },
-      { root: sc, rootMargin: '200px' },
-    )
-    for (let n = 1; n <= doc.numPages; n++) {
-      const page = n === 1 ? first : await doc.getPage(n)
-      const vp = page.getViewport({ scale: s })
-      const canvas = document.createElement('canvas')
-      canvas.className = styles.pdfPage ?? ''
-      canvas.dataset.page = String(n)
-      canvas.style.width = `${Math.floor(vp.width)}px`
-      canvas.style.height = `${Math.floor(vp.height)}px`
-      canvas.setAttribute('role', 'img')
-      canvas.setAttribute('aria-label', t('preview.pdfPage', { n, total: doc.numPages, name }))
-      host.appendChild(canvas)
-      observer.observe(canvas)
-    }
-    if (saved.current) {
-      sc.scrollTop = saved.current.top
-      sc.scrollLeft = saved.current.left
-      saved.current = null
-    }
-    return () => observer.disconnect()
-  }, [doc, scale, t, name])
-
   useEffect(() => {
-    let cleanup: (() => void) | undefined
-    void layout().then((c) => {
-      cleanup = c
+    let cancelled = false
+    let observer: IntersectionObserver | undefined
+    const tasks = new Set<RenderTask>()
+    const layout = async () => {
+      const host = pagesEl.current
+      const sc = scroller.current
+      if (!doc || !host || !sc) return
+      const first = await doc.getPage(1)
+      if (cancelled) return
+      const base = first.getViewport({ scale: 1 })
+      const s = scale === 'fit' ? Math.max(MIN_SCALE, (sc.clientWidth - 32) / base.width) : scale
+      setEffective(s)
+      host.replaceChildren()
+      const ratio = window.devicePixelRatio || 1
+      observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (cancelled || !entry.isIntersecting) continue
+            const canvas = entry.target as HTMLCanvasElement
+            if (canvas.dataset.rendered) continue
+            canvas.dataset.rendered = '1'
+            const n = Number(canvas.dataset.page)
+            void doc
+              .getPage(n)
+              .then((page) => {
+                if (cancelled) return
+                const vp = page.getViewport({ scale: s * ratio })
+                canvas.width = vp.width
+                canvas.height = vp.height
+                const task = page.render({ canvas, viewport: vp })
+                tasks.add(task)
+                void task.promise.catch(() => undefined).finally(() => tasks.delete(task))
+              })
+              .catch(() => undefined)
+          }
+        },
+        { root: sc, rootMargin: '200px' },
+      )
+      for (let n = 1; n <= doc.numPages; n++) {
+        const page = n === 1 ? first : await doc.getPage(n)
+        if (cancelled) return
+        const vp = page.getViewport({ scale: s })
+        const canvas = document.createElement('canvas')
+        canvas.className = styles.pdfPage ?? ''
+        canvas.dataset.page = String(n)
+        canvas.style.width = `${Math.floor(vp.width)}px`
+        canvas.style.height = `${Math.floor(vp.height)}px`
+        canvas.setAttribute('role', 'img')
+        canvas.setAttribute('aria-label', t('preview.pdfPage', { n, total: doc.numPages, name }))
+        host.appendChild(canvas)
+        observer.observe(canvas)
+      }
+      if (saved.current) {
+        sc.scrollTop = saved.current.top
+        sc.scrollLeft = saved.current.left
+        saved.current = null
+      }
+    }
+    void layout().catch((e: unknown) => {
+      if (!cancelled) setError(errorMessage(e))
     })
-    return () => cleanup?.()
-  }, [layout])
+    return () => {
+      cancelled = true
+      observer?.disconnect()
+      for (const task of tasks) task.cancel()
+    }
+  }, [doc, scale, t, name])
 
   const zoom = (f: number) =>
     setScale(Math.min(MAX_SCALE, Math.max(MIN_SCALE, Math.round(effective * f * 100) / 100)))
