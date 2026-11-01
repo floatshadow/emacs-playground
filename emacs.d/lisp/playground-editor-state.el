@@ -169,7 +169,7 @@ the absolute names of the spec's files, by its name."
                   (cdr state))))
    (t (mapcar (lambda (s) (playground--state-map-files s files)) state))))
 
-(defun playground--op-snapshot (&rest _)
+(defun playground--window-spec ()
   "Buffer and window spec of the learner's frame (protocol.WindowSpec)."
   (let* ((frame (window-frame (playground--user-window)))
          (wins (window-list frame 'nomini (frame-first-window frame)))
@@ -620,18 +620,6 @@ closes it.  Returns the number killed."
             (cl-incf n)))))
     n))
 
-(defun playground--op-reset-step (args &optional id)
-  "Reset the step from ARGS at top level (see `playground--reset-step-now').
-A prefix key typed before Reset (C-c waiting for its second key) would
-otherwise swallow the next keys, so it is cancelled, and so are prompts
-(see `playground--at-top-level'); the reply to call ID may come later.
-An open hydra is closed: its keys would take the demo's or the
-learner's next keys, and the layout would delete its hint window
-while they stay active."
-  (playground--close-hydra)
-  (playground--at-top-level id (lambda () (let ((playground--degraded nil))
-                                            (playground--reset-step-now args)))))
-
 (defun playground--reset-step-now (args)
   "Put the files and windows back to the spec in ARGS (the step's start).
 Edited workspace buffers are reverted to the restored files, buffers of
@@ -805,7 +793,7 @@ Nil when VARS is empty or the alist prints longer than LIMIT."
 
 (defun playground--op-capture-editor (args &rest _)
   "The editor state a checkpoint keeps: {spec, buffers, globals}.
-spec is the window spec of the learner's frame (`playground--op-snapshot'),
+spec is the window spec of the learner's frame (`playground--window-spec'),
 buffers the unsaved text and undo of the file buffers under ARGS's
 workspace (`playground--capture-buffers', bounded by maxText, maxUndo
 and maxTotal), globals the variables ARGS lists under vars printed
@@ -817,7 +805,7 @@ bounds and no vars capture the spec alone."
                            (error "Bad variable name %S" v))
                          (intern v))
                        (alist-get 'vars args))))
-    `((spec . ,(playground--op-snapshot))
+    `((spec . ,(playground--window-spec))
       (buffers . ,(playground--capture-buffers
                    playground-agent-workspace (playground--arg-count args 'maxText)
                    (playground--arg-count args 'maxUndo) (playground--arg-count args 'maxTotal)))
@@ -897,8 +885,12 @@ pointer goes back to its head."
 
 (defun playground--op-restore-editor (args &optional id)
   "Put the editor back to the state in ARGS {workspace, spec, buffers, globals}.
-At top level, like reset-step (`playground--op-reset-step'), so the
-reply to call ID may come later."
+At top level: a prefix key typed before Reset (C-c waiting for its
+second key) would otherwise swallow the next keys, so it is cancelled,
+and so are prompts (see `playground--at-top-level'); the reply to call
+ID may come later.  An open hydra is closed: its keys would take the
+demo's or the learner's next keys, and the layout would delete its hint
+window while they stay active."
   (playground--close-hydra)
   (playground--at-top-level id (lambda () (playground--restore-editor-now args))))
 

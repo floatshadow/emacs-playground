@@ -90,6 +90,47 @@
     }
   ],
   "events": [],
+  "state": {
+    "t": "state",
+    "buf": "*scratch*",
+    "file": null,
+    "mode": "lisp-interaction-mode",
+    "modeName": "",
+    "minors": [],
+    "modified": false,
+    "readonly": false,
+    "narrowed": false,
+    "overwrite": false,
+    "line": 1,
+    "col": 0,
+    "point": 1,
+    "markActive": false,
+    "windows": [
+      {
+        "id": 13,
+        "buf": "*scratch*",
+        "mode": "lisp-interaction-mode",
+        "selected": true,
+        "dedicated": false,
+        "side": null
+      }
+    ],
+    "layout": 13,
+    "frame": "terminal",
+    "frames": 1,
+    "tabs": {
+      "count": 1,
+      "current": "*scratch*"
+    },
+    "minibuffer": null,
+    "isearch": false,
+    "recursive": 0,
+    "macro": false,
+    "prefixArg": null,
+    "waiting": null,
+    "readOnlyReason": null,
+    "diagAtPoint": null
+  },
   "eventsExact": {
     "key": [
       "keys",

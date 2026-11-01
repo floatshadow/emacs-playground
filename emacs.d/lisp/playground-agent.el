@@ -204,12 +204,7 @@ sends the reply itself later.")
         ("frame" . playground--op-frame)
         ("leave-display" . playground--op-leave-display)
         ("resume-loop" . playground--op-resume-loop)
-        ("reset-debug" . playground--op-reset-debug)
-        ;; The window spec and the step's start alone, what capture-editor
-        ;; and restore-editor replace.  TODO(emacs, api.md §7): deleted
-        ;; in the next phase; sessiond no longer calls them.
-        ("snapshot" . playground--op-snapshot)
-        ("reset-step" . playground--op-reset-step)))
+        ("reset-debug" . playground--op-reset-debug)))
 
 ;;;; Interactive commands (emacs.md 10.3)
 
@@ -223,17 +218,9 @@ Never saves, kills file buffers or reverts."
   "Evaluate FORMS (strings) like a lesson check: t, nil or \"unknown\"."
   (mapcar (lambda (f) (let ((r (playground--check-form f))) (if (eq r :false) nil r))) forms))
 
-(defun playground-snapshot ()
-  "Return the buffer and window spec of the selected frame."
-  (playground--op-snapshot))
-
 (defun playground-open (spec)
   "Visit the files of SPEC and apply its layout."
   (playground--op-open spec))
-
-(defun playground-reset-step (spec)
-  "Revert file buffers to disk and apply SPEC."
-  (playground--op-reset-step `((spec . ,spec))))
 
 (defun playground-set-modules (list)
   "Write modules.el with LIST (strings); sessiond restarts the daemon."

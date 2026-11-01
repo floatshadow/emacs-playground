@@ -10,8 +10,12 @@
 ;;
 ;; A case is its setup files and steps: keys pressed, text typed, ops
 ;; called (with "$NAME" standing for the reply saved under NAME,
-;; "$NAME.FIELD" for a field of it, and "$WS" for the workspace), pauses.  `exact' names the reply fields that must
-;; be equal on replay; everything else is compared by shape.  `make
+;; "$NAME.FIELD" for a field of it, and "$WS" for the workspace), pauses.
+;; `exact' names the reply fields that must be equal on replay; everything
+;; else is compared by shape.  A fixture keeps the calls, the key and
+;; minibuffer events and the final state, which is what replays assert;
+;; `allStates' also keeps every state message, for the one case that
+;; stands for the state shapes.  `make
 ;; emacs-test' replays the committed files against the agent
 ;; (pg-agent/contract-fixtures), and so does sessiond's fake editor
 ;; (internal/sessiond/agent/fakeeditor), so the fake is checked against
@@ -89,6 +93,7 @@ the fake prints undo and variables in a format of its own).")
      (steps . [((call . "hello") (exact . ["protocol" "agent"]))]))
 
     ((name . "state-after-find-file")
+     (allStates . t)
      (setup . [((file . "a.txt") (contents . "line one\nline two\n"))])
      (steps . [,@(pg-fixtures--find "a.txt") ((press . "C-n"))]))
 
@@ -265,7 +270,9 @@ the fake prints undo and variables in a format of its own).")
         (steps . ,(alist-get 'steps case))
         (calls . ,(nth 1 run))
         (events . ,(nth 2 run))
-        (eventsExact . ,(or (alist-get 'eventsExact case) pg-fixtures--events-exact))))))
+        (state . ,(nth 3 run))
+        (eventsExact . ,(or (alist-get 'eventsExact case) pg-fixtures--events-exact))
+        ,@(and (alist-get 'allStates case) '((allStates . t)))))))
 
 (defun pg-fixtures-record (dir)
   "Record every case of `pg-fixtures-cases' into DIR."

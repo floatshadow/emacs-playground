@@ -293,7 +293,7 @@ Pings are left out unless TYPE is \"ping\"."
         ;; (hsplit main (vsplit right popup)) collapses to (hsplit main right).
         (should (equal (alist-get 'layout s)
                        (vector "hsplit" (playground--window-id main) (playground--window-id right)))))
-      (should (equal (alist-get 'layout (playground--op-snapshot)) "(hsplit *scratch* pg-other)"))
+      (should (equal (alist-get 'layout (playground--window-spec)) "(hsplit *scratch* pg-other)"))
       ;; Same-direction splits merge when the popup between them goes.
       (delete-other-windows main)
       (let* ((mid (split-window-below))
@@ -1078,20 +1078,6 @@ no variables, as sessiond asks for snapshot.json (snapshot.SpecOnly)."
   (alist-get 'spec (pg-test-value
                     (pg-test-call "capture-editor"
                                   '((vars . []) (maxText . 0) (maxUndo . 0) (maxTotal . 0) (maxGlobals . 0))))))
-
-;; TODO(emacs, api.md §7): deleted with the aliases.
-(ert-deftest pg-agent/legacy-snapshot-and-reset-step ()
-  "The aliases snapshot and reset-step answer like capture-editor's spec and restore-editor."
-  (pg-test-with-agent
-    (pg-test-file "a.txt" "line one\n")
-    (delete-other-windows)
-    (find-file (expand-file-name "a.txt" pg-test--dir))
-    (let ((snap (pg-test-value (pg-test-call "snapshot"))))
-      (should (equal (alist-get 'layout snap) (alist-get 'layout (pg-test-window-spec))))
-      (insert "edited ")
-      (let ((r (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap)))))))
-        (should (= (alist-get 'reverted r) 1)))
-      (should-not (buffer-modified-p (get-file-buffer (expand-file-name "a.txt" pg-test--dir)))))))
 
 (defun pg-test--spec (snap)
   "SNAP, a parsed window spec, ready to be sent back as a WindowSpec."
@@ -2204,13 +2190,17 @@ but whether the name is remote (no I/O on the connection)."
 
 ;; A fixture case is JSON: {name, setup: [{file, contents}], steps: [{press}
 ;; | {type} | {call, args, as, exact} | {sleep}], calls: [{op, ok, reply,
-;; exact}], events: [key, state and minibuffer messages], eventsExact}.
-;; `pg-fixture-run' plays the steps against the agent and returns what it
-;; sent, normalised: the workspace directory reads $WS, and takenAt, pid,
-;; ts and uptime are dropped.  Fixtures are compared by shape (the same
-;; keys and JSON types, recursively) plus equality of the fields named
-;; exact.  sessiond's fake editor (internal/sessiond/agent/fakeeditor)
-;; replays the same files under the same rule.
+;; exact}], events: [key and minibuffer messages], state, eventsExact,
+;; allStates}.  `state' is the final state, read once every step has
+;; settled; with allStates, `events' also keeps every state message sent
+;; (the representative state shapes sessiond decodes).  `pg-fixture-run'
+;; plays the steps against the agent and returns what it sent, normalised:
+;; the workspace directory reads $WS, and takenAt, pid, ts and uptime are
+;; dropped.  Fixtures are compared by shape (the same keys and JSON types,
+;; recursively) plus equality of the fields named exact: every call, the
+;; key and minibuffer events in order, and the final state.  sessiond's
+;; fake editor (internal/sessiond/agent/fakeeditor) replays the same files
+;; under the same rule.
 
 (defvar pg-fixture-dir
   (expand-file-name "fixtures/agent"
@@ -2291,8 +2281,11 @@ and \"$NAME.FIELD\" that reply's FIELD."
   (setq kill-ring nil kill-ring-yank-pointer nil))
 
 (defun pg-fixture-run (case)
-  "Play fixture CASE against the agent; return (HELLO CALLS EVENTS), normalised."
-  (let (hello calls events)
+  "Play fixture CASE against the agent; return (HELLO CALLS EVENTS STATE),
+normalised: EVENTS are the key and minibuffer messages (and the state
+messages when CASE has allStates), STATE the final state."
+  (let ((kinds (if (eq (alist-get 'allStates case) t) '("key" "state" "minibuffer") '("key" "minibuffer")))
+        hello calls events state)
     (pg-test-with-agent
       (put 'narrow-to-region 'disabled nil)
       (let ((playground-config-dir (file-name-as-directory pg-test--dir))
@@ -2340,11 +2333,12 @@ and \"$NAME.FIELD\" that reply's FIELD."
                 (pg-test-settle)))))
           (flush))
         (pg-test-settle)
+        (setq state (pg-fixture--normalize (pg-fixture--parse (playground--json (playground--state)))))
         (dolist (l (reverse pg-test--lines))
           (let ((m (pg-fixture--parse l)))
-            (when (member (alist-get 't m) '("key" "state" "minibuffer"))
+            (when (member (alist-get 't m) kinds)
               (push (pg-fixture--normalize m) events))))))
-    (list hello (vconcat (nreverse calls)) (vconcat (nreverse events)))))
+    (list hello (vconcat (nreverse calls)) (vconcat (nreverse events)) state)))
 
 (defun pg-fixture--type (v)
   "JSON type of V as parsed by `pg-fixture--parse'."
@@ -2392,8 +2386,9 @@ and \"$NAME.FIELD\" that reply's FIELD."
           (push (format "%s %s: %S, want %S" where p g w) out))))
     (nreverse out)))
 
-(defun pg-fixture-diffs (fixture hello calls events)
-  "How HELLO, CALLS and EVENTS of a run differ from FIXTURE, as strings."
+(defun pg-fixture-diffs (fixture hello calls events state)
+  "How HELLO, CALLS, EVENTS and the final STATE of a run differ from
+FIXTURE, as strings."
   (let ((out '())
         (want-calls (alist-get 'calls fixture))
         (exact (alist-get 'eventsExact fixture)))
@@ -2411,9 +2406,8 @@ and \"$NAME.FIELD\" that reply's FIELD."
                            out)))))
     (ignore hello)
     (let* ((other (lambda (evs) (seq-remove (lambda (e) (equal (alist-get 't e) "state")) evs)))
-           (states (lambda (evs) (seq-filter (lambda (e) (equal (alist-get 't e) "state")) evs)))
            (wo (funcall other (alist-get 'events fixture))) (go (funcall other events))
-           (ws (funcall states (alist-get 'events fixture))) (gs (funcall states events)))
+           (want-state (alist-get 'state fixture)))
       (unless (= (length wo) (length go))
         (push (format "key and minibuffer events %S, want %S"
                       (mapcar (lambda (e) (or (alist-get 'keys e) (alist-get 'open e))) go)
@@ -2428,18 +2422,12 @@ and \"$NAME.FIELD\" that reply's FIELD."
                                                  w g (alist-get (intern (alist-get 't w)) exact) where))
                                       out)))))
                wo go)
-      ;; The recorded last state must be among the run's states (sessiond's
-      ;; fake editor reports more: a batch Emacs never redisplays, so ops
-      ;; send none here).
-      (when ws
-        (let* ((w (car (last ws)))
-               (diffs (mapcar (lambda (g)
-                                (append (pg-fixture--shape-diffs w g "last state")
-                                        (pg-fixture--exact-diffs w g (alist-get 'state exact) "last state")))
-                              gs))
-               (best (if gs (car (sort diffs (lambda (a b) (< (length a) (length b)))))
-                       '("no state events"))))
-          (setq out (nconc (reverse best) out)))))
+      ;; The final state, once every step settled, is the recorded one.
+      (when (consp want-state)
+        (setq out (nconc (nreverse (append (pg-fixture--shape-diffs want-state state "final state")
+                                           (pg-fixture--exact-diffs want-state state (alist-get 'state exact)
+                                                                    "final state")))
+                         out))))
     (nreverse out)))
 
 (defun pg-fixture-files ()
@@ -2460,7 +2448,7 @@ and \"$NAME.FIELD\" that reply's FIELD."
     (dolist (file files)
       (let* ((fixture (pg-fixture-read file))
              (run (pg-fixture-run fixture))
-             (diffs (pg-fixture-diffs fixture (nth 0 run) (nth 1 run) (nth 2 run))))
+             (diffs (pg-fixture-diffs fixture (nth 0 run) (nth 1 run) (nth 2 run) (nth 3 run))))
         (when diffs
           (push (cons (alist-get 'name fixture) diffs) failures))))
     (should-not failures)))
