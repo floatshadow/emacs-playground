@@ -1,0 +1,11 @@
+= first scenario restarting=true
+= second scenario restarting=false step=quit
+# load twice
+modules:true
+emacs:restarting
+emacs:daemon-restarted
+checkpoint:01-life/02-modules/quit
+step:quit:loaded
+modules:false
+check:quit:false
+gw:01-life/02-modules/quit:in-progress:gen0

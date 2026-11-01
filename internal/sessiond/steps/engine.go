@@ -137,9 +137,15 @@ type Engine struct {
 	opt Options
 	log *slog.Logger
 
-	mu           sync.Mutex
-	sc           *protocol.Scenario
-	idx          int // active step index; -1 when none; len(Steps) after the last
+	mu  sync.Mutex
+	sc  *protocol.Scenario
+	idx int // active step index; -1 when none; len(Steps) after the last
+	// preRehearsal is the lesson and step active before a rehearsal began
+	// (sc nil: none); EndRehearsal brings them back.
+	preRehearsal struct {
+		sc  *protocol.Scenario
+		idx int
+	}
 	gen          uint64
 	startedAt    time.Time
 	counts       map[string]int
@@ -360,8 +366,8 @@ const (
 	LapKeep
 )
 
-// Activate makes step idx of sc active (the scenario loader has already
-// taken its checkpoint), emits step loaded, and schedules an evaluation. A
+// Activate makes step idx of sc active (the session core's load op has
+// already taken its checkpoint), emits step loaded, and schedules an evaluation. A
 // running lap ends.
 func (e *Engine) Activate(sc *protocol.Scenario, idx int) protocol.StepRef {
 	return e.ActivateLap(sc, idx, LapEnd)
@@ -387,6 +393,7 @@ func (e *Engine) ActivateLap(sc *protocol.Scenario, idx int, mode LapMode) proto
 		e.saved.Lap = nil
 	}
 	e.hold = holdNone
+	e.preRehearsal.sc = nil
 	evs := e.startStepLocked(idx, protocol.StepLoaded)
 	ref := *e.activeLocked()
 	saved := e.savedLocked()
@@ -401,10 +408,11 @@ func (e *Engine) ActivateLap(sc *protocol.Scenario, idx int, mode LapMode) proto
 
 // Rehearse makes step idx of sc active without recording or emitting
 // anything: completions are not recorded, check, step and nudge events
-// are not emitted, progress is neither reported nor persisted. The scenario
-// loader uses it to replay the steps before the one "Go to this step" asked
+// are not emitted, progress is neither reported nor persisted. The load
+// op's fast-forward uses it to replay the steps before the one "Go to this step" asked
 // for, evaluating each step's conditions after its demo (Check); Activate
-// ends it. Command counts restart for the step as with Activate.
+// or EndRehearsal ends it. Command counts restart for the step as with
+// Activate.
 func (e *Engine) Rehearse(sc *protocol.Scenario, idx int) {
 	sc.AssignIDs()
 	e.mu.Lock()
@@ -412,9 +420,34 @@ func (e *Engine) Rehearse(sc *protocol.Scenario, idx int) {
 	if e.sc == nil || e.sc.ID != sc.ID {
 		e.lessonCounts = map[string]int{}
 	}
+	if e.hold != holdQuiet {
+		e.preRehearsal.sc, e.preRehearsal.idx = e.sc, e.idx
+	}
 	e.sc = sc
 	e.hold = holdQuiet
 	e.startStepLocked(idx, protocol.StepLoaded)
+}
+
+// EndRehearsal ends a rehearsal in progress for a load that activates
+// nothing: the step active before it is active again, as after a load that
+// failed before its fast-forward, with nothing emitted (the page never saw
+// it go). The step counts as dirty, since the load changed the workspace,
+// so demo start and skip restore its checkpoint first.
+func (e *Engine) EndRehearsal() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.hold != holdQuiet {
+		return
+	}
+	prev := e.preRehearsal
+	e.preRehearsal.sc = nil
+	e.hold = holdNone
+	e.sc, e.idx = prev.sc, prev.idx
+	if prev.sc == nil {
+		e.idx = -1
+	}
+	e.gen++
+	e.commands = 1
 }
 
 // startStepLocked resets per-step state and returns the step event.
@@ -501,6 +534,14 @@ func (e *Engine) Drop(lessonID string) bool {
 	return e.DropGeneration(lessonID, 0)
 }
 
+// GenerationNewer reports whether DropGeneration(lessonID, generation)
+// would apply: generation zero, or newer than the one applied.
+func (e *Engine) GenerationNewer(lessonID string, generation int64) bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return generation == 0 || generation > e.saved.Generations.ForLesson(lessonID)
+}
+
 // DropGeneration applies a gateway reset once, retaining any newer lesson reset.
 // Generation zero is an unconditional local drop.
 func (e *Engine) DropGeneration(lessonID string, generation int64) bool {
@@ -515,14 +556,18 @@ func (e *Engine) DropGeneration(lessonID string, generation int64) bool {
 	}
 	var evs []protocol.Event
 	if e.sc != nil && drop(e.sc.ID) {
-		if a := e.activeLocked(); a != nil {
-			evs = append(evs, &protocol.StepEvent{LessonID: a.LessonID, StepID: a.StepID, Status: protocol.StepDropped,
+		// A rehearsed step counts as active here: the fast-forward that
+		// replays it ends with the drop, and the page waiting for its load
+		// learns the lesson's step went.
+		if e.idx >= 0 && e.idx < len(e.sc.Steps) {
+			evs = append(evs, &protocol.StepEvent{LessonID: e.sc.ID, StepID: e.sc.Steps[e.idx].ID, Status: protocol.StepDropped,
 				Index: e.idx, Count: len(e.sc.Steps)})
 		}
 		e.sc = nil
 		e.idx = -1
 		e.gen++
 		e.hold = holdNone
+		e.preRehearsal.sc = nil
 		e.demoLatch, e.demoPlaying, e.demonstrated = false, false, false
 		e.saved.Active = nil
 		e.saved.Lap = nil

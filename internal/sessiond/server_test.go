@@ -48,9 +48,8 @@ func TestPersistOrdersSnapshots(t *testing.T) {
 	for _, revision := range []uint64{2, 1} {
 		s.persist(steps.Saved{Revision: revision, Active: &protocol.StepRef{LessonID: "a/b", StepID: fmt.Sprint(revision)}})
 	}
-	saved, resume := s.readState()
-	if !resume || saved.Active.StepID != "2" {
-		t.Fatalf("saved %+v, resume %v", saved, resume)
+	if saved := s.readState(); saved.Active == nil || saved.Active.StepID != "2" {
+		t.Fatalf("saved %+v", saved)
 	}
 }
 
@@ -263,6 +262,19 @@ func (ts *testServer) rpc(op string, body any, out any, hdr ...string) int {
 	if resp.StatusCode != 200 && testing.Verbose() {
 		ts.t.Logf("%s → %d %s", op, resp.StatusCode, raw)
 	}
+	return resp.StatusCode
+}
+
+// rpcCtx sends op under ctx and returns the status, 0 when the request
+// ended without a response (ctx cancelled).
+func (ts *testServer) rpcCtx(ctx context.Context, op string, body any) int {
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequestWithContext(ctx, "POST", ts.base+"/rpc/"+op, bytes.NewReader(b))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0
+	}
+	resp.Body.Close()
 	return resp.StatusCode
 }
 
@@ -775,22 +787,6 @@ func TestHealthzBeforeReady(t *testing.T) {
 	s.healthz(rec, httptest.NewRequest("GET", "/healthz", nil))
 	if rec.Code != 503 || !strings.Contains(rec.Body.String(), "starting") {
 		t.Fatalf("%d %s", rec.Code, rec.Body)
-	}
-}
-
-func TestSplitStepRef(t *testing.T) {
-	cases := map[string][2]string{
-		"refs/playground/02-buffers-and-files/03-opening-files/open": {"02-buffers-and-files/03-opening-files", "open"},
-		"refs/playground/projects/p6-polyglot/deploy":                {"projects/p6-polyglot", "deploy"},
-	}
-	for ref, want := range cases {
-		l, s, ok := splitStepRef(ref)
-		if !ok || l != want[0] || s != want[1] {
-			t.Errorf("%s → %s %s %v", ref, l, s, ok)
-		}
-	}
-	if _, _, ok := splitStepRef("refs/playground/manual/x"); ok {
-		t.Error("manual ref is not a step ref")
 	}
 }
 

@@ -182,7 +182,7 @@ func TestRestoreOutlivesTheRequest(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := ts.srv.restoreCheckpoint(ctx, ref, nil); err != nil {
+	if _, _, err := ts.srv.snaps.Restore(ctx, ref); err != nil {
 		t.Fatalf("restore with a cancelled request: %v", err)
 	}
 	if got := ts.srv.editor.CountCalls(protocol.AgentOpResetStep); got != before+1 {

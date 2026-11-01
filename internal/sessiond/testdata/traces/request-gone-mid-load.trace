@@ -1,0 +1,6 @@
+= scenario answered 0 after the page went away
+# the load runs on
+checkpoint:01-life/01-three/open
+step:open:loaded
+check:open:false
+gw:01-life/01-three/open:in-progress:gen0

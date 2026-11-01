@@ -40,13 +40,13 @@ func RepoDir(root, dir string) (string, error) {
 	return rel, nil
 }
 
-// prepareRepos makes each setup.repos directory a git repository with the
+// PrepareRepos makes each setup.repos directory a git repository with the
 // fixtures as its initial commit when it has none; reset re-creates it.
-func (l *Loader) prepareRepos(ctx context.Context, sc *protocol.Scenario, reset bool) error {
+// A nil git runs the git binary.
+func PrepareRepos(ctx context.Context, git checkpoint.Runner, workspace string, sc *protocol.Scenario, reset bool) error {
 	if len(sc.Setup.Repos) == 0 {
 		return nil
 	}
-	git := l.Git
 	if git == nil {
 		git = checkpoint.ExecRunner{}
 	}
@@ -55,7 +55,7 @@ func (l *Loader) prepareRepos(ctx context.Context, sc *protocol.Scenario, reset 
 		if err != nil {
 			return err
 		}
-		if err := InitRepo(ctx, git, filepath.Join(l.Workspace, filepath.FromSlash(rel)), reset); err != nil {
+		if err := InitRepo(ctx, git, filepath.Join(workspace, filepath.FromSlash(rel)), reset); err != nil {
 			return fmt.Errorf("setup.repos %s: %w", d, err)
 		}
 	}
@@ -93,19 +93,19 @@ func InitRepo(ctx context.Context, git checkpoint.Runner, dir string, reset bool
 	return nil
 }
 
-// runSetup runs setup.run in the setup root.
-func (l *Loader) runSetup(ctx context.Context, sc *protocol.Scenario) error {
+// RunSetup runs setup.run in the setup root.
+func RunSetup(ctx context.Context, shell steps.ShellRunner, workspace string, sc *protocol.Scenario) error {
 	if strings.TrimSpace(sc.Setup.Run) == "" {
 		return nil
 	}
-	if l.Shell == nil {
+	if shell == nil {
 		return fmt.Errorf("setup.run: no shell")
 	}
-	dir := filepath.Join(l.Workspace, filepath.FromSlash(strings.Trim(sc.Setup.Root, "/")))
+	dir := filepath.Join(workspace, filepath.FromSlash(strings.Trim(sc.Setup.Root, "/")))
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	res := l.Shell.Run(ctx, dir, sc.Setup.Run, protocol.SetupRunTimeout*time.Second)
+	res := shell.Run(ctx, dir, sc.Setup.Run, protocol.SetupRunTimeout*time.Second)
 	switch {
 	case res.TimedOut:
 		return fmt.Errorf("setup.run timed out after %ds", protocol.SetupRunTimeout)

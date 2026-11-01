@@ -31,6 +31,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/sessiond/preview"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/pty"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/session"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/sshbox"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/supervisor"
@@ -77,7 +78,8 @@ type Server struct {
 	sup      *supervisor.Supervisor
 	tap      *inputtap.Tap
 	engine   *steps.Engine
-	loader   *scenario.Loader
+	core     *session.Core
+	snaps    *session.Checkpoints
 	modules  *scenario.Modules
 	ckpt     *checkpoint.Manager
 	preview  *preview.Server
@@ -96,8 +98,6 @@ type Server struct {
 	stateRevision uint64
 	// progressMu serialises gateway snapshots with incoming resets.
 	progressMu sync.Mutex
-	// restoreMu covers files, Emacs state and the following step activation.
-	restoreMu sync.Mutex
 	// skipMu serialises rpc skip.
 	skipMu sync.Mutex
 	bg     sync.WaitGroup
@@ -211,18 +211,17 @@ func (s *Server) Run(ctx context.Context) error {
 	s.log.Info("sessiond listening", "addr", ln.Addr().String(), "session", cfg.SessionID, "fake", s.opt.Fake,
 		"proxy_auth", cfg.ProxySecret != "")
 
-	s.bg.Add(1)
+	s.bg.Add(2)
 	go func() {
 		defer s.bg.Done()
 		s.engine.Run(runCtx)
 	}()
+	go func() {
+		defer s.bg.Done()
+		s.core.Run(runCtx)
+	}()
 
-	// The snapshot of the last run stays until the saved step is resumed.
-	saved, resume := s.readState()
-	var release func()
-	if resume {
-		release = s.sup.HoldSnapshots()
-	}
+	saved := s.readState()
 
 	// 3 and 4. Emacs, tmux, terminal frame.
 	if err := s.sup.Start(runCtx); err != nil {
@@ -230,7 +229,7 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 
 	// 6. Resume the saved step.
-	s.restoreState(runCtx, saved, release)
+	s.restoreState(runCtx, saved)
 	if s.gw != nil {
 		s.bg.Add(1)
 		go s.heartbeatLoop(runCtx)
@@ -295,6 +294,7 @@ func (s *Server) wire() {
 		supOpt.BusySignal = syscall.SIGUSR2
 	}
 	supOpt.SnapshotFile = filepath.Join(s.playgroundDir(), "snapshot.json")
+	supOpt.Busy = func() bool { return s.core.Busy() != nil }
 	supOpt.HelloTimeout = s.opt.HelloTimeout
 	supOpt.OnModeChange = func(m protocol.FrameKind) {
 		if m == protocol.FrameTerminal {
@@ -335,7 +335,7 @@ func (s *Server) wire() {
 				}
 			},
 			Checkpoint: func(ctx context.Context, lessonID, stepID string) {
-				if err := s.stepCheckpoint(ctx, lessonID, stepID, true); err != nil {
+				if err := session.CaptureStep(ctx, s.snaps, lessonID, stepID, true); err != nil {
 					s.log.Warn("step checkpoint", "err", err)
 				}
 			},
@@ -351,18 +351,19 @@ func (s *Server) wire() {
 	} else {
 		fetch = noGateway{}
 	}
-	s.loader = &scenario.Loader{
-		Workspace: cfg.Workspace, Root: s.preview.Root(), CacheDir: filepath.Join(s.playgroundDir(), "cache"),
-		Fetch: fetch, Agent: s.agent, Restart: s.sup, Modules: s.modules, Engine: s.engine,
-		Git: checkpoint.ExecRunner{Bin: cfg.GitBin}, Shell: s.shell(),
-		Checkpoint:  s.stepCheckpoint,
-		RestoreStep: s.restoreStep,
-		PlayDemo:    s.playDemo,
-		Ready:       s.sup.WaitReady,
-		Snapshot:    s.sup.LastSnapshot,
-		Emit:        func(ev protocol.Event) { s.bus.Publish(ev) },
-		Log:         log.With("component", "scenario"),
+	s.snaps = &session.Checkpoints{
+		Workspace: cfg.Workspace, Ckpt: s.ckpt, Agent: s.agent, Editor: s.sup, Modules: s.modules,
+		Emit: func(ev protocol.Event) { s.bus.Publish(ev) },
+		Log:  log.With("component", "checkpoints"),
 	}
+	s.core = session.New(session.Deps{
+		Workspace: cfg.Workspace, Root: s.preview.Root(), CacheDir: filepath.Join(s.playgroundDir(), "cache"),
+		Fetch: fetch, Agent: s.agent, Sup: s.sup, Snapshots: s.snaps, Modules: s.modules, Engine: s.engine,
+		DropProgress: s.dropProgress,
+		Git:          checkpoint.ExecRunner{Bin: cfg.GitBin}, Shell: s.shell(),
+		Emit: func(ev protocol.Event) { s.bus.Publish(ev) },
+		Log:  log.With("component", "session"),
+	})
 	s.eventsH = &events.Handler{Bus: s.bus, Hello: s.hello, Track: s.track, Done: s.done, Log: log}
 }
 
@@ -460,7 +461,17 @@ func (s *Server) hello(replayed bool) *protocol.HelloEvent {
 		Modules:   s.modules.Current(),
 		Replayed:  replayed,
 		Lap:       s.engine.Lap(),
+		Busy:      s.busy(),
 	}
+}
+
+// busy describes the lesson op in progress for status and hello.
+func (s *Server) busy() *protocol.BusyInfo {
+	op := s.core.Busy()
+	if op == nil {
+		return nil
+	}
+	return &protocol.BusyInfo{Op: string(op.Kind), LessonID: op.LessonID, StepID: op.StepID, StartedAt: op.StartedAt.UnixMilli()}
 }
 
 func (s *Server) status() protocol.StatusResult {
@@ -475,6 +486,7 @@ func (s *Server) status() protocol.StatusResult {
 		ActiveWebSockets: int(s.wsCount.Load()),
 		Lap:              s.engine.Lap(),
 		RemoteBox:        s.boxReady.Load(),
+		Busy:             s.busy(),
 	}
 }
 
@@ -543,34 +555,6 @@ func (s *Server) onFile(ev *protocol.FileEvent) {
 
 // --- checkpoints and state -----------------------------------------------
 
-// stepCheckpoint takes refs/playground/<lesson>/<step>; unless force, an
-// existing one is kept.
-func (s *Server) stepCheckpoint(ctx context.Context, lessonID, stepID string, force bool) error {
-	ref := checkpoint.StepRef(lessonID, stepID)
-	if !force && s.ckpt.Exists(ctx, ref) {
-		return nil
-	}
-	_, err := s.takeCheckpoint(ctx, checkpoint.Meta{Ref: ref, Label: lessonID + "/" + stepID,
-		Step: &protocol.StepRef{LessonID: lessonID, StepID: stepID}})
-	return err
-}
-
-// takeCheckpoint records the workspace files under meta.Ref together with
-// the windows, the file buffers' unsaved state and the session variables
-// (each captured within 5 s, best effort), and announces the checkpoint.
-func (s *Server) takeCheckpoint(ctx context.Context, meta checkpoint.Meta) (checkpoint.Meta, error) {
-	sctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	meta.Spec, _ = s.sup.Snapshot(sctx)
-	meta.Buffers, meta.Globals = s.bufferStates(sctx), s.globals(sctx)
-	cancel()
-	meta, err := s.ckpt.TakeWith(ctx, meta)
-	if err != nil {
-		return meta, err
-	}
-	s.bus.Publish(&protocol.CheckpointEvent{Label: meta.Label, Ref: meta.Ref, CreatedAt: meta.CreatedAt})
-	return meta, nil
-}
-
 // stateFile is /work/.playground/state.json.
 type stateFile struct {
 	Version int `json:"version"`
@@ -604,18 +588,18 @@ func (s *Server) persist(saved steps.Saved) {
 	}
 }
 
-// readState reads state.json; resume is true when it has an active step.
-func (s *Server) readState() (saved steps.Saved, resume bool) {
+// readState reads state.json (empty when missing or unreadable).
+func (s *Server) readState() steps.Saved {
 	b, err := os.ReadFile(s.statePath())
 	if err != nil {
-		return saved, false
+		return steps.Saved{}
 	}
 	var st stateFile
 	if err := json.Unmarshal(b, &st); err != nil {
 		s.log.Warn("state.json is unreadable; starting fresh", "err", err)
-		return saved, false
+		return steps.Saved{}
 	}
-	return st.Saved, st.Active != nil
+	return st.Saved
 }
 
 // syncProgress applies gateway resets missed while this session was unavailable.
@@ -638,9 +622,20 @@ func (s *Server) syncProgress(ctx context.Context) {
 	s.engine.SyncGenerations(generations)
 }
 
-// restoreState loads the saved progress and resumes the active step in the
-// background (Loader.Resume), then calls release (when set).
-func (s *Server) restoreState(ctx context.Context, saved steps.Saved, release func()) {
+// dropProgress applies a gateway reset (the core's drop op): queued
+// reports and saved progress of the scope, under progressMu.
+func (s *Server) dropProgress(lessonID string, generation int64) {
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
+	if s.reporter != nil {
+		s.reporter.Purge(lessonID, generation)
+	}
+	s.engine.DropGeneration(lessonID, generation)
+}
+
+// restoreState loads the saved progress and queues the resume of the
+// active step (the core's resume op).
+func (s *Server) restoreState(ctx context.Context, saved steps.Saved) {
 	s.engine.Restore(saved)
 	s.syncProgress(ctx)
 	saved = s.engine.Saved()
@@ -648,21 +643,13 @@ func (s *Server) restoreState(ctx context.Context, saved steps.Saved, release fu
 		s.reporter.Reconcile()
 	}
 	if saved.Active == nil {
-		if release != nil {
-			release()
-		}
 		return
 	}
 	ref := *saved.Active
 	s.bg.Add(1)
 	go func() {
 		defer s.bg.Done()
-		if release != nil {
-			defer release()
-		}
-		rctx, cancel := context.WithTimeout(ctx, time.Minute)
-		defer cancel()
-		if err := s.loader.Resume(rctx, ref); err != nil {
+		if err := s.core.Resume(ctx, ref); err != nil {
 			s.log.Warn("resuming the saved step", "lesson", ref.LessonID, "step", ref.StepID, "err", err)
 		}
 	}()
@@ -858,7 +845,6 @@ func (s *Server) shutdown(srv *http.Server) {
 	cancel()
 	close(s.done)
 	s.sup.Stop()
-	s.loader.Wait()
 	hctx, hcancel := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = srv.Shutdown(hctx)
 	hcancel()

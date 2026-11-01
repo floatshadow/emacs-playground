@@ -3,12 +3,9 @@ package sessiond
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
@@ -18,7 +15,6 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/httpx"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
-	"github.com/floatshadow/emacs-playground/internal/sessiond/agent/fakeeditor"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/gwclient"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
@@ -60,112 +56,6 @@ func restoreServer(t *testing.T) (*Server, *restoreGit) {
 		}
 	}
 	return s, g
-}
-
-func TestRestoreSerializesActivation(t *testing.T) {
-	s, git := restoreServer(t)
-	entered, release := make(chan struct{}), make(chan struct{})
-	var once sync.Once
-	defer once.Do(func() { close(release) })
-	s.engine = steps.New(steps.Options{Hooks: steps.Hooks{Emit: func(ev protocol.Event) {
-		if st, ok := ev.(*protocol.StepEvent); ok && st.Status == protocol.StepReset && st.StepID == "one" {
-			close(entered)
-			<-release
-		}
-	}}})
-	s.engine.Activate(&protocol.Scenario{ID: "a/b", Steps: []protocol.Step{{ID: "one"}, {ID: "two"}}}, 1)
-	done := make(chan error, 2)
-	go func() {
-		_, err := s.rpcRestore(context.Background(), protocol.RestoreRequest{Ref: checkpoint.StepRef("a/b", "one")})
-		done <- err
-	}()
-	<-entered
-	started := make(chan struct{})
-	go func() {
-		close(started)
-		_, err := s.rpcRestore(context.Background(), protocol.RestoreRequest{Ref: checkpoint.StepRef("a/b", "two")})
-		done <- err
-	}()
-	<-started
-	select {
-	case err := <-done:
-		t.Fatalf("second restore passed the unfinished activation: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
-	git.mu.Lock()
-	n := len(git.restored)
-	git.mu.Unlock()
-	if n != 1 {
-		t.Fatalf("restores before activation completed: %d", n)
-	}
-	once.Do(func() { close(release) })
-	for range 2 {
-		if err := <-done; err != nil {
-			t.Fatal(err)
-		}
-	}
-	if a := s.engine.Active(); a == nil || a.StepID != "two" {
-		t.Fatalf("active %+v", a)
-	}
-}
-
-func TestRestoreAgentFailure(t *testing.T) {
-	for _, fail := range []bool{false, true} {
-		t.Run(map[bool]string{false: "success", true: "reset-step failure"}[fail], func(t *testing.T) {
-			s, _ := restoreServer(t)
-			dir, err := os.MkdirTemp("", "pg-agent")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer os.RemoveAll(dir)
-			a, err := agent.Listen(filepath.Join(dir, "agent.sock"), nil, nil)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer a.Close()
-			s.agent = a
-			ed := fakeeditor.New(s.cfg.Workspace)
-			if fail {
-				ed.Fail(protocol.AgentOpResetStep, errors.New("busy"))
-			}
-			fake := &agent.Fake{Path: a.Path(), Handle: ed.Handle}
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			go func() { _ = fake.Run(ctx) }()
-			wait, stop := context.WithTimeout(ctx, time.Second)
-			defer stop()
-			if _, err := a.WaitHello(wait, 0); err != nil {
-				t.Fatal(err)
-			}
-			before := s.engine.Saved()
-			_, err = s.rpcRestore(ctx, protocol.RestoreRequest{Ref: checkpoint.StepRef("a/b", "one")})
-			if (err != nil) != fail {
-				t.Fatalf("restore error %v", err)
-			}
-			saved := s.engine.Saved()
-			if fail {
-				if !reflect.DeepEqual(saved.Active, before.Active) || !reflect.DeepEqual(saved.Lessons, before.Lessons) {
-					t.Fatalf("failed restore changed engine: %+v", saved)
-				}
-				if got := ed.CountCalls(protocol.AgentOpEval); got != 1 {
-					t.Fatalf("eval calls after failed reset: %d", got)
-				}
-			} else if saved.Active == nil || saved.Active.StepID != "one" || saved.Lessons["a/b"] == nil || saved.Lessons["a/b"].Resets["one"] != 1 {
-				t.Fatalf("successful restore: %+v", saved)
-			}
-		})
-	}
-}
-
-func TestRestoreMissingMetadata(t *testing.T) {
-	s, _ := restoreServer(t)
-	if err := os.RemoveAll(filepath.Join(s.cfg.Workspace, ".playground", "checkpoints")); err != nil {
-		t.Fatal(err)
-	}
-	_, err := s.rpcRestore(context.Background(), protocol.RestoreRequest{Ref: checkpoint.StepRef("a/b", "one")})
-	if err == nil || httpx.AsError(err).Status != 409 || !strings.Contains(err.Error(), "metadata") {
-		t.Fatalf("restore error %v", err)
-	}
 }
 
 func TestSyncProgressGenerations(t *testing.T) {
@@ -217,7 +107,7 @@ func TestSyncProgressLowersGenerations(t *testing.T) {
 			if !reflect.DeepEqual(after.Generations, generations) || !reflect.DeepEqual(after.Lessons, saved.Lessons) || !reflect.DeepEqual(after.Active, saved.Active) {
 				t.Fatalf("synchronized state %+v", after)
 			}
-			persisted, _ := s.readState()
+			persisted := s.readState()
 			if persisted.Generations.ForLesson("a/b") != generations.ForLesson("a/b") {
 				t.Fatalf("persisted %+v", persisted)
 			}

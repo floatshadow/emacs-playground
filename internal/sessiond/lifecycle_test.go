@@ -547,6 +547,27 @@ func (l *lifecycle) editorNote(when string) {
 	l.note("kill ring %s: %s", when, kr)
 }
 
+// whileHeld sends op and, while the editor holds the agent op held, the
+// request goes away; it returns the status the request saw (0: none).
+func (l *lifecycle) whileHeld(held protocol.AgentOp, op string, body any) int {
+	l.t.Helper()
+	arrived, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	l.ed.SetFault(held, fakeeditor.Fault{Hook: func() {
+		once.Do(func() { close(arrived) })
+		<-release
+	}})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() { done <- l.server().rpcCtx(ctx, op, body) }()
+	<-arrived
+	cancel()
+	code := <-done
+	l.ed.ClearFaults()
+	close(release)
+	return code
+}
+
 // waitFor polls cond for up to 2 s.
 func (l *lifecycle) waitFor(what string, cond func() bool) {
 	l.t.Helper()
@@ -709,6 +730,13 @@ func TestLifecycle(t *testing.T) {
 			l.section("load a lesson needing editing", "modules:false", "step:quit:loaded")
 			l.note("hello modules after the restart: %v", l.ed.Snapshot().Modules)
 		}},
+		{name: "second-load-during-module-restart", run: func(l *lifecycle) {
+			res := l.load(protocol.ScenarioRequest{LessonID: lessonB})
+			l.note("first scenario restarting=%v", res.Restarting)
+			res = l.load(protocol.ScenarioRequest{LessonID: lessonB})
+			l.note("second scenario restarting=%v step=%s", res.Restarting, res.Step.StepID)
+			l.section("load twice", "modules:false", "step:quit:loaded")
+		}},
 		{name: "rpc-modules", run: func(l *lifecycle) {
 			var mr protocol.ModulesResult
 			l.rpc("modules", protocol.ModulesRequest{Enabled: []string{"base", "agent", "files"}}, &mr)
@@ -755,6 +783,42 @@ func TestLifecycle(t *testing.T) {
 			// TODO(sessiond, backend.md §3.8): the skip's demo keeps
 			// typing into Emacs after the drop; drop should cancel it.
 			l.note("b.txt visited by the rest of the demo: %v", l.ed.Buffer("b.txt") != nil)
+		}},
+		{name: "drop-during-fast-forward", run: func(l *lifecycle) {
+			// The cancelled load ends its rehearsal: the step active
+			// before it is the one the drop forgets.
+			l.loadA()
+			done := make(chan int, 1)
+			go func() {
+				done <- l.server().rpc("scenario", protocol.ScenarioRequest{LessonID: lessonA, StepID: "split"}, nil)
+			}()
+			l.waitFor("the replay to open a prompt", func() bool { return l.ed.Snapshot().Minibuffer != nil })
+			start := time.Now()
+			l.gw.Reset(l.t, lessonA)
+			took := time.Since(start)
+			l.note("scenario answered %d", <-done)
+			l.note("dropped within 1 s: %v", took < time.Second)
+			l.section("gateway reset during the fast-forward", "step:open:dropped")
+			time.Sleep(500 * time.Millisecond)
+			l.section("later")
+			var st protocol.StatusResult
+			l.rpc("status", nil, &st)
+			l.note("active after the drop: %v", st.Step)
+		}},
+		{name: "request-gone-mid-load", run: func(l *lifecycle) {
+			code := l.whileHeld(protocol.AgentOpSetup, "scenario", protocol.ScenarioRequest{LessonID: lessonA})
+			l.note("scenario answered %d after the page went away", code)
+			l.section("the load runs on", "step:open:loaded", "gw:"+lessonA+"/open:in-progress:gen0")
+		}},
+		{name: "request-gone-mid-restore", run: func(l *lifecycle) {
+			l.loadA()
+			l.completeOpen()
+			l.play(`"xx"`)
+			code := l.whileHeld(protocol.AgentOpResetStep, "restore", protocol.RestoreRequest{})
+			l.note("restore answered %d after the page went away", code)
+			l.section("the Reset runs on", "step:write:reset", "gw:"+lessonA+"/write:in-progress:gen0")
+			b := l.ed.Buffer("b.txt")
+			l.note("b.txt after the Reset: %q modified=%v", b.Text, b.Modified)
 		}},
 		{name: "gateway-down-during-completion", run: func(l *lifecycle) {
 			l.loadA()

@@ -1,4 +1,4 @@
-package sessiond
+package session
 
 import (
 	"encoding/json"

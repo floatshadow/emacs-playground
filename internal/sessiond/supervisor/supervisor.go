@@ -72,6 +72,12 @@ type Options struct {
 	// SnapshotFile stores the last buffer and window spec (restart
 	// restore), e.g. /work/.playground/snapshot.json.
 	SnapshotFile string
+	// Busy, when set, reports a lesson op in progress; the periodic
+	// snapshot skips while it does (after a cold start the file holds the
+	// learner's windows until the resume op has re-opened them).
+	// TODO(sessiond, backend.md §3.9): the snapshot service takes over
+	// the periodic snapshot.
+	Busy func() bool
 	// OnModeChange is called once the new mode is recorded, before the GUI
 	// frame and Xvnc are stopped (sessiond closes VNC bridges there) and
 	// before the mode event is emitted. It must not block.
@@ -128,8 +134,6 @@ type Supervisor struct {
 	guiSeen       chan struct{}
 
 	restarting bool // RestartEmacs is running (under mu)
-	// snapHolds counts HoldSnapshots not yet released (under mu).
-	snapHolds int
 
 	restartMu sync.Mutex
 	modeMu    sync.Mutex
@@ -566,10 +570,18 @@ func (s *Supervisor) snapshotLoop() {
 		case <-s.ctx.Done():
 			return
 		case <-t.C:
-			if _, err := s.Snapshot(s.ctx); err != nil {
-				s.log.Debug("snapshot", "err", err)
-			}
+			s.autosave()
 		}
+	}
+}
+
+// autosave takes the periodic snapshot unless a lesson op is in progress.
+func (s *Supervisor) autosave() {
+	if s.opt.Busy != nil && s.opt.Busy() {
+		return
+	}
+	if _, err := s.Snapshot(s.ctx); err != nil {
+		s.log.Debug("snapshot", "err", err)
 	}
 }
 
@@ -587,12 +599,6 @@ func (s *Supervisor) Snapshot(ctx context.Context) (*protocol.WindowSpec, error)
 	}
 	if spec.TakenAt == 0 {
 		spec.TakenAt = time.Now().UnixMilli()
-	}
-	s.mu.Lock()
-	held := s.snapHolds > 0
-	s.mu.Unlock()
-	if held {
-		return &spec, nil
 	}
 	if err := s.saveSnapshot(&spec); err != nil {
 		s.log.Warn("saving snapshot", "err", err)
@@ -616,24 +622,6 @@ func (s *Supervisor) saveSnapshot(spec *protocol.WindowSpec) error {
 		return err
 	}
 	return os.Rename(tmp, s.opt.SnapshotFile)
-}
-
-// HoldSnapshots keeps Snapshot from overwriting the snapshot file until
-// release is called: after a cold start the file holds the learner's
-// buffers and windows until the resume has re-opened them, and a snapshot
-// of the fresh Emacs (*scratch*) must not replace it meanwhile.
-func (s *Supervisor) HoldSnapshots() (release func()) {
-	s.mu.Lock()
-	s.snapHolds++
-	s.mu.Unlock()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			s.mu.Lock()
-			s.snapHolds--
-			s.mu.Unlock()
-		})
-	}
 }
 
 // LastSnapshot returns the saved spec, or nil.
@@ -780,7 +768,7 @@ func (s *Supervisor) waitTerminalFrame(ctx context.Context, timeout time.Duratio
 
 // WaitReady waits, up to timeout, until no restart is in progress and the
 // terminal frame is open, so a lesson's setup lands in the frame the
-// learner sees (scenario loader).
+// learner sees (the session core's load and resume ops).
 func (s *Supervisor) WaitReady(ctx context.Context, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for {

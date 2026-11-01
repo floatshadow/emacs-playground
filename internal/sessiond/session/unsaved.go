@@ -1,4 +1,4 @@
-package sessiond
+package session
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 )
 
 // Bounds on the buffer state a checkpoint keeps; the restore form travels
@@ -62,7 +63,7 @@ func buffersForm(workspace string) string {
               (push (cons (file-relative-name (expand-file-name f) ws)
                           (vector (if modified t :false) (or text :null) (or undo :null)))
                     out)))))))
-  out)`, elispString(ws), maxBufferText, maxBufferUndo, maxBuffersSize)
+  out)`, steps.ElispString(ws), maxBufferText, maxBufferUndo, maxBuffersSize)
 }
 
 // modifiedFilesForm returns, as a vector, the workspace-relative paths of
@@ -75,15 +76,15 @@ func modifiedFilesForm(workspace string) string {
       (when (and f (not (buffer-base-buffer b)) (buffer-modified-p b)
                  (string-prefix-p ws (expand-file-name f)))
         (push (file-relative-name (expand-file-name f) ws) out))))
-  (vconcat out))`, elispString(ws))
+  (vconcat out))`, steps.ElispString(ws))
 }
 
 // modifiedFiles asks the agent for modifiedFilesForm. Errors (a busy
 // Emacs) report none.
-func (s *Server) modifiedFiles(ctx context.Context) []string {
-	v, err := s.evalRaw(ctx, modifiedFilesForm(s.cfg.Workspace), 2*time.Second)
+func (s *Checkpoints) modifiedFiles(ctx context.Context) []string {
+	v, err := s.evalRaw(ctx, modifiedFilesForm(s.Workspace), 2*time.Second)
 	if err != nil {
-		s.log.Debug("modified buffers before a restore", "err", err)
+		s.log().Debug("modified buffers before a restore", "err", err)
 		return nil
 	}
 	var paths []string
@@ -101,13 +102,13 @@ func (s *Server) modifiedFiles(ctx context.Context) []string {
 
 // bufferStates asks the agent for the buffer state to record with a
 // checkpoint. Errors (no agent, a busy Emacs) record nothing.
-func (s *Server) bufferStates(ctx context.Context) map[string]checkpoint.BufferState {
-	if s.agent == nil || !s.agent.Connected() {
+func (s *Checkpoints) bufferStates(ctx context.Context) map[string]checkpoint.BufferState {
+	if s.Agent == nil || !s.Agent.Connected() {
 		return nil
 	}
-	v, err := s.evalRaw(ctx, buffersForm(s.cfg.Workspace), 2*time.Second)
+	v, err := s.evalRaw(ctx, buffersForm(s.Workspace), 2*time.Second)
 	if err != nil {
-		s.log.Debug("buffer state for the checkpoint", "err", err)
+		s.log().Debug("buffer state for the checkpoint", "err", err)
 		return nil
 	}
 	var raw map[string][3]json.RawMessage
@@ -156,12 +157,12 @@ func restoreBuffersForm(workspace string, bufs map[string]checkpoint.BufferState
 		b := bufs[p]
 		text, undo := "nil", "nil"
 		if b.Modified && b.HasText {
-			text = elispString(b.Text)
+			text = steps.ElispString(b.Text)
 		}
 		if b.Undo != "" {
-			undo = elispString(b.Undo)
+			undo = steps.ElispString(b.Undo)
 		}
-		fmt.Fprintf(&entries, "\n    (%s %s %s %d)", elispString(p), text, undo, points[p])
+		fmt.Fprintf(&entries, "\n    (%s %s %s %d)", steps.ElispString(p), text, undo, points[p])
 	}
 	return fmt.Sprintf(`(let ((ws %s) (n 0))
   (dolist (e '(%s))
@@ -189,7 +190,7 @@ func restoreBuffersForm(workspace string, bufs map[string]checkpoint.BufferState
                   (dolist (w (get-buffer-window-list b nil t)) (set-window-point w pt))))
               (setq n (1+ n)))))
       (error nil)))
-  n)`, elispString(ws), entries.String())
+  n)`, steps.ElispString(ws), entries.String())
 }
 
 // GlobalVars are the Emacs session variables a checkpoint keeps: steps
@@ -248,18 +249,18 @@ func restoreGlobalsForm(printed string) string {
       (dolist (e g) (when (boundp (car e)) (set (car e) (cdr e))))
       (when (assq 'kill-ring g) (setq kill-ring-yank-pointer kill-ring))
       (length g))
-  (error nil))`, elispString(printed))
+  (error nil))`, steps.ElispString(printed))
 }
 
 // globals asks the agent for the session variables to record with a
 // checkpoint ("" when unavailable).
-func (s *Server) globals(ctx context.Context) string {
-	if s.agent == nil || !s.agent.Connected() {
+func (s *Checkpoints) globals(ctx context.Context) string {
+	if s.Agent == nil || !s.Agent.Connected() {
 		return ""
 	}
 	v, err := s.evalRaw(ctx, globalsForm(), 2*time.Second)
 	if err != nil {
-		s.log.Debug("session variables for the checkpoint", "err", err)
+		s.log().Debug("session variables for the checkpoint", "err", err)
 		return ""
 	}
 	var printed string
@@ -270,18 +271,18 @@ func (s *Server) globals(ctx context.Context) string {
 }
 
 // restoreGlobals sets a checkpoint's session variables back.
-func (s *Server) restoreGlobals(ctx context.Context, printed string) {
-	if printed == "" || s.agent == nil || !s.agent.Connected() {
+func (s *Checkpoints) restoreGlobals(ctx context.Context, printed string) {
+	if printed == "" || s.Agent == nil || !s.Agent.Connected() {
 		return
 	}
-	if err := s.agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: restoreGlobalsForm(printed)}, 3*time.Second, nil); err != nil {
-		s.log.Warn("restoring the session variables of the checkpoint", "err", err)
+	if err := s.Agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: restoreGlobalsForm(printed)}, 3*time.Second, nil); err != nil {
+		s.log().Warn("restoring the session variables of the checkpoint", "err", err)
 	}
 }
 
 // restoreBuffers puts a checkpoint's buffer state back.
-func (s *Server) restoreBuffers(ctx context.Context, bufs map[string]checkpoint.BufferState, spec *protocol.WindowSpec) {
-	if len(bufs) == 0 || s.agent == nil || !s.agent.Connected() {
+func (s *Checkpoints) restoreBuffers(ctx context.Context, bufs map[string]checkpoint.BufferState, spec *protocol.WindowSpec) {
+	if len(bufs) == 0 || s.Agent == nil || !s.Agent.Connected() {
 		return
 	}
 	points := map[string]int{}
@@ -290,7 +291,7 @@ func (s *Server) restoreBuffers(ctx context.Context, bufs map[string]checkpoint.
 			points[f.Path] = f.Point
 		}
 	}
-	if err := s.agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: restoreBuffersForm(s.cfg.Workspace, bufs, points)}, 5*time.Second, nil); err != nil {
-		s.log.Warn("restoring the buffers of the checkpoint", "err", err)
+	if err := s.Agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: restoreBuffersForm(s.Workspace, bufs, points)}, 5*time.Second, nil); err != nil {
+		s.log().Warn("restoring the buffers of the checkpoint", "err", err)
 	}
 }
