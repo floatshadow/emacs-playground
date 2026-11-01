@@ -114,10 +114,10 @@ Rescue (`POST /rpc/rescue`): one agent call that leaves prompts and recursive ed
 Reset (`POST /rpc/restore`, `{}` for the active step):
 
 1. `git restore --source=<ref> --worktree --staged -- .` and `git clean -fd`, keeping `target`, `_build`, `.venv`, `node_modules` and `.playground`; empty directories recorded with the checkpoint are recreated; `emacs.d/modules.el` is kept.
-2. The agent's `reset-step` with the stored window spec: revert visiting buffers, kill buffers of files that no longer exist, reopen windows by file, remake Dired, ibuffer, buffer-list and help buffers, restore tabs, and close unmodified workspace file buffers the spec does not list.
-3. sessiond puts back the unsaved text and undo history of file buffers and the session variables steps rely on (kill ring, histories, keyboard macro), captured with the checkpoint (backend.md §3.9).
+2. One agent call, `restore-editor`, with the editor state stored with the checkpoint: revert visiting buffers, kill buffers of files that no longer exist, reopen windows by file, remake Dired, ibuffer, buffer-list and help buffers, restore tabs, and close unmodified workspace file buffers the spec does not list; then put back the unsaved text and undo history of file buffers and the session variables steps rely on (kill ring, histories, keyboard macro). Each buffer is restored on its own (backend.md §3.9).
+3. sessiond writes the checkpoint's window spec to `snapshot.json`. Without an agent the files are restored and the agent's next hello gets the editor state, while the checkpoint's step is still active.
 
-A restore runs in sessiond's op queue, after any load in progress, and once started runs to the end even if the request is cancelled; a git lock older than 10 s that blocks a command is removed and the command retried.
+A restore runs in sessiond's op queue, after any load in progress, and once started runs to the end even if the request is cancelled; a git lock older than 10 s that blocks a command is removed and the command retried. All of it goes through sessiond's snapshot service, the only path to checkpoints and editor state.
 
 ### 3.5 Frame switch
 
@@ -185,7 +185,7 @@ terminal frame: open → (client exited, e.g. C-x C-c) → sessiond respawns the
 gui frame: absent → starting Xvnc → frame opened → (closed or mode terminal) → absent
 ```
 
-Every 30 s and before every planned restart sessiond saves the agent's buffer and window snapshot (`/work/.playground/snapshot.json`); a restarted daemon reopens those files and windows. Before a planned restart (module change, `restart-emacs`) and at shutdown sessiond saves modified file buffers (never over a file changed on disk; remote and read-only files skipped). An unexpected daemon death therefore loses at most the edits since the last auto-save (`auto-save-visited-mode`, 5 s).
+Every 30 s, before every planned restart and on every restore sessiond saves the agent's buffer and window spec (`/work/.playground/snapshot.json`); a restarted daemon reopens those files and windows. Before a planned restart (module change, `restart-emacs`) and at shutdown sessiond saves modified file buffers (never over a file changed on disk; remote and read-only files skipped). An unexpected daemon death therefore loses at most the edits since the last auto-save (`auto-save-visited-mode`, 5 s).
 
 ### 5.3 Step
 

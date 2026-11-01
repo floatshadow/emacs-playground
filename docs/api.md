@@ -167,12 +167,14 @@ One JSON object per line, ≤ 1 MB (`protocol.MaxAgentLine`); a new connection r
 
 Agent → sessiond: `hello {protocol, agent, emacs, pid, modules?, moduleErrors?}`; `key`, `state`, `echo`, `minibuffer` as in §4; `frame {event: opened|closed, kind}`, `closed` only when a terminal's last frame goes; `ping` every 2 s; `reply {id, ok, value?, error?}`.
 
-sessiond → agent: `pong`, `call {id, op, args, timeoutMs}`, serialised; a prompting op fails instead of blocking (emacs.md §10.4). Ops:
+sessiond → agent: `pong`, `call {id, op, args, timeoutMs}`, serialised; a prompting op fails instead of blocking (emacs.md §10.4). Ops take typed arguments (`protocol.Agent*Args`); sessiond builds no Lisp, and only `eval` (author mode) and `check` (curriculum conditions) carry forms:
 
 - `eval {form}` → `{value}`; `check {forms}` → `{results}` of `true|false|"unknown"` (`protocol.Truth`; 1 s per form).
-- `rescue` → `{did}`; `snapshot` → `WindowSpec`; `open WindowSpec` → `{opened, layoutDeferred?}`.
-- `reset-step {spec}` → `{reverted, killed}`; `setup {open?, layout?, eval?, compile?, workspace, reset?, root?}` → `{ok}`.
-- `set-modules {enabled}` → `{written}` (sessiond then restarts); `frame {kind, display?}` → `{frame}`; `describe {keys}|{cmd}` → `{cmd, doc}`.
+- `capture-editor {workspace, vars, maxText, maxUndo, maxTotal, maxGlobals}` → `{spec: WindowSpec, buffers: {path: [modified, text|null, undo|null]}, globals: string|null}`; `restore-editor {workspace, spec, buffers, globals}` → `{reverted, killed, buffers, globals, degraded}`; `modified-files {workspace}` → `{paths}`; `flush-buffers` → `{saved}` (the snapshot service, backend.md §3.9).
+- `open WindowSpec` → `{opened, layoutDeferred?}`; `visit {path}` → `{buffer}`; `setup {open?, layout?, eval?, compile?, workspace, reset?, root?}` → `{ok}`.
+- `rescue` → `{did}`; `set-modules {enabled}` → `{written}` (sessiond then restarts); `describe {keys}|{cmd}` → `{cmd, doc}`.
+- `frame {kind, display?}` → `{frame}`; `leave-display` → `{closed, detail}`; `resume-loop` → `{}`; `reset-debug` → `{}` (the supervisor).
+- `snapshot` → `WindowSpec` and `reset-step {spec}` → `{reverted, killed}`: replaced by `capture-editor` and `restore-editor`, kept one phase.
 
 `WindowSpec`: `files:[{path, point, visible}]` (most recent first, workspace-relative), `layout` (used without `windowState`), `windowState` and `specialBuffers` (printed, opaque to sessiond), `selected`, `tab`, `tabs`, `tabIndex`, `takenAt`; semantics in emacs.md §10.3.
 

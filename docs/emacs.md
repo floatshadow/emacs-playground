@@ -18,7 +18,7 @@ One cached stage per toolchain (list: third-party.md §4), versions and sha256 i
 
 ## 3. Configuration layout
 
-`emacs.d/`: `early-init.el` (GC, frame defaults, native-code location), `init.el` (loads the modules listed in `modules.el`, in order; never edited by the course), `modules.el` (written by the playground: `(setq playground-modules '(base agent …))`), `modules/` (base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui; each file's header lists its keys by lesson), `lisp/playground-agent.el` (§10), `user-lisp/` (the learner's Lisp), `packages.el`, `packages.lock`, `vendor/`, `tools/` (§8), `test/` (§10.6).
+`emacs.d/`: `early-init.el` (GC, frame defaults, native-code location), `init.el` (loads the modules listed in `modules.el`, in order; never edited by the course), `modules.el` (written by the playground: `(setq playground-modules '(base agent …))`), `modules/` (base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python, writing, input, org, power, remote, ui; each file's header lists its keys by lesson), `lisp/playground-*.el` (the agent, §10), `user-lisp/` (the learner's Lisp), `packages.el`, `packages.lock`, `vendor/`, `tools/` (§8), `test/` (§10.6).
 
 A module that fails to load is reported (a warning and `moduleErrors` in the agent's `hello`) and the others still load. `agent.el` prefers the compiled agent in the image (`/opt/playground/emacs.d/lisp`) so it always speaks sessiond's protocol. The pristine config is copied to `/work/emacs.d` on first start only (AGENTS.md §5).
 
@@ -54,7 +54,7 @@ The browser asks Xvnc for a screen the size of its pane (RandR). Without a windo
 
 Saving: `auto-save-visited-mode` saves file buffers 5 s after the last edit without formatting (apheleia skips those saves; `C-x C-s` formats even when one already wrote the buffer), never over a file changed on disk since visited (`auto-save-visited-predicate`; else a timer asks "Save anyway?" after a lesson reset). Unmodified buffers auto-revert. No backup, auto-save or lock files. sessiond saves modified buffers before the daemon stops (backend.md §3.3).
 
-After a daemon restart sessiond re-applies its latest `snapshot` (taken every 30 s and before restarts and checkpoints) with `open`.
+After a daemon restart sessiond reopens `snapshot.json` with `open`: the window spec saved every 30 s, before a restart and by every restore (backend.md §3.9).
 
 Module behaviour lessons rely on: eat and `M-x shell` run `/bin/bash`; `C-x p t` and `C-x p p` are bound before project.el loads; prose buffers wrap at words and open corfu's popup only on request; an empty `*Org-Babel Error Output*` window closes after a block runs cleanly; while a compile runs, an unmatched last line is read again with the next one, so a cargo error split across output chunks is still a location.
 
@@ -68,7 +68,7 @@ Sessions have no egress (deployment.md §9.2), so cargo and uv run offline (`CAR
 
 ## 10. playground-agent.el
 
-A global minor mode (built-in libraries only) that reports and answers sessiond's calls and never changes editing behaviour; hook code is wrapped so an agent bug cannot break a command. Compile it with `byte-compile-error-on-warn`: an unescaped docstring quote can become a silent runtime error in a hook.
+A global minor mode (built-in libraries only) that reports and answers sessiond's calls and never changes editing behaviour; hook code is wrapped so an agent bug cannot break a command. `playground-agent.el` holds the options, the op table (`playground-agent-ops`) and the mode, and loads one file per feature: `playground-transport` (socket, queue, pings, dispatch, replies, `at-top-level`), `playground-frames` (the learner's frame and window, frame hooks, `frame`, `leave-display`, `resume-loop`), `playground-observe` (command, minibuffer, isearch and echo reports, the state object, `eval`, `check`), `playground-rescue` (Rescue, `reset-debug`), `playground-editor-state` (window specs, `open`, `capture-editor`, `restore-editor`, `modified-files`, `flush-buffers`), `playground-setup` (`setup`, `set-modules`, `visit`, `describe`) and `playground-compat` (what it knows of hydra, which-key, avy, menus, eldoc, eglot, Dired and ibuffer). `(require 'playground-agent)` loads them all. The image byte- and native-compiles every file with `byte-compile-error-on-warn`: an unescaped docstring quote can become a silent runtime error in a hook.
 
 ### 10.1 Hooks and emissions
 
@@ -78,7 +78,7 @@ A global minor mode (built-in libraries only) that reports and answers sessiond'
 - Window, buffer, mode and macro changes → one coalesced `state` per command.
 - Frame creation and deletion → `frame`; `closed` only when the last frame of its terminal goes. A new client frame gets the learner's windows; when the last graphical frame goes, its windows return to the terminal frame.
 - Loops that read their own keys (`popup-menu`, avy, which-key paging; `playground-agent-waiting-loops`) set the state's `waiting` with the keys that leave them; so does an open hydra (`kind: hydra`, leave `C-g`; `hydra-curr-map` set, hydra's clear function on `pre-command-hook`; resent after `hydra-disable`, as on a `:timeout`). Heads report their command names (`my-menu/other-window`), keys an amaranth hydra swallows `hydra-amaranth-warn`.
-- `compilation-start-hook` stamps each run's start (for `reset-step`).
+- `compilation-start-hook` stamps each run's start (for `restore-editor`).
 
 ### 10.2 State snapshot
 
@@ -91,16 +91,18 @@ Ops run in the learner's window of the learner's frame (the newest graphical fra
 - `check {forms}`: each form under `condition-case` and a 1 s timeout → `t`, `false` or `"unknown"`.
 - `eval {form}`: value as JSON (symbol-keyed alists become objects).
 - `rescue`: closes an open hydra (`hydra-keyboard-quit`), leaves a waiting loop by queueing its leave keys (a throw would leave a tty menu drawn), then minibuffers, recursive edits, isearch, macro recording, overwrite mode, narrowing, multiple cursors, iedit, extra windows (keeping a file window), `special-mode` buffers, the selection and pending input; returns its actions as sentences. Never saves, kills file buffers or reverts.
-- `snapshot`: the `WindowSpec` (api.md §7). `windowState` is `window-state-get` with each buffer entry's file added, stripped of text properties (uniquify can leave buffer objects in names); files, not buffer names, identify buffers across a step. Dired, ibuffer and buffer-list windows record how to remake them (directory or filters, marks, line); `tabs`/`tabIndex` and `specialBuffers` (help buffers with their `help-xref-stack-item`) complete it.
+- `capture-editor {workspace, vars, maxText, maxUndo, maxTotal, maxGlobals}` → `{spec, buffers, globals}`: what a checkpoint keeps of Emacs (backend.md §3.9). `spec` is the `WindowSpec` (api.md §7): `windowState` is `window-state-get` with each buffer entry's file added, stripped of text properties (uniquify can leave buffer objects in names); files, not buffer names, identify buffers across a step. Dired, ibuffer and buffer-list windows record how to remake them (directory or filters, marks, line); `tabs`/`tabIndex` and `specialBuffers` (help buffers with their `help-xref-stack-item`) complete it. `buffers` maps each workspace file buffer with unsaved text or an undo history to `[modified, text|null, undo|null]` (readable undo entries only), within the bounds. `globals` prints the listed variables readably (strings without properties and at most 32 KiB, lists cut to 100, macro counters as integers, a macro only when it is keys), or null. Zero bounds and no `vars` capture the spec alone (`snapshot.json`).
 - `open {spec}`: visits files, selects the spec's tab, then `window-state-put` with buffer entries renamed to the buffers now visiting those files and list buffers remade; else applies `layout`. Without a client frame the layout waits for the next one (`layoutDeferred`).
-- `reset-step {spec}` (every checkpoint restore): leaves any open hydra, prompt or pending prefix key, as `setup`; reverts changed or modified file buffers; kills buffers of vanished files and unmodified workspace file buffers the spec does not list (conditions are false again, names un-uniquify); remakes help buffers; kills compilation runs started after the spec unless a spec window shows them (a demo's build must not satisfy the learner's step); restores the spec's tabs; `open`s it; runs `playground-reset-step-hook` (13.5 reloads a file there; `setup` empties it before `eval`).
+- `restore-editor {workspace, spec, buffers, globals}` → `{reverted, killed, buffers, globals, degraded}` (every checkpoint restore): first the step's start: leaves any open hydra, prompt or pending prefix key, as `setup`; reverts changed or modified file buffers; kills buffers of vanished files and unmodified workspace file buffers the spec does not list (conditions are false again, names un-uniquify); remakes help buffers; kills compilation runs started after the spec unless a spec window shows them (a demo's build must not satisfy the learner's step); restores the spec's tabs; `open`s it; runs `playground-reset-step-hook` (13.5 reloads a file there; `setup` empties it before `eval`). Then each buffer's unsaved text (`replace-buffer-contents`) and undo history with undo recording off and point from the spec, then the variables (and `kill-ring-yank-pointer`). Each buffer and part is restored on its own; the ones that fail (a remote buffer whose revert would ask) are named in `degraded`.
+- `modified-files {workspace}` → `{paths}`; `flush-buffers` → `{saved}`: saves modified file buffers before Emacs stops, never over a file changed on disk, skipping remote and read-only ones and any that would ask.
+- `snapshot` and `reset-step {spec}`: the spec alone and the step's start alone, what `capture-editor` and `restore-editor` replace; kept one phase.
 - `setup {open, layout, eval, compile, workspace, reset, root}`: closes any hydra and leaves any prompt or pending prefix key; reverts buffers whose files changed on disk, kills those whose files are gone. With `reset`: re-enables `auto-save-visited-mode`, closes other tabs, clears unmodified leftover buffers, forgets save-place positions under `root`, opens files at line 1. Then opens, lays out, evaluates `eval` in the learner's window and runs `compile` in the first file's project root.
-- `set-modules {enabled}`: writes `modules.el` atomically; sessiond restarts.
-- `describe {keys}` or `{cmd}`: binding and first docstring line; hydra's generated commands get sentences ("CMD from the NAME hydra"). `frame {display?}`: the GUI frame (§6).
+- `set-modules {enabled}`: writes `modules.el` atomically; sessiond restarts. `visit {path}` → `{buffer}`: `find-file` in the learner's window (rpc `open`).
+- `describe {keys}` or `{cmd}`: binding and first docstring line; hydra's generated commands get sentences ("CMD from the NAME hydra"). `frame {display?}`: the GUI frame (§6). `leave-display` → `{closed, detail}`: deletes the X frames and closes the X connections before Xvnc stops; `resume-loop` → `{}`: a `top-level` from a timer restarts the command loop's wait on the terminal frame; `reset-debug` → `{}`: clears the `debug-on-quit` SIGUSR2 leaves.
 
 Side windows: layouts, window states, `single` setups and Rescue select a normal window before deleting the others and make a sole window still marked as a side window ordinary; splitting such a window recurses to `max-lisp-eval-depth`.
 
-Known limits: `reset-step` leaves buffer-local minor modes a demo turned on; what else a restore omits is in backend.md §3.9.
+Known limits: `restore-editor` leaves buffer-local minor modes a demo turned on; what else a restore omits is in backend.md §3.9.
 
 ### 10.4 Socket client
 

@@ -74,7 +74,7 @@ flowchart LR
 | web | screens, panes, ticker, Where am I, nudges, preview | frontend.md |
 | gateway | auth, sessions, routing, curriculum, progress | backend.md §2 |
 | sessiond (per session) | supervises Emacs, tmux, Xvnc; endpoints; input tap; step engine; checkpoints | backend.md §3 |
-| playground-agent.el | state and command reports; rescue, check, reset, snapshot | emacs.md §10 |
+| playground-agent.el (+ feature files) | state and command reports; rescue, check, editor-state capture and restore | emacs.md §10 |
 | playctl | curriculum validate, build, replay; config check; TypeScript types | backend.md §4 |
 | curriculum | lessons, fixtures, exit and habit tables | CURRICULUM.md |
 
@@ -101,7 +101,7 @@ Go 1.27 with the stdlib mux, `coder/websocket`, `creack/pty`, the Docker client,
 - ADR-006 One daemon (`emacs --fg-daemon`), frames by `emacsclient -t` in tmux and `-c` on Xvnc, so a frame switch or `C-x C-c` never loses buffers; sessiond respawns frames and restarts restore buffers from snapshots.
 - ADR-007 Extended keys as CSI u: tmux never forwards Emacs's kitty-keyboard push, so the pane itself sends CSI u for exactly the chords legacy encoding cannot carry; tmux passes them, `kkp.el` and the tap decode them. A new chord goes into the pane's encoder.
 - ADR-008 Layered hints, state first: exits table over real state, habit and stuck rules over keys, ordered step conditions, reset. Authors write goals, not mistakes.
-- ADR-009 Git checkpoints `refs/playground/<lesson>/<step>` via a temporary index, plus window spec, unsaved text and undo of file buffers, and the session variables steps rely on (add one when a lesson needs it, backend.md §3.9). Restores keep build directories, `modules.el` and the learner's git index.
+- ADR-009 Git checkpoints `refs/playground/<lesson>/<step>` via a temporary index, plus window spec, unsaved text and undo of file buffers, and the session variables steps rely on (add one when a lesson needs it, backend.md §3.9). Restores keep build directories, `modules.el` and the learner's git index. One snapshot service owns them, captures through typed agent ops and publishes the ref after the manifest, and every restore writes the `snapshot.json` all recovery paths reopen.
 - ADR-010 The curriculum bundle ships apart from images; sessiond fetches and caches fixtures from the gateway.
 - ADR-011 Gateway-native auth: generic OpenID Connect (code flow with PKCE) in server mode, none locally; Caddy only terminates TLS.
 - ADR-012 Steps are evaluated in sessiond (Elisp, files, shells; progress survives a closed tab); the browser renders and picks hints, and only it evaluates `session.*` exit rows.

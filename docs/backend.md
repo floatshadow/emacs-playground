@@ -12,7 +12,7 @@ internal/httpx       problem+json, JSON, middleware, WebSocket helpers
 internal/curriculum  loader, validator, bundle builder
 internal/docker      Engine client wrapper, hardening
 internal/gateway/    auth sessions proxy store curriculum progress limit
-internal/sessiond/   session supervisor pty agent inputtap events steps checkpoint preview vnc scenario gwclient sshbox
+internal/sessiond/   session supervisor pty agent inputtap events steps snapshot checkpoint preview vnc scenario gwclient sshbox
 web/embed.go         bundle in the gateway binary (tag embedweb)
 ```
 
@@ -86,15 +86,15 @@ Keep Emacs, tmux and Xvnc alive; serve PTY, events, VNC, RPC and preview; tap in
 3. Start HTTP; `/healthz` answers 503 until step 4 is done.
 4. Start the daemon and wait for `hello` (60 s, then restart once).
 5. Start tmux and the terminal frame.
-6. Resume the step in `.playground/state.json`, if any, as the session core's resume op (§3.12), without fixtures or checkpoint: re-open `snapshot.json` when it shows a file under the lesson root, else run setup without `reset`. A lesson loaded meanwhile wins. The periodic snapshot skips while an op runs, so the fresh `*scratch*` never replaces the learner's windows.
+6. Resume the step in `.playground/state.json`, if any, as the session core's resume op (§3.12), without fixtures or checkpoint: re-open `snapshot.json` (§3.9) when it shows a file under the lesson root, else run setup without `reset`. A lesson loaded meanwhile wins. The snapshot service's autosave skips while an op runs, so the fresh `*scratch*` never replaces the learner's windows.
 
 ### 3.3 Supervisor
 
 - Daemon `emacs --fg-daemon=playground --init-directory=/work/emacs.d`: backoff 1-8 s; after 5 restarts in 10 min give up (`/healthz` 503) until `restart-emacs`.
 - tmux `-L pg`, session `emacs`, pane `emacsclient -t -s playground`: a session-level `pane-died` hook (emacs.md §5) lets only sessiond respawn the pane, with a growing delay when it keeps dying (`frame-closed`, `frame-opened`).
-- Xvnc `:1` (localhost, no auth, `-AcceptSetDesktopSize=1`) and the GUI frame (`emacsclient -c`, no `fullscreen`, emacs.md §6): restarted while GUI mode is on. Leaving GUI closes `/vnc` with 4002, deletes the X frames and closes Emacs's X connections before Xvnc stops (if Emacs cannot let go, Xvnc keeps running); then a `top-level` from a timer restarts the command loop, which would otherwise swallow the terminal's next input event (the ESC of `ESC [ I`, typing `[I`).
-- Heartbeat: agent pings every 2 s; five missed → `emacs unresponsive` and SIGUSR2; resumed → `responsive`. Rescue then sends C-g via tmux; still busy 10 s later → `error emacs_unavailable` offering a restart.
-- Restart (`restart-emacs`, module change): `restarting`, snapshot, save modified file buffers (`supervisor.FlushForm`: never over a file changed on disk, skipping remote and read-only ones), restart, hello, re-open the snapshot, respawn the pane, `daemon-restarted` once the frame is open.
+- Xvnc `:1` (localhost, no auth, `-AcceptSetDesktopSize=1`) and the GUI frame (`emacsclient -c`, no `fullscreen`, emacs.md §6): restarted while GUI mode is on. Leaving GUI closes `/vnc` with 4002, deletes the X frames and closes Emacs's X connections (agent `leave-display`) before Xvnc stops (if Emacs cannot let go, Xvnc keeps running); then `resume-loop` restarts the command loop, which would otherwise swallow the terminal's next input event (the ESC of `ESC [ I`, typing `[I`). The supervisor builds no Lisp: it calls these ops through `supervisor.AgentOps`.
+- Heartbeat: agent pings every 2 s; five missed → `emacs unresponsive` and SIGUSR2; resumed → `responsive` and `reset-debug` (the signal leaves `debug-on-quit` set). Rescue then sends C-g via tmux; still busy 10 s later → `error emacs_unavailable` offering a restart.
+- Restart (`restart-emacs`, module change): `restarting`, `Hooks.BeforeStop` (the snapshot service writes `snapshot.json` and the agent's `flush-buffers` saves modified file buffers: never over a file changed on disk, skipping remote and read-only ones), restart, hello, `Hooks.AfterRestart` (the snapshot service reopens `snapshot.json`, or the editor state of a restore still waiting for the agent), respawn the pane, `daemon-restarted` once the frame is open. A daemon that crashed gets the same `AfterRestart` on its first hello.
 
 ### 3.4 PTY
 
@@ -146,21 +146,26 @@ Statuses and the demo latch: api.md §4.1. Internals:
 - Laps: started by `scenario {lap}`, kept on resume, ended by any other load or `drop-step`; hints, demos and skips answer 409 and stuck rules pause; the last completion reports `lapMs`.
 - Locks: `Core.mu`, then the evaluator's state lock; the evaluator calls `Observe` holding neither. Events go out under `Core.mu`, in the order of the state changes; reports and `state.json` after it.
 
-### 3.9 Checkpoints
+### 3.9 Checkpoints and the snapshot service
 
 The workspace is a git repository. A checkpoint is a commit at `refs/playground/<lesson>/<step>` made with a temporary index (`GIT_INDEX_FILE=.playground/index.tmp`), so the learner's index and branch are untouched and course files stay untracked. `.git/info/exclude` lists build output (`target`, `_build`, `.venv`, `node_modules`), `.playground/` and emacs.d's package and cache directories. sessiond's git gets `safe.directory=*` via `GIT_CONFIG_COUNT` (bind-mounted `/work` belongs to the host uid); checkpoints and shell conditions also get `GIT_OPTIONAL_LOCKS=0`, so their `git status` never holds `index.lock` while the learner's `git add` or `git commit` runs.
 
-`.playground/checkpoints/<ref>.json` (`checkpoint.Meta`) adds what git cannot hold:
+`snapshot.Service` is the only path to checkpoints and editor state: it drives `checkpoint.Manager` (git only) and the agent's typed ops through `snapshot.Editor` (`capture-editor`, `restore-editor`, `modified-files`, `open`, `visit`, `flush-buffers`; api.md §7). `.playground/checkpoints/<ref>.json` (`snapshot.Manifest`, version 1; version 0 files read unchanged) adds what git cannot hold:
 
 - `spec`: the agent's `WindowSpec` (api.md §7).
 - `buffers`: each file buffer's unsaved text (≤ 256 KiB) and readable undo entries (≤ 128 KiB), 512 KiB in all. A step usually starts with the previous step's edit still unsaved (auto-save waits 5 s).
-- `globals`: printed `session.GlobalVars` (kill ring, minibuffer and search histories, last macro and counters; ≤ 256 KiB), so Watch it then Do it yourself leaves none of the demo's kills, history or macro counts.
+- `globals`: the printed `snapshot.GlobalVars` (kill ring, minibuffer and search histories, last macro and counters; ≤ 256 KiB), so Watch it then Do it yourself leaves none of the demo's kills, history or macro counts. The list is curriculum knowledge and travels as `vars`; the agent applies the printing rules.
+- `commit`: the commit the ref publishes (absent in version 0).
 - `emptyDirs` (≤ 1000).
 - `nested`: each nested git repository (≤ 50) as two commits, its working tree (its own ignores apply) and its `.git` (minus lock files), kept reachable as extra parents of the checkpoint commit.
 
-Restore: remove the `.git` of nested repositories the checkpoint lacks; `git restore --worktree --staged` and `git clean -fd` against the temporary index, outside the checkpoint's nested repositories (removing exactly what the checkpoint lacks, except build output and `.playground`); restore each nested repository's `.git`, then its working tree; recreate empty directories; keep `emacs.d/modules.el` (emacs.md §4); agent `reset-step`; then unsaved text (`replace-buffer-contents`) and undo with recording off; then globals. `restoredFiles` counts files changed on disk plus buffers whose unsaved edits were discarded.
+Capture: the editor state first (one `capture-editor`, 5 s; none without an agent), then `git add`, `write-tree`, the nested repositories and `commit-tree` (`TakeTree`), then the manifest naming the commit, then `update-ref` (`PublishRef`), then the `checkpoint` event. The ref publishes: a ref is a checkpoint (`Exists`, `List`) only with a readable manifest, and for `Exists` and restores only when that manifest names the ref's commit (version 0 manifests trust the ref). A ref without one, older than this order or left by a first capture stopped between manifest and ref, and a recapture (every advance and fast-forward overwrites the step's checkpoint) stopped there, are invisible: `restore {ref}` answers 404 and the next load takes the checkpoint again. A learner's `checkpoint {label}` is an op of the session core (30 s) like the restores, so the two never interleave.
 
-Restore requires readable checkpoint metadata; an existing ref with unreadable metadata returns `409`. Every restore entry point (Reset, Do it yourself, Watch it and Skip after a command, Go to this step, `restore` by label or ref) runs inside an op of the session core (§3.12), so files, Emacs restoration and the following step activation never interleave with another restore or load. A failed `reset-step` returns an incomplete-restore error before buffers, globals or activation run, and nothing activates. External file buffers stay untouched. A started restore runs to the end whatever the request or a drop does (`session.Checkpoints.Restore`). Git commands are serialised, detached and bounded by `checkpoint.GitTimeout`; a lock older than `checkpoint.StaleLockAge` (10 s) that blocks a command is removed and the command retried once.
+Restore: read the manifest (none, or not the ref's commit: `ErrNoCheckpoint`, 404); ask `modified-files`; remove the `.git` of nested repositories the checkpoint lacks; `git restore --worktree --staged` and `git clean -fd` against the temporary index, outside the checkpoint's nested repositories (removing exactly what the checkpoint lacks, except build output and `.playground`); restore each nested repository's `.git`, then its working tree; recreate empty directories; keep `emacs.d/modules.el` (emacs.md §4); one `restore-editor` (the step's start as `reset-step`, then unsaved text with `replace-buffer-contents` and undo with recording off, point from the spec, then globals; each buffer and part on its own, the failed ones listed in `degraded` and logged); write the manifest's spec to `snapshot.json`. `restoredFiles` counts files changed on disk plus buffers whose unsaved edits were discarded. Failure classes: `ErrFiles` (git failed: 500, nothing activates) and `ErrEditor` (the agent is connected but `restore-editor` failed or the agent left during it: 500, the files are back, nothing activates, Reset works again). Whether the agent is there is decided after the git phase. Without it the files are restored, the restore reports `EditorDeferred`, the step activates, and the service remembers the ref and the step it is for (the checkpoint's, else the active one): the agent's next hello or `AfterRestart` reads the manifest again and applies its editor state only while that step is active. A capture or another restore replaces it, so a later load never gets an earlier lesson's buffers.
+
+`snapshot.json` is the one editor state every recovery path reopens: `Autosave` writes the spec every 30 s (skipped while a session-core op runs and from `BeforeStop` until `AfterRestart` reopened the state), `BeforeStop` before a restart or shutdown, and every restore writes the checkpoint's spec; a restarted or crashed daemon (`AfterRestart`) and the `resume` op reopen it.
+
+Every restore entry point (Reset, Do it yourself, Watch it and Skip after a command, Go to this step, `restore` by label or ref) runs inside an op of the session core (§3.12), so files, Emacs restoration and the following step activation never interleave with another restore or load. External file buffers stay untouched. A started restore runs to the end whatever the request or a drop does. Git commands are serialised, detached and bounded by `checkpoint.GitTimeout`; a lock older than `checkpoint.StaleLockAge` (10 s) that blocks a command is removed and the command retried once.
 
 Not captured: the staging area of `/work` itself (nested repositories keep theirs), minor modes a demo turned on, variables outside `GlobalVars` such as `display-buffer-alist`. `/work` being the checkpoint repository makes project.el treat it as a project (`emacs.d` in `project-files`); hiding it needs a separate `GIT_DIR`.
 
@@ -174,7 +179,7 @@ Not captured: the staging area of `/work` itself (nested repositories keep their
 
 ### 3.12 Session core and scenario load
 
-`session.Core` owns lesson orchestration. `scenario`, `restore`, `modules`, `drop-step` and the startup resume are ops that one worker runs one at a time, each detached from its request (a request that goes away changes nothing) and bounded from its start: load 3 min (fast-forward included), restore 2 min, resume 1 min, module change 3 min, drop 10 s. An op checks its context between phases; once the context ends nothing activates. `drop-step` jumps the queue and, when its generation is newer than the one applied, cancels the running op when it concerns the same lesson (any lesson for `{}`), so a dropped lesson's fast-forward stops at once and loads nothing. The generation sync (at startup and before each `scenario`) applies each missed reset as such a drop, then adopts the gateway's generations; `drop-step` waits for a sync under way. While an op runs, `status` and `hello` carry `busy` (api.md §3.4). `demo start` (30 s), `skip` (60 s) and the `advance` after a completion (1 min, queued first) are ops too (§3.8).
+`session.Core` owns lesson orchestration. `scenario`, `restore`, `modules`, `drop-step` and the startup resume are ops that one worker runs one at a time, each detached from its request (a request that goes away changes nothing) and bounded from its start: load 3 min (fast-forward included), restore 2 min, resume 1 min, module change 3 min, labelled checkpoint 30 s, drop 10 s. An op checks its context between phases; once the context ends nothing activates. `drop-step` jumps the queue and, when its generation is newer than the one applied, cancels the running op when it concerns the same lesson (any lesson for `{}`), so a dropped lesson's fast-forward stops at once and loads nothing. The generation sync (at startup and before each `scenario`) applies each missed reset as such a drop, then adopts the gateway's generations; `drop-step` waits for a sync under way. While an op runs, `status` and `hello` carry `busy` (api.md §3.4). `demo start` (30 s), `skip` (60 s) and the `advance` after a completion (1 min, queued first) are ops too (§3.8).
 
 The load op, `rpc scenario {lessonId, stepId?, reset?, lap?}`:
 
@@ -205,7 +210,7 @@ Environment only: `protocol.SessiondConfig` (names and defaults in its tags), ea
 - Metrics (optional): sessions, WebSockets, events, RPC, evaluation, checkpoint and proxy durations.
 - Errors: handlers return `httpx` errors, rendered as problem+json with api.md §1's codes.
 - Every subprocess has a context, every call a deadline; HTTP read-header 10 s, idle 120 s; WebSocket pings every 20 s; every buffer is bounded.
-- Shutdown: sessiond emits `emacs stopping`, snapshots, `FlushForm`, stops Emacs (≤ 15 s), closes WebSockets with 4003; the gateway drains 10 s.
+- Shutdown: sessiond emits `emacs stopping`, runs `BeforeStop` (`snapshot.json`, `flush-buffers`), stops Emacs (≤ 15 s), closes WebSockets with 4003; the gateway drains 10 s.
 
 ## 6. Testing
 
