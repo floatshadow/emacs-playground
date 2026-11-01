@@ -16,7 +16,7 @@ export const AgentCall = "call" satisfies AgentMsgType;
 export const AgentPong = "pong" satisfies AgentMsgType;
 
 /** AgentOp names an op the agent implements (emacs.md §10.3). */
-export type AgentOp = "eval" | "check" | "rescue" | "capture-editor" | "restore-editor" | "modified-files" | "flush-buffers" | "set-modules" | "open" | "visit" | "frame" | "leave-display" | "resume-loop" | "reset-debug" | "describe" | "setup" | "reset-step" | "snapshot";
+export type AgentOp = "eval" | "check" | "rescue" | "capture-editor" | "restore-editor" | "modified-files" | "flush-buffers" | "set-modules" | "open" | "visit" | "frame" | "leave-display" | "resume-loop" | "reset-debug" | "describe" | "setup";
 export const AgentOpEval = "eval" satisfies AgentOp;
 export const AgentOpCheck = "check" satisfies AgentOp;
 export const AgentOpRescue = "rescue" satisfies AgentOp;
@@ -33,8 +33,6 @@ export const AgentOpResumeLoop = "resume-loop" satisfies AgentOp;
 export const AgentOpResetDebug = "reset-debug" satisfies AgentOp;
 export const AgentOpDescribe = "describe" satisfies AgentOp;
 export const AgentOpSetup = "setup" satisfies AgentOp;
-export const AgentOpResetStep = "reset-step" satisfies AgentOp;
-export const AgentOpSnapshot = "snapshot" satisfies AgentOp;
 
 /** AuthMode selects learner authentication. */
 export type AuthMode = "none" | "oidc";
@@ -508,7 +506,8 @@ export interface BufferCond {
 export interface BusyInfo {
   /**
    * Op names the kind of operation (load, restore, …) for logs and
-   * display; the set is open, so clients must not switch on it.
+   * display; the set is open: a client recognises the kinds it
+   * displays (the page veils a "load") and ignores the others.
    */
   op: string;
   /** LessonID and StepID name the step the op works on, when known. */
@@ -1132,6 +1131,11 @@ export interface KeysRequest {
 
 /** LapInfo describes the running lap (ScenarioRequest.Lap). */
 export interface LapInfo {
+  /**
+   * ID names the lap (LapID): the done report of its last step carries
+   * it, so the gateway counts the lap once however often it arrives.
+   */
+  id?: string;
   lessonId: string;
   /** StartedAt is when the lap's first step became active (ms). */
   startedAt: number;
@@ -1560,9 +1564,11 @@ export interface ProgressReport {
   at?: number;
   /**
    * LapMs, on the done report of a lap's last step, records a finished
-   * lap of this many milliseconds.
+   * lap of this many milliseconds; LapID names that lap (LapInfo.ID),
+   * so a report delivered twice counts one lap.
    */
   lapMs?: number;
+  lapId?: string;
 }
 
 /**

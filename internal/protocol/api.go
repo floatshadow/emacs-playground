@@ -250,8 +250,10 @@ type ProgressReport struct {
 	// completedAt for done.
 	At int64 `json:"at,omitempty"`
 	// LapMs, on the done report of a lap's last step, records a finished
-	// lap of this many milliseconds.
-	LapMs int64 `json:"lapMs,omitempty"`
+	// lap of this many milliseconds; LapID names that lap (LapInfo.ID),
+	// so a report delivered twice counts one lap.
+	LapMs int64  `json:"lapMs,omitempty"`
+	LapID string `json:"lapId,omitempty"`
 }
 
 // InternalStuckReport is POST /internal/sessions/{id}/stuck from sessiond.

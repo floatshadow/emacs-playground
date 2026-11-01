@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // RPCOp names a session RPC: POST /s/{id}/rpc/{op} (api.md §3.4).
 type RPCOp string
@@ -105,9 +108,18 @@ type ScenarioRequest struct {
 
 // LapInfo describes the running lap (ScenarioRequest.Lap).
 type LapInfo struct {
+	// ID names the lap (LapID): the done report of its last step carries
+	// it, so the gateway counts the lap once however often it arrives.
+	ID       string `json:"id,omitempty"`
 	LessonID string `json:"lessonId"`
 	// StartedAt is when the lap's first step became active (ms).
 	StartedAt int64 `json:"startedAt"`
+}
+
+// LapID is the identity of a lap of lessonID that started at startedAt
+// (ms).
+func LapID(lessonID string, startedAt int64) string {
+	return fmt.Sprintf("%s@%d", lessonID, startedAt)
 }
 
 // ScenarioResult reports the loaded step.
@@ -255,7 +267,8 @@ type StatusResult struct {
 // replays earlier steps.
 type BusyInfo struct {
 	// Op names the kind of operation (load, restore, …) for logs and
-	// display; the set is open, so clients must not switch on it.
+	// display; the set is open: a client recognises the kinds it
+	// displays (the page veils a "load") and ignores the others.
 	Op string `json:"op"`
 	// LessonID and StepID name the step the op works on, when known.
 	LessonID string `json:"lessonId,omitempty"`

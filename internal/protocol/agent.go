@@ -130,11 +130,6 @@ const (
 	AgentOpResetDebug    AgentOp = "reset-debug"
 	AgentOpDescribe      AgentOp = "describe"
 	AgentOpSetup         AgentOp = "setup"
-	// AgentOpResetStep and AgentOpSnapshot are what restore-editor and
-	// capture-editor replace; the agent keeps them for one phase.
-	// TODO(sessiond, api.md §7): deleted with the agent's aliases.
-	AgentOpResetStep AgentOp = "reset-step"
-	AgentOpSnapshot  AgentOp = "snapshot"
 )
 
 // AgentEvalArgs: eval {form} → AgentEvalResult.
@@ -161,11 +156,6 @@ type AgentCheckResult struct {
 // AgentRescueResult: rescue → {did}.
 type AgentRescueResult struct {
 	Did []string `json:"did"`
-}
-
-// AgentResetStepArgs: reset-step {spec}.
-type AgentResetStepArgs struct {
-	Spec WindowSpec `json:"spec"`
 }
 
 // AgentCaptureEditorArgs: capture-editor → AgentCaptureEditorResult. The
