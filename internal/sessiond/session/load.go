@@ -225,8 +225,8 @@ func (c *Core) restoreStep(ctx context.Context, sc *protocol.Scenario, idx int, 
 	if !c.d.Snapshots.Exists(ctx, ref) {
 		return false, nil
 	}
-	if _, _, err := c.d.Snapshots.Restore(ctx, ref); err != nil {
-		if isNotExist(err) {
+	if _, err := c.d.Snapshots.Restore(ctx, ref); err != nil {
+		if noCheckpoint(err) {
 			return false, nil
 		}
 		return false, httpx.Internal("could not restore the step").Wrap(err)

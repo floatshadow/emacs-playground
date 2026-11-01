@@ -790,19 +790,6 @@ func TestHealthzBeforeReady(t *testing.T) {
 	}
 }
 
-func TestElispString(t *testing.T) {
-	for in, want := range map[string]string{
-		"/work/a.md":     `"/work/a.md"`,
-		`/work/q"uote`:   `"/work/q\"uote"`,
-		`/work/back\sl`:  `"/work/back\\sl"`,
-		"/work/ünï cödé": `"/work/ünï cödé"`,
-	} {
-		if got := elispString(in); got != want {
-			t.Errorf("elispString(%q) = %s, want %s", in, got, want)
-		}
-	}
-}
-
 func TestProxyAuth(t *testing.T) {
 	var seen []string
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

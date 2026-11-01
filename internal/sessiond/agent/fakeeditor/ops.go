@@ -13,7 +13,6 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
-	"github.com/floatshadow/emacs-playground/internal/sessiond/supervisor"
 )
 
 // Replies are built as the agent builds them, field for field (the
@@ -100,6 +99,43 @@ func (e *Editor) op(op protocol.AgentOp, raw json.RawMessage) (any, error) {
 		did := e.rescue()
 		e.stateLocked()
 		return map[string]any{"did": did}, nil
+	case protocol.AgentOpCaptureEditor:
+		var a protocol.AgentCaptureEditorArgs
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, err
+		}
+		return e.captureEditor(&a), nil
+	case protocol.AgentOpRestoreEditor:
+		var a protocol.AgentRestoreEditorArgs
+		if err := json.Unmarshal(raw, &a); err != nil {
+			return nil, err
+		}
+		r := e.restoreEditor(&a)
+		e.stateLocked()
+		return r, nil
+	case protocol.AgentOpModifiedFiles:
+		paths := e.m.ModifiedFiles()
+		if paths == nil {
+			paths = []string{}
+		}
+		return map[string]any{"paths": paths}, nil
+	case protocol.AgentOpFlushBuffers:
+		return map[string]any{"saved": e.flushBuffers()}, nil
+	case protocol.AgentOpVisit:
+		var a protocol.AgentVisitArgs
+		_ = json.Unmarshal(raw, &a)
+		rel, ok := e.rel(a.Path)
+		if !ok || rel == "" {
+			return nil, fmt.Errorf("No path to visit")
+		}
+		b := e.visit(rel)
+		e.switchTo(b)
+		e.stateLocked()
+		return map[string]any{"buffer": b.Name}, nil
+	case protocol.AgentOpLeaveDisplay:
+		return map[string]any{"closed": true, "detail": ""}, nil
+	case protocol.AgentOpResumeLoop, protocol.AgentOpResetDebug:
+		return map[string]any{}, nil
 	case protocol.AgentOpSnapshot:
 		return e.snapshot(), nil
 	case protocol.AgentOpOpen:
@@ -151,7 +187,6 @@ var (
 	bufferFormName     = regexp.MustCompile(`^\(let \(\(pg-b \(or \(get-buffer ("(?:[^"\\]|\\.)*")\)`)
 	bufferFormMode     = regexp.MustCompile(`\(derived-mode-p \(intern ("(?:[^"\\]|\\.)*")\)\)`)
 	bufferFormContains = regexp.MustCompile(`\(search-forward ("(?:[^"\\]|\\.)*") nil t\)`)
-	openForm           = regexp.MustCompile(`^\(progn \(find-file ("(?:[^"\\]|\\.)*")\) \(buffer-name\)\)$`)
 )
 
 // elispUnquote reads a string literal as steps.ElispString writes it.
@@ -228,40 +263,31 @@ func (e *Editor) bufferCond(c *protocol.BufferCond) protocol.Truth {
 	return protocol.False
 }
 
-// eval answers registered forms, the forms sessiond builds whose meaning
-// the model has (visiting a file, saving before Emacs stops, a
-// checkpoint's editor state), and null for anything else.
+// eval answers registered forms (author-mode eval, setup.eval) and null
+// for anything else: sessiond builds no Lisp.
 func (e *Editor) eval(form string) any {
 	if fn := e.Evals[form]; fn != nil {
 		return fn(&e.m)
 	}
-	if v, ok := e.evalEditorState(form); ok {
-		return v
-	}
-	if form == supervisor.FlushForm {
-		n := 0
-		for _, b := range e.m.Buffers {
-			if b.Path != "" && b.Modified && !b.ReadOnly {
-				if disk, ok := e.readFile(b.Path); ok && disk != b.Saved {
-					continue
-				}
-				if e.writeFile(b.Path, b.Text) == nil {
-					b.Saved, b.Modified = b.Text, false
-					n++
-				}
+	return nil
+}
+
+// flushBuffers is playground--op-flush-buffers: modified file buffers are
+// saved unless read-only or changed on disk.
+func (e *Editor) flushBuffers() int {
+	n := 0
+	for _, b := range e.m.Buffers {
+		if b.Path != "" && b.Modified && !b.ReadOnly {
+			if disk, ok := e.readFile(b.Path); ok && disk != b.Saved {
+				continue
+			}
+			if e.writeFile(b.Path, b.Text) == nil {
+				b.Saved, b.Modified = b.Text, false
+				n++
 			}
 		}
-		return n
 	}
-	if m := openForm.FindStringSubmatch(form); m != nil {
-		if rel, ok := e.rel(elispUnquote(m[1])); ok && rel != "" {
-			b := e.visit(rel)
-			e.switchTo(b)
-			e.stateLocked()
-			return b.Name
-		}
-	}
-	return nil
+	return n
 }
 
 // --- rescue ----------------------------------------------------------------------
@@ -357,7 +383,7 @@ func (e *Editor) mainWindow() int {
 	return sel.ID
 }
 
-// --- snapshot, open, reset-step -------------------------------------------------------
+// --- snapshot, open, reset-step (restore-editor resets with resetStep) ------------------
 
 func (e *Editor) snapshot() snapshotReply {
 	sel := e.selected()

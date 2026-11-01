@@ -3,7 +3,6 @@ package checkpoint
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -12,16 +11,10 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
-
-// ErrMetadata means the checkpoint ref exists but its restore metadata is unreadable.
-var ErrMetadata = errors.New("checkpoint metadata unavailable")
 
 // RefPrefix is the namespace of every checkpoint ref.
 const RefPrefix = "refs/playground/"
@@ -132,44 +125,11 @@ func (l *limitedBuffer) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Meta is stored next to each ref.
-type Meta struct {
-	Label     string               `json:"label"`
-	Ref       string               `json:"ref"`
-	CreatedAt int64                `json:"createdAt"`
-	Step      *protocol.StepRef    `json:"step,omitempty"`
-	Spec      *protocol.WindowSpec `json:"spec,omitempty"`
-	// Buffers is the state of the file buffers the commit (files as on
-	// disk) does not have, by workspace-relative path; a restore puts it
-	// back after the agent's reset-step.
-	Buffers map[string]BufferState `json:"buffers,omitempty"`
-	// Globals is the printed alist of Emacs session variables (kill ring,
-	// histories, keyboard macro) when the checkpoint was taken.
-	Globals string `json:"globals,omitempty"`
-	// EmptyDirs are the workspace's empty directories (workspace-relative),
-	// which a commit cannot hold; a restore recreates them (lesson 2.6
-	// moves files into a docs folder made in the step before).
-	EmptyDirs []string `json:"emptyDirs,omitempty"`
-	// Nested are the nested git repositories, kept whole (nested.go).
-	Nested []NestedRepo `json:"nested,omitempty"`
-}
-
-// BufferState is what a checkpoint keeps of one file buffer besides the
-// file: a step can start with the previous step's unsaved edit and rely on
-// its undo history (lesson 1.3 undoes a deletion within a region).
-type BufferState struct {
-	// Modified is true when the buffer had unsaved changes.
-	Modified bool `json:"modified,omitempty"`
-	// Text is the unsaved text (HasText), absent for unmodified or large
-	// buffers.
-	Text    string `json:"text,omitempty"`
-	HasText bool   `json:"hasText,omitempty"`
-	// Undo is the printed buffer-undo-list, reduced to readable entries.
-	Undo string `json:"undo,omitempty"`
-}
-
-// Manager takes, lists and restores checkpoints of one workspace. Operations
-// are serialised.
+// Manager is the git half of the checkpoints of one workspace: it records
+// the workspace as commits under refs/playground/, publishes them, lists
+// them and restores them. What goes with a commit (the manifest: label,
+// step, editor state, nested repositories, empty directories) belongs to
+// the snapshot service, the only caller. Operations are serialised.
 type Manager struct {
 	Workspace string
 	Git       Runner
@@ -457,151 +417,123 @@ func (m *Manager) writeExclude() error {
 	return os.WriteFile(p, []byte(b.String()), 0o644)
 }
 
-// Take records a checkpoint at ref with label and saves the metadata.
-func (m *Manager) Take(ctx context.Context, ref, label string, step *protocol.StepRef, spec *protocol.WindowSpec) (Meta, error) {
-	return m.TakeWith(ctx, Meta{Ref: ref, Label: label, Step: step, Spec: spec})
+// Tree is a recorded workspace that no ref names yet.
+type Tree struct {
+	// Commit holds the workspace files. Its first parent is the commit
+	// the ref pointed to; the nested repositories' snapshots are extra
+	// parents, which keep them reachable.
+	Commit string
+	// Nested are the nested git repositories, kept whole (nested.go).
+	Nested []NestedRepo
+	// EmptyDirs are the workspace's empty directories (workspace-relative),
+	// which a commit cannot hold; a restore recreates them (lesson 2.6
+	// moves files into a docs folder made in the step before).
+	EmptyDirs []string
 }
 
-// TakeWith is Take with the metadata given whole (Ref, Label, Step, Spec,
-// Buffers, Globals); CreatedAt and EmptyDirs are set here.
-func (m *Manager) TakeWith(ctx context.Context, meta Meta) (Meta, error) {
-	ref, label := meta.Ref, meta.Label
+// TakeTree records the workspace for ref (backend.md §3.9: add,
+// write-tree, the nested repositories, commit-tree) and leaves the ref
+// alone: PublishRef moves it once the caller has saved what belongs with
+// the commit, so a ref only ever names a complete checkpoint.
+func (m *Manager) TakeTree(ctx context.Context, ref, label string) (Tree, error) {
 	if !ValidRef(ref) {
-		return Meta{}, fmt.Errorf("checkpoint: invalid ref %q", ref)
+		return Tree{}, fmt.Errorf("checkpoint: invalid ref %q", ref)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if err := m.ensurePlaygroundDir(); err != nil {
-		return Meta{}, err
+		return Tree{}, err
 	}
-	parent, _ := m.commitOf(ctx, ref)
+	parent, _ := m.CommitOf(ctx, ref)
 	repos := m.nestedRepos()
 	cmds := TakeCommands(m.IndexFile(), ref, "checkpoint "+label, "$tree", parent)
 	add := withExcludes(cmds[0], repos)
 	if _, err := m.git(ctx, add.Env, add.Args...); err != nil {
-		return Meta{}, err
+		return Tree{}, err
 	}
 	tree, err := m.git(ctx, cmds[1].Env, cmds[1].Args...)
 	if err != nil {
-		return Meta{}, err
+		return Tree{}, err
 	}
 	nested, err := m.snapshotNested(ctx, repos, label)
 	if err != nil {
-		return Meta{}, err
+		return Tree{}, err
 	}
 	cmds = TakeCommands(m.IndexFile(), ref, "checkpoint "+label, tree, parent)
 	commitCmd := cmds[2]
 	for _, n := range nested {
-		// Extra parents keep the nested snapshots reachable.
 		commitCmd.Args = append(commitCmd.Args, "-p", n.Worktree, "-p", n.GitDir)
 	}
 	commit, err := m.git(ctx, commitCmd.Env, commitCmd.Args...)
 	if err != nil {
-		return Meta{}, err
+		return Tree{}, err
 	}
-	meta.Nested = nested
-	if _, err := m.git(ctx, nil, "update-ref", ref, commit); err != nil {
-		return Meta{}, err
-	}
-	meta.CreatedAt = m.Now().UnixMilli()
-	meta.EmptyDirs = m.emptyDirs()
-	return meta, m.writeMeta(meta)
+	return Tree{Commit: commit, Nested: nested, EmptyDirs: m.emptyDirs()}, nil
 }
 
-// commitOf returns the commit ref points to; an error when there is none.
-func (m *Manager) commitOf(ctx context.Context, ref string) (string, error) {
+// PublishRef points ref at commit (the last command of TakeCommands).
+func (m *Manager) PublishRef(ctx context.Context, ref, commit string) error {
+	if !ValidRef(ref) {
+		return fmt.Errorf("checkpoint: invalid ref %q", ref)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	_, err := m.git(ctx, nil, "update-ref", ref, commit)
+	return err
+}
+
+// CommitOf returns the commit ref points to; an error when there is none.
+func (m *Manager) CommitOf(ctx context.Context, ref string) (string, error) {
+	if !ValidRef(ref) {
+		return "", fmt.Errorf("checkpoint: invalid ref %q", ref)
+	}
 	return m.git(ctx, nil, "rev-parse", "-q", "--verify", ref+"^{commit}")
-}
-
-func (m *Manager) metaPath(ref string) string {
-	rel := strings.TrimPrefix(ref, RefPrefix)
-	return filepath.Join(m.Workspace, PlaygroundDir, "checkpoints", filepath.FromSlash(rel)+".json")
-}
-
-func (m *Manager) writeMeta(meta Meta) error {
-	p := m.metaPath(meta.Ref)
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(meta, "", "  ")
-	if err != nil {
-		return err
-	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, p)
-}
-
-// ReadMeta returns the metadata saved for ref.
-func (m *Manager) ReadMeta(ref string) (Meta, error) {
-	b, err := os.ReadFile(m.metaPath(ref))
-	if err != nil {
-		return Meta{}, err
-	}
-	var meta Meta
-	if err := json.Unmarshal(b, &meta); err != nil {
-		return Meta{}, err
-	}
-	return meta, nil
 }
 
 // Exists reports whether ref exists.
 func (m *Manager) Exists(ctx context.Context, ref string) bool {
-	if !ValidRef(ref) {
-		return false
-	}
-	_, err := m.commitOf(ctx, ref)
+	_, err := m.CommitOf(ctx, ref)
 	return err == nil
 }
 
-// List returns every checkpoint, newest first, with the files a restore
-// would change.
-func (m *Manager) List(ctx context.Context) ([]protocol.CheckpointInfo, error) {
+// Refs returns every checkpoint ref.
+func (m *Manager) Refs(ctx context.Context) ([]string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out, err := m.git(ctx, nil, "for-each-ref", "--format=%(refname)%09%(creatordate:unix)%09%(subject)", RefPrefix)
-	if err != nil {
+	out, err := m.git(ctx, nil, "for-each-ref", "--format=%(refname)", RefPrefix)
+	if err != nil || out == "" {
 		return nil, err
 	}
-	if out == "" {
-		return []protocol.CheckpointInfo{}, nil
+	return strings.Split(out, "\n"), nil
+}
+
+// Changes returns, for each ref of refs (mapped to its nested
+// repositories), the files a restore would change: those that differ
+// between the ref and the working tree, with the files under a nested
+// repository taken from that repository's own diff.
+func (m *Manager) Changes(ctx context.Context, refs map[string][]NestedRepo) (map[string][]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make(map[string][]string, len(refs))
+	if len(refs) == 0 {
+		return out, nil
 	}
 	repos := m.nestedRepos()
 	if err := m.stageWorktree(ctx, repos); err != nil {
 		return nil, err
 	}
-	var items []protocol.CheckpointInfo
-	for _, line := range strings.Split(out, "\n") {
-		f := strings.SplitN(line, "\t", 3)
-		if len(f) < 3 {
-			continue
-		}
-		info := protocol.CheckpointInfo{Ref: f[0], Label: strings.TrimPrefix(f[2], "checkpoint ")}
-		var secs int64
-		fmt.Sscan(f[1], &secs)
-		info.CreatedAt = secs * 1000
-		meta, merr := m.ReadMeta(f[0])
-		if merr == nil {
-			info.Label = meta.Label
-			info.CreatedAt = meta.CreatedAt
-			info.Step = meta.Step
-		}
-		files, err := m.diffFiles(ctx, f[0])
+	for ref, nested := range refs {
+		files, err := m.diffFiles(ctx, ref)
 		if err != nil {
 			return nil, err
 		}
-		// Files under a nested repository are the nested diff's.
 		files = slices.DeleteFunc(files, func(p string) bool { return underAny(p, repos) })
-		for _, n := range meta.Nested {
+		for _, n := range nested {
 			files = append(files, m.nestedDiff(ctx, n)...)
 		}
-		info.Files = files
-		items = append(items, info)
+		out[ref] = files
 	}
-	sort.SliceStable(items, func(i, j int) bool { return items[i].CreatedAt > items[j].CreatedAt })
-	return items, nil
+	return out, nil
 }
 
 // stageWorktree refreshes the temporary index from the working tree,
@@ -641,32 +573,29 @@ func (m *Manager) diffFiles(ctx context.Context, ref string) ([]string, error) {
 }
 
 // Restore resets the workspace to ref and returns the workspace-relative
-// paths of the files that were restored or removed, and the metadata saved
-// with the ref (Spec may be nil for checkpoints taken without the agent).
-func (m *Manager) Restore(ctx context.Context, ref string) ([]string, Meta, error) {
+// paths of the files that were restored or removed. nested and emptyDirs
+// are what TakeTree recorded with the ref's commit. A missing ref is
+// os.ErrNotExist.
+func (m *Manager) Restore(ctx context.Context, ref string, nested []NestedRepo, emptyDirs []string) ([]string, error) {
 	if !ValidRef(ref) {
-		return nil, Meta{}, fmt.Errorf("checkpoint: invalid ref %q", ref)
+		return nil, fmt.Errorf("checkpoint: invalid ref %q", ref)
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, err := m.commitOf(ctx, ref); err != nil {
-		return nil, Meta{}, fmt.Errorf("checkpoint %s: %w", ref, os.ErrNotExist)
-	}
-	meta, err := m.ReadMeta(ref)
-	if err != nil {
-		return nil, Meta{}, fmt.Errorf("%w: %v", ErrMetadata, err)
+	if _, err := m.CommitOf(ctx, ref); err != nil {
+		return nil, fmt.Errorf("checkpoint %s: %w", ref, os.ErrNotExist)
 	}
 	// Repositories made since the checkpoint lose their .git and become
 	// ordinary files; the checkpoint's own nested repositories stay out of
 	// the workspace restore and are restored whole afterwards.
-	dropped := m.dropNewRepos(m.nestedRepos(), meta.Nested)
-	skip := nestedPaths(meta.Nested)
+	dropped := m.dropNewRepos(m.nestedRepos(), nested)
+	skip := nestedPaths(nested)
 	if err := m.stageWorktree(ctx, skip); err != nil {
-		return nil, Meta{}, err
+		return nil, err
 	}
 	files, err := m.diffFiles(ctx, ref)
 	if err != nil {
-		return nil, Meta{}, err
+		return nil, err
 	}
 	files = append(files, dropped...)
 	// Best effort: without it the restore rewrites every file (new mtimes,
@@ -679,18 +608,18 @@ func (m *Manager) Restore(ctx context.Context, ref string) ([]string, Meta, erro
 	for _, c := range RestoreCommands(m.IndexFile(), ref) {
 		c = withExcludes(c, skip)
 		if _, err := m.git(ctx, c.Env, c.Args...); err != nil {
-			return nil, Meta{}, err
+			return nil, err
 		}
 	}
-	nfiles, err := m.restoreNested(ctx, meta.Nested)
+	nfiles, err := m.restoreNested(ctx, nested)
 	files = append(files, nfiles...)
 	if err != nil {
-		return files, meta, err
+		return files, err
 	}
 	// git has no empty directories: git clean removed the ones that
 	// existed at the checkpoint if anything was put into them since.
-	m.makeDirs(meta.EmptyDirs)
-	return files, meta, nil
+	m.makeDirs(emptyDirs)
+	return files, nil
 }
 
 // skipDir reports whether the empty-directory walk leaves the directory

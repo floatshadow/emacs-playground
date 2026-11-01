@@ -12,5 +12,5 @@ check:write:false
 gw:01-life/01-three/open:done:gen0
 gw:01-life/01-three/write:in-progress:gen0
 = restore answered 500
-# Reset while reset-step fails
+# Reset while restore-editor fails
 = active: write

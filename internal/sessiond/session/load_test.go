@@ -268,6 +268,7 @@ func TestResume(t *testing.T) {
 	watch := func(f *fixture, _ *Deps) {
 		// Emacs is fresh: the step becomes active only once its buffers are back.
 		f.agent.onCall = func(protocol.AgentOp) { activeDuringCall = activeDuringCall || f.core.Active() != nil }
+		f.snaps.onOpen = func() { activeDuringCall = activeDuringCall || f.core.Active() != nil }
 	}
 
 	// No snapshot: the lesson's setup, without reset.
@@ -278,8 +279,8 @@ func TestResume(t *testing.T) {
 	if a := f.core.Active(); a == nil || a.StepID != "save" {
 		t.Fatalf("resume active %+v", a)
 	}
-	if calls := f.agent.setups(); len(calls) != 1 || calls[0].Reset || len(calls[0].Open) != 1 || len(f.agent.opens) != 0 {
-		t.Fatalf("resume without a snapshot runs the setup without reset: %+v %v", calls, f.agent.opens)
+	if calls := f.agent.setups(); len(calls) != 1 || calls[0].Reset || len(calls[0].Open) != 1 || len(f.snaps.opens) != 0 {
+		t.Fatalf("resume without a snapshot runs the setup without reset: %+v %v", calls, f.snaps.opens)
 	}
 	if f.snaps.captured() != "" || activeDuringCall {
 		t.Fatalf("resume took checkpoints %v or activated the step before Emacs was set up", f.snaps.captured())
@@ -298,8 +299,8 @@ func TestResume(t *testing.T) {
 	if err := g.core.Resume(ctx, protocol.StepRef{LessonID: lessonID, StepID: "save"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(g.agent.opens) != 1 || g.agent.opens[0] != snap || len(g.agent.setups()) != 0 || activeDuringCall {
-		t.Fatalf("resume with a snapshot: opens %v setups %+v", g.agent.opens, g.agent.setups())
+	if len(g.snaps.opens) != 1 || g.snaps.opens[0] != snap || len(g.agent.setups()) != 0 || activeDuringCall {
+		t.Fatalf("resume with a snapshot: opens %v setups %+v", g.snaps.opens, g.agent.setups())
 	}
 	if a := g.core.Active(); a == nil || a.StepID != "save" {
 		t.Fatalf("resume active %+v", a)
@@ -311,8 +312,8 @@ func TestResume(t *testing.T) {
 	if err := h.core.Resume(ctx, protocol.StepRef{LessonID: lessonID, StepID: "save"}); err != nil {
 		t.Fatal(err)
 	}
-	if len(h.agent.opens) != 0 || len(h.agent.setups()) != 1 {
-		t.Fatalf("a stale snapshot: opens %v setups %+v", h.agent.opens, h.agent.setups())
+	if len(h.snaps.opens) != 0 || len(h.agent.setups()) != 1 {
+		t.Fatalf("a stale snapshot: opens %v setups %+v", h.snaps.opens, h.agent.setups())
 	}
 }
 

@@ -2,7 +2,6 @@ package session
 
 import (
 	"context"
-	"errors"
 	"strings"
 
 	"github.com/floatshadow/emacs-playground/internal/httpx"
@@ -12,7 +11,9 @@ import (
 
 // restore is rpc restore (backend.md §3.9): the checkpoint's files and
 // editor state come back, then the step it was taken for restarts as reset
-// (counted). Nothing activates when the restore failed or ctx ended.
+// (counted). Nothing activates when the restore failed (a missing
+// checkpoint, git, or the editor while the agent is connected) or ctx
+// ended; a restore whose editor state waits for the agent activates.
 func (c *Core) restore(ctx context.Context, op *Op) (any, error) {
 	ref, err := c.resolveRestore(ctx, op.Req.(protocol.RestoreRequest))
 	if err != nil {
@@ -21,12 +22,9 @@ func (c *Core) restore(ctx context.Context, op *Op) (any, error) {
 	if lesson, step, ok := splitStepRef(ref); ok {
 		c.setTarget(op, lesson, step)
 	}
-	n, meta, err := c.d.Snapshots.Restore(ctx, ref)
+	rep, err := c.d.Snapshots.Restore(ctx, ref)
 	if err != nil {
-		if errors.Is(err, checkpoint.ErrMetadata) {
-			return nil, httpx.Conflict("checkpoint metadata is missing or unreadable").Wrap(err)
-		}
-		if isNotExist(err) {
+		if noCheckpoint(err) {
 			return nil, httpx.NotFound("no such checkpoint")
 		}
 		return nil, httpx.Internal("restore incomplete").Wrap(err)
@@ -34,12 +32,12 @@ func (c *Core) restore(ctx context.Context, op *Op) (any, error) {
 	if ctx.Err() != nil {
 		return nil, interrupted(ctx)
 	}
-	if meta.Step != nil {
-		c.resetTo(meta.Step.LessonID, meta.Step.StepID, true)
+	if rep.Step != nil {
+		c.resetTo(rep.Step.LessonID, rep.Step.StepID, true)
 	} else if lesson, step, ok := splitStepRef(ref); ok {
 		c.resetTo(lesson, step, true)
 	}
-	return protocol.RestoreResult{RestoredFiles: n}, nil
+	return protocol.RestoreResult{RestoredFiles: len(rep.Files)}, nil
 }
 
 // resolveRestore turns a restore request into a ref: the ref, the newest
@@ -55,7 +53,7 @@ func (c *Core) resolveRestore(ctx context.Context, req protocol.RestoreRequest) 
 		return req.Ref, nil
 	case req.Label != "":
 		if ref := checkpoint.ManualRef(req.Label); c.d.Snapshots.Exists(ctx, ref) {
-			if meta, err := c.d.Snapshots.ReadMeta(ref); err != nil || meta.Label == req.Label {
+			if m, err := c.d.Snapshots.Read(ref); err == nil && m.Label == req.Label {
 				return ref, nil
 			}
 		}

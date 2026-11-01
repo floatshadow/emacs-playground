@@ -1,6 +1,9 @@
-// Package checkpoint records and restores git-based checkpoints under
-// refs/playground/ with a temporary index, plus the protocol.WindowSpec
-// saved next to each ref (backend.md §3.9, ADR-009).
+// Package checkpoint is the git half of checkpoints: it records the
+// workspace as commits under refs/playground/ with a temporary index,
+// publishes, lists and restores them (backend.md §3.9, ADR-009). The
+// snapshot service is its only caller and owns what goes with a commit
+// (the manifest: label, step, editor state, nested repositories, empty
+// directories) and the order: TakeTree, the manifest, then PublishRef.
 //
 // Taking a checkpoint never touches the learner's index or branch:
 //
@@ -16,11 +19,8 @@
 //	git restore --source=<ref> --worktree --staged -- .
 //	git clean -fd -e target -e _build -e .venv -e node_modules -e .playground
 //
-// recreates the recorded empty directories, and leaves the agent's
-// reset-step (and the buffer and session-variable restore) to the caller.
-// Metadata (label, step, creation time, window spec, unsaved buffer state,
-// session variables, empty directories) is stored in
-// /work/.playground/checkpoints/<ref without refs/playground/>.json.
+// restores the nested repositories and recreates the recorded empty
+// directories.
 //
 // Build output, the playground directory and the Emacs package and cache
 // directories under emacs.d are listed in .git/info/exclude so checkpoints

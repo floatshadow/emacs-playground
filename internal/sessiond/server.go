@@ -32,6 +32,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/sessiond/pty"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/session"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/snapshot"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/sshbox"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/supervisor"
@@ -80,9 +81,8 @@ type Server struct {
 	tap      *inputtap.Tap
 	eval     *steps.Evaluator
 	core     *session.Core
-	snaps    *session.Checkpoints
+	snap     *snapshot.Service
 	modules  *scenario.Modules
-	ckpt     *checkpoint.Manager
 	preview  *preview.Server
 	watcher  *preview.Watcher
 	gw       *gwclient.Client
@@ -159,7 +159,16 @@ func (s *Server) Run(ctx context.Context) error {
 	defer ag.Close()
 
 	// 2. Workspace.
-	s.ckpt = checkpoint.New(cfg.Workspace, cfg.GitBin)
+	s.snap = &snapshot.Service{
+		Files:     checkpoint.New(cfg.Workspace, cfg.GitBin),
+		Editor:    &snapshot.AgentEditor{Agent: ag, Workspace: cfg.Workspace},
+		Modules:   s.modules,
+		StateFile: filepath.Join(s.playgroundDir(), "snapshot.json"),
+		Busy:      func() bool { return s.core.Busy() != nil },
+		Active:    func() *protocol.StepRef { return s.core.Active() },
+		Emit:      func(ev protocol.Event) { s.bus.Publish(ev) },
+		Log:       s.log.With("component", "snapshot"),
+	}
 	if err := s.initWorkspace(ctx); err != nil {
 		s.log.Error("workspace initialisation", "err", err)
 	}
@@ -227,8 +236,14 @@ func (s *Server) Run(ctx context.Context) error {
 		s.log.Error("emacs startup", "err", err)
 	}
 
-	// 6. Resume the saved step.
+	// 6. Resume the saved step. snapshot.json autosaves from here on: the
+	// resume op reads it first.
 	s.restoreState(runCtx, saved)
+	s.bg.Add(1)
+	go func() {
+		defer s.bg.Done()
+		s.snap.Autosave(runCtx)
+	}()
 	if s.gw != nil {
 		s.bg.Add(1)
 		go s.heartbeatLoop(runCtx)
@@ -292,8 +307,7 @@ func (s *Server) wire() {
 		supOpt.VNCAddr = s.vncH.Addr
 		supOpt.BusySignal = syscall.SIGUSR2
 	}
-	supOpt.SnapshotFile = filepath.Join(s.playgroundDir(), "snapshot.json")
-	supOpt.Busy = func() bool { return s.core.Busy() != nil }
+	supOpt.Hooks = supervisor.Hooks{BeforeStop: s.snap.BeforeStop, AfterRestart: s.snap.AfterRestart}
 	supOpt.HelloTimeout = s.opt.HelloTimeout
 	supOpt.OnModeChange = func(m protocol.FrameKind) {
 		if m == protocol.FrameTerminal {
@@ -334,14 +348,9 @@ func (s *Server) wire() {
 	} else {
 		fetch = noGateway{}
 	}
-	s.snaps = &session.Checkpoints{
-		Workspace: cfg.Workspace, Ckpt: s.ckpt, Agent: s.agent, Editor: s.sup, Modules: s.modules,
-		Emit: func(ev protocol.Event) { s.bus.Publish(ev) },
-		Log:  log.With("component", "checkpoints"),
-	}
 	s.core = session.New(session.Deps{
 		Workspace: cfg.Workspace, Root: s.preview.Root(), CacheDir: filepath.Join(s.playgroundDir(), "cache"),
-		Fetch: fetch, Agent: s.agent, Sup: s.sup, Snapshots: s.snaps, Modules: s.modules, Evaluator: s.eval,
+		Fetch: fetch, Agent: s.agent, Sup: s.sup, Snapshots: s.snap, Modules: s.modules, Evaluator: s.eval,
 		Report: func(r protocol.ProgressReport) {
 			if s.reporter != nil {
 				s.reporter.Report(r)
@@ -508,9 +517,16 @@ func readVersions(path string) map[string]string {
 
 // --- agent.Handler -------------------------------------------------------
 
-// OnHello implements agent.Handler.
+// OnHello implements agent.Handler. A restore made while the agent was
+// away gets its editor state now, if its step is still active (outside the
+// reader goroutine, which must not call the agent).
 func (s *Server) OnHello(h *protocol.AgentHelloMsg) {
 	s.sup.OnHello(h)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		s.snap.OnHello(ctx)
+	}()
 	for mod, msg := range h.ModuleErrors {
 		s.bus.Publish(&protocol.ErrorEvent{Code: protocol.ErrInternal, Message: fmt.Sprintf("The %s module failed to load: %s", mod, msg)})
 	}
@@ -656,7 +672,7 @@ func (s *Server) restoreState(ctx context.Context, saved session.Saved) {
 // initWorkspace is backend.md §3.2 step 2.
 func (s *Server) initWorkspace(ctx context.Context) error {
 	var errs []error
-	if err := s.ckpt.Init(ctx); err != nil {
+	if err := s.snap.Init(ctx); err != nil {
 		errs = append(errs, err)
 	}
 	initDir := supervisor.InitDirectory(s.cfg)
@@ -828,16 +844,14 @@ func (s *Server) stopFakeAgent() {
 
 // --- shutdown ----------------------------------------------------------------
 
-// shutdown is backend.md §5: emit stopping, snapshot, flush, stop Emacs
-// (SIGTERM, 15 s), close WebSockets with 4003, stop HTTP.
+// shutdown is backend.md §5: emit stopping, snapshot.json and the modified
+// buffers saved (BeforeStop), stop Emacs (SIGTERM, 15 s), close WebSockets
+// with 4003, stop HTTP.
 func (s *Server) shutdown(srv *http.Server) {
 	s.log.Info("sessiond stopping")
 	s.bus.Publish(&protocol.EmacsEvent{Event: protocol.EmacsStopping})
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	if _, err := s.sup.Snapshot(ctx); err != nil {
-		s.log.Info("no snapshot at shutdown", "err", err)
-	}
-	s.sup.Flush(ctx)
+	s.sup.BeforeStop(ctx)
 	cancel()
 	close(s.done)
 	s.sup.Stop()

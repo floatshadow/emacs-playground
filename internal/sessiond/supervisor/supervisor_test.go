@@ -7,9 +7,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -259,10 +259,9 @@ type harness struct {
 	stop  context.CancelFunc
 	calls []string
 	dir   string
-	// evalValue, when set, is the value of every eval (the agent's reply
-	// {"value": …}); evalForms records the forms.
-	evalValue any
-	evalForms []string
+	// keepDisplay, when set, is the detail leave-display answers with a
+	// display it could not close.
+	keepDisplay string
 }
 
 func newHarness(t *testing.T, mutate func(*Options)) *harness {
@@ -285,12 +284,17 @@ func newHarness(t *testing.T, mutate func(*Options)) *harness {
 		Agent:        srv,
 		Emit:         h.evs.emit,
 		GUIEnabled:   true,
-		SnapshotFile: filepath.Join(dir, "snapshot.json"),
 		HelloTimeout: 3 * time.Second,
 		PingInterval: 50 * time.Millisecond,
 		RespawnDelay: 10 * time.Millisecond,
 		FrameWait:    300 * time.Millisecond,
 		DaemonPolicy: &Policy{Backoff: []time.Duration{50 * time.Millisecond}, MaxRestarts: 3, Window: time.Minute},
+	}
+	// The hooks stand for the snapshot service; they are logged with the
+	// agent calls.
+	opt.Hooks = Hooks{
+		BeforeStop:   func(context.Context) { h.mu.Lock(); h.calls = append(h.calls, "before-stop"); h.mu.Unlock() },
+		AfterRestart: func(context.Context) { h.mu.Lock(); h.calls = append(h.calls, "after-restart"); h.mu.Unlock() },
 	}
 	opt.OnDaemonStart = func(pid int) {
 		ctx, cancel := context.WithCancel(context.Background())
@@ -298,18 +302,10 @@ func newHarness(t *testing.T, mutate func(*Options)) *harness {
 		fake.Handle = func(op protocol.AgentOp, args json.RawMessage) (any, error) {
 			h.mu.Lock()
 			h.calls = append(h.calls, string(op))
-			value := h.evalValue
-			if op == protocol.AgentOpEval {
-				var a protocol.AgentEvalArgs
-				_ = json.Unmarshal(args, &a)
-				h.evalForms = append(h.evalForms, a.Form)
-			}
+			keep := h.keepDisplay
 			h.mu.Unlock()
-			if op == protocol.AgentOpEval && value != nil {
-				return map[string]any{"value": value}, nil
-			}
-			if op == protocol.AgentOpSnapshot {
-				return protocol.WindowSpec{Files: []protocol.FileSpec{{Path: "hello/src/main.rs", Point: 42, Visible: true}}}, nil
+			if op == protocol.AgentOpLeaveDisplay {
+				return protocol.AgentLeaveDisplayResult{Closed: keep == "", Detail: keep}, nil
 			}
 			return map[string]any{}, nil
 		}
@@ -419,30 +415,6 @@ func TestSupervisorLifecycle(t *testing.T) {
 	}
 	h.tmux.mu.Unlock()
 
-	// A snapshot is saved for restart restore.
-	if _, err := h.sup.Snapshot(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if spec := h.sup.LastSnapshot(); spec == nil || spec.Files[0].Point != 42 {
-		t.Fatalf("snapshot %+v", spec)
-	}
-	// While a lesson op runs, the periodic snapshot leaves the file alone.
-	if err := os.WriteFile(h.sup.opt.SnapshotFile, []byte(`{"files":[{"path":"kept.md","point":1}]}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	var busy atomic.Bool
-	busy.Store(true)
-	h.sup.opt.Busy = busy.Load
-	h.sup.autosave()
-	if spec := h.sup.LastSnapshot(); spec == nil || spec.Files[0].Path != "kept.md" {
-		t.Fatalf("a snapshot during an op replaced the file: %+v", spec)
-	}
-	busy.Store(false)
-	h.sup.autosave()
-	if spec := h.sup.LastSnapshot(); spec == nil || spec.Files[0].Point != 42 {
-		t.Fatalf("snapshot after the op %+v", spec)
-	}
-
 	// Crash: the daemon dies, restarts with backoff, buffers are restored.
 	oldPID := h.sup.Status().PID
 	_ = syscall.Kill(oldPID, syscall.SIGKILL)
@@ -451,12 +423,8 @@ func TestSupervisorLifecycle(t *testing.T) {
 	if h.sup.Status().PID == oldPID {
 		t.Fatal("daemon pid unchanged")
 	}
-	found := false
-	for _, c := range h.agentCalls() {
-		found = found || c == string(protocol.AgentOpOpen)
-	}
-	if !found {
-		t.Fatalf("no open call after the crash: %v", h.agentCalls())
+	if !slices.Contains(h.agentCalls(), "after-restart") {
+		t.Fatalf("the editor state was not reopened after the crash: %v", h.agentCalls())
 	}
 
 	// Requested restart.
@@ -469,11 +437,11 @@ func TestSupervisorLifecycle(t *testing.T) {
 	if got[0] != "restarting" || got[len(got)-1] != "daemon-restarted" {
 		t.Fatalf("restart events %v", got)
 	}
-	// Snapshot, then the modified buffers are saved, then the new daemon
-	// re-opens the snapshot.
+	// The editor state is saved before the daemon stops and reopened in
+	// the new one.
 	calls := strings.Join(h.agentCalls()[callsBefore:], " ")
-	if !strings.HasPrefix(calls, "snapshot eval") || !strings.Contains(calls, "open") {
-		t.Fatalf("agent calls around the restart: %s", calls)
+	if calls != "before-stop after-restart" {
+		t.Fatalf("hooks around the restart: %s", calls)
 	}
 }
 
@@ -509,9 +477,7 @@ func TestSupervisorGUIMode(t *testing.T) {
 	if err := h.sup.SendKeys(ctx, protocol.FrameGUI, "C-x C-f", ""); err != nil {
 		t.Fatalf("xdotool: %v", err)
 	}
-	h.mu.Lock()
-	evalsBefore := strings.Count(strings.Join(h.calls, ","), "eval")
-	h.mu.Unlock()
+	callsBefore := len(h.agentCalls())
 	if _, err := h.sup.SetMode(ctx, protocol.FrameTerminal); err != nil {
 		t.Fatal(err)
 	}
@@ -521,23 +487,11 @@ func TestSupervisorGUIMode(t *testing.T) {
 	if len(modes) != 2 || modes[1] != protocol.FrameTerminal {
 		t.Fatalf("mode callbacks %v", modes)
 	}
-	// The GUI frame is deleted inside Emacs (an eval) before Xvnc stops,
-	// then the command loop is restarted on the terminal frame (a second
-	// eval); an intentional switch emits no frame-closed event.
-	h.mu.Lock()
-	evalsAfter := strings.Count(strings.Join(h.calls, ","), "eval")
-	h.mu.Unlock()
-	if evalsAfter != evalsBefore+2 {
-		t.Fatalf("agent calls %v: want an eval deleting the GUI frame and one restarting the command loop", h.calls)
-	}
-	h.mu.Lock()
-	form, restart := h.evalForms[len(h.evalForms)-2], h.evalForms[len(h.evalForms)-1]
-	h.mu.Unlock()
-	if !strings.Contains(form, "delete-frame") || !strings.Contains(form, "x-close-connection") {
-		t.Fatalf("the eval must delete the X frames and close the display: %s", form)
-	}
-	if restart != restartLoopForm {
-		t.Fatalf("the second eval must restart the command loop: %s", restart)
+	// The GUI frame and display are let go inside Emacs before Xvnc
+	// stops, then the command loop is restarted on the terminal frame;
+	// an intentional switch emits no frame-closed event.
+	if got := strings.Join(h.agentCalls()[callsBefore:], " "); got != "leave-display resume-loop" {
+		t.Fatalf("agent calls leaving the GUI: %s", got)
 	}
 	// TODO(sessiond, backend.md §3.3): setFrame emits frame-opened
 	// after releasing the lock that SetMode waits on, so mode:gui can
@@ -553,7 +507,7 @@ func TestSupervisorGUIMode(t *testing.T) {
 	// When Emacs cannot close its X connection, the display keeps running
 	// rather than dropping under Emacs; the next switch reuses it.
 	h.mu.Lock()
-	h.evalValue = ":1: Display still has frames on it"
+	h.keepDisplay = ":1: Display still has frames on it"
 	h.mu.Unlock()
 	go func() {
 		time.Sleep(100 * time.Millisecond)
@@ -569,7 +523,7 @@ func TestSupervisorGUIMode(t *testing.T) {
 		t.Fatal("the display must keep running when Emacs keeps its X connection")
 	}
 	h.mu.Lock()
-	h.evalValue = "closed"
+	h.keepDisplay = ""
 	h.mu.Unlock()
 	go func() {
 		time.Sleep(100 * time.Millisecond)
@@ -649,9 +603,8 @@ func TestSupervisorGivesUpOnCrashLoop(t *testing.T) {
 // the daemon process only (its subprocesses survive), and Rescue's C-g
 // offers a restart when Emacs is still busy RescueGrace later.
 func TestSupervisorBusyEmacs(t *testing.T) {
-	var dir string
+	dir := t.TempDir()
 	h := newHarness(t, func(o *Options) {
-		dir = filepath.Dir(o.SnapshotFile)
 		o.BusySignal = syscall.SIGUSR2
 		o.RescueGrace = 200 * time.Millisecond
 		o.Commands.Daemon = func() *exec.Cmd {
@@ -726,13 +679,13 @@ while :; do sleep 0.05; done`
 	for deadline := time.Now().Add(3 * time.Second); ; {
 		found := false
 		for _, c := range fake.Calls() {
-			found = found || (c.Op == protocol.AgentOpEval && strings.Contains(string(c.Args), "debug-on-quit nil"))
+			found = found || c.Op == protocol.AgentOpResetDebug
 		}
 		if found {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("no eval resetting debug-on-quit after the debug signal")
+			t.Fatal("no reset-debug after the debug signal")
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

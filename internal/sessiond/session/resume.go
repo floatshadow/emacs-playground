@@ -39,8 +39,9 @@ func (c *Core) resume(ctx context.Context, ref protocol.StepRef) error {
 }
 
 // reopen puts the lesson's buffers and windows back in a fresh Emacs: the
-// last editor state (saved at shutdown, else at most SnapshotInterval old)
-// when it shows the lesson's files, else the lesson's setup without reset.
+// last editor state (snapshot.json: saved before Emacs stopped, by the
+// last restore, or at most snapshot.AutosaveInterval old) when it shows
+// the lesson's files, else the lesson's setup without reset.
 func (c *Core) reopen(ctx context.Context, sc *protocol.Scenario) {
 	if c.d.Agent == nil {
 		return
@@ -53,7 +54,7 @@ func (c *Core) reopen(ctx context.Context, sc *protocol.Scenario) {
 	if !c.d.Sup.WaitReady(ctx, 15*time.Second) {
 		c.log.Warn("re-opening the snapshot before the terminal frame is open", "lesson", sc.ID)
 	}
-	if err := c.d.Agent.Call(ctx, protocol.AgentOpOpen, spec, 10*time.Second, nil); err != nil {
+	if err := c.d.Snapshots.Open(ctx, spec); err != nil {
 		c.log.Warn("re-opening the snapshot failed; running the lesson setup", "lesson", sc.ID, "err", err)
 		c.setup(ctx, sc, false)
 	}

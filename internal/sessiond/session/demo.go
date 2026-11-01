@@ -72,8 +72,8 @@ func (c *Core) restoreIfDirty(ctx context.Context, sc *protocol.Scenario, idx in
 		return false, nil
 	}
 	stepID := sc.Steps[idx].ID
-	if _, _, err := c.d.Snapshots.Restore(ctx, checkpoint.StepRef(sc.ID, stepID)); err != nil {
-		if !isNotExist(err) {
+	if _, err := c.d.Snapshots.Restore(ctx, checkpoint.StepRef(sc.ID, stepID)); err != nil {
+		if !noCheckpoint(err) {
 			c.log.Warn("restoring the step before its demo", "lesson", sc.ID, "step", stepID, "err", err)
 		}
 		return false, nil

@@ -16,5 +16,6 @@ gw:01-life/01-three/write:in-progress:gen0
 step:write:reset
 check:write:false
 gw:01-life/01-three/write:in-progress:gen0
+= snapshot.json is the checkpoint's: true
 # the agent comes back
-= b.txt in Emacs after the restore: "xxbeta\n" modified=true
+= b.txt in Emacs after the restore: "beta\n" modified=false

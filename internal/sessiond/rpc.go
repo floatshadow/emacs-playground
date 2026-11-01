@@ -14,8 +14,8 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/httpx"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
-	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/events"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/snapshot"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/supervisor"
 )
 
@@ -48,7 +48,7 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 	case protocol.OpCheckpoint:
 		res, err = withBody(w, r, s.rpcCheckpoint)
 	case protocol.OpCheckpoints:
-		items, lerr := s.snaps.List(ctx)
+		items, lerr := s.snap.List(ctx)
 		if lerr != nil {
 			return httpx.Internal("could not list checkpoints").Wrap(lerr)
 		}
@@ -151,7 +151,7 @@ func (s *Server) rpcDropStep(ctx context.Context, req protocol.DropStepRequest) 
 func agentError(err error) error {
 	var ce *agent.CallError
 	switch {
-	case errors.Is(err, agent.ErrNotConnected), errors.Is(err, agent.ErrClosed):
+	case errors.Is(err, agent.ErrNotConnected), errors.Is(err, agent.ErrClosed), errors.Is(err, snapshot.ErrDisconnected):
 		return httpx.EmacsUnavailable("Emacs is not connected")
 	case errors.Is(err, agent.ErrTimeout), errors.Is(err, context.DeadlineExceeded):
 		return httpx.Timeout("Emacs did not answer in time")
@@ -228,9 +228,8 @@ func (s *Server) evalRaw(ctx context.Context, form string, timeout time.Duration
 	return out.Value, err
 }
 
-// rpcOpen visits a workspace file in the learner's window. The form is
-// built here from a path checked to stay inside the workspace, so it is
-// available without author mode (unlike eval).
+// rpcOpen visits a workspace file in the learner's window (the agent's
+// visit op) after checking that the path is a file inside the workspace.
 func (s *Server) rpcOpen(ctx context.Context, req protocol.OpenRequest) (any, error) {
 	rel := filepath.ToSlash(filepath.Clean(strings.TrimPrefix(req.Path, "/")))
 	if req.Path == "" || rel == "." || rel == ".." || strings.HasPrefix(rel, "../") || strings.ContainsRune(rel, 0) {
@@ -248,21 +247,11 @@ func (s *Server) rpcOpen(ctx context.Context, req protocol.OpenRequest) (any, er
 	if st.IsDir() {
 		return nil, httpx.BadRequest("path is a directory")
 	}
-	abs := filepath.Join(s.cfg.Workspace, filepath.FromSlash(rel))
-	form := "(progn (find-file " + elispString(abs) + ") (buffer-name))"
-	v, err := s.evalRaw(ctx, form, agent.DefaultTimeout)
+	name, err := s.snap.Visit(ctx, filepath.Join(s.cfg.Workspace, filepath.FromSlash(rel)))
 	if err != nil {
 		return nil, agentError(err)
 	}
-	var name string
-	_ = json.Unmarshal(v, &name)
 	return protocol.OpenResult{Buffer: name}, nil
-}
-
-// elispString quotes s as an Emacs Lisp string literal.
-func elispString(s string) string {
-	r := strings.NewReplacer(`\`, `\\`, `"`, `\"`)
-	return `"` + r.Replace(s) + `"`
 }
 
 func (s *Server) rpcRescue(ctx context.Context) (any, error) {
@@ -298,11 +287,11 @@ func (s *Server) rpcCheckpoint(ctx context.Context, req protocol.CheckpointReque
 	if len(label) > 200 {
 		return nil, httpx.BadRequest("label is limited to 200 characters")
 	}
-	meta, err := s.snaps.Capture(ctx, checkpoint.Meta{Ref: checkpoint.ManualRef(label), Label: label})
+	m, err := s.core.Checkpoint(ctx, label)
 	if err != nil {
 		return nil, httpx.Internal("could not take the checkpoint").Wrap(err)
 	}
-	return protocol.CheckpointResult{Ref: meta.Ref, CreatedAt: meta.CreatedAt}, nil
+	return protocol.CheckpointResult{Ref: m.Ref, CreatedAt: m.CreatedAt}, nil
 }
 
 // rpcDemo brackets the browser's "Watch it" (api.md §3.4, §4.1).

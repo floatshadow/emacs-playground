@@ -1,0 +1,20 @@
+# load 01-life/01-three
+checkpoint:01-life/01-three/open
+step:open:loaded
+check:open:false
+gw:01-life/01-three/open:in-progress:gen0
+# Watch it kills a line
+check:open:true
+step:open:demonstrated
+gw:01-life/01-three/open:demonstrated:gen0
+= a.txt after the demo: "\n" modified=true undo=1
+= b.txt after the demo: "beta\n" modified=false undo=0
+= kill ring after the demo: ["alpha"]
+# Do it yourself
+step:open:reset
+check:open:false
+gw:01-life/01-three/open:in-progress:gen0
+= a.txt after Do it yourself: "alpha\n" modified=false undo=0
+= b.txt after Do it yourself: no buffer
+= kill ring after Do it yourself: null
+= command history after Do it yourself: ["learner-command"]

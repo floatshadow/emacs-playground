@@ -21,6 +21,7 @@ import (
 
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent/fakeeditor"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 )
 
 // Lifecycle traces: each scenario drives a fake-mode sessiond (the fake
@@ -815,7 +816,7 @@ func TestLifecycle(t *testing.T) {
 			l.loadA()
 			l.completeOpen()
 			l.play(`"xx"`)
-			code := l.whileHeld(protocol.AgentOpResetStep, "restore", protocol.RestoreRequest{})
+			code := l.whileHeld(protocol.AgentOpRestoreEditor, "restore", protocol.RestoreRequest{})
 			l.note("restore answered %d after the page went away", code)
 			l.section("the Reset runs on", "step:write:reset", "gw:"+lessonA+"/write:in-progress:gen0")
 			b := l.ed.Buffer("b.txt")
@@ -907,22 +908,23 @@ func TestLifecycle(t *testing.T) {
 			code := l.rpc("restore", protocol.RestoreRequest{}, nil)
 			l.note("restore answered %d", code)
 			l.section("Reset without an agent", "step:write:reset")
+			spec, _ := os.ReadFile(filepath.Join(l.ws, ".playground", "snapshot.json"))
+			l.note("snapshot.json is the checkpoint's: %v", strings.Contains(string(spec), `"layout":"life/b.txt"`))
 			l.ed.Reconnect()
 			l.waitFor("the agent to reconnect", func() bool { return l.server().srv.agent.Connected() })
+			// The agent's hello gets the checkpoint's editor state.
+			l.waitFor("the editor state", func() bool { b := l.ed.Buffer("b.txt"); return b != nil && !b.Modified })
 			l.section("the agent comes back")
-			// TODO(sessiond, backend.md §3.9): the Reset reports success
-			// but Emacs keeps the unsaved edit; the agent's next hello
-			// should reopen the checkpoint's editor state.
 			b := l.ed.Buffer("b.txt")
 			l.note("b.txt in Emacs after the restore: %q modified=%v", b.Text, b.Modified)
 		}},
 		{name: "agent-restore-step-failure", run: func(l *lifecycle) {
 			l.loadA()
 			l.completeOpen()
-			l.ed.Fail(protocol.AgentOpResetStep, errors.New("busy"))
+			l.ed.Fail(protocol.AgentOpRestoreEditor, errors.New("busy"))
 			code := l.rpc("restore", protocol.RestoreRequest{}, nil)
 			l.note("restore answered %d", code)
-			l.section("Reset while reset-step fails")
+			l.section("Reset while restore-editor fails")
 			l.ed.ClearFaults()
 			var st protocol.StatusResult
 			l.rpc("status", nil, &st)
@@ -936,7 +938,7 @@ func TestLifecycle(t *testing.T) {
 			// the editor was reset or the step activated: nothing flushes
 			// the unsaved edit.
 			ts := l.server()
-			l.ed.SetFault(protocol.AgentOpResetStep, fakeeditor.Fault{Err: errors.New("Emacs died"), Hook: func() {
+			l.ed.SetFault(protocol.AgentOpRestoreEditor, fakeeditor.Fault{Err: errors.New("Emacs died"), Hook: func() {
 				l.ed.Disconnect()
 				ts.cancel()
 			}})
@@ -956,6 +958,65 @@ func TestLifecycle(t *testing.T) {
 			l.section("Reset again", "step:write:reset", "check:write:false")
 			disk, _ = os.ReadFile(filepath.Join(l.ws, "life", "b.txt"))
 			l.note("life/b.txt after Reset: %q", disk)
+		}},
+		{name: "stopped-between-manifest-and-ref", run: func(l *lifecycle) {
+			// sessiond dies after the first step's manifest is written and
+			// before its ref is published: no checkpoint exists, and the
+			// next load takes it again.
+			ts := l.server()
+			ts.srv.snap.SetFault(func(point string) error {
+				if point != "publish" {
+					return nil
+				}
+				ts.cancel()
+				return errors.New("sessiond died")
+			})
+			l.note("scenario answered %d", l.rpc("scenario", protocol.ScenarioRequest{LessonID: lessonA}, nil))
+			l.stop()
+			_, err := os.Stat(filepath.Join(l.ws, ".playground", "checkpoints", "01-life", "01-three", "open.json"))
+			l.note("manifest written: %v", err == nil)
+			l.start("?after=0")
+			l.load(protocol.ScenarioRequest{LessonID: lessonA})
+			l.section("load again", "checkpoint:"+lessonA+"/open", "step:open:loaded")
+		}},
+		{name: "legacy-ref-without-manifest", run: func(l *lifecycle) {
+			// A ref whose manifest is missing (taken before manifests were
+			// written first) is no checkpoint: restoring it is a 404, it is
+			// not listed, and loading its step takes it again.
+			l.loadA()
+			l.completeOpen()
+			ref := checkpoint.StepRef(lessonA, "open")
+			if err := os.Remove(filepath.Join(l.ws, ".playground", "checkpoints", "01-life", "01-three", "open.json")); err != nil {
+				l.t.Fatal(err)
+			}
+			l.note("restore of the ref answered %d", l.rpc("restore", protocol.RestoreRequest{Ref: ref}, nil))
+			var cps protocol.CheckpointsResult
+			l.rpc("checkpoints", nil, &cps)
+			for _, it := range cps.Items {
+				l.note("listed %s", it.Label)
+			}
+			l.load(protocol.ScenarioRequest{LessonID: lessonA, StepID: "open"})
+			l.section("Go to step open", "checkpoint:"+lessonA+"/open", "step:open:loaded")
+		}},
+		{name: "watch-it-leaves-no-kills-or-history", run: func(l *lifecycle) {
+			l.ed.Update(func(m *fakeeditor.Model) { m.Globals["extended-command-history"] = []string{"learner-command"} })
+			l.loadA()
+			l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoStart}, nil)
+			l.play(`C-k`)
+			l.ed.Update(func(m *fakeeditor.Model) {
+				m.Globals["extended-command-history"] = []string{"demo-command", "learner-command"}
+			})
+			l.play(demoOpen)
+			l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoEnd}, nil)
+			l.section("Watch it kills a line", "step:open:demonstrated", "gw:"+lessonA+"/open:demonstrated:gen0")
+			l.editorNote("after the demo")
+			if code := l.rpc("restore", protocol.RestoreRequest{}, nil); code != 200 {
+				l.t.Fatalf("restore %d", code)
+			}
+			l.section("Do it yourself", "step:open:reset")
+			l.editorNote("after Do it yourself")
+			h, _ := json.Marshal(l.ed.Snapshot().Globals["extended-command-history"])
+			l.note("command history after Do it yourself: %s", h)
 		}},
 		{name: "go-to-step-after-an-unsaved-edit", run: func(l *lifecycle) {
 			l.loadA()

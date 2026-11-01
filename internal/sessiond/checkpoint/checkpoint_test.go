@@ -2,6 +2,7 @@ package checkpoint
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,8 +11,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
 func TestCommandBuilding(t *testing.T) {
@@ -157,17 +156,18 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 	_ = os.MkdirAll(filepath.Join(ws, "emacs.d/elpa/empty"), 0o755)
 
 	ref := StepRef("02-buffers-and-files/03-opening-files", "open")
-	spec := &protocol.WindowSpec{Files: []protocol.FileSpec{{Path: "hello/src/main.rs", Point: 1, Visible: true}}, Layout: "single"}
-	step := &protocol.StepRef{LessonID: "02-buffers-and-files/03-opening-files", StepID: "open"}
-	meta, err := m.Take(ctx, ref, "02-buffers-and-files/03-opening-files/open", step, spec)
+	tr, err := m.TakeTree(ctx, ref, "02-buffers-and-files/03-opening-files/open")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.CreatedAt != 1761472000000 || meta.Ref != ref {
-		t.Fatalf("meta %+v", meta)
+	if m.Exists(ctx, ref) {
+		t.Fatal("TakeTree must not publish the ref")
 	}
-	if !reflect.DeepEqual(meta.EmptyDirs, []string{"hello/docs"}) {
-		t.Fatalf("empty dirs %v", meta.EmptyDirs)
+	if err := m.PublishRef(ctx, ref, tr.Commit); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(tr.EmptyDirs, []string{"hello/docs"}) {
+		t.Fatalf("empty dirs %v", tr.EmptyDirs)
 	}
 	// The learner's index and branch are untouched: no HEAD, nothing staged.
 	if out := gitOut(t, ws, "status", "--porcelain"); strings.Contains(out, "A ") || strings.Contains(out, "M ") || strings.Contains(out, ".playground") {
@@ -189,13 +189,6 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 			t.Errorf("tree has %s:\n%s", not, tree)
 		}
 	}
-	saved, err := m.ReadMeta(ref)
-	if err != nil || saved.Spec == nil || saved.Spec.Files[0].Path != "hello/src/main.rs" || saved.Step.StepID != "open" {
-		t.Fatalf("saved meta %+v %v", saved, err)
-	}
-	if _, ok := read(t, ws, ".playground/checkpoints/02-buffers-and-files/03-opening-files/open.json"); !ok {
-		t.Fatal("meta file not at the documented path")
-	}
 
 	// The learner edits, deletes, creates; builds produce output.
 	write(t, ws, "hello/src/main.rs", "fn main() {}\n")
@@ -205,35 +198,26 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 	write(t, ws, "emacs.d/elpa/consult/consult.el", ";; installed later")
 	write(t, ws, ".playground/cache/x", "cache")
 
-	m.Now = func() time.Time { return time.UnixMilli(1761472060000) }
-	bufs := map[string]BufferState{"hello/src/main.rs": {Modified: true, HasText: true, Text: "fn main() {}\n", Undo: `(nil ("x" . 1))`}}
-	manual, err := m.TakeWith(ctx, Meta{Ref: ManualRef("Before refactor!"), Label: "Before refactor!", Buffers: bufs})
+	manual := ManualRef("Before refactor!")
+	if manual != "refs/playground/manual/before-refactor" {
+		t.Fatalf("manual ref %s", manual)
+	}
+	if _, err := take(ctx, m, manual, "Before refactor!"); err != nil {
+		t.Fatal(err)
+	}
+	if refs, err := m.Refs(ctx); err != nil || len(refs) != 2 {
+		t.Fatalf("refs %v %v", refs, err)
+	}
+	changes, err := m.Changes(ctx, map[string][]NestedRepo{ref: nil, manual: nil})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if manual.Ref != "refs/playground/manual/before-refactor" || manual.CreatedAt != 1761472060000 {
-		t.Fatalf("manual %+v", manual)
+	if len(changes[manual]) != 0 {
+		t.Fatalf("manual checkpoint should match the worktree: %v", changes[manual])
 	}
-	if got, err := m.ReadMeta(manual.Ref); err != nil || got.Buffers["hello/src/main.rs"] != bufs["hello/src/main.rs"] {
-		t.Fatalf("buffer state not kept with the checkpoint: %+v %v", got.Buffers, err)
-	}
-
-	items, err := m.List(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(items) != 2 || items[0].Label != "Before refactor!" || items[1].Ref != ref {
-		t.Fatalf("list %+v", items)
-	}
-	if len(items[0].Files) != 0 {
-		t.Fatalf("manual checkpoint should match the worktree: %v", items[0].Files)
-	}
-	slices.Sort(items[1].Files)
-	if !reflect.DeepEqual(items[1].Files, []string{"hello/README.md", "hello/notes.txt", "hello/src/main.rs"}) {
-		t.Fatalf("files %v", items[1].Files)
-	}
-	if items[1].Step == nil || items[1].Step.StepID != "open" {
-		t.Fatalf("step %+v", items[1].Step)
+	slices.Sort(changes[ref])
+	if !reflect.DeepEqual(changes[ref], []string{"hello/README.md", "hello/notes.txt", "hello/src/main.rs"}) {
+		t.Fatalf("files %v", changes[ref])
 	}
 
 	// A file the learner staged that the checkpoint does not have, and an
@@ -249,13 +233,13 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 	write(t, ws, "hello/docs/moved.md", "moved")
 	_ = os.MkdirAll(filepath.Join(ws, "hello/extra"), 0o755)
 
-	restored, rmeta, err := m.Restore(ctx, ref)
+	restored, err := m.Restore(ctx, ref, tr.Nested, tr.EmptyDirs)
 	if err != nil {
 		t.Fatal(err)
 	}
 	slices.Sort(restored)
-	if !reflect.DeepEqual(restored, []string{"hello/README.md", "hello/docs/moved.md", "hello/notes.txt", "hello/src/main.rs", "hello/staged.txt"}) || rmeta.Spec == nil {
-		t.Fatalf("restored %v meta %+v", restored, rmeta)
+	if !reflect.DeepEqual(restored, []string{"hello/README.md", "hello/docs/moved.md", "hello/notes.txt", "hello/src/main.rs", "hello/staged.txt"}) {
+		t.Fatalf("restored %v", restored)
 	}
 	if ents, err := os.ReadDir(filepath.Join(ws, "hello/docs")); err != nil || len(ents) != 0 {
 		t.Fatalf("hello/docs must be back and empty: %v %v", ents, err)
@@ -293,16 +277,16 @@ func TestTakeListRestoreRealRepo(t *testing.T) {
 	}
 
 	// Re-taking the same ref chains to the previous commit.
-	if _, err := m.Take(ctx, ref, "again", step, spec); err != nil {
+	if _, err := take(ctx, m, ref, "again"); err != nil {
 		t.Fatal(err)
 	}
 	if parents := gitOut(t, ws, "rev-list", "--count", ref); parents != "2" {
 		t.Fatalf("history length %s", parents)
 	}
-	if _, _, err := m.Restore(ctx, "refs/playground/missing/x"); err == nil {
-		t.Fatal("missing ref must fail")
+	if _, err := m.Restore(ctx, "refs/playground/missing/x", nil, nil); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing ref: %v", err)
 	}
-	if _, _, err := m.Restore(ctx, "refs/heads/main"); err == nil {
+	if _, err := m.Restore(ctx, "refs/heads/main", nil, nil); err == nil {
 		t.Fatal("foreign ref must fail")
 	}
 	if !m.Exists(ctx, ref) || m.Exists(ctx, "refs/playground/missing/x") {
@@ -375,7 +359,7 @@ func (r *recRunner) Run(ctx context.Context, dir string, env []string, args ...s
 func TestTakeUsesPlan(t *testing.T) {
 	r := &recRunner{}
 	m := &Manager{Workspace: t.TempDir(), Git: r, Now: time.Now}
-	if _, err := m.Take(context.Background(), "refs/playground/l/s", "l/s", nil, nil); err != nil {
+	if _, err := take(context.Background(), m, "refs/playground/l/s", "l/s"); err != nil {
 		t.Fatal(err)
 	}
 	last := r.calls[len(r.calls)-1]
@@ -386,4 +370,13 @@ func TestTakeUsesPlan(t *testing.T) {
 	if !slices.Contains(commit, "tree1") || slices.Contains(commit, "-p") {
 		t.Fatalf("commit-tree call %v", commit)
 	}
+}
+
+// take records and publishes a checkpoint of the workspace at ref.
+func take(ctx context.Context, m *Manager, ref, label string) (Tree, error) {
+	tr, err := m.TakeTree(ctx, ref, label)
+	if err != nil {
+		return tr, err
+	}
+	return tr, m.PublishRef(ctx, ref, tr.Commit)
 }

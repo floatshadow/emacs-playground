@@ -2,14 +2,11 @@ package supervisor
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
@@ -19,13 +16,12 @@ import (
 
 // Timing (backend.md §3.2, §3.3, emacs.md §7).
 const (
-	HelloTimeout     = 60 * time.Second
-	PingInterval     = 2 * time.Second
-	MissedPings      = 5
-	SnapshotInterval = 30 * time.Second
-	GUIStartTimeout  = 5 * time.Second
-	StopGrace        = 15 * time.Second
-	RestartGrace     = 5 * time.Second
+	HelloTimeout    = 60 * time.Second
+	PingInterval    = 2 * time.Second
+	MissedPings     = 5
+	GUIStartTimeout = 5 * time.Second
+	StopGrace       = 15 * time.Second
+	RestartGrace    = 5 * time.Second
 	// RescueGrace: if Emacs is still unresponsive this long after Rescue
 	// interrupted it, a daemon restart is offered (backend.md §3.3).
 	RescueGrace = 10 * time.Second
@@ -44,6 +40,20 @@ type Agent interface {
 	LastPing() time.Time
 	Connected() bool
 	Call(ctx context.Context, op protocol.AgentOp, args any, timeout time.Duration, out any) error
+}
+
+// Hooks are what sessiond does around Emacs stopping and starting; the
+// snapshot service implements them (the editor state is its, not the
+// supervisor's). Each runs in the supervisor's goroutine and may call the
+// agent.
+type Hooks struct {
+	// BeforeStop records the editor state and saves the modified file
+	// buffers before Emacs stops.
+	BeforeStop func(ctx context.Context)
+	// AfterRestart reopens the editor state in a daemon that restarted
+	// (requested or after a crash), once it said hello and before the
+	// terminal frame is respawned.
+	AfterRestart func(ctx context.Context)
 }
 
 // Commands build the supervised processes. RealCommands uses the session
@@ -69,15 +79,10 @@ type Options struct {
 	GUIEnabled bool
 	// VNCAddr is where Xvnc listens (127.0.0.1:5901).
 	VNCAddr string
-	// SnapshotFile stores the last buffer and window spec (restart
-	// restore), e.g. /work/.playground/snapshot.json.
-	SnapshotFile string
-	// Busy, when set, reports a lesson op in progress; the periodic
-	// snapshot skips while it does (after a cold start the file holds the
-	// learner's windows until the resume op has re-opened them).
-	// TODO(sessiond, backend.md §3.9): the snapshot service takes over
-	// the periodic snapshot.
-	Busy func() bool
+	Hooks   Hooks
+	// Ops are the agent calls the supervisor makes (default: through
+	// Agent).
+	Ops AgentOps
 	// OnModeChange is called once the new mode is recorded, before the GUI
 	// frame and Xvnc are stopped (sessiond closes VNC bridges there) and
 	// before the mode event is emitted. It must not block.
@@ -92,13 +97,12 @@ type Options struct {
 	// Zero sends nothing (tests and -fake mode, where the daemon is bash).
 	BusySignal syscall.Signal
 	// Overridable timing for tests.
-	RescueGrace      time.Duration
-	HelloTimeout     time.Duration
-	PingInterval     time.Duration
-	SnapshotInterval time.Duration
-	DaemonPolicy     *Policy
-	RespawnDelay     time.Duration
-	GUIStartTimeout  time.Duration
+	RescueGrace     time.Duration
+	HelloTimeout    time.Duration
+	PingInterval    time.Duration
+	DaemonPolicy    *Policy
+	RespawnDelay    time.Duration
+	GUIStartTimeout time.Duration
 	// FrameWait bounds how long a restart waits for the new terminal
 	// frame before it reports daemon-restarted (default 10 s).
 	FrameWait time.Duration
@@ -156,8 +160,8 @@ func New(opt Options) *Supervisor {
 	if opt.PingInterval <= 0 {
 		opt.PingInterval = PingInterval
 	}
-	if opt.SnapshotInterval <= 0 {
-		opt.SnapshotInterval = SnapshotInterval
+	if opt.Ops == nil {
+		opt.Ops = agentOps{opt.Agent}
 	}
 	if opt.FrameWait <= 0 {
 		opt.FrameWait = 10 * time.Second
@@ -229,10 +233,9 @@ func (s *Supervisor) Start(ctx context.Context) error {
 			err = terr
 		}
 	}
-	s.wg.Add(3)
+	s.wg.Add(2)
 	go s.frameWatcher()
 	go s.heartbeat()
-	go s.snapshotLoop()
 	return err
 }
 
@@ -541,7 +544,7 @@ func (s *Supervisor) heartbeat() {
 				// *Backtrace*.
 				signalled = false
 				ctx, cancel := context.WithTimeout(s.ctx, 3*time.Second)
-				if err := s.opt.Agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: ResetDebugForm}, 2*time.Second, nil); err != nil {
+				if err := s.opt.Ops.ResetDebug(ctx); err != nil {
 					s.log.Warn("resetting debug-on-quit", "err", err)
 				}
 				cancel()
@@ -550,9 +553,6 @@ func (s *Supervisor) heartbeat() {
 	}
 }
 
-// ResetDebugForm undoes what the debug signal (SIGUSR2) leaves set.
-const ResetDebugForm = "(setq debug-on-quit nil)"
-
 // Unresponsive reports missed heartbeats.
 func (s *Supervisor) Unresponsive() bool {
 	s.mu.Lock()
@@ -560,129 +560,10 @@ func (s *Supervisor) Unresponsive() bool {
 	return s.unresponsive
 }
 
-// snapshotLoop saves the buffer and window spec every SnapshotInterval.
-func (s *Supervisor) snapshotLoop() {
-	defer s.wg.Done()
-	t := time.NewTicker(s.opt.SnapshotInterval)
-	defer t.Stop()
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		case <-t.C:
-			s.autosave()
-		}
-	}
-}
-
-// autosave takes the periodic snapshot unless a lesson op is in progress.
-func (s *Supervisor) autosave() {
-	if s.opt.Busy != nil && s.opt.Busy() {
-		return
-	}
-	if _, err := s.Snapshot(s.ctx); err != nil {
-		s.log.Debug("snapshot", "err", err)
-	}
-}
-
-// Snapshot asks the agent for the buffer and window spec and saves it.
-func (s *Supervisor) Snapshot(ctx context.Context) (*protocol.WindowSpec, error) {
-	s.mu.Lock()
-	ok := s.ready && !s.unresponsive
-	s.mu.Unlock()
-	if !ok || !s.opt.Agent.Connected() {
-		return nil, errors.New("emacs not ready")
-	}
-	var spec protocol.WindowSpec
-	if err := s.opt.Agent.Call(ctx, protocol.AgentOpSnapshot, nil, 2*time.Second, &spec); err != nil {
-		return nil, err
-	}
-	if spec.TakenAt == 0 {
-		spec.TakenAt = time.Now().UnixMilli()
-	}
-	if err := s.saveSnapshot(&spec); err != nil {
-		s.log.Warn("saving snapshot", "err", err)
-	}
-	return &spec, nil
-}
-
-func (s *Supervisor) saveSnapshot(spec *protocol.WindowSpec) error {
-	if s.opt.SnapshotFile == "" {
-		return nil
-	}
-	b, err := json.Marshal(spec)
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(s.opt.SnapshotFile), 0o755); err != nil {
-		return err
-	}
-	tmp := s.opt.SnapshotFile + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmp, s.opt.SnapshotFile)
-}
-
-// LastSnapshot returns the saved spec, or nil.
-func (s *Supervisor) LastSnapshot() *protocol.WindowSpec {
-	if s.opt.SnapshotFile == "" {
-		return nil
-	}
-	b, err := os.ReadFile(s.opt.SnapshotFile)
-	if err != nil {
-		return nil
-	}
-	var spec protocol.WindowSpec
-	if json.Unmarshal(b, &spec) != nil {
-		return nil
-	}
-	return &spec
-}
-
-// FlushForm saves every modified file buffer before Emacs stops (a
-// restart, sessiond's shutdown), whether or not auto-save-visited-mode is
-// on: lessons about the modified flag turn it off, and stopping the daemon
-// would otherwise lose the learner's edits. Like base's
-// auto-save-visited-predicate it never saves over a file that changed on
-// disk (a lesson reset just restored it), skips remote and read-only
-// files, and a buffer that cannot be saved without a question is left
-// alone. The value is the number of buffers saved.
-const FlushForm = `(let ((n 0))
-  (dolist (b (buffer-list) n)
-    (with-current-buffer b
-      (when (and buffer-file-name (buffer-modified-p) (not buffer-read-only)
-                 (not (file-remote-p buffer-file-name))
-                 (verify-visited-file-modtime b))
-        (condition-case nil
-            (let ((save-silently t) (inhibit-message t))
-              (basic-save-buffer)
-              (setq n (1+ n)))
-          (error nil))))))`
-
-// FlushTimeout bounds FlushForm.
-const FlushTimeout = 3 * time.Second
-
-// Flush saves modified file buffers (FlushForm) when the agent is
-// connected and Emacs responsive.
-func (s *Supervisor) Flush(ctx context.Context) {
-	if s.opt.Agent == nil || !s.opt.Agent.Connected() || s.Unresponsive() {
-		return
-	}
-	var res protocol.AgentEvalResult
-	if err := s.opt.Agent.Call(ctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: FlushForm}, FlushTimeout, &res); err != nil {
-		s.log.Info("saving buffers before Emacs stops", "err", err)
-		return
-	}
-	if n, ok := res.Value.(float64); ok && n > 0 {
-		s.log.Info("saved modified buffers before Emacs stops", "buffers", int(n))
-	}
-}
-
 // RestartEmacs restarts the daemon with buffer restore (rpc restart-emacs,
-// module changes): snapshot, save modified buffers, stop, start, wait for
-// hello, re-open the snapshot, respawn the terminal frame, emit
-// daemon-restarted.
+// module changes): Hooks.BeforeStop (snapshot.json, modified buffers
+// saved), stop, start, wait for hello, Hooks.AfterRestart (the editor
+// state reopened), respawn the terminal frame, emit daemon-restarted.
 func (s *Supervisor) RestartEmacs(ctx context.Context, reason string) error {
 	s.restartMu.Lock()
 	defer s.restartMu.Unlock()
@@ -698,11 +579,7 @@ func (s *Supervisor) RestartEmacs(ctx context.Context, reason string) error {
 		s.mu.Unlock()
 	}()
 	s.emit(&protocol.EmacsEvent{Event: protocol.EmacsRestarting, Reason: reason})
-	if _, err := s.Snapshot(ctx); err != nil {
-		s.log.Info("restart without a fresh snapshot", "err", err)
-	}
-	// The snapshot re-opens files from disk: unsaved edits would be lost.
-	s.Flush(ctx)
+	s.beforeStop(ctx)
 	s.setIntentional(true)
 	before := s.opt.Agent.HelloCount()
 	s.daemon.Stop(RestartGrace)
@@ -728,15 +605,24 @@ func (s *Supervisor) RestartEmacs(ctx context.Context, reason string) error {
 	return nil
 }
 
+// BeforeStop runs Hooks.BeforeStop when the agent can answer (sessiond's
+// shutdown; RestartEmacs runs it too).
+func (s *Supervisor) BeforeStop(ctx context.Context) { s.beforeStop(ctx) }
+
+func (s *Supervisor) beforeStop(ctx context.Context) {
+	if s.opt.Hooks.BeforeStop == nil || !s.opt.Agent.Connected() || s.Unresponsive() {
+		return
+	}
+	s.opt.Hooks.BeforeStop(ctx)
+}
+
 // afterRestart restores buffers and frames once a restarted daemon said
 // hello.
 func (s *Supervisor) afterRestart(reason string) {
 	ctx, cancel := context.WithTimeout(s.ctx, 15*time.Second)
 	defer cancel()
-	if spec := s.LastSnapshot(); spec != nil && len(spec.Files) > 0 {
-		if err := s.opt.Agent.Call(ctx, protocol.AgentOpOpen, spec, 10*time.Second, nil); err != nil {
-			s.log.Warn("restoring buffers after restart", "err", err)
-		}
+	if s.opt.Hooks.AfterRestart != nil {
+		s.opt.Hooks.AfterRestart(ctx)
 	}
 	s.ensureTerminalFrame()
 	// Lesson setup after a restart needs the learner's frame: before it
@@ -788,32 +674,6 @@ func (s *Supervisor) WaitReady(ctx context.Context, timeout time.Duration) bool 
 		}
 	}
 }
-
-// leaveGUIForm deletes every X frame of the daemon (the GUI frame) and then
-// closes its X display connections, so stopping Xvnc afterwards does not
-// make Emacs report "Connection lost to X server" in the terminal frame:
-// deleting the frames alone keeps the connection open. The session
-// image's Emacs is a Lucid build, where x-close-connection is safe. The
-// value is "closed" when no X display is left open, else a description of
-// what failed (the display is then left running).
-const leaveGUIForm = `(progn
-  (when (fboundp 'x-hide-tip) (ignore-errors (x-hide-tip)))
-  (dolist (f (frame-list)) (when (eq (framep f) 'x) (delete-frame f t)))
-  (if (not (fboundp 'x-display-list))
-      "closed"
-    (let ((failed nil))
-      (dolist (d (x-display-list))
-        (condition-case err (x-close-connection d)
-          (error (push (format "%s: %s" d (error-message-string err)) failed))))
-      (if failed (mapconcat #'identity failed "; ") "closed"))))`
-
-// restartLoopForm makes Emacs's command loop start waiting for keys again.
-// After the GUI frame's terminal is gone, the loop that was waiting for a
-// key from it swallows the next input event from the terminal frame (a
-// key, or the ESC of an escape sequence, whose rest is then typed as text:
-// "[I", "[<35;43;15M"); a top-level from a timer restarts the wait on the
-// terminal frame first.
-const restartLoopForm = "(progn (run-at-time 0 nil #'top-level) t)"
 
 // SetMode switches the frame shown to the browser (rpc mode, architecture.md
 // §3.5).
@@ -886,15 +746,14 @@ func (s *Supervisor) leaveGUI(ctx context.Context) {
 	stopDisplay := true
 	if s.opt.Agent != nil && s.opt.Agent.Connected() {
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-		var out protocol.AgentEvalResult
-		err := s.opt.Agent.Call(cctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: leaveGUIForm}, 2*time.Second, &out)
+		res, err := s.opt.Ops.LeaveDisplay(cctx)
 		cancel()
 		switch {
 		case err != nil:
 			s.log.Warn("closing the GUI frame and display in Emacs; leaving the display running", "err", err)
 			stopDisplay = false
-		case out.Value != "closed" && out.Value != nil:
-			s.log.Warn("Emacs kept its X connection; leaving the display running", "result", out.Value)
+		case !res.Closed:
+			s.log.Warn("Emacs kept its X connection; leaving the display running", "result", res.Detail)
 			stopDisplay = false
 		}
 	}
@@ -904,7 +763,10 @@ func (s *Supervisor) leaveGUI(ctx context.Context) {
 	s.setFrame(protocol.FrameGUI, false, "")
 	if s.opt.Agent != nil && s.opt.Agent.Connected() {
 		cctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 3*time.Second)
-		if err := s.opt.Agent.Call(cctx, protocol.AgentOpEval, protocol.AgentEvalArgs{Form: restartLoopForm}, 2*time.Second, nil); err != nil {
+		// After the GUI frame's terminal is gone, the command loop that
+		// waited for a key from it swallows the next input event from the
+		// terminal frame; resume-loop restarts the wait there.
+		if err := s.opt.Ops.ResumeLoop(cctx); err != nil {
 			s.log.Warn("restarting the command loop after the GUI frame", "err", err)
 		}
 		cancel()
@@ -1021,7 +883,7 @@ func (s *Supervisor) Interrupt(ctx context.Context) error {
 }
 
 // Stop shuts everything down (backend.md §5): the caller has already emitted
-// emacs stopping and taken a snapshot.
+// emacs stopping and run BeforeStop.
 func (s *Supervisor) Stop() {
 	s.setIntentional(true)
 	if s.gui != nil {

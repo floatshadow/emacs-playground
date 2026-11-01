@@ -18,6 +18,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent/fakeeditor"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/snapshot"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 )
 
@@ -306,7 +307,7 @@ func (g *restoreGit) Run(_ context.Context, _ string, _ []string, args ...string
 
 type restoreFixture struct {
 	core  *Core
-	snaps *Checkpoints
+	snaps *snapshot.Service
 	git   *restoreGit
 	ws    string
 }
@@ -321,17 +322,18 @@ func newRestoreFixture(t *testing.T, ag Agent, emit func(protocol.Event)) *resto
 		ag = &agent.Server{}
 	}
 	g := &restoreGit{}
-	ckpt := &checkpoint.Manager{Workspace: ws, Git: g, Now: time.Now}
+	snaps := &snapshot.Service{
+		Files:   &checkpoint.Manager{Workspace: ws, Git: g, Now: time.Now},
+		Editor:  &snapshot.AgentEditor{Agent: ag, Workspace: ws},
+		Modules: &scenario.Modules{Path: filepath.Join(ws, "emacs.d", "modules.el")},
+	}
 	for _, id := range []string{"one", "two"} {
-		if _, err := ckpt.TakeWith(context.Background(), checkpoint.Meta{
-			Ref: checkpoint.StepRef("a/b", id), Step: &protocol.StepRef{LessonID: "a/b", StepID: id},
-			Globals: "()", Buffers: map[string]checkpoint.BufferState{"a.txt": {Modified: true, HasText: true, Text: "saved"}},
-		}); err != nil {
+		if _, err := snaps.Capture(context.Background(), checkpoint.StepRef("a/b", id), "a/b/"+id,
+			&protocol.StepRef{LessonID: "a/b", StepID: id}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	ev := steps.New(steps.Options{})
-	snaps := &Checkpoints{Workspace: ws, Ckpt: ckpt, Agent: ag, Modules: &scenario.Modules{Path: filepath.Join(ws, "emacs.d", "modules.el")}}
 	core := New(Deps{Workspace: ws, Agent: ag, Sup: &fakeSup{eval: ev}, Snapshots: snaps, Modules: snaps.Modules, Evaluator: ev, Emit: emit})
 	core.activate(&protocol.Scenario{ID: "a/b", Steps: []protocol.Step{{ID: "one"}, {ID: "two"}}}, 1, activation{status: protocol.StepLoaded, phase: Active})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -386,7 +388,7 @@ func TestRestoreSerializesActivation(t *testing.T) {
 
 func TestRestoreAgentFailure(t *testing.T) {
 	for _, fail := range []bool{false, true} {
-		t.Run(map[bool]string{false: "success", true: "reset-step failure"}[fail], func(t *testing.T) {
+		t.Run(map[bool]string{false: "success", true: "restore-editor failure"}[fail], func(t *testing.T) {
 			dir, err := os.MkdirTemp("", "pg-agent")
 			if err != nil {
 				t.Fatal(err)
@@ -400,7 +402,7 @@ func TestRestoreAgentFailure(t *testing.T) {
 			f := newRestoreFixture(t, a, nil)
 			ed := fakeeditor.New(f.ws)
 			if fail {
-				ed.Fail(protocol.AgentOpResetStep, errors.New("busy"))
+				ed.Fail(protocol.AgentOpRestoreEditor, errors.New("busy"))
 			}
 			fake := &agent.Fake{Path: a.Path(), Handle: ed.Handle}
 			ctx, cancel := context.WithCancel(context.Background())
@@ -421,8 +423,8 @@ func TestRestoreAgentFailure(t *testing.T) {
 				if !reflect.DeepEqual(saved.Active, before.Active) || !reflect.DeepEqual(saved.Lessons, before.Lessons) {
 					t.Fatalf("failed restore changed the lesson state: %+v", saved)
 				}
-				if got := ed.CountCalls(protocol.AgentOpEval); got != 1 {
-					t.Fatalf("eval calls after failed reset: %d", got)
+				if got := ed.CountCalls(protocol.AgentOpRestoreEditor); got != 1 {
+					t.Fatalf("restore-editor calls: %d", got)
 				}
 			} else if saved.Active == nil || saved.Active.StepID != "one" || saved.Lessons["a/b"] == nil || saved.Lessons["a/b"].Resets["one"] != 1 {
 				t.Fatalf("successful restore: %+v", saved)
@@ -431,14 +433,21 @@ func TestRestoreAgentFailure(t *testing.T) {
 	}
 }
 
-func TestRestoreMissingMetadata(t *testing.T) {
+// A ref without a manifest (taken before the snapshot service, or cut
+// short between its manifest and its ref) is no checkpoint.
+func TestRestoreWithoutManifest(t *testing.T) {
 	f := newRestoreFixture(t, nil, nil)
 	if err := os.RemoveAll(filepath.Join(f.ws, ".playground", "checkpoints")); err != nil {
 		t.Fatal(err)
 	}
 	_, err := f.core.Restore(context.Background(), protocol.RestoreRequest{Ref: checkpoint.StepRef("a/b", "one")})
-	if err == nil || httpx.AsError(err).Status != 409 || !strings.Contains(err.Error(), "metadata") {
+	if httpx.AsError(err).Status != 404 {
 		t.Fatalf("restore error %v", err)
+	}
+	f.git.mu.Lock()
+	defer f.git.mu.Unlock()
+	if len(f.git.restored) != 0 {
+		t.Fatalf("files restored: %v", f.git.restored)
 	}
 }
 

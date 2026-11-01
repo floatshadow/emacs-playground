@@ -20,6 +20,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/gwclient"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/snapshot"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 )
 
@@ -100,12 +101,11 @@ func (f *fakeFetch) numGets() int {
 	return len(f.gets)
 }
 
-// fakeAgent records setup and open calls; block, when set, holds setup
-// until it is closed.
+// fakeAgent records setup calls; block, when set, holds setup until it is
+// closed.
 type fakeAgent struct {
 	mu    sync.Mutex
 	calls []protocol.AgentSetupArgs
-	opens []*protocol.WindowSpec
 	block chan struct{}
 	// onCall, when set, observes every call.
 	onCall func(protocol.AgentOp)
@@ -119,11 +119,8 @@ func (a *fakeAgent) Call(ctx context.Context, op protocol.AgentOp, args any, tim
 	if a.onCall != nil {
 		a.onCall(op)
 	}
-	switch op {
-	case protocol.AgentOpSetup:
+	if op == protocol.AgentOpSetup {
 		a.calls = append(a.calls, args.(protocol.AgentSetupArgs))
-	case protocol.AgentOpOpen:
-		a.opens = append(a.opens, args.(*protocol.WindowSpec))
 	}
 	a.mu.Unlock()
 	if op == protocol.AgentOpSetup && block != nil {
@@ -225,7 +222,10 @@ type fakeSnaps struct {
 	restorable map[string]bool
 	restoreErr error
 	spec       *protocol.WindowSpec
-	// onCapture, when set, runs at the start of each capture.
+	opens      []*protocol.WindowSpec
+	// onCapture and onOpen, when set, run at the start of each capture and
+	// open.
+	onOpen    func()
 	onCapture func()
 }
 
@@ -236,13 +236,13 @@ func (s *fakeSnaps) Exists(ctx context.Context, ref string) bool {
 	return s.restorable[step] || s.restoreErr != nil
 }
 
-func (s *fakeSnaps) ReadMeta(ref string) (checkpoint.Meta, error) {
-	return checkpoint.Meta{Ref: ref}, nil
+func (s *fakeSnaps) Read(ref string) (snapshot.Manifest, error) {
+	return snapshot.Manifest{Ref: ref}, nil
 }
 
 func (s *fakeSnaps) List(ctx context.Context) ([]protocol.CheckpointInfo, error) { return nil, nil }
 
-func (s *fakeSnaps) Capture(ctx context.Context, meta checkpoint.Meta) (checkpoint.Meta, error) {
+func (s *fakeSnaps) Capture(ctx context.Context, ref, label string, step *protocol.StepRef) (snapshot.Manifest, error) {
 	s.mu.Lock()
 	hook := s.onCapture
 	s.mu.Unlock()
@@ -251,28 +251,39 @@ func (s *fakeSnaps) Capture(ctx context.Context, meta checkpoint.Meta) (checkpoi
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.cps = append(s.cps, strings.TrimPrefix(meta.Ref, checkpoint.RefPrefix))
-	if _, step, ok := splitStepRef(meta.Ref); ok {
+	s.cps = append(s.cps, strings.TrimPrefix(ref, checkpoint.RefPrefix))
+	if _, step, ok := splitStepRef(ref); ok {
 		s.restorable[step] = true
 	}
-	return meta, nil
+	return snapshot.Manifest{Ref: ref, Label: label, Step: step}, nil
 }
 
-func (s *fakeSnaps) Restore(ctx context.Context, ref string) (int, checkpoint.Meta, error) {
+func (s *fakeSnaps) Restore(ctx context.Context, ref string) (snapshot.Report, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, step, _ := splitStepRef(ref)
 	s.restored = append(s.restored, step)
 	if s.restoreErr != nil {
-		return 0, checkpoint.Meta{}, s.restoreErr
+		return snapshot.Report{}, s.restoreErr
 	}
 	if !s.restorable[step] {
-		return 0, checkpoint.Meta{}, os.ErrNotExist
+		return snapshot.Report{}, snapshot.ErrNoCheckpoint
 	}
-	return 1, checkpoint.Meta{Ref: ref}, nil
+	return snapshot.Report{Files: []string{"x"}}, nil
 }
 
 func (s *fakeSnaps) LastEditorState() *protocol.WindowSpec { return s.spec }
+
+func (s *fakeSnaps) Open(ctx context.Context, spec *protocol.WindowSpec) error {
+	s.mu.Lock()
+	hook := s.onOpen
+	s.opens = append(s.opens, spec)
+	s.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	return nil
+}
 
 func (s *fakeSnaps) captured() string {
 	s.mu.Lock()

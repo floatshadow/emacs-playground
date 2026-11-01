@@ -172,21 +172,21 @@ func TestRestoreOutlivesTheRequest(t *testing.T) {
 	es.wait("step:open:loaded")
 	ref := checkpoint.StepRef(lesson, "open")
 	deadline := time.Now().Add(10 * time.Second)
-	for !ts.srv.ckpt.Exists(context.Background(), ref) {
+	for !ts.srv.snap.Exists(context.Background(), ref) {
 		if time.Now().After(deadline) {
 			t.Fatal("no checkpoint for the first step")
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	before := ts.srv.editor.CountCalls(protocol.AgentOpResetStep)
+	before := ts.srv.editor.CountCalls(protocol.AgentOpRestoreEditor)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, _, err := ts.srv.snaps.Restore(ctx, ref); err != nil {
+	if _, err := ts.srv.snap.Restore(ctx, ref); err != nil {
 		t.Fatalf("restore with a cancelled request: %v", err)
 	}
-	if got := ts.srv.editor.CountCalls(protocol.AgentOpResetStep); got != before+1 {
-		t.Fatalf("reset-step calls %d, want %d", got, before+1)
+	if got := ts.srv.editor.CountCalls(protocol.AgentOpRestoreEditor); got != before+1 {
+		t.Fatalf("restore-editor calls %d, want %d", got, before+1)
 	}
 	if _, err := os.Stat(filepath.Join(ws, ".git", "index.lock")); !os.IsNotExist(err) {
 		t.Fatalf("index.lock left behind: %v", err)

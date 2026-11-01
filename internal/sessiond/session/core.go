@@ -12,6 +12,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/snapshot"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 )
 
@@ -88,18 +89,21 @@ const (
 	// OpAdvance follows a completion: the next step's checkpoint and
 	// activation.
 	OpAdvance OpKind = "advance"
+	// OpCheckpoint takes a learner's labelled checkpoint (rpc checkpoint).
+	OpCheckpoint OpKind = "checkpoint"
 )
 
 // Deadlines bound each op from the moment it starts running.
 const (
-	LoadDeadline    = 3 * time.Minute
-	ResumeDeadline  = time.Minute
-	RestoreDeadline = 2 * time.Minute
-	ModulesDeadline = 3 * time.Minute
-	DropDeadline    = 10 * time.Second
-	DemoDeadline    = 30 * time.Second
-	SkipDeadline    = 60 * time.Second
-	AdvanceDeadline = time.Minute
+	LoadDeadline       = 3 * time.Minute
+	ResumeDeadline     = time.Minute
+	RestoreDeadline    = 2 * time.Minute
+	ModulesDeadline    = 3 * time.Minute
+	DropDeadline       = 10 * time.Second
+	DemoDeadline       = 30 * time.Second
+	SkipDeadline       = 60 * time.Second
+	AdvanceDeadline    = time.Minute
+	CheckpointDeadline = 30 * time.Second
 )
 
 // RestartTimeout bounds a daemon restart for a module change.
@@ -279,6 +283,9 @@ func (c *Core) exec(ctx context.Context, op *Op) (any, error) {
 		req := op.Req.(protocol.DropStepRequest)
 		c.drop(req.LessonID, req.Generation)
 		return nil, nil
+	case OpCheckpoint:
+		label := op.Req.(string)
+		return c.d.Snapshots.Capture(ctx, checkpoint.ManualRef(label), label, nil)
 	}
 	return nil, errors.New("unknown op " + string(op.Kind))
 }
@@ -312,7 +319,7 @@ func (c *Core) submitLocked(op *Op) {
 
 // lessonScoped reports whether ops of kind work on a lesson's step, which a
 // drop of that lesson makes moot.
-func lessonScoped(k OpKind) bool { return k != OpSetModules && k != OpDrop }
+func lessonScoped(k OpKind) bool { return k != OpSetModules && k != OpDrop && k != OpCheckpoint }
 
 // do submits op and waits, while ctx lasts, for its early or final result.
 // A caller that goes away changes nothing: the op runs on.
@@ -425,6 +432,17 @@ func (c *Core) Skip(ctx context.Context, stepID string) (protocol.SkipResult, er
 		return protocol.SkipResult{}, err
 	}
 	return v.(protocol.SkipResult), nil
+}
+
+// Checkpoint implements rpc checkpoint: a checkpoint of the workspace and
+// the editor labelled by the learner (refs/playground/manual/<slug>). It is
+// an op so that it never interleaves with a restore.
+func (c *Core) Checkpoint(ctx context.Context, label string) (snapshot.Manifest, error) {
+	v, err := c.do(ctx, &Op{Kind: OpCheckpoint, Req: label, Deadline: CheckpointDeadline})
+	if err != nil {
+		return snapshot.Manifest{}, err
+	}
+	return v.(snapshot.Manifest), nil
 }
 
 // SetModules implements rpc modules: it replaces the set exactly and

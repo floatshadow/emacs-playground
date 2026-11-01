@@ -203,15 +203,23 @@ func exactDiffs(want, got any, paths []string, where string) []string {
 	return out
 }
 
-// resolve substitutes "$WS" and "$NAME" (a saved reply) in call arguments.
+// resolve substitutes "$WS", "$NAME" (a saved reply) and "$NAME.FIELD"
+// (its field) in call arguments.
 func resolve(v any, ws string, saved map[string]any) any {
 	switch x := v.(type) {
 	case string:
 		if x == "$WS" {
 			return ws
 		}
-		if r, ok := saved[strings.TrimPrefix(x, "$")]; ok && strings.HasPrefix(x, "$") {
-			return r
+		if strings.HasPrefix(x, "$") {
+			parts := strings.Split(x[1:], ".")
+			if r, ok := saved[parts[0]]; ok {
+				for _, field := range parts[1:] {
+					m, _ := r.(map[string]any)
+					r = m[field]
+				}
+				return r
+			}
 		}
 		return x
 	case []any:
@@ -415,6 +423,20 @@ func TestFixturesDecodeIntoProtocolTypes(t *testing.T) {
 				out = &protocol.DescribeResult{}
 			case protocol.AgentOpEval:
 				out = &protocol.AgentEvalResult{}
+			case protocol.AgentOpCaptureEditor:
+				out = &protocol.AgentCaptureEditorResult{}
+			case protocol.AgentOpRestoreEditor:
+				out = &protocol.AgentRestoreEditorResult{}
+			case protocol.AgentOpModifiedFiles:
+				out = &protocol.AgentModifiedFilesResult{}
+			case protocol.AgentOpFlushBuffers:
+				out = &protocol.AgentFlushResult{}
+			case protocol.AgentOpLeaveDisplay:
+				out = &protocol.AgentLeaveDisplayResult{}
+			case protocol.AgentOpVisit:
+				out = &protocol.AgentVisitResult{}
+			case protocol.AgentOpResumeLoop, protocol.AgentOpResetDebug:
+				out = &protocol.Empty{}
 			// sessiond discards these replies; the fake's reply types
 			// state their shape.
 			case protocol.AgentOpResetStep:
