@@ -6,6 +6,7 @@
  */
 import { create } from 'zustand'
 import type {
+  BusyInfo,
   CheckEvent,
   ErrorEvent,
   Event,
@@ -149,6 +150,23 @@ export interface SessionData {
   lap: LapInfo | null
   /** The lap that finished while this page listened, and its time. */
   lapDone: { lessonId: string; ms: number } | null
+  /**
+   * The lesson op sessiond runs (hello, status): a page opened while a
+   * "Go to this step" runs veils the screen until the step is active.
+   */
+  serverBusy: BusyInfo | null
+  /** When hello named serverBusy (ms): only a later status can end it. */
+  serverBusySince: number
+}
+
+/**
+ * The "Go to this step" load sessiond runs that this page did not start
+ * (hello's busy, until a status or the step event ends it). The screen
+ * veil and the terminal's key guard both read it: while it runs the
+ * screen is covered and the learner's keys wait.
+ */
+export function serverStepJump(s: SessionData): BusyInfo | null {
+  return s.serverBusy?.op === 'load' && s.serverBusy.stepId ? s.serverBusy : null
 }
 
 export function initialSessionData(): SessionData {
@@ -190,6 +208,8 @@ export function initialSessionData(): SessionData {
     quietHabitsUntil: 0,
     lap: null,
     lapDone: null,
+    serverBusy: null,
+    serverBusySince: 0,
   }
 }
 
@@ -237,6 +257,8 @@ export function reduce(s: SessionData, ev: Event, now: number): SessionData {
         emacs: { ...base.emacs, overlay: null, busy: false },
         prefix: null,
         lap: ev.lap ?? null,
+        serverBusy: ev.busy ?? null,
+        serverBusySince: now,
       }
       const step = ev.step
       if (!step) next.activeStep = null
@@ -381,6 +403,12 @@ function reduceStep(
   ev: Extract<Event, { t: 'step' }>,
   now: number,
 ): SessionData {
+  // A step that loads, resets or goes ends the lesson op that was running.
+  if (
+    base.serverBusy &&
+    (ev.status === 'loaded' || ev.status === 'reset' || ev.status === 'dropped')
+  )
+    base = { ...base, serverBusy: null }
   const ref: ActiveStep = {
     lessonId: ev.lessonId,
     stepId: ev.stepId,
@@ -501,6 +529,7 @@ export interface SessionStore extends SessionData {
   forgetProgress(lessonId?: string): void
   /** The running lap as an rpc reported it (scenario, status), or none. */
   setLap(lap: LapInfo | null): void
+  setServerBusy(busy: BusyInfo | null): void
   /** A synthetic ticker entry (Rescue, Reset). */
   note(entry: { keys: string[]; cmd: string; gloss?: string; kind: TickerEntry['kind'] }): void
   /** Back to the initial state (tests, logout). */
@@ -547,6 +576,7 @@ export const useSessionStore = create<SessionStore>()((set) => ({
       }
     }),
   setLap: (lap) => set({ lap }),
+  setServerBusy: (serverBusy) => set({ serverBusy }),
   note: (entry) => set((s) => ({ ticker: tickerNote(s.ticker, entry, Date.now()) })),
   reset: () => set(initialSessionData()),
 }))

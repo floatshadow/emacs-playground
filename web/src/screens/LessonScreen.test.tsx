@@ -590,6 +590,32 @@ describe('LessonScreen against a fake events stream', () => {
     expect(useSessionStore.getState().quietHabitsUntil).toBeLessThan(Number.POSITIVE_INFINITY)
   })
 
+  it('after a reload during Go to this step the screen stays covered until the step is active', async () => {
+    const busy = { op: 'load', lessonId: LESSON, stepId: 'save', startedAt: 1 }
+    server.use(
+      http.post('/s/local/rpc/status', () =>
+        HttpResponse.json({ ok: true, result: { sessionId: 'local', busy } }),
+      ),
+    )
+    renderApp()
+    await waitFor(() => expect(ws.server.clients().length).toBe(1))
+    send({ ...hello, busy } as Event)
+    send(state())
+    expect(
+      await screen.findByRole('status', { name: 'Going to step 3: Save it…' }),
+    ).toBeInTheDocument()
+    send({
+      t: 'step',
+      seq: 3,
+      lessonId: LESSON,
+      stepId: 'save',
+      status: 'loaded',
+      index: 2,
+      count: 4,
+    })
+    await waitFor(() => expect(screen.queryByRole('status', { name: /^Going to step/ })).toBeNull())
+  })
+
   it('after a reload a demonstrated step still offers Do it yourself', async () => {
     server.use(
       http.get('/api/v1/progress', () =>

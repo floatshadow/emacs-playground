@@ -1,11 +1,12 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useEnsureSession } from '../../api/queries'
-import { useSessionStore } from '../../store/session'
+import { useEnsureSession, useLesson, useStatus } from '../../api/queries'
+import { serverStepJump, useSessionStore } from '../../store/session'
 import { useUiStore } from '../../store/ui'
 import { sessionStartError } from '../../lib/sessionError'
 import { Button } from '../common/Button'
 import { doRescue } from '../live/actions'
+import { lt } from '../../lib/localtext'
 import styles from './Screen.module.css'
 
 function Card({ title, body, children }: { title: string; body: string; children?: ReactNode }) {
@@ -18,6 +19,29 @@ function Card({ title, body, children }: { title: string; body: string; children
       </div>
     </div>
   )
+}
+
+/**
+ * The "Going to step N" veil of a load sessiond runs that this page did not
+ * start (it was reloaded meanwhile): hello's busy names it, status polls
+ * until it ends, and the step event that ends it clears it sooner.
+ */
+function useServerStepJump(): { n: number; goal: string } | null {
+  const sessionId = useSessionStore((s) => s.sessionId)
+  const locale = useUiStore((s) => s.locale)
+  const load = useSessionStore(serverStepJump)
+  const lesson = useLesson(load?.lessonId)
+  const status = useStatus(load ? sessionId : null, () => true)
+  // Only a status fetched after hello named the op tells it ended.
+  const since = useSessionStore((s) => s.serverBusySince)
+  useEffect(() => {
+    if (load && status.data && status.dataUpdatedAt > since)
+      useSessionStore.getState().setServerBusy(status.data.busy ?? null)
+  }, [load, since, status.data, status.dataUpdatedAt])
+  const steps = lesson.data?.scenario.steps ?? []
+  const i = load ? steps.findIndex((s) => s.id === load.stepId) : -1
+  const step = steps[i]
+  return step ? { n: i + 1, goal: lt(step.goal, locale) } : null
 }
 
 /**
@@ -37,7 +61,8 @@ export function ScreenOverlay({ onReattach }: { onReattach(): void }) {
   const modulesRestarting = useSessionStore((s) => s.modulesRestarting)
   const mode = useSessionStore((s) => s.mode)
   const skipping = useUiStore((s) => s.skipping)
-  const stepJump = useUiStore((s) => s.stepJump)
+  const serverJump = useServerStepJump()
+  const stepJump = useUiStore((s) => s.stepJump) ?? serverJump
 
   let card: ReactNode = null
   if (skipping) {

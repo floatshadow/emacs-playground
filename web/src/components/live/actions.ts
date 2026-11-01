@@ -47,7 +47,7 @@ export async function doResetStep(): Promise<void> {
     toast(i18n.t('rescue.restored', { count: r.restoredFiles ?? 0 }))
     useSessionStore.getState().note({
       keys: ['Reset'],
-      cmd: 'playground-reset-step',
+      cmd: 'playground-restore',
       gloss: i18n.t('rescue.restoredShort'),
       kind: 'quit',
     })

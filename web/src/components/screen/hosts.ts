@@ -16,7 +16,7 @@ import { PtyClient } from '../../api/session/pty'
 import { sessionBase, wsUrl } from '../../api/session/rpc'
 import { VncClient } from '../../api/session/vnc'
 import { debounce } from '../../lib/debounce'
-import { useSessionStore } from '../../store/session'
+import { serverStepJump, useSessionStore } from '../../store/session'
 import { toast, useUiStore } from '../../store/ui'
 import i18n from '../../i18n'
 import { MODUS_VIVENDI_TINTED, TERMINAL_FONT } from './theme'
@@ -64,10 +64,14 @@ const clipboardProvider: IClipboardProvider = {
   },
 }
 
-/** Emacs is restarting: keys typed now would be lost or misplaced. */
+/**
+ * Emacs is restarting, or sessiond replays steps for a "Go to this step"
+ * this page did not start (the veil's serverStepJump): keys typed now
+ * would be lost or misplaced.
+ */
 export function keysHeld(): boolean {
   const s = useSessionStore.getState()
-  return s.modulesRestarting || s.emacs.overlay === 'restarting'
+  return s.modulesRestarting || s.emacs.overlay === 'restarting' || serverStepJump(s) !== null
 }
 
 const isFirefox = () => typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent)
