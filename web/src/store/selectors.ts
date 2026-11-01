@@ -234,7 +234,7 @@ export function selectStepView(inp: StepsInput): StepView[] {
 }
 
 /**
- * Where to resume a lesson (sessiond's Engine.FirstIncomplete agrees): the
+ * Where to resume a lesson (sessiond's session core agrees): the
  * first step that is neither done nor skipped, by this visit's outcome or
  * else the saved status. A demonstrated step is resumed, so the learner
  * practises what they watched.
