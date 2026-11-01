@@ -225,7 +225,9 @@ func (c *Core) restoreStep(ctx context.Context, sc *protocol.Scenario, idx int, 
 	if !c.d.Snapshots.Exists(ctx, ref) {
 		return false, nil
 	}
-	if _, err := c.d.Snapshots.Restore(ctx, ref); err != nil {
+	rep, err := c.d.Snapshots.Restore(ctx, ref)
+	defer c.deferEditor(ref, rep)
+	if err != nil {
 		if noCheckpoint(err) {
 			return false, nil
 		}

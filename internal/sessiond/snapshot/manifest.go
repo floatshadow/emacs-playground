@@ -75,7 +75,8 @@ func manifestPath(workspace, ref string) string {
 	return filepath.Join(workspace, checkpoint.PlaygroundDir, "checkpoints", filepath.FromSlash(rel)+".json")
 }
 
-// writeJSON writes v to p atomically (a temporary file renamed over p).
+// writeJSON writes v to p atomically: a temporary file of its own, renamed
+// over p, so concurrent writers never share one.
 func writeJSON(p string, v any, indent bool) error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
@@ -90,9 +91,22 @@ func writeJSON(p string, v any, indent bool) error {
 	if err != nil {
 		return err
 	}
-	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	f, err := os.CreateTemp(filepath.Dir(p), filepath.Base(p)+".*.tmp")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, p)
+	_, err = f.Write(b)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = os.Chmod(f.Name(), 0o644)
+	}
+	if err == nil {
+		err = os.Rename(f.Name(), p)
+	}
+	if err != nil {
+		os.Remove(f.Name())
+	}
+	return err
 }

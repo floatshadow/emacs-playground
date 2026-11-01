@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -19,28 +20,19 @@ import (
 
 // fakeEditor records the editor ops and answers them from fields.
 type fakeEditor struct {
-	mu        sync.Mutex
-	connected bool
-	// reconnectAfter > 0 reports the agent away for that many Connected
-	// calls, then connected (a hello during a restore).
-	reconnectAfter int
-	state          EditorState
-	modified       []string
-	restoreErr     error
-	restored       []EditorState
-	opened         []*protocol.WindowSpec
-	limits         []CaptureLimits
+	mu         sync.Mutex
+	connected  bool
+	state      EditorState
+	modified   []string
+	restoreErr error
+	restored   []EditorState
+	opened     []*protocol.WindowSpec
+	limits     []CaptureLimits
 }
 
 func (e *fakeEditor) Connected() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.reconnectAfter > 0 {
-		if e.reconnectAfter--; e.reconnectAfter == 0 {
-			e.connected = true
-		}
-		return false
-	}
 	return e.connected
 }
 
@@ -101,6 +93,24 @@ func newService(t *testing.T) (*Service, *fakeEditor, string) {
 	return s, ed, ws
 }
 
+// stopAt runs git, except that the command op fails after hook ran: a
+// capture stopped there, as a crash would stop it.
+type stopAt struct {
+	checkpoint.Runner
+	op   string
+	hook func()
+}
+
+func (r stopAt) Run(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
+	if slices.Contains(args, r.op) {
+		if r.hook != nil {
+			r.hook()
+		}
+		return nil, errors.New("stopped")
+	}
+	return r.Runner.Run(ctx, dir, env, args...)
+}
+
 func TestCaptureWritesManifestThenRef(t *testing.T) {
 	s, ed, ws := newService(t)
 	ctx := context.Background()
@@ -110,15 +120,12 @@ func TestCaptureWritesManifestThenRef(t *testing.T) {
 	step := &protocol.StepRef{LessonID: "a/b", StepID: "one"}
 
 	// Stopped between the manifest and the ref: no checkpoint, no event.
-	s.SetFault(func(point string) error {
-		if point == "publish" {
-			if _, err := os.Stat(manifestPath(ws, ref)); err != nil {
-				t.Errorf("the manifest must be written before the ref: %v", err)
-			}
-			return errors.New("stopped")
+	git := s.Files.Git
+	s.Files.Git = stopAt{Runner: git, op: "update-ref", hook: func() {
+		if _, err := os.Stat(manifestPath(ws, ref)); err != nil {
+			t.Errorf("the manifest must be written before the ref: %v", err)
 		}
-		return nil
-	})
+	}}
 	if _, err := s.Capture(ctx, ref, "a/b/one", step); err == nil {
 		t.Fatal("capture past the fault")
 	}
@@ -130,7 +137,7 @@ func TestCaptureWritesManifestThenRef(t *testing.T) {
 	}
 
 	// The next capture publishes.
-	s.SetFault(nil)
+	s.Files.Git = git
 	m, err := s.Capture(ctx, ref, "a/b/one", step)
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +211,6 @@ func TestRestoreClassesAndSnapshotJSON(t *testing.T) {
 	ctx := context.Background()
 	ref := checkpoint.StepRef("a/b", "one")
 	step := &protocol.StepRef{LessonID: "a/b", StepID: "one"}
-	s.Active = func() *protocol.StepRef { return step }
 	if _, err := s.Capture(ctx, ref, "a/b/one", step); err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +249,7 @@ func TestRestoreClassesAndSnapshotJSON(t *testing.T) {
 	}
 	ed.restoreErr = nil
 
-	// Disconnected: deferred; the next hello restores the editor state.
+	// Disconnected: deferred; RestoreEditor restores the editor state.
 	ed.connected = false
 	if err := os.WriteFile(s.StateFile, []byte(`{"files":[],"layout":"other"}`), 0o644); err != nil {
 		t.Fatal(err)
@@ -257,16 +263,8 @@ func TestRestoreClassesAndSnapshotJSON(t *testing.T) {
 	}
 	n := len(ed.restored)
 	ed.connected = true
-	s.OnHello(ctx)
-	s.OnHello(ctx)
-	if len(ed.restored) != n+1 {
-		t.Fatalf("hello restores the deferred state once: %d calls", len(ed.restored)-n)
-	}
-
-	// After a restart without a pending restore: snapshot.json is opened.
-	s.AfterRestart(ctx)
-	if len(ed.opened) != 1 || ed.opened[0].Layout != "a.txt" {
-		t.Fatalf("opened after a restart %+v", ed.opened)
+	if err := s.RestoreEditor(ctx, ref); err != nil || len(ed.restored) != n+1 || ed.restored[n].Buffers["a.txt"].Text != "unsaved\n" {
+		t.Fatalf("the deferred editor state: %v, %d calls", err, len(ed.restored)-n)
 	}
 
 	// A git failure is ErrFiles.
@@ -304,22 +302,17 @@ func TestManifestVersionZero(t *testing.T) {
 	}
 }
 
-func TestAutosaveSkipsWhileBusy(t *testing.T) {
+// SaveEditorState (the autosave) writes the window spec alone.
+func TestSaveEditorState(t *testing.T) {
 	s, ed, _ := newService(t)
-	ctx := context.Background()
-	busy := true
-	s.Busy = func() bool { return busy }
-	s.autosave(ctx)
-	if s.LastEditorState() != nil {
-		t.Fatal("autosave during an op")
+	if _, err := s.SaveEditorState(context.Background()); err != nil {
+		t.Fatal(err)
 	}
-	busy = false
-	s.autosave(ctx)
 	if spec := s.LastEditorState(); spec == nil || spec.Layout != "a.txt" {
-		t.Fatalf("autosave %+v", spec)
+		t.Fatalf("snapshot.json %+v", spec)
 	}
 	if lim := ed.limits[len(ed.limits)-1]; lim.MaxTotal != 0 || len(lim.Vars) != 0 {
-		t.Fatalf("autosave captures the spec alone: %+v", lim)
+		t.Fatalf("the spec alone is captured: %+v", lim)
 	}
 }
 
@@ -335,73 +328,6 @@ func TestFitLine(t *testing.T) {
 	}
 }
 
-// A restore made while the agent was away gives its editor state to the
-// next hello only while the checkpoint's step is active; a capture drops
-// it.
-func TestDeferredEditorStateFollowsTheActiveStep(t *testing.T) {
-	s, ed, _ := newService(t)
-	ctx := context.Background()
-	one := &protocol.StepRef{LessonID: "a/b", StepID: "one"}
-	other := &protocol.StepRef{LessonID: "c/d", StepID: "first"}
-	var active *protocol.StepRef
-	s.Active = func() *protocol.StepRef { return active }
-	ref := checkpoint.StepRef("a/b", "one")
-	if _, err := s.Capture(ctx, ref, "a/b/one", one); err != nil {
-		t.Fatal(err)
-	}
-	restore := func() {
-		t.Helper()
-		ed.connected = false
-		if rep, err := s.Restore(ctx, ref); err != nil || !rep.EditorDeferred {
-			t.Fatalf("deferred restore %+v %v", rep, err)
-		}
-		ed.connected = true
-	}
-
-	// Another lesson became active: the hello leaves the state alone.
-	restore()
-	active = other
-	s.OnHello(ctx)
-	if len(ed.restored) != 0 {
-		t.Fatalf("another lesson's hello got the editor state: %+v", ed.restored)
-	}
-	// Its step activates (the hello came before the op activated it).
-	active = one
-	s.OnHello(ctx)
-	if len(ed.restored) != 1 || ed.restored[0].Buffers["a.txt"].Text != "unsaved\n" {
-		t.Fatalf("hello on the checkpoint's step: %+v", ed.restored)
-	}
-
-	// A capture since the restore drops it.
-	restore()
-	active = other
-	if _, err := s.Capture(ctx, checkpoint.StepRef("c/d", "first"), "c/d/first", other); err != nil {
-		t.Fatal(err)
-	}
-	active = one
-	s.OnHello(ctx)
-	s.AfterRestart(ctx)
-	if len(ed.restored) != 1 || len(ed.opened) != 1 {
-		t.Fatalf("a dropped restore came back: restored %d opened %d", len(ed.restored), len(ed.opened))
-	}
-}
-
-// An agent that says hello while git restores the files gets the editor
-// state from the restore itself.
-func TestRestoreReconnectDuringFiles(t *testing.T) {
-	s, ed, _ := newService(t)
-	ctx := context.Background()
-	ref := checkpoint.StepRef("a/b", "one")
-	if _, err := s.Capture(ctx, ref, "a/b/one", nil); err != nil {
-		t.Fatal(err)
-	}
-	ed.connected, ed.reconnectAfter = false, 1
-	rep, err := s.Restore(ctx, ref)
-	if err != nil || rep.EditorDeferred || len(ed.restored) != 1 {
-		t.Fatalf("restore %+v %v, restore-editor calls %d", rep, err, len(ed.restored))
-	}
-}
-
 // A recapture that stopped after its manifest leaves the manifest of a
 // commit the ref does not name: no checkpoint until the next capture.
 func TestRecaptureStoppedBeforeRef(t *testing.T) {
@@ -414,11 +340,12 @@ func TestRecaptureStoppedBeforeRef(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "a.txt"), []byte("later\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.SetFault(func(point string) error { return errors.New("stopped") })
+	git := s.Files.Git
+	s.Files.Git = stopAt{Runner: git, op: "update-ref"}
 	if _, err := s.Capture(ctx, ref, "a/b/one", nil); err == nil {
 		t.Fatal("capture past the fault")
 	}
-	s.SetFault(nil)
+	s.Files.Git = git
 	if s.Exists(ctx, ref) {
 		t.Fatal("a manifest of another commit makes a checkpoint")
 	}
@@ -434,23 +361,25 @@ func TestRecaptureStoppedBeforeRef(t *testing.T) {
 	}
 }
 
-// Autosave pauses from BeforeStop until AfterRestart reopened the state.
-func TestAutosaveSkipsDuringRestart(t *testing.T) {
-	s, ed, _ := newService(t)
-	ctx := context.Background()
-	s.BeforeStop(ctx)
-	saved := s.LastEditorState()
-	ed.state = EditorState{Spec: &protocol.WindowSpec{Files: []protocol.FileSpec{}, Layout: "fresh"}}
-	s.autosave(ctx)
-	if spec := s.LastEditorState(); spec == nil || spec.Layout != saved.Layout {
-		t.Fatalf("autosave during a restart wrote %+v", spec)
+// Concurrent writers of one file each write through a temporary file of
+// their own: every rename publishes a whole document.
+func TestWriteJSONConcurrently(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "snapshot.json")
+	var wg sync.WaitGroup
+	for i := range 20 {
+		wg.Go(func() {
+			if err := writeJSON(p, protocol.WindowSpec{Layout: strings.Repeat("x", 1000*i)}, false); err != nil {
+				t.Error(err)
+			}
+		})
 	}
-	s.AfterRestart(ctx)
-	if len(ed.opened) != 1 || ed.opened[0].Layout != "a.txt" {
-		t.Fatalf("opened after the restart %+v", ed.opened)
+	wg.Wait()
+	var spec protocol.WindowSpec
+	b, err := os.ReadFile(p)
+	if err != nil || json.Unmarshal(b, &spec) != nil {
+		t.Fatalf("snapshot.json %v %q", err, b)
 	}
-	s.autosave(ctx)
-	if spec := s.LastEditorState(); spec == nil || spec.Layout != "fresh" {
-		t.Fatalf("autosave after the restart %+v", spec)
+	if left, _ := filepath.Glob(p + ".*.tmp"); len(left) != 0 {
+		t.Fatalf("temporary files left: %v", left)
 	}
 }

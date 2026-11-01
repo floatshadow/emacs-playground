@@ -27,7 +27,6 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/config"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent/fakeeditor"
-	"github.com/floatshadow/emacs-playground/internal/sessiond/session"
 )
 
 const testLesson = `{
@@ -42,16 +41,6 @@ const testLesson = `{
     {"id": "last", "goal": "Keep the README", "conditions": [{"shell": {"run": "test -f README.md"}}]}
   ]
 }`
-
-func TestPersistOrdersSnapshots(t *testing.T) {
-	s := New(&protocol.SessiondConfig{Workspace: t.TempDir()}, Options{})
-	for _, revision := range []uint64{2, 1} {
-		s.persist(session.Saved{Revision: revision, Active: &protocol.StepRef{LessonID: "a/b", StepID: fmt.Sprint(revision)}})
-	}
-	if saved := s.readState(); saved.Active == nil || saved.Active.StepID != "2" {
-		t.Fatalf("saved %+v", saved)
-	}
-}
 
 type fakeGateway struct {
 	mu       sync.Mutex
@@ -82,6 +71,7 @@ type gwLesson struct {
 type gwLap struct {
 	count          int
 	lastAt, lastMs int64
+	lastID         string
 }
 
 func (g *fakeGateway) handler(t *testing.T) http.Handler {

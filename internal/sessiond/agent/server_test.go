@@ -288,7 +288,7 @@ func TestCallFailsWhenAgentDiesMidCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	err = s.Call(context.Background(), protocol.AgentOpSnapshot, nil, 5*time.Second, nil)
+	err = s.Call(context.Background(), protocol.AgentOpCaptureEditor, nil, 5*time.Second, nil)
 	if !errors.Is(err, ErrNotConnected) || time.Since(start) > 2*time.Second {
 		t.Fatalf("got %v after %v", err, time.Since(start))
 	}

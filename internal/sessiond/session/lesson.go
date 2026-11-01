@@ -119,9 +119,9 @@ type activation struct {
 
 // activate makes step idx of sc the current attempt: the attempt number
 // rises, demo flags clear, the evaluator begins the attempt, Saved.Active
-// is persisted, the step event goes out, an in-progress report (once per
-// process) or a counted reset is reported, and an evaluation is
-// scheduled. A reset forgets the step's saved outcomes.
+// is persisted, the step event goes out, an in-progress entry goes to the
+// outbox, and an evaluation is scheduled. A reset forgets the step's
+// saved outcomes; a counted one adds to its resets.
 func (c *Core) activate(sc *protocol.Scenario, idx int, how activation) protocol.StepRef {
 	sc.AssignIDs()
 	if idx < 0 || idx >= len(sc.Steps) {
@@ -134,7 +134,7 @@ func (c *Core) activate(sc *protocol.Scenario, idx int, how activation) protocol
 	l := &c.lesson
 	switch how.lap {
 	case lapStart:
-		l.Saved.Lap = &protocol.LapInfo{LessonID: sc.ID, StartedAt: now.UnixMilli()}
+		l.Saved.Lap = &protocol.LapInfo{ID: protocol.LapID(sc.ID, now.UnixMilli()), LessonID: sc.ID, StartedAt: now.UnixMilli()}
 	case lapKeep:
 		if l.Saved.Lap != nil && l.Saved.Lap.LessonID != sc.ID {
 			l.Saved.Lap = nil
@@ -153,25 +153,25 @@ func (c *Core) activate(sc *protocol.Scenario, idx int, how activation) protocol
 		return ref
 	}
 	l.Saved.Active = &ref
-	var reports []protocol.ProgressReport
+	ls := l.Saved.lesson(sc.ID)
 	if how.status == protocol.StepReset {
-		ls := l.Saved.lesson(sc.ID)
 		if how.counted {
 			ls.Resets[step.ID]++
-			reports = append(reports, c.progressLocked(sc.ID, step.ID, protocol.ProgressInProgress, now))
 		}
 		delete(ls.Done, step.ID)
 		delete(ls.Skipped, step.ID)
 		delete(ls.Demonstrated, step.ID)
-	} else {
-		reports = c.inProgressLocked()
+	}
+	// Every activation reports in-progress (with a counted reset's new
+	// total); the gateway ignores what it already has. A step finished or
+	// demonstrated earlier stays so.
+	if statusOf(ls, step.ID) == protocol.ProgressInProgress {
+		c.recordLocked(sc.ID, step.ID, protocol.ProgressInProgress, now)
 	}
 	c.emitLocked(&protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: how.status,
 		Index: idx, Count: len(sc.Steps), Lap: c.inLapLocked()})
-	saved := c.savedLocked()
 	c.mu.Unlock()
-	c.report(reports...)
-	c.persist(saved)
+	c.persist()
 	c.trigger()
 	return ref
 }
@@ -284,11 +284,9 @@ func (c *Core) Observe(o steps.Observation) {
 		l.Demo.Demonstrated = true
 		l.Saved.lesson(sc.ID).Demonstrated[step.ID] = now.UnixMilli()
 		c.emitLocked(&protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepDemonstrated, Index: idx, Count: len(sc.Steps)})
-		rep := c.progressLocked(sc.ID, step.ID, protocol.ProgressDemonstrated, now)
-		saved := c.savedLocked()
+		c.recordLocked(sc.ID, step.ID, protocol.ProgressDemonstrated, now)
 		c.mu.Unlock()
-		c.report(rep)
-		c.persist(saved)
+		c.persist()
 		return
 	}
 	// Active: record done, then advance.
@@ -296,18 +294,22 @@ func (c *Core) Observe(o steps.Observation) {
 	last := idx+1 >= len(sc.Steps)
 	ev := &protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepComplete, Index: idx, Count: len(sc.Steps),
 		LessonComplete: last, Lap: c.inLapLocked()}
-	rep := c.progressLocked(sc.ID, step.ID, protocol.ProgressDone, now)
+	e := l.Saved.lesson(sc.ID).report(sc.ID, step.ID, protocol.ProgressDone, now)
 	if last && ev.Lap {
-		ev.LapMs = max(now.UnixMilli()-l.Saved.Lap.StartedAt, 1)
-		rep.LapMs = ev.LapMs
+		lap := l.Saved.Lap
+		ev.LapMs = max(now.UnixMilli()-lap.StartedAt, 1)
+		e.LapMs, e.LapID = ev.LapMs, lap.ID
+		if e.LapID == "" {
+			// A lap saved before laps had ids.
+			e.LapID = protocol.LapID(lap.LessonID, lap.StartedAt)
+		}
 		l.Saved.Lap = nil
 	}
+	c.d.Progress.Record(e)
 	c.emitLocked(ev)
 	c.finishLocked(last, true)
-	saved := c.savedLocked()
 	c.mu.Unlock()
-	c.report(rep)
-	c.persist(saved)
+	c.persist()
 }
 
 // finishLocked follows a recorded completion or skip of the active step:

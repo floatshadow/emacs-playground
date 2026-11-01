@@ -35,7 +35,7 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 	case protocol.OpRescue:
 		res, err = s.rpcRescue(ctx)
 	case protocol.OpScenario:
-		s.syncProgress(ctx)
+		s.syncProgress(ctx, false)
 		res, err = withBody(w, r, s.core.Load)
 	case protocol.OpCheck:
 		cr, ok := s.core.Check(ctx)
@@ -60,7 +60,7 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 	case protocol.OpModules:
 		res, err = withBody(w, r, s.rpcModules)
 	case protocol.OpRestartEmacs:
-		s.rpcRestartEmacs()
+		s.core.RestartEmacs()
 		res = protocol.Empty{}
 	case protocol.OpStuck:
 		var req protocol.StuckRPCRequest
@@ -111,20 +111,6 @@ func (s *Server) rpcModules(ctx context.Context, req protocol.ModulesRequest) (a
 	return protocol.ModulesResult{Restarting: restarting}, err
 }
 
-// rpcRestartEmacs restarts Emacs in the background: the restart takes
-// seconds, and its progress arrives as emacs events.
-func (s *Server) rpcRestartEmacs() {
-	s.bg.Add(1)
-	go func() {
-		defer s.bg.Done()
-		rctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
-		defer cancel()
-		if err := s.sup.RestartEmacs(rctx, "requested"); err != nil {
-			s.log.Error("restart-emacs", "err", err)
-		}
-	}()
-}
-
 func (s *Server) rpcDescribe(ctx context.Context, req protocol.DescribeRequest) (any, error) {
 	if _, err := protocol.ParseKeys(req.Keys); err != nil {
 		return nil, httpx.BadRequest(err.Error())
@@ -137,10 +123,8 @@ func (s *Server) rpcDescribe(ctx context.Context, req protocol.DescribeRequest) 
 }
 
 // rpcDropStep forgets a lesson's active step; an empty lessonId forgets
-// every lesson ("Start over"). It waits for a generation sync under way.
+// every lesson ("Start over").
 func (s *Server) rpcDropStep(ctx context.Context, req protocol.DropStepRequest) (any, error) {
-	s.progressMu.Lock()
-	defer s.progressMu.Unlock()
 	if err := s.core.Drop(ctx, req.LessonID, req.Generation); err != nil {
 		return nil, err
 	}

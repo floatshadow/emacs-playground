@@ -7,6 +7,7 @@ gw:01-life/01-three/open:in-progress:gen0
 # demo start after a command
 step:open:reset
 check:open:false
+gw:01-life/01-three/open:in-progress:gen0
 # the demo plays
 check:open:true
 step:open:demonstrated

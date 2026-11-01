@@ -14,6 +14,7 @@ import (
 
 	"github.com/floatshadow/emacs-playground/internal/httpx"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/progress"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 )
 
@@ -121,16 +122,33 @@ type stepFixture struct {
 	sup   *fakeSup
 	ws    string
 
+	outbox delivered
+
 	mu      sync.Mutex
 	events  []protocol.Event
 	reports []protocol.ProgressReport
 	saved   []Saved
 }
 
+// delivered is a progress outbox whose gateway answers at once: each
+// recorded entry is sent before Record returns.
+type delivered struct{ *progress.Outbox }
+
+func newDelivered(send func(protocol.ProgressReport), gens protocol.ProgressGenerations) delivered {
+	return delivered{progress.New(progress.Snapshot{Generations: gens},
+		func(_ context.Context, r protocol.ProgressReport) error { send(r); return nil }, nil, nil)}
+}
+
+func (d delivered) Record(e protocol.ProgressReport) {
+	d.Outbox.Record(e)
+	d.Flush(context.Background())
+}
+
 // newStepFixture runs a core and an evaluator (evaluated only on Check)
-// over fake snapshots, a fake supervisor and a test clock; with prev it
-// starts from prev's saved state.
-func newStepFixture(t *testing.T, prev ...Saved) *stepFixture {
+// over fake snapshots, a fake supervisor, a test clock and an outbox
+// delivered at once; it starts from prev's saved state and the
+// generations gens when given.
+func newStepFixture(t *testing.T, prev *Saved, gens protocol.ProgressGenerations) *stepFixture {
 	t.Helper()
 	ws := t.TempDir()
 	root, err := os.OpenRoot(ws)
@@ -142,15 +160,16 @@ func newStepFixture(t *testing.T, prev ...Saved) *stepFixture {
 	f.ev = steps.New(steps.Options{Root: root, Workspace: ws, Checker: f.elisp, Now: f.clock.now, Tick: time.Hour,
 		Observe: func(o steps.Observation) { f.core.Observe(o) }})
 	f.sup = &fakeSup{eval: f.ev}
+	f.outbox = newDelivered(func(r protocol.ProgressReport) { f.mu.Lock(); f.reports = append(f.reports, r); f.mu.Unlock() }, gens)
 	f.core = New(Deps{
 		Workspace: ws, Evaluator: f.ev, Snapshots: f.snaps, Sup: f.sup, Now: f.clock.now,
-		Log:     slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Emit:    func(ev protocol.Event) { f.mu.Lock(); f.events = append(f.events, ev); f.mu.Unlock() },
-		Report:  func(r protocol.ProgressReport) { f.mu.Lock(); f.reports = append(f.reports, r); f.mu.Unlock() },
-		Persist: func(s Saved) { f.mu.Lock(); f.saved = append(f.saved, s); f.mu.Unlock() },
+		Log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Emit:     func(ev protocol.Event) { f.mu.Lock(); f.events = append(f.events, ev); f.mu.Unlock() },
+		Progress: f.outbox,
+		Persist:  func() { s := f.core.Saved(); f.mu.Lock(); f.saved = append(f.saved, s); f.mu.Unlock() },
 	})
-	for _, s := range prev {
-		f.core.RestoreSaved(s)
+	if prev != nil {
+		f.core.RestoreSaved(*prev)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go f.core.Run(ctx)
@@ -230,6 +249,18 @@ func (f *stepFixture) statuses() string {
 	return strings.Join(out, " ")
 }
 
+// report returns the last report of stepID with status, nil when none.
+func (f *stepFixture) report(stepID string, status protocol.ProgressStatus) *protocol.ProgressReport {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := len(f.reports) - 1; i >= 0; i-- {
+		if r := f.reports[i]; r.StepID == stepID && r.Status == status {
+			return &r
+		}
+	}
+	return nil
+}
+
 func (f *stepFixture) nudges() []*protocol.NudgeEvent {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -275,7 +306,7 @@ func (f *stepFixture) phase() Phase {
 }
 
 func TestStepLifecycle(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	f.write("hello/src/main.rs", "fn main() { println!(\"Hello, world\"); }\n")
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	if _, ok := f.core.Check(context.Background()); ok {
@@ -350,7 +381,7 @@ func TestStepLifecycle(t *testing.T) {
 }
 
 func TestHintsResetsDropAndPersistence(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	f.activate(sc, 0)
 	f.clear()
@@ -387,25 +418,25 @@ func TestHintsResetsDropAndPersistence(t *testing.T) {
 	// Persisted state round-trips and drives firstIncomplete.
 	saved := f.core.Saved()
 	saved.Lessons[sc.ID].Done["open"] = 1
-	g := newStepFixture(t, saved)
+	g := newStepFixture(t, &saved, nil)
 	if g.core.firstIncomplete(sc) != 1 || g.core.Active() != nil {
 		t.Fatalf("restored: first incomplete %d active %v", g.core.firstIncomplete(sc), g.core.Active())
 	}
 
-	if !f.core.dropGeneration(sc.ID, 0) || f.core.Active() != nil || f.core.Scenario() != nil {
+	if !f.core.drop(sc.ID, 0) || f.core.Active() != nil || f.core.Scenario() != nil {
 		t.Fatal("drop")
 	}
 	if _, ok := f.core.Saved().Lessons[sc.ID]; ok {
 		t.Fatal("drop must clear the lesson's progress")
 	}
-	if f.core.dropGeneration(sc.ID, 0) {
+	if f.core.drop(sc.ID, 0) {
 		t.Fatal("second drop")
 	}
 }
 
 // Check events go out when the results change, or when Check forces them.
 func TestCheckEventsOnlyOnChange(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	f.activate(sc, 0)
 	f.clear()
@@ -430,7 +461,7 @@ func TestCheckEventsOnlyOnChange(t *testing.T) {
 // Go to this step: an observation of the attempt it replaced, arriving
 // late, is ignored; the new attempt's completes it.
 func TestStaleObservationAfterGoTo(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	f.activate(sc, 1)
 	f.core.mu.Lock()
@@ -454,7 +485,7 @@ func TestStaleObservationAfterGoTo(t *testing.T) {
 // A completion observed again while the advance is under way records
 // nothing more.
 func TestCompletionDuringAdvancing(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	f.activate(sc, 1)
 	release := make(chan struct{})
@@ -483,7 +514,7 @@ func TestCompletionDuringAdvancing(t *testing.T) {
 }
 
 func TestDemoLatch(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	ctx := context.Background()
 	f.activate(sc, 0)
@@ -529,7 +560,7 @@ func TestDemoLatch(t *testing.T) {
 	if res, err := f.core.DemoStart(ctx, "open"); err != nil || !res.Restored || !f.core.Watching() {
 		t.Fatalf("dirty demo start %+v %v", res, err)
 	}
-	if got := f.types(); got != "step:open:reset" || f.statuses() != "" {
+	if got := f.types(); got != "step:open:reset" || f.statuses() != "open:in-progress" {
 		t.Fatalf("restart events %s reports %s", got, f.statuses())
 	}
 	if !f.core.resetTo(sc.ID, "open", true) || f.core.Watching() {
@@ -552,7 +583,7 @@ func TestDemoLatch(t *testing.T) {
 // wins: enter checks and writes in one hold of mu, refuses the Advancing
 // step and leaves it to the queued advance.
 func TestEnterAfterCompletion(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	for _, p := range []Phase{Watching, Skipping} {
 		f.activate(sc, 0)
@@ -572,7 +603,7 @@ func TestEnterAfterCompletion(t *testing.T) {
 func TestDemoLongPause(t *testing.T) {
 	for _, pause := range []time.Duration{12 * time.Second, 60 * time.Second} {
 		t.Run(pause.String(), func(t *testing.T) {
-			f := newStepFixture(t)
+			f := newStepFixture(t, nil, nil)
 			f.activate(scenarioFromJSON(t, stepLessonJSON), 0)
 			if _, err := f.core.DemoStart(context.Background(), "open"); err != nil {
 				t.Fatal(err)
@@ -590,7 +621,7 @@ func TestDemoLongPause(t *testing.T) {
 }
 
 func TestNoStuckRulesWhileDemoPlays(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	f.activate(scenarioFromJSON(t, stepLessonJSON), 0)
 	if _, err := f.core.DemoStart(context.Background(), "open"); err != nil {
 		t.Fatal(err)
@@ -620,7 +651,7 @@ func TestNoStuckRulesWhileDemoPlays(t *testing.T) {
 func TestIdleDemoEnds(t *testing.T) {
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	ctx := context.Background()
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	f.activate(sc, 0)
 	_, _ = f.core.DemoStart(ctx, "open")
 	f.ev.OnMinibuffer(&protocol.MinibufferEvent{Open: true})
@@ -648,7 +679,7 @@ func TestIdleDemoEnds(t *testing.T) {
 
 	// A demonstration whose page went away ends at once, and its latch
 	// drops when it never demonstrated.
-	a := newStepFixture(t)
+	a := newStepFixture(t, nil, nil)
 	a.activate(sc, 0)
 	_, _ = a.core.DemoStart(ctx, "open")
 	a.core.AbandonDemo()
@@ -663,7 +694,7 @@ func TestIdleDemoEnds(t *testing.T) {
 
 	// A demonstration that completed the step keeps its latch when it ends
 	// for idleness ("Do it yourself" clears it).
-	g := newStepFixture(t)
+	g := newStepFixture(t, nil, nil)
 	g.activate(sc, 0)
 	_, _ = g.core.DemoStart(ctx, "open")
 	g.completeOpen()
@@ -677,7 +708,7 @@ func TestIdleDemoEnds(t *testing.T) {
 }
 
 func TestSkip(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	ctx := context.Background()
 	f.activate(sc, 1)
@@ -716,7 +747,7 @@ func TestSkip(t *testing.T) {
 // A skip whose demo completes the step records exactly one skipped (no
 // done) and reports it once.
 func TestSkipDemoCompletes(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	f.elisp.set("(main-rs-p)", protocol.True)
 	f.activate(sc, 0)
@@ -743,7 +774,7 @@ func TestSkipDemoCompletes(t *testing.T) {
 }
 
 func TestRehearseIsQuiet(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	ctx := context.Background()
 	f.core.activate(sc, 0, activation{phase: Rehearsing})
@@ -787,7 +818,7 @@ func TestRehearseIsQuiet(t *testing.T) {
 }
 
 func TestDropAll(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	f.activate(sc, 1)
 	_ = f.core.Hint("save", 1)
@@ -795,7 +826,7 @@ func TestDropAll(t *testing.T) {
 	other.Lessons["00-orientation/01-reading-the-screen"] = &LessonState{Done: map[string]int64{"q1": 1}}
 	f.core.RestoreSaved(other)
 	f.clear()
-	if !f.core.dropGeneration("", 0) {
+	if !f.core.drop("", 0) {
 		t.Fatal("drop all forgets the active step")
 	}
 	if ev := f.lastStep(); ev == nil || ev.Status != protocol.StepDropped || ev.StepID != "save" || ev.Index != 1 || ev.Count != 3 {
@@ -807,19 +838,19 @@ func TestDropAll(t *testing.T) {
 	if _, ok := f.core.Check(context.Background()); ok {
 		t.Fatal("check after the drop")
 	}
-	if f.core.dropGeneration("", 0) {
+	if f.core.drop("", 0) {
 		t.Fatal("nothing left to drop")
 	}
 	// Dropping another lesson keeps the active step.
 	f.activate(sc, 0)
 	f.clear()
-	if f.core.dropGeneration("00-orientation/01-reading-the-screen", 0) || f.core.Active() == nil || f.types() != "" {
+	if f.core.drop("00-orientation/01-reading-the-screen", 0) || f.core.Active() == nil || f.types() != "" {
 		t.Fatal("drop of another lesson")
 	}
 }
 
 func TestStuckRules(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, stepLessonJSON)
 	f.activate(sc, 0)
 	f.clear()
@@ -859,7 +890,7 @@ func TestStuckRules(t *testing.T) {
 	}
 
 	// Layout step: idle, quits, unbound, conjunction.
-	g := newStepFixture(t)
+	g := newStepFixture(t, nil, nil)
 	g.activate(sc, 2)
 	g.clear()
 	g.clock.add(59 * time.Second)
@@ -948,66 +979,70 @@ func TestFirstSentence(t *testing.T) {
 	}
 }
 
-func TestProgressReportsAfterRestore(t *testing.T) {
-	f := newStepFixture(t, Saved{Lessons: map[string]*LessonState{"a/b": {
+func (f *stepFixture) outcomes() []protocol.ProgressReport {
+	f.core.mu.Lock()
+	defer f.core.mu.Unlock()
+	return f.core.outcomesLocked()
+}
+
+func TestOutcomesAfterRestore(t *testing.T) {
+	f := newStepFixture(t, &Saved{Lessons: map[string]*LessonState{"a/b": {
 		Done: map[string]int64{"done": 100}, Skipped: map[string]int64{"skip": 200},
 		Demonstrated: map[string]int64{"demo": 300, "done": 50}, Hints: map[string]int{"done": 2}, Resets: map[string]int{"done": 1},
-	}}})
-	reports := f.core.ProgressReports()
-	if len(reports) != 3 {
-		t.Fatalf("reports %+v", reports)
+	}}}, nil)
+	outcomes := f.outcomes()
+	if len(outcomes) != 3 {
+		t.Fatalf("outcomes %+v", outcomes)
 	}
-	for _, r := range reports {
+	for _, e := range outcomes {
 		want := map[string]struct {
 			status protocol.ProgressStatus
 			at     int64
 		}{
 			"done": {protocol.ProgressDone, 100}, "skip": {protocol.ProgressSkipped, 200}, "demo": {protocol.ProgressDemonstrated, 300},
-		}[r.StepID]
-		if r.Status != want.status || r.At != want.at || r.LapMs != 0 {
-			t.Fatalf("report %+v", r)
+		}[e.StepID]
+		if e.Status != want.status || e.At != want.at || e.LapMs != 0 {
+			t.Fatalf("outcome %+v", e)
 		}
-		if r.StepID == "done" && (r.HintsUsed == nil || *r.HintsUsed != 2 || r.Resets == nil || *r.Resets != 1) {
-			t.Fatalf("totals %+v", r)
+		if e.StepID == "done" && (e.HintsUsed == nil || *e.HintsUsed != 2 || e.Resets == nil || *e.Resets != 1) {
+			t.Fatalf("totals %+v", e)
 		}
 	}
-	f.core.dropGeneration("a/b", 0)
-	if got := f.core.ProgressReports(); len(got) != 0 {
-		t.Fatalf("reports after drop %+v", got)
+	f.core.drop("a/b", 0)
+	if got := f.outcomes(); len(got) != 0 {
+		t.Fatalf("outcomes after drop %+v", got)
 	}
 }
 
 func TestProgressGenerations(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, projectJSON)
 	f.activate(sc, 0)
-	f.core.dropGeneration("", 2)
+	f.core.drop("", 2)
 	f.activate(sc, 0)
-	if g := f.core.Saved().Generations.ForLesson(sc.ID); g != 2 {
+	if g := f.outbox.Snapshot().Generations.ForLesson(sc.ID); g != 2 {
 		t.Fatalf("generation %d", g)
 	}
-	f.core.dropGeneration(sc.ID, 4)
+	f.core.drop(sc.ID, 4)
 	f.activate(sc, 0)
-	f.core.dropGeneration("", 3)
-	f.core.dropGeneration(sc.ID, 4)
+	f.core.drop("", 3)
+	f.core.drop(sc.ID, 4)
 	if f.core.Active() == nil {
 		t.Fatal("older or duplicate reset dropped newer lesson")
 	}
 	_ = f.core.Hint("scaffold", 1)
 	f.ev.OnKey(&protocol.KeyEvent{Cmd: "eshell"})
 	f.check()
-	if reports := f.core.ProgressReports(); len(reports) != 1 || reports[0].Generation != 4 {
-		t.Fatalf("reconciled reports %+v", reports)
+	if outcomes := f.outcomes(); len(outcomes) != 1 || outcomes[0].StepID != "scaffold" {
+		t.Fatalf("outcomes %+v", outcomes)
 	}
-	if reports := f.reports; reports[len(reports)-1].Generation != 4 {
-		t.Fatalf("completion reports %+v", reports)
+	if done := f.report("scaffold", protocol.ProgressDone); done == nil || done.Generation != 4 {
+		t.Fatalf("completion reports %+v", f.reports)
 	}
-	if saved := f.core.Saved(); saved.Generations.ForLesson(sc.ID) != 4 {
-		t.Fatalf("saved %+v", saved)
-	}
-	g := newStepFixture(t, f.core.Saved())
-	g.core.dropGeneration("", 5)
-	if saved := g.core.Saved(); saved.Active != nil || len(saved.Lessons) != 0 || saved.Generations.ForLesson(sc.ID) != 5 {
+	saved := f.core.Saved()
+	g := newStepFixture(t, &saved, f.outbox.Snapshot().Generations)
+	g.core.drop("", 5)
+	if saved := g.core.Saved(); saved.Active != nil || len(saved.Lessons) != 0 || g.outbox.Snapshot().Generations.ForLesson(sc.ID) != 5 {
 		t.Fatalf("reset before resume %+v", saved)
 	}
 }
@@ -1016,7 +1051,7 @@ func TestResetGenerationAfterGatewayLoss(t *testing.T) {
 	for _, scope := range []string{"", "projects/p1-hello-cargo"} {
 		t.Run(scope, func(t *testing.T) {
 			sc := scenarioFromJSON(t, projectJSON)
-			f := newStepFixture(t, Saved{Generations: protocol.ProgressGenerations{sc.ID: 18}})
+			f := newStepFixture(t, nil, protocol.ProgressGenerations{sc.ID: 18})
 			f.activate(sc, 0)
 			f.ev.OnKey(&protocol.KeyEvent{Cmd: "eshell"})
 			f.check()
@@ -1024,22 +1059,23 @@ func TestResetGenerationAfterGatewayLoss(t *testing.T) {
 				t.Fatalf("state before reset %+v", saved)
 			}
 			const generation int64 = 1_800_000_000_000
-			if !f.core.dropGeneration(scope, generation) {
+			if !f.core.drop(scope, generation) {
 				t.Fatal("reset did not drop the active step")
 			}
 			saved := f.core.Saved()
-			if saved.Active != nil || len(saved.Lessons) != 0 || saved.Generations.ForLesson(sc.ID) != generation {
+			if saved.Active != nil || len(saved.Lessons) != 0 || f.outbox.Snapshot().Generations.ForLesson(sc.ID) != generation {
 				t.Fatalf("state after reset %+v", saved)
 			}
-			g := newStepFixture(t, saved)
-			if reports := g.core.ProgressReports(); len(reports) != 0 {
-				t.Fatalf("reset outcomes replayed after restart: %+v", reports)
+			g := newStepFixture(t, &saved, f.outbox.Snapshot().Generations)
+			if outcomes := g.outcomes(); len(outcomes) != 0 {
+				t.Fatalf("reset outcomes replayed after restart: %+v", outcomes)
 			}
 			g.activate(sc, 0)
 			g.ev.OnKey(&protocol.KeyEvent{Cmd: "eshell"})
 			g.check()
-			if reports := g.core.ProgressReports(); len(reports) != 1 || reports[0].Generation != generation || reports[0].Status != protocol.ProgressDone {
-				t.Fatalf("completion after reset %+v", reports)
+			done := g.report("scaffold", protocol.ProgressDone)
+			if outcomes := g.outcomes(); len(outcomes) != 1 || done == nil || done.Generation != generation {
+				t.Fatalf("completion after reset %+v", g.reports)
 			}
 		})
 	}
@@ -1048,12 +1084,12 @@ func TestResetGenerationAfterGatewayLoss(t *testing.T) {
 // A lap: hint, demo start and skip answer 409, stuck rules are silent, a
 // Reset keeps the lap, and the last completion reports lapMs once.
 func TestLap(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, projectJSON)
 	ctx := context.Background()
 	f.activate(sc, 0, lapStart)
 	lap := f.core.Lap()
-	if lap == nil || lap.LessonID != sc.ID || lap.StartedAt != f.clock.now().UnixMilli() {
+	if lap == nil || lap.LessonID != sc.ID || lap.StartedAt != f.clock.now().UnixMilli() || lap.ID != protocol.LapID(sc.ID, lap.StartedAt) {
 		t.Fatalf("lap %+v", lap)
 	}
 	if ev := f.lastStep(); !ev.Lap {
@@ -1095,7 +1131,7 @@ func TestLap(t *testing.T) {
 			laps = append(laps, r)
 		}
 	}
-	if len(laps) != 1 || laps[0].StepID != "commit" || laps[0].Status != protocol.ProgressDone || laps[0].LapMs != 95000 {
+	if len(laps) != 1 || laps[0].StepID != "commit" || laps[0].Status != protocol.ProgressDone || laps[0].LapMs != 95000 || laps[0].LapID != lap.ID {
 		t.Fatalf("lap reports %+v", f.reports)
 	}
 	if f.core.Lap() != nil || f.core.Saved().Lap != nil {
@@ -1104,7 +1140,7 @@ func TestLap(t *testing.T) {
 }
 
 func TestLapEndsAndResumes(t *testing.T) {
-	f := newStepFixture(t)
+	f := newStepFixture(t, nil, nil)
 	sc := scenarioFromJSON(t, projectJSON)
 	f.activate(sc, 0, lapStart)
 	saved := f.core.Saved()
@@ -1112,7 +1148,7 @@ func TestLapEndsAndResumes(t *testing.T) {
 		t.Fatal("lap not persisted")
 	}
 	// A restarted sessiond resumes the lap.
-	g := newStepFixture(t, saved)
+	g := newStepFixture(t, &saved, nil)
 	g.activate(sc, 1, lapKeep)
 	if l := g.core.Lap(); l == nil || l.StartedAt != saved.Lap.StartedAt {
 		t.Fatalf("resumed lap %+v", l)
@@ -1123,7 +1159,7 @@ func TestLapEndsAndResumes(t *testing.T) {
 		t.Fatal("an ordinary activation kept the lap")
 	}
 	// So does a progress reset.
-	f.core.dropGeneration(sc.ID, 0)
+	f.core.drop(sc.ID, 0)
 	if f.core.Lap() != nil {
 		t.Fatal("the drop kept the lap")
 	}

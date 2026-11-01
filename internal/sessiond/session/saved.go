@@ -8,12 +8,10 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
 
-// Saved is the lesson state kept in /work/.playground/state.json (version
-// 1). The core is its only writer.
+// Saved is the lesson state kept in /work/.playground/state.json, next to
+// the progress outbox's generations and entries (Core.Persistent). The
+// core is its only writer.
 type Saved struct {
-	Generations protocol.ProgressGenerations `json:"generations,omitempty"`
-	// Revision orders snapshots within this process, independently of disk state.
-	Revision uint64 `json:"-"`
 	// Active is the active step, nil when none.
 	Active *protocol.StepRef `json:"active,omitempty"`
 	// Lessons is per-lesson progress known to this session.
@@ -41,21 +39,21 @@ func (ls *LessonState) finished(stepID string) bool {
 	return ls != nil && (ls.Done[stepID] != 0 || ls.Skipped[stepID] != 0)
 }
 
-// progress is a report of stepID with status, carrying the step's hint and
-// reset totals when there are any.
-func (ls *LessonState) progress(lessonID, stepID string, status protocol.ProgressStatus, at time.Time) protocol.ProgressReport {
-	rep := protocol.ProgressReport{LessonID: lessonID, StepID: stepID, Status: status, At: at.UnixMilli()}
+// report is a progress report of stepID with status, carrying the step's
+// hint and reset totals when there are any.
+func (ls *LessonState) report(lessonID, stepID string, status protocol.ProgressStatus, at time.Time) protocol.ProgressReport {
+	e := protocol.ProgressReport{LessonID: lessonID, StepID: stepID, Status: status, At: at.UnixMilli()}
 	if h := ls.Hints[stepID]; h > 0 {
-		rep.HintsUsed = &h
+		e.HintsUsed = &h
 	}
 	if r := ls.Resets[stepID]; r > 0 {
-		rep.Resets = &r
+		e.Resets = &r
 	}
-	return rep
+	return e
 }
 
-// statusOf is the saved status of a step, for reports that carry it along
-// (hints): done, skipped, demonstrated or in-progress.
+// statusOf is the saved status of a step, for entries that carry it along
+// (hints, reconciliation): done, skipped, demonstrated or in-progress.
 func statusOf(ls *LessonState, stepID string) protocol.ProgressStatus {
 	switch {
 	case ls == nil:
@@ -100,7 +98,7 @@ func (s *Saved) lesson(id string) *LessonState {
 
 // clone returns a deep copy.
 func (s *Saved) clone() Saved {
-	out := Saved{Revision: s.Revision, Generations: maps.Clone(s.Generations), Lessons: map[string]*LessonState{}}
+	out := Saved{Lessons: map[string]*LessonState{}}
 	if s.Active != nil {
 		a := *s.Active
 		out.Active = &a
@@ -125,45 +123,28 @@ func (c *Core) RestoreSaved(s Saved) {
 	if s.Lessons == nil {
 		s.Lessons = map[string]*LessonState{}
 	}
-	s.Revision = c.lesson.Saved.Revision
 	c.lesson.Saved = s
 }
 
-// Saved returns a copy of the persistent state.
+// Saved returns a copy of the saved lesson state.
 func (c *Core) Saved() Saved {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.savedLocked()
-}
-
-// savedLocked returns a copy of the persistent state with the next
-// revision, for persist.
-func (c *Core) savedLocked() Saved {
-	c.lesson.Saved.Revision++
 	return c.lesson.Saved.clone()
 }
 
-func (c *Core) persist(s Saved) {
+// persist writes state.json (Deps.Persist), never under mu.
+func (c *Core) persist() {
 	if c.d.Persist != nil {
-		c.d.Persist(s)
+		c.d.Persist()
 	}
 }
 
-func (c *Core) report(rs ...protocol.ProgressReport) {
-	if c.d.Report == nil {
-		return
-	}
-	for _, r := range rs {
-		c.d.Report(r)
-	}
-}
-
-// progressLocked is a report of the step's saved totals with status and
-// the lesson's generation.
-func (c *Core) progressLocked(lessonID, stepID string, status protocol.ProgressStatus, at time.Time) protocol.ProgressReport {
-	r := c.lesson.Saved.lesson(lessonID).progress(lessonID, stepID, status, at)
-	r.Generation = c.lesson.Saved.Generations.ForLesson(lessonID)
-	return r
+// recordLocked queues an outcome of stepID with the step's saved totals in
+// the progress outbox. It runs under mu, as the drop op does, so a drop
+// that forgets the lesson also purges what was recorded before it.
+func (c *Core) recordLocked(lessonID, stepID string, status protocol.ProgressStatus, at time.Time) {
+	c.d.Progress.Record(c.lesson.Saved.lesson(lessonID).report(lessonID, stepID, status, at))
 }
 
 // firstIncomplete returns the index of the first step of sc that is
@@ -182,12 +163,12 @@ func (c *Core) firstIncomplete(sc *protocol.Scenario) int {
 	return 0
 }
 
-// ProgressReports reconciles completed, skipped and demonstrated steps using
-// their original timestamps. Lap increments are sent only at completion.
-func (c *Core) ProgressReports() []protocol.ProgressReport {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	var reports []protocol.ProgressReport
+// outcomesLocked are the saved done, skipped and demonstrated steps as
+// progress reports with their original times and the steps' totals, by
+// lesson and step id (the sync op's reconciliation). Laps are reported
+// only when they finish.
+func (c *Core) outcomesLocked() []protocol.ProgressReport {
+	var out []protocol.ProgressReport
 	for _, lessonID := range slices.Sorted(maps.Keys(c.lesson.Saved.Lessons)) {
 		ls := c.lesson.Saved.Lessons[lessonID]
 		times := map[string]int64{}
@@ -197,8 +178,8 @@ func (c *Core) ProgressReports() []protocol.ProgressReport {
 			}
 		}
 		for _, stepID := range slices.Sorted(maps.Keys(times)) {
-			reports = append(reports, c.progressLocked(lessonID, stepID, statusOf(ls, stepID), time.UnixMilli(times[stepID])))
+			out = append(out, ls.report(lessonID, stepID, statusOf(ls, stepID), time.UnixMilli(times[stepID])))
 		}
 	}
-	return reports
+	return out
 }

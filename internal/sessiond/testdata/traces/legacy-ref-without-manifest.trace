@@ -22,3 +22,4 @@ checkpoint:01-life/01-three/write
 step:write:loaded
 check:write:false
 gw:01-life/01-three/open:done:gen0
+gw:01-life/01-three/write:in-progress:gen0

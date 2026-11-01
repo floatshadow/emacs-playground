@@ -42,18 +42,18 @@ type Agent interface {
 	Call(ctx context.Context, op protocol.AgentOp, args any, timeout time.Duration, out any) error
 }
 
-// Hooks are what sessiond does around Emacs stopping and starting; the
-// snapshot service implements them (the editor state is its, not the
-// supervisor's). Each runs in the supervisor's goroutine and may call the
-// agent.
+// Hooks are what sessiond does around Emacs stopping and starting (the
+// editor state is sessiond's, not the supervisor's). Both may call the
+// agent. In RestartEmacs they run on its caller's goroutine; after a crash
+// AfterRestart runs on the supervisor's.
 type Hooks struct {
 	// BeforeStop records the editor state and saves the modified file
 	// buffers before Emacs stops.
 	BeforeStop func(ctx context.Context)
-	// AfterRestart reopens the editor state in a daemon that restarted
-	// (requested or after a crash), once it said hello and before the
-	// terminal frame is respawned.
-	AfterRestart func(ctx context.Context)
+	// AfterRestart reopens the editor state in a daemon that restarted,
+	// once it said hello and before the terminal frame is respawned;
+	// crashed tells a restart after a crash from RestartEmacs.
+	AfterRestart func(ctx context.Context, crashed bool)
 }
 
 // Commands build the supervised processes. RealCommands uses the session
@@ -327,14 +327,16 @@ func (s *Supervisor) onDaemonExit(err error, restarting, gaveUp bool) {
 	s.emit(&protocol.EmacsEvent{Event: protocol.EmacsRestarting, Reason: errString(err)})
 }
 
-// OnHello is called by the agent handler for every hello.
-func (s *Supervisor) OnHello(h *protocol.AgentHelloMsg) {
+// OnHello is called by the agent handler for every hello. It reports
+// whether the hello starts the recovery of a daemon restarted after a crash
+// (Hooks.AfterRestart with crashed).
+func (s *Supervisor) OnHello(h *protocol.AgentHelloMsg) bool {
 	// The socket is read independently of the process: a daemon that said
 	// hello and exited at once may be heard after its exit was handled
 	// (and after the restart policy gave up). Its hello proves nothing.
 	if s.daemon.PID() == 0 || s.daemon.GaveUp() {
 		s.log.Info("ignoring the hello of an exited daemon", "pid", h.PID)
-		return
+		return false
 	}
 	s.mu.Lock()
 	s.ready = true
@@ -355,10 +357,13 @@ func (s *Supervisor) OnHello(h *protocol.AgentHelloMsg) {
 	}
 	if crashed && !intentional && s.ctx != nil {
 		// Unexpected exit and automatic restart: restore buffers.
-		go s.afterRestart(reason)
-	} else if s.ctx != nil && !intentional {
+		go s.afterRestart(s.ctx, reason, true)
+		return true
+	}
+	if s.ctx != nil && !intentional {
 		go s.ensureTerminalFrame()
 	}
+	return false
 }
 
 // OnFrame is called for agent frame messages.
@@ -601,7 +606,7 @@ func (s *Supervisor) RestartEmacs(ctx context.Context, reason string) error {
 		s.emit(&protocol.ErrorEvent{Code: protocol.ErrEmacsUnavailable, Message: "Emacs did not start after the restart."})
 		return fmt.Errorf("emacs did not say hello after restart: %w", err)
 	}
-	s.afterRestart(reason)
+	s.afterRestart(ctx, reason, false)
 	return nil
 }
 
@@ -618,11 +623,11 @@ func (s *Supervisor) beforeStop(ctx context.Context) {
 
 // afterRestart restores buffers and frames once a restarted daemon said
 // hello.
-func (s *Supervisor) afterRestart(reason string) {
-	ctx, cancel := context.WithTimeout(s.ctx, 15*time.Second)
+func (s *Supervisor) afterRestart(ctx context.Context, reason string, crashed bool) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	if s.opt.Hooks.AfterRestart != nil {
-		s.opt.Hooks.AfterRestart(ctx)
+		s.opt.Hooks.AfterRestart(ctx, crashed)
 	}
 	s.ensureTerminalFrame()
 	// Lesson setup after a restart needs the learner's frame: before it

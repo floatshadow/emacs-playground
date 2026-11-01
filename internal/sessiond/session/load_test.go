@@ -78,7 +78,7 @@ func TestLoadFlow(t *testing.T) {
 	f.fetch.mu.Lock()
 	f.fetch.down = true
 	f.fetch.mu.Unlock()
-	f.core.dropGeneration(lessonID, 0)
+	f.core.drop(lessonID, 0)
 	_ = os.RemoveAll(filepath.Join(f.ws, "hello"))
 	res, err = f.core.Load(ctx, protocol.ScenarioRequest{LessonID: lessonID, Reset: true})
 	if err != nil || res.Step.StepID != "open" {

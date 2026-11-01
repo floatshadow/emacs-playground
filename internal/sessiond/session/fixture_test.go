@@ -151,8 +151,10 @@ type fakeSup struct {
 	played   []string
 	// pending is the key sequence typed so far towards a demo command.
 	pending string
-	// onKeys, when set, runs before each key chunk is sent.
-	onKeys func(ctx context.Context) error
+	// onKeys, when set, runs before each key chunk is sent; afterRestart,
+	// when set, at the end of each restart (the supervisor's hook).
+	onKeys       func(ctx context.Context) error
+	afterRestart func(ctx context.Context)
 }
 
 func (s *fakeSup) Ready() (bool, string)                               { return true, "" }
@@ -161,7 +163,7 @@ func (s *fakeSup) WaitReady(ctx context.Context, d time.Duration) bool { return 
 func (s *fakeSup) RestartEmacs(ctx context.Context, reason string) error {
 	s.mu.Lock()
 	s.restarts++
-	release := s.release
+	release, after := s.release, s.afterRestart
 	s.mu.Unlock()
 	if release != nil {
 		select {
@@ -174,6 +176,9 @@ func (s *fakeSup) RestartEmacs(ctx context.Context, reason string) error {
 		}
 	} else {
 		time.Sleep(20 * time.Millisecond)
+	}
+	if after != nil {
+		after(ctx)
 	}
 	return nil
 }
@@ -221,12 +226,18 @@ type fakeSnaps struct {
 	restored   []string
 	restorable map[string]bool
 	restoreErr error
-	spec       *protocol.WindowSpec
-	opens      []*protocol.WindowSpec
-	// onCapture and onOpen, when set, run at the start of each capture and
-	// open.
+	// deferred makes restores report the agent away; editorRestores lists
+	// the refs RestoreEditor restored, saves counts SaveEditorState.
+	deferred       bool
+	editorRestores []string
+	saves          int
+	spec           *protocol.WindowSpec
+	opens          []*protocol.WindowSpec
+	// onCapture, onOpen and onRestore, when set, run at the start of each
+	// capture, open and restore.
 	onOpen    func()
 	onCapture func()
+	onRestore func()
 }
 
 func (s *fakeSnaps) Exists(ctx context.Context, ref string) bool {
@@ -260,6 +271,12 @@ func (s *fakeSnaps) Capture(ctx context.Context, ref, label string, step *protoc
 
 func (s *fakeSnaps) Restore(ctx context.Context, ref string) (snapshot.Report, error) {
 	s.mu.Lock()
+	hook := s.onRestore
+	s.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
+	s.mu.Lock()
 	defer s.mu.Unlock()
 	_, step, _ := splitStepRef(ref)
 	s.restored = append(s.restored, step)
@@ -269,7 +286,21 @@ func (s *fakeSnaps) Restore(ctx context.Context, ref string) (snapshot.Report, e
 	if !s.restorable[step] {
 		return snapshot.Report{}, snapshot.ErrNoCheckpoint
 	}
-	return snapshot.Report{Files: []string{"x"}}, nil
+	return snapshot.Report{Files: []string{"x"}, EditorDeferred: s.deferred}, nil
+}
+
+func (s *fakeSnaps) RestoreEditor(ctx context.Context, ref string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.editorRestores = append(s.editorRestores, ref)
+	return nil
+}
+
+func (s *fakeSnaps) SaveEditorState(ctx context.Context) (*protocol.WindowSpec, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.saves++
+	return s.spec, nil
 }
 
 func (s *fakeSnaps) LastEditorState() *protocol.WindowSpec { return s.spec }

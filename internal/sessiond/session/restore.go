@@ -13,7 +13,8 @@ import (
 // editor state come back, then the step it was taken for restarts as reset
 // (counted). Nothing activates when the restore failed (a missing
 // checkpoint, git, or the editor while the agent is connected) or ctx
-// ended; a restore whose editor state waits for the agent activates.
+// ended; a restore whose editor state waits for the agent activates, and
+// the agent's next hello gets that state (deferEditor).
 func (c *Core) restore(ctx context.Context, op *Op) (any, error) {
 	ref, err := c.resolveRestore(ctx, op.Req.(protocol.RestoreRequest))
 	if err != nil {
@@ -23,6 +24,7 @@ func (c *Core) restore(ctx context.Context, op *Op) (any, error) {
 		c.setTarget(op, lesson, step)
 	}
 	rep, err := c.d.Snapshots.Restore(ctx, ref)
+	defer c.deferEditor(ref, rep)
 	if err != nil {
 		if noCheckpoint(err) {
 			return nil, httpx.NotFound("no such checkpoint")

@@ -20,11 +20,12 @@ import (
 // The contract fixtures are recorded from the real agent by
 // emacs.d/test/record-fixtures.el (make agent-fixtures) and replayed
 // against it by make emacs-test. Here the fake editor replays them under
-// the same rule: replies and events have the recorded shape (keys and
-// JSON types, recursively) and the fields a fixture marks exact are
-// equal. Every recorded reply decodes, without unknown fields, into the
-// Go type of its op (an op without one fails), and every event into its
-// protocol type.
+// the same rule: every reply, the key and minibuffer events in order and
+// the final state (read once every step ran) have the recorded shape
+// (keys and JSON types, recursively), and the fields a fixture marks
+// exact are equal. Every recorded reply decodes, without unknown fields,
+// into the Go type of its op (an op without one fails), and every event
+// and final state into its protocol type.
 
 type fixture struct {
 	Name  string `json:"name"`
@@ -47,8 +48,12 @@ type fixture struct {
 		Reply any      `json:"reply"`
 		Exact []string `json:"exact"`
 	} `json:"calls"`
+	// Events are the key and minibuffer events, and with AllStates every
+	// state event too (decoded, not replayed); State is the final state.
 	Events      []map[string]any    `json:"events"`
+	State       map[string]any      `json:"state"`
 	EventsExact map[string][]string `json:"eventsExact"`
+	AllStates   bool                `json:"allStates"`
 }
 
 func fixtureDir(t *testing.T) string {
@@ -244,8 +249,9 @@ type replayedCall struct {
 	reply any
 }
 
-// replay plays fx against a fresh editor.
-func replay(t *testing.T, fx fixture) ([]replayedCall, []map[string]any) {
+// replay plays fx against a fresh editor; it returns the calls, the key
+// and minibuffer events and the final state.
+func replay(t *testing.T, fx fixture) ([]replayedCall, []map[string]any, map[string]any) {
 	t.Helper()
 	ws := t.TempDir()
 	for _, f := range fx.Setup {
@@ -305,14 +311,17 @@ func replay(t *testing.T, fx fixture) ([]replayedCall, []map[string]any) {
 			t.Fatal(err)
 		}
 		switch m["t"] {
-		case "key", "state", "minibuffer":
+		case "key", "minibuffer":
 			events = append(events, normalize(m, ws).(map[string]any))
 		}
 	}
-	return calls, events
+	e.mu.Lock()
+	state := normalize(jsonValue(t, e.stateObject()), ws).(map[string]any)
+	e.mu.Unlock()
+	return calls, events, state
 }
 
-func fixtureDiffs(fx fixture, calls []replayedCall, events []map[string]any) []string {
+func fixtureDiffs(fx fixture, calls []replayedCall, events []map[string]any, state map[string]any) []string {
 	var out []string
 	if len(calls) != len(fx.Calls) {
 		out = append(out, fmt.Sprintf("%d calls, want %d", len(calls), len(fx.Calls)))
@@ -329,23 +338,12 @@ func fixtureDiffs(fx fixture, calls []replayedCall, events []map[string]any) []s
 			out = append(out, exactDiffs(w.Reply, g.reply, w.Exact, where)...)
 		}
 	}
-	split := func(evs []map[string]any) (other []map[string]any, states []map[string]any) {
-		for _, e := range evs {
-			if e["t"] == "state" {
-				states = append(states, e)
-			} else {
-				other = append(other, e)
-			}
-		}
-		return
+	wo := slices.DeleteFunc(slices.Clone(fx.Events), func(e map[string]any) bool { return e["t"] == "state" })
+	if len(wo) != len(events) {
+		out = append(out, fmt.Sprintf("key and minibuffer events %v, want %v", summary(events), summary(wo)))
 	}
-	wo, ws := split(fx.Events)
-	gotOther, gs := split(events)
-	if len(wo) != len(gotOther) {
-		out = append(out, fmt.Sprintf("key and minibuffer events %v, want %v", summary(gotOther), summary(wo)))
-	}
-	for i := 0; i < min(len(wo), len(gotOther)); i++ {
-		w, g := wo[i], gotOther[i]
+	for i := 0; i < min(len(wo), len(events)); i++ {
+		w, g := wo[i], events[i]
 		where := fmt.Sprintf("%v event %d", w["t"], i)
 		if w["t"] != g["t"] {
 			out = append(out, fmt.Sprintf("%s: got %v", where, g["t"]))
@@ -354,22 +352,9 @@ func fixtureDiffs(fx fixture, calls []replayedCall, events []map[string]any) []s
 		out = append(out, shapeDiffs(any(w), any(g), where)...)
 		out = append(out, exactDiffs(any(w), any(g), fx.EventsExact[w["t"].(string)], where)...)
 	}
-	// The recorded last state must be among the replay's states (the
-	// replay may report more: a batch Emacs never redisplays, so ops send
-	// none there).
-	if len(ws) > 0 {
-		w := ws[len(ws)-1]
-		var best []string
-		for i, g := range gs {
-			d := append(shapeDiffs(any(w), any(g), "last state"), exactDiffs(any(w), any(g), fx.EventsExact["state"], "last state")...)
-			if i == 0 || len(d) < len(best) {
-				best = d
-			}
-		}
-		if len(gs) == 0 {
-			best = []string{"no state events"}
-		}
-		out = append(out, best...)
+	if fx.State != nil {
+		out = append(out, shapeDiffs(any(fx.State), any(state), "final state")...)
+		out = append(out, exactDiffs(any(fx.State), any(state), fx.EventsExact["state"], "final state")...)
 	}
 	return out
 }
@@ -389,8 +374,8 @@ func summary(evs []map[string]any) []string {
 func TestContractFixtures(t *testing.T) {
 	for _, fx := range loadFixtures(t) {
 		t.Run(fx.Name, func(t *testing.T) {
-			calls, events := replay(t, fx)
-			for _, d := range fixtureDiffs(fx, calls, events) {
+			calls, events, state := replay(t, fx)
+			for _, d := range fixtureDiffs(fx, calls, events, state) {
 				t.Error(d)
 			}
 		})
@@ -413,8 +398,6 @@ func TestFixturesDecodeIntoProtocolTypes(t *testing.T) {
 			}
 			var out any
 			switch protocol.AgentOp(c.Op) {
-			case protocol.AgentOpSnapshot:
-				out = &protocol.WindowSpec{}
 			case protocol.AgentOpCheck:
 				out = &protocol.AgentCheckResult{}
 			case protocol.AgentOpRescue:
@@ -439,8 +422,6 @@ func TestFixturesDecodeIntoProtocolTypes(t *testing.T) {
 				out = &protocol.Empty{}
 			// sessiond discards these replies; the fake's reply types
 			// state their shape.
-			case protocol.AgentOpResetStep:
-				out = &resetReply{}
 			case protocol.AgentOpOpen:
 				out = &openReply{}
 			case protocol.AgentOpSetup:
@@ -457,7 +438,11 @@ func TestFixturesDecodeIntoProtocolTypes(t *testing.T) {
 				t.Errorf("%s call %d (%s): %v", fx.Name, i, c.Op, err)
 			}
 		}
-		for i, ev := range fx.Events {
+		evs := fx.Events
+		if fx.State != nil {
+			evs = append(slices.Clone(evs), fx.State)
+		}
+		for i, ev := range evs {
 			b, _ := json.Marshal(ev)
 			m, err := protocol.DecodeAgentMessage(b)
 			if err != nil {

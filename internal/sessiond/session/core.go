@@ -11,6 +11,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/httpx"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/progress"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/snapshot"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
@@ -51,14 +52,15 @@ type Deps struct {
 	// Evaluator evaluates the current attempt; its Observe hook must call
 	// Core.Observe.
 	Evaluator *steps.Evaluator
-	// Report sends progress to the gateway without blocking (queue it);
-	// Persist writes state.json (revision-ordered). Both are called
-	// without Core.mu.
-	Report  func(protocol.ProgressReport)
-	Persist func(Saved)
-	// PurgeReports discards the queued reports a gateway reset makes
-	// stale (the drop op, before it forgets saved progress); nil: none.
-	PurgeReports func(lessonID string, generation int64)
+	// Progress is the progress outbox (default: one without a sender).
+	// The core calls it under Core.mu; it must not block.
+	Progress Progress
+	// Generations fetches the gateway's reset generations (the sync op);
+	// nil without a gateway.
+	Generations func(context.Context) (protocol.ProgressGenerations, error)
+	// Persist writes state.json from Persistent; the core calls it without
+	// Core.mu after every change.
+	Persist func()
 	// Git runs git for setup.repos (nil: the git binary); Shell runs
 	// setup.run.
 	Git   checkpoint.Runner
@@ -91,6 +93,17 @@ const (
 	OpAdvance OpKind = "advance"
 	// OpCheckpoint takes a learner's labelled checkpoint (rpc checkpoint).
 	OpCheckpoint OpKind = "checkpoint"
+	// OpSync applies the gateway's generations (Sync).
+	OpSync OpKind = "sync"
+	// OpRestartEmacs restarts the daemon (rpc restart-emacs).
+	OpRestartEmacs OpKind = "restart-emacs"
+	// OpAutosave writes snapshot.json while nothing else is queued.
+	OpAutosave OpKind = "autosave"
+	// OpReconnect gives an agent that said hello the editor state of a
+	// restore made while it was away; OpRecover reopens the editor state
+	// in a daemon restarted after a crash.
+	OpReconnect OpKind = "reconnect"
+	OpRecover   OpKind = "recover"
 )
 
 // Deadlines bound each op from the moment it starts running.
@@ -104,6 +117,7 @@ const (
 	SkipDeadline       = 60 * time.Second
 	AdvanceDeadline    = time.Minute
 	CheckpointDeadline = 30 * time.Second
+	EditorDeadline     = 30 * time.Second
 )
 
 // RestartTimeout bounds a daemon restart for a module change.
@@ -162,13 +176,15 @@ type Core struct {
 	mu      sync.Mutex
 	queue   []*Op
 	running *Op
+	// stopped is set once Run returned: later ops fail at once.
+	stopped bool
 	wake    chan struct{}
 	lesson  Lesson
+	// pending is the editor state of a restore made while the agent was
+	// away (deferEditor). Only ops (the worker) touch it.
+	pending *pendingEditor
 	// obs is what the current attempt's observations left (Observe).
 	obs observed
-	// reported holds the lesson and step ids reported in progress in this
-	// process.
-	reported map[string]bool
 	// dirty marks the active step dirty after a load that failed changed
 	// the workspace (until the next activation).
 	dirty bool
@@ -188,7 +204,10 @@ func New(d Deps) *Core {
 	if d.Locale == "" {
 		d.Locale = protocol.DefaultLocale
 	}
-	return &Core{d: d, log: d.Log, wake: make(chan struct{}, 1), reported: map[string]bool{},
+	if d.Progress == nil {
+		d.Progress = progress.New(progress.Snapshot{}, nil, nil, d.Log)
+	}
+	return &Core{d: d, log: d.Log, wake: make(chan struct{}, 1),
 		lesson: Lesson{Index: -1, Saved: Saved{Lessons: map[string]*LessonState{}}}}
 }
 
@@ -219,7 +238,7 @@ func (c *Core) Run(ctx context.Context) {
 		if op == nil {
 			c.mu.Lock()
 			queued := c.queue
-			c.queue = nil
+			c.queue, c.stopped = nil, true
 			c.mu.Unlock()
 			for _, op := range queued {
 				op.done <- Result{Err: errStopped}
@@ -270,9 +289,9 @@ func (c *Core) exec(ctx context.Context, op *Op) (any, error) {
 	case OpRestore:
 		return c.restore(ctx, op)
 	case OpDemoStart:
-		return c.demoStart(ctx, op.Req.(string))
+		return c.demoStart(ctx, op.Req.(admitted))
 	case OpSkip:
-		return c.skip(ctx, op.Req.(string))
+		return c.skip(ctx, op.Req.(admitted))
 	case OpAdvance:
 		_, err := c.advance(ctx, op.Req.(uint64))
 		return nil, err
@@ -286,6 +305,22 @@ func (c *Core) exec(ctx context.Context, op *Op) (any, error) {
 	case OpCheckpoint:
 		label := op.Req.(string)
 		return c.d.Snapshots.Capture(ctx, checkpoint.ManualRef(label), label, nil)
+	case OpSync:
+		return nil, c.sync(ctx, op.Req.(bool))
+	case OpRestartEmacs:
+		c.restart("requested")
+		return nil, nil
+	case OpAutosave:
+		if _, err := c.d.Snapshots.SaveEditorState(ctx); err != nil {
+			c.log.Debug("autosave of snapshot.json", "err", err)
+		}
+		return nil, nil
+	case OpReconnect:
+		c.reconnect(ctx)
+		return nil, nil
+	case OpRecover:
+		c.reopenEditor(ctx)
+		return nil, nil
 	}
 	return nil, errors.New("unknown op " + string(op.Kind))
 }
@@ -303,6 +338,10 @@ func (c *Core) submitLocked(op *Op) {
 	op.early = make(chan any, 1)
 	op.done = make(chan Result, 1)
 	op.info.Kind = op.Kind
+	if c.stopped {
+		op.done <- Result{Err: errStopped}
+		return
+	}
 	if r := c.running; op.Cancels && r != nil && lessonScoped(r.Kind) && (op.info.LessonID == "" || r.info.LessonID == op.info.LessonID) {
 		r.cancel()
 	}
@@ -319,7 +358,13 @@ func (c *Core) submitLocked(op *Op) {
 
 // lessonScoped reports whether ops of kind work on a lesson's step, which a
 // drop of that lesson makes moot.
-func lessonScoped(k OpKind) bool { return k != OpSetModules && k != OpDrop && k != OpCheckpoint }
+func lessonScoped(k OpKind) bool {
+	switch k {
+	case OpLoad, OpResume, OpRestore, OpDemoStart, OpSkip, OpAdvance:
+		return true
+	}
+	return false
+}
 
 // do submits op and waits, while ctx lasts, for its early or final result.
 // A caller that goes away changes nothing: the op runs on.
@@ -408,26 +453,28 @@ func (c *Core) Restore(ctx context.Context, req protocol.RestoreRequest) (protoc
 
 // DemoStart implements rpc demo start (api.md §4.1): the active step,
 // restored first when the learner ran a command in it, gets a "Watch it"
-// latch.
+// latch. The op runs only while the attempt it was admitted for is
+// current.
 func (c *Core) DemoStart(ctx context.Context, stepID string) (protocol.DemoResult, error) {
-	sc, idx, err := c.requireActive(stepID)
+	req, err := c.admit(stepID)
 	if err != nil {
 		return protocol.DemoResult{}, err
 	}
-	v, err := c.do(ctx, &Op{Kind: OpDemoStart, Req: stepID, Deadline: DemoDeadline, info: OpInfo{LessonID: sc.ID, StepID: sc.Steps[idx].ID}})
+	v, err := c.do(ctx, &Op{Kind: OpDemoStart, Req: req, Deadline: DemoDeadline, info: OpInfo{LessonID: req.attempt.Lesson, StepID: stepID}})
 	if err != nil {
 		return protocol.DemoResult{}, err
 	}
 	return v.(protocol.DemoResult), nil
 }
 
-// Skip implements rpc skip (api.md §3.4).
+// Skip implements rpc skip (api.md §3.4); like DemoStart it runs only for
+// the attempt it was admitted for.
 func (c *Core) Skip(ctx context.Context, stepID string) (protocol.SkipResult, error) {
-	sc, idx, err := c.requireActive(stepID)
+	req, err := c.admit(stepID)
 	if err != nil {
 		return protocol.SkipResult{}, err
 	}
-	v, err := c.do(ctx, &Op{Kind: OpSkip, Req: stepID, Deadline: SkipDeadline, info: OpInfo{LessonID: sc.ID, StepID: sc.Steps[idx].ID}})
+	v, err := c.do(ctx, &Op{Kind: OpSkip, Req: req, Deadline: SkipDeadline, info: OpInfo{LessonID: req.attempt.Lesson, StepID: stepID}})
 	if err != nil {
 		return protocol.SkipResult{}, err
 	}
@@ -445,6 +492,25 @@ func (c *Core) Checkpoint(ctx context.Context, label string) (snapshot.Manifest,
 	return v.(snapshot.Manifest), nil
 }
 
+// RestartEmacs implements rpc restart-emacs: the restart is queued as an
+// op and its progress arrives as emacs events. Every daemon restart sessiond
+// asks for runs in an op, so the supervisor's restart hooks always run in
+// the worker (AfterRestart).
+func (c *Core) RestartEmacs() {
+	c.Submit(&Op{Kind: OpRestartEmacs, Deadline: RestartTimeout})
+}
+
+// Autosave queues an autosave of snapshot.json when no op runs or waits:
+// a capture never interleaves with an op that puts another editor state
+// in place, and an op asked for meanwhile waits for it (2 s at most).
+func (c *Core) Autosave() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.running == nil && len(c.queue) == 0 {
+		c.submitLocked(&Op{Kind: OpAutosave, Deadline: EditorDeadline})
+	}
+}
+
 // SetModules implements rpc modules: it replaces the set exactly and
 // answers {restarting} as soon as the daemon restart begins.
 func (c *Core) SetModules(ctx context.Context, mods []string) (bool, error) {
@@ -460,15 +526,15 @@ func (c *Core) SetModules(ctx context.Context, mods []string) (bool, error) {
 
 // Drop implements rpc drop-step: it forgets a lesson's (with "" every
 // lesson's) saved progress and active step for a gateway reset. It runs
-// next and, when its generation is newer than the one applied (the
-// predicate dropGeneration applies), cancels a running op on that lesson;
-// a stale drop changes nothing and cancels nothing.
+// next and, when its generation is newer than the one applied
+// (Progress.Newer), cancels a running op on that lesson; a stale drop
+// changes nothing and cancels nothing.
 func (c *Core) Drop(ctx context.Context, lessonID string, generation int64) error {
 	if lessonID != "" && !validLessonID(lessonID) {
 		return httpx.BadRequest("lessonId is not a valid lesson id")
 	}
 	_, err := c.do(ctx, &Op{Kind: OpDrop, Req: protocol.DropStepRequest{LessonID: lessonID, Generation: generation},
-		Deadline: DropDeadline, Preempt: true, Cancels: c.generationNewer(lessonID, generation),
+		Deadline: DropDeadline, Preempt: true, Cancels: c.d.Progress.Newer(lessonID, generation),
 		info: OpInfo{LessonID: lessonID}})
 	return err
 }

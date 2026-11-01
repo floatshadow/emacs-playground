@@ -1,0 +1,19 @@
+# load 01-life/01-three
+checkpoint:01-life/01-three/open
+step:open:loaded
+check:open:false
+gw:01-life/01-three/open:in-progress:gen0
+# open with the gateway down
+check:open:true
+step:open:complete
+checkpoint:01-life/01-three/write
+step:write:loaded
+check:write:false
+= pending in state.json: [open:done:gen0 write:in-progress:gen0]
+# sessiond restarts after the reset
+gw:reset:01-life/01-three
+= pending after the restart: []
+# load the lesson again
+step:open:loaded
+check:open:false
+gw:01-life/01-three/open:in-progress:gen1

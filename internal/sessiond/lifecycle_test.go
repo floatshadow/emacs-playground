@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -88,11 +89,15 @@ func jsonString(s string) string {
 
 // applyLocked records a progress report as the gateway applies it
 // (progress.Service.Apply): stale generations are discarded, statuses
-// only rise, a lap counts once per (at, ms).
+// only rise, a lap counts once per lap id (without one, once per (at,
+// ms)).
 func (g *fakeGateway) applyLocked(p protocol.ProgressReport) {
 	line := fmt.Sprintf("gw:%s/%s:%s:gen%d", p.LessonID, p.StepID, p.Status, p.Generation)
 	if p.LapMs > 0 {
 		line += fmt.Sprintf(":lap%d", p.LapMs)
+	}
+	if p.LapID != "" {
+		line += ":" + p.LapID
 	}
 	if p.Generation < g.gens.ForLesson(p.LessonID) {
 		g.lines = append(g.lines, line+":stale")
@@ -111,9 +116,9 @@ func (g *fakeGateway) applyLocked(p protocol.ProgressReport) {
 			g.laps = map[string]gwLap{}
 		}
 		lr := g.laps[p.LessonID]
-		if p.At == 0 || lr.lastAt != p.At || lr.lastMs != p.LapMs {
+		if p.LapID != "" && p.LapID != lr.lastID || p.LapID == "" && (p.At == 0 || lr.lastAt != p.At || lr.lastMs != p.LapMs) {
 			lr.count++
-			lr.lastAt, lr.lastMs = p.At, p.LapMs
+			lr.lastAt, lr.lastMs, lr.lastID = p.At, p.LapMs, p.LapID
 		}
 		g.laps[p.LessonID] = lr
 	}
@@ -268,6 +273,7 @@ func (l *lifecycle) start(after string) {
 	ts := startServer(l.t, l.ws, l.run, l.gw, l.gwURL, func(o *Options) {
 		o.Editor = l.ed
 		o.Debounce = 10 * time.Millisecond
+		o.ProgressBackoff = 200 * time.Millisecond
 		if l.clock != nil {
 			o.Clock = l.clock.Now
 		}
@@ -569,6 +575,73 @@ func (l *lifecycle) whileHeld(held protocol.AgentOp, op string, body any) int {
 	return code
 }
 
+// diesAt runs git until the command op, where sessiond dies (die) and git
+// fails.
+type diesAt struct {
+	checkpoint.Runner
+	op  string
+	die func()
+}
+
+func (r diesAt) Run(ctx context.Context, dir string, env []string, args ...string) ([]byte, error) {
+	if slices.Contains(args, r.op) {
+		r.die()
+		return nil, errors.New("sessiond died")
+	}
+	return r.Runner.Run(ctx, dir, env, args...)
+}
+
+// statePath is state.json.
+func (l *lifecycle) statePath() string { return filepath.Join(l.ws, ".playground", "state.json") }
+
+// writeState writes state.json (before a start).
+func (l *lifecycle) writeState(content string) {
+	l.t.Helper()
+	if err := os.MkdirAll(filepath.Dir(l.statePath()), 0o755); err != nil {
+		l.t.Fatal(err)
+	}
+	if err := os.WriteFile(l.statePath(), []byte(content), 0o644); err != nil {
+		l.t.Fatal(err)
+	}
+}
+
+// readStateFile reads state.json as JSON.
+func (l *lifecycle) readStateFile() map[string]any {
+	l.t.Helper()
+	b, err := os.ReadFile(l.statePath())
+	if err != nil {
+		l.t.Fatal(err)
+	}
+	var st map[string]any
+	if err := json.Unmarshal(b, &st); err != nil {
+		l.t.Fatal(err)
+	}
+	return st
+}
+
+// editState rewrites state.json (while sessiond is stopped).
+func (l *lifecycle) editState(edit func(map[string]any)) {
+	l.t.Helper()
+	st := l.readStateFile()
+	edit(st)
+	b, _ := json.Marshal(st)
+	l.writeState(string(b))
+}
+
+// outboxNote lists the outbox entries in state.json as step:status.
+func (l *lifecycle) outboxNote() string {
+	var st struct {
+		Outbox []protocol.ProgressReport `json:"outbox"`
+	}
+	b, _ := os.ReadFile(l.statePath())
+	_ = json.Unmarshal(b, &st)
+	var out []string
+	for _, e := range st.Outbox {
+		out = append(out, fmt.Sprintf("%s:%s:gen%d", e.StepID, e.Status, e.Generation))
+	}
+	return "[" + strings.Join(out, " ") + "]"
+}
+
 // waitFor polls cond for up to 2 s.
 func (l *lifecycle) waitFor(what string, cond func() bool) {
 	l.t.Helper()
@@ -860,7 +933,7 @@ func TestLifecycle(t *testing.T) {
 		}},
 		{name: "duplicate-lap-delivery", opts: []func(*lifecycle){withClock}, run: func(l *lifecycle) {
 			res := l.load(protocol.ScenarioRequest{LessonID: lessonA, Lap: true})
-			l.note("lap started: %v", res.Lap != nil)
+			l.note("lap started: %v, id %s", res.Lap != nil, res.Lap.ID)
 			l.section("start the lap", "step:open:loaded")
 			l.clock.Advance(time.Second)
 			l.play(demoOpen)
@@ -870,7 +943,7 @@ func TestLifecycle(t *testing.T) {
 			l.section("write", "step:split:loaded")
 			l.clock.Advance(time.Second)
 			l.play(demoSplit)
-			l.section("split", "step:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0:lap3000")
+			l.section("split", "step:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0:lap3000:"+res.Lap.ID)
 			l.gw.mu.Lock()
 			last := l.gw.progress[len(l.gw.progress)-1]
 			l.gw.mu.Unlock()
@@ -880,11 +953,11 @@ func TestLifecycle(t *testing.T) {
 				l.t.Fatal(err)
 			}
 			resp.Body.Close()
-			l.section("the same report delivered again", "gw:"+lessonA+"/split:done:gen0:lap3000")
+			l.section("the same report delivered again", "gw:"+lessonA+"/split:done:gen0:lap3000:"+res.Lap.ID)
 			l.note("laps counted: %d", l.gw.lapCount(lessonA))
 		}},
 		{name: "lap-refuses-help", opts: []func(*lifecycle){withClock}, run: func(l *lifecycle) {
-			l.load(protocol.ScenarioRequest{LessonID: lessonA, Lap: true})
+			res := l.load(protocol.ScenarioRequest{LessonID: lessonA, Lap: true})
 			l.section("start the lap", "step:open:loaded")
 			l.note("hint answered %d", l.rpc("hint", protocol.HintRequest{StepID: "open", Level: 1}, nil))
 			l.note("demo start answered %d", l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoStart}, nil))
@@ -896,7 +969,7 @@ func TestLifecycle(t *testing.T) {
 			l.play(demoWrite)
 			l.section("write", "step:split:loaded")
 			l.play(demoSplit)
-			l.section("split", "step:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0:lap2000")
+			l.section("split", "step:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0:lap2000:"+res.Lap.ID)
 			l.note("laps counted: %d", l.gw.lapCount(lessonA))
 		}},
 		{name: "agent-disconnected-during-restore", run: func(l *lifecycle) {
@@ -964,13 +1037,7 @@ func TestLifecycle(t *testing.T) {
 			// before its ref is published: no checkpoint exists, and the
 			// next load takes it again.
 			ts := l.server()
-			ts.srv.snap.SetFault(func(point string) error {
-				if point != "publish" {
-					return nil
-				}
-				ts.cancel()
-				return errors.New("sessiond died")
-			})
+			ts.srv.snap.Files.Git = diesAt{Runner: ts.srv.snap.Files.Git, op: "update-ref", die: ts.cancel}
 			l.note("scenario answered %d", l.rpc("scenario", protocol.ScenarioRequest{LessonID: lessonA}, nil))
 			l.stop()
 			_, err := os.Stat(filepath.Join(l.ws, ".playground", "checkpoints", "01-life", "01-three", "open.json"))
@@ -1051,6 +1118,71 @@ func TestLifecycle(t *testing.T) {
 			l.section("the learner makes the flag", "step:flag:complete", "step:last:loaded", "gw:"+lessonC+"/flag:done:gen0")
 			time.Sleep(500 * time.Millisecond)
 			l.section("later")
+		}},
+		{name: "gateway-down-during-three-completions", run: func(l *lifecycle) {
+			l.loadA()
+			l.gw.Down()
+			l.play(demoOpen)
+			l.section("open with the gateway down", "step:write:loaded")
+			l.play(demoWrite)
+			l.section("write with the gateway down", "step:split:loaded")
+			l.play(demoSplit)
+			l.section("split with the gateway down", "step:split:complete:lesson-complete")
+			l.gw.Up()
+			l.section("the gateway comes back",
+				"gw:"+lessonA+"/open:done:gen0", "gw:"+lessonA+"/write:done:gen0", "gw:"+lessonA+"/split:done:gen0")
+			time.Sleep(time.Second)
+			l.section("later")
+		}},
+		{name: "gateway-reset-while-stopped-with-pending-reports", run: func(l *lifecycle) {
+			l.loadA()
+			l.gw.Down()
+			l.play(demoOpen)
+			l.section("open with the gateway down", "step:write:loaded")
+			l.stop()
+			l.note("pending in state.json: %s", l.outboxNote())
+			l.gw.Reset(l.t, lessonA)
+			l.gw.Up()
+			l.start("?after=0")
+			l.section("sessiond restarts after the reset")
+			l.note("pending after the restart: %s", l.outboxNote())
+			l.load(protocol.ScenarioRequest{LessonID: lessonA})
+			l.section("load the lesson again", "step:open:loaded", "gw:"+lessonA+"/open:in-progress:gen1")
+		}},
+		{name: "stopped-after-delivery-before-persisting", opts: []func(*lifecycle){withClock}, run: func(l *lifecycle) {
+			l.load(protocol.ScenarioRequest{LessonID: lessonA, Lap: true})
+			l.section("start the lap", "step:open:loaded")
+			l.clock.Advance(time.Second)
+			l.play(demoOpen)
+			l.section("open", "step:write:loaded", "gw:"+lessonA+"/write:in-progress:gen0")
+			l.clock.Advance(time.Second)
+			l.play(demoWrite)
+			l.section("write", "step:split:loaded", "gw:"+lessonA+"/split:in-progress:gen0")
+			l.clock.Advance(time.Second)
+			l.play(demoSplit)
+			l.section("split ends the lap", "step:split:complete:lesson-complete")
+			l.stop()
+			// sessiond stopped after the gateway accepted the lap but
+			// before state.json lost it.
+			l.gw.mu.Lock()
+			last := l.gw.progress[len(l.gw.progress)-1]
+			before := maps.Clone(l.gw.store)
+			l.gw.mu.Unlock()
+			l.editState(func(st map[string]any) {
+				st["outbox"] = []protocol.ProgressReport{last}
+			})
+			l.start("?after=0")
+			l.section("sessiond restarts", "gw:"+lessonA+"/split:done:gen0:lap3000:"+last.LapID)
+			l.gw.mu.Lock()
+			unchanged := maps.Equal(before, l.gw.store)
+			l.gw.mu.Unlock()
+			l.note("gateway progress unchanged: %v, laps counted: %d", unchanged, l.gw.lapCount(lessonA))
+		}},
+		{name: "state-version-1-upgrade", opts: []func(*lifecycle){func(l *lifecycle) {
+			l.writeState(`{"version": 1, "lessons": {"` + lessonA + `": {"done": {"open": 100, "write": 200}, "hints": {"write": 1}}}}`)
+		}}, run: func(l *lifecycle) {
+			l.section("sessiond starts from a version 1 state.json", "gw:"+lessonA+"/open:done:gen0", "gw:"+lessonA+"/write:done:gen0")
+			l.note("state.json version %v, pending %s", l.readStateFile()["version"], l.outboxNote())
 		}},
 		{name: "two-event-streams", run: func(l *lifecycle) {
 			es2 := l.server().events("")

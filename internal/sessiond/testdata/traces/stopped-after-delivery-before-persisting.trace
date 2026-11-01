@@ -1,0 +1,30 @@
+# start the lap
+checkpoint:01-life/01-three/open
+step:open:loaded
+check:open:false
+gw:01-life/01-three/open:in-progress:gen0
+# open
+check:open:true
+step:open:complete
+checkpoint:01-life/01-three/write
+step:write:loaded
+check:write:false
+gw:01-life/01-three/open:done:gen0
+gw:01-life/01-three/write:in-progress:gen0
+# write
+check:write:true
+step:write:complete
+checkpoint:01-life/01-three/split
+step:split:loaded
+check:split:false
+gw:01-life/01-three/write:done:gen0
+gw:01-life/01-three/split:in-progress:gen0
+# split ends the lap
+check:split:true
+step:split:complete:lesson-complete
+gw:01-life/01-three/split:done:gen0:lap3000:01-life/01-three@1767323045000
+# sessiond restarts
+gw:01-life/01-three/split:done:gen0:lap3000:01-life/01-three@1767323045000
+gw:01-life/01-three/open:done:gen0
+gw:01-life/01-three/write:done:gen0
+= gateway progress unchanged: true, laps counted: 1

@@ -29,6 +29,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/sessiond/gwclient"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/inputtap"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/preview"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/progress"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/pty"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/session"
@@ -66,6 +67,9 @@ type Options struct {
 	// Debounce replaces the evaluator's debounce, and three times it the
 	// longest wait (tests).
 	Debounce time.Duration
+	// ProgressBackoff caps the progress outbox's retry delay (tests;
+	// default progress.DefaultMaxBackoff).
+	ProgressBackoff time.Duration
 }
 
 // Server is one sessiond.
@@ -74,33 +78,31 @@ type Server struct {
 	opt Options
 	log *slog.Logger
 
-	bus      *events.Bus
-	evlog    *events.LogWriter
-	agent    *agent.Server
-	sup      *supervisor.Supervisor
-	tap      *inputtap.Tap
-	eval     *steps.Evaluator
-	core     *session.Core
-	snap     *snapshot.Service
-	modules  *scenario.Modules
-	preview  *preview.Server
-	watcher  *preview.Watcher
-	gw       *gwclient.Client
-	reporter *gwclient.Reporter
-	ptyH     *pty.Handler
-	vncH     *vnc.Handler
-	eventsH  *events.Handler
+	bus     *events.Bus
+	evlog   *events.LogWriter
+	agent   *agent.Server
+	sup     *supervisor.Supervisor
+	tap     *inputtap.Tap
+	eval    *steps.Evaluator
+	core    *session.Core
+	snap    *snapshot.Service
+	modules *scenario.Modules
+	preview *preview.Server
+	watcher *preview.Watcher
+	gw      *gwclient.Client
+	outbox  *progress.Outbox
+	ptyH    *pty.Handler
+	vncH    *vnc.Handler
+	eventsH *events.Handler
 
 	wsCount atomic.Int64
 	// boxReady: the box alias is set up (sshbox.Setup succeeded).
-	boxReady      atomic.Bool
-	done          chan struct{}
-	stateMu       sync.Mutex
-	stateRevision uint64
-	// progressMu serialises generation syncs with rpc drop-step.
-	progressMu sync.Mutex
-	bg         sync.WaitGroup
-	addr       atomic.Value // string
+	boxReady atomic.Bool
+	done     chan struct{}
+	// stateMu makes persist the one writer of state.json.
+	stateMu sync.Mutex
+	bg      sync.WaitGroup
+	addr    atomic.Value // string
 
 	// editor is the fake editor (Fake mode); fakeCancel stops its
 	// connection loop.
@@ -164,8 +166,6 @@ func (s *Server) Run(ctx context.Context) error {
 		Editor:    &snapshot.AgentEditor{Agent: ag, Workspace: cfg.Workspace},
 		Modules:   s.modules,
 		StateFile: filepath.Join(s.playgroundDir(), "snapshot.json"),
-		Busy:      func() bool { return s.core.Busy() != nil },
-		Active:    func() *protocol.StepRef { return s.core.Active() },
 		Emit:      func(ev protocol.Event) { s.bus.Publish(ev) },
 		Log:       s.log.With("component", "snapshot"),
 	}
@@ -183,7 +183,9 @@ func (s *Server) Run(ctx context.Context) error {
 	s.preview = pv
 	defer pv.Close()
 
-	s.wire()
+	st := s.readState()
+	s.wire(st.outbox())
+	s.core.RestoreSaved(st.saved())
 
 	s.agent.SetHandler(s)
 	if w, err := preview.NewWatcher(cfg.Workspace, s.onFile, s.log.With("component", "watcher")); err != nil {
@@ -219,31 +221,31 @@ func (s *Server) Run(ctx context.Context) error {
 	s.log.Info("sessiond listening", "addr", ln.Addr().String(), "session", cfg.SessionID, "fake", s.opt.Fake,
 		"proxy_auth", cfg.ProxySecret != "")
 
-	s.bg.Add(2)
+	s.bg.Add(1)
 	go func() {
 		defer s.bg.Done()
 		s.eval.Run(runCtx)
 	}()
+	// The core stops first at shutdown, so the editor state saved before
+	// Emacs stops (BeforeStop) never interleaves with an op.
+	coreCtx, stopCore := context.WithCancel(runCtx)
+	coreDone := make(chan struct{})
 	go func() {
-		defer s.bg.Done()
-		s.core.Run(runCtx)
+		defer close(coreDone)
+		s.core.Run(coreCtx)
 	}()
-
-	saved := s.readState()
 
 	// 3 and 4. Emacs, tmux, terminal frame.
 	if err := s.sup.Start(runCtx); err != nil {
 		s.log.Error("emacs startup", "err", err)
 	}
 
-	// 6. Resume the saved step. snapshot.json autosaves from here on: the
-	// resume op reads it first.
-	s.restoreState(runCtx, saved)
+	// 6. Progress, then the saved step. snapshot.json autosaves from here
+	// on: the resume op reads it first.
+	outboxDone := s.startProgress(runCtx)
+	s.resume(runCtx)
 	s.bg.Add(1)
-	go func() {
-		defer s.bg.Done()
-		s.snap.Autosave(runCtx)
-	}()
+	go s.autosaveLoop(runCtx)
 	if s.gw != nil {
 		s.bg.Add(1)
 		go s.heartbeatLoop(runCtx)
@@ -257,24 +259,31 @@ func (s *Server) Run(ctx context.Context) error {
 	case err := <-httpErr:
 		s.log.Error("http server", "err", err)
 	}
+	stopCore()
+	<-coreDone
 	s.shutdown(srv)
 	cancel()
 	s.bg.Wait()
-	// The reporter closes last: the evaluator and the core stopped with
-	// runCtx and the HTTP handlers in shutdown, so nothing reports any more.
-	if s.reporter != nil {
-		s.reporter.Close(5 * time.Second)
-	}
+	// The outbox closes last: the evaluator and the core stopped with
+	// runCtx and the HTTP handlers in shutdown, so nothing records any
+	// more; it delivers for up to 5 s, and what is left stays in
+	// state.json.
+	s.outbox.Close(5 * time.Second)
+	<-outboxDone
 	return nil
 }
 
-// wire builds the components.
-func (s *Server) wire() {
+// wire builds the components; the progress outbox starts from saved.
+func (s *Server) wire(saved progress.Snapshot) {
 	cfg := s.cfg
 	log := s.log
+	var send func(context.Context, protocol.ProgressReport) error
 	if cfg.GatewayURL != "" {
 		s.gw = gwclient.New(cfg.GatewayURL, cfg.SessionToken, cfg.SessionID, log.With("component", "gateway"))
+		send = s.gw.Progress
 	}
+	s.outbox = progress.New(saved, send, s.persist, log.With("component", "progress"))
+	s.outbox.MaxBackoff = s.opt.ProgressBackoff
 	s.tap = inputtap.NewTap(func(ev *protocol.PrefixEvent) { s.bus.Publish(ev) })
 
 	cmds := supervisor.RealCommands(cfg)
@@ -307,7 +316,8 @@ func (s *Server) wire() {
 		supOpt.VNCAddr = s.vncH.Addr
 		supOpt.BusySignal = syscall.SIGUSR2
 	}
-	supOpt.Hooks = supervisor.Hooks{BeforeStop: s.snap.BeforeStop, AfterRestart: s.snap.AfterRestart}
+	supOpt.Hooks = supervisor.Hooks{BeforeStop: s.snap.BeforeStop,
+		AfterRestart: func(ctx context.Context, crashed bool) { s.core.AfterRestart(ctx, crashed) }}
 	supOpt.HelloTimeout = s.opt.HelloTimeout
 	supOpt.OnModeChange = func(m protocol.FrameKind) {
 		if m == protocol.FrameTerminal {
@@ -342,30 +352,20 @@ func (s *Server) wire() {
 		Log:       log.With("component", "steps"),
 		Observe:   func(o steps.Observation) { s.core.Observe(o) },
 	})
-	var fetch scenario.Fetcher
+	var fetch scenario.Fetcher = noGateway{}
+	var generations func(context.Context) (protocol.ProgressGenerations, error)
 	if s.gw != nil {
-		fetch = s.gw
-	} else {
-		fetch = noGateway{}
+		fetch, generations = s.gw, s.gw.ProgressGenerations
 	}
 	s.core = session.New(session.Deps{
 		Workspace: cfg.Workspace, Root: s.preview.Root(), CacheDir: filepath.Join(s.playgroundDir(), "cache"),
 		Fetch: fetch, Agent: s.agent, Sup: s.sup, Snapshots: s.snap, Modules: s.modules, Evaluator: s.eval,
-		Report: func(r protocol.ProgressReport) {
-			if s.reporter != nil {
-				s.reporter.Report(r)
-			}
-		},
-		Persist:      s.persist,
-		PurgeReports: s.purgeReports,
-		Git:          checkpoint.ExecRunner{Bin: cfg.GitBin}, Shell: s.shell(),
+		Progress: s.outbox, Generations: generations, Persist: s.persist,
+		Git: checkpoint.ExecRunner{Bin: cfg.GitBin}, Shell: s.shell(),
 		Emit: func(ev protocol.Event) { s.bus.Publish(ev) },
 		Log:  log.With("component", "session"),
 		Now:  s.opt.Clock,
 	})
-	if s.gw != nil {
-		s.reporter = gwclient.NewReporter(s.gw, s.core.ProgressReports)
-	}
 	s.eventsH = &events.Handler{Bus: s.bus, Hello: s.hello, Track: s.track, Done: s.done, Log: log}
 }
 
@@ -518,15 +518,12 @@ func readVersions(path string) map[string]string {
 // --- agent.Handler -------------------------------------------------------
 
 // OnHello implements agent.Handler. A restore made while the agent was
-// away gets its editor state now, if its step is still active (outside the
-// reader goroutine, which must not call the agent).
+// away gets its editor state from the core's reconnect op, unless the
+// hello is a crashed daemon's restart, whose recovery covers it.
 func (s *Server) OnHello(h *protocol.AgentHelloMsg) {
-	s.sup.OnHello(h)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		s.snap.OnHello(ctx)
-	}()
+	if !s.sup.OnHello(h) {
+		s.core.Reconnected()
+	}
 	for mod, msg := range h.ModuleErrors {
 		s.bus.Publish(&protocol.ErrorEvent{Code: protocol.ErrInternal, Message: fmt.Sprintf("The %s module failed to load: %s", mod, msg)})
 	}
@@ -564,21 +561,43 @@ func (s *Server) onFile(ev *protocol.FileEvent) {
 
 // --- checkpoints and state -----------------------------------------------
 
-// stateFile is /work/.playground/state.json.
+// stateFile is /work/.playground/state.json: the session core's saved
+// state, and the progress outbox's generations and entries. Version 1
+// had no outbox; its outcomes reach the gateway by the reconciliation at
+// every start.
 type stateFile struct {
-	Version int `json:"version"`
-	session.Saved
+	Version     int                             `json:"version"`
+	Generations protocol.ProgressGenerations    `json:"generations,omitempty"`
+	Active      *protocol.StepRef               `json:"active,omitempty"`
+	Lessons     map[string]*session.LessonState `json:"lessons,omitempty"`
+	Lap         *protocol.LapInfo               `json:"lap,omitempty"`
+	Outbox      []protocol.ProgressReport       `json:"outbox,omitempty"`
+}
+
+// stateVersion is the version persist writes.
+const stateVersion = 2
+
+func (f stateFile) saved() session.Saved {
+	return session.Saved{Active: f.Active, Lessons: f.Lessons, Lap: f.Lap}
+}
+
+func (f stateFile) outbox() progress.Snapshot {
+	return progress.Snapshot{Generations: f.Generations, Entries: f.Outbox}
 }
 
 func (s *Server) statePath() string { return filepath.Join(s.playgroundDir(), "state.json") }
 
-func (s *Server) persist(saved session.Saved) {
+// persist writes state.json from the core's saved state and the outbox,
+// read together (Core.Persistent) under stateMu, so a later write never
+// holds older state than an earlier one. The core and the outbox call it
+// after every change; the file is written outside the core's lock.
+func (s *Server) persist() {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
-	if saved.Revision < s.stateRevision {
-		return
-	}
-	b, err := json.MarshalIndent(stateFile{Version: 1, Saved: saved}, "", "  ")
+	saved, ob := s.core.Persistent()
+	st := stateFile{Version: stateVersion, Generations: ob.Generations, Active: saved.Active, Lessons: saved.Lessons,
+		Lap: saved.Lap, Outbox: ob.Entries}
+	b, err := json.MarshalIndent(st, "", "  ")
 	if err != nil {
 		return
 	}
@@ -592,68 +611,58 @@ func (s *Server) persist(saved session.Saved) {
 	}
 	if err != nil {
 		s.log.Warn("state.json", "err", err)
-	} else {
-		s.stateRevision = saved.Revision
 	}
 }
 
-// readState reads state.json (empty when missing or unreadable).
-func (s *Server) readState() session.Saved {
+// readState reads state.json, version 1 or 2 (empty when missing or
+// unreadable).
+func (s *Server) readState() stateFile {
 	b, err := os.ReadFile(s.statePath())
 	if err != nil {
-		return session.Saved{}
+		return stateFile{}
 	}
 	var st stateFile
 	if err := json.Unmarshal(b, &st); err != nil {
 		s.log.Warn("state.json is unreadable; starting fresh", "err", err)
-		return session.Saved{}
+		return stateFile{}
 	}
-	return st.Saved
+	if st.Version > stateVersion {
+		s.log.Warn("state.json is from a newer sessiond; reading what this one knows", "version", st.Version)
+	}
+	return st
 }
 
 // syncProgress applies gateway resets missed while this session was
-// unavailable (the core's drop ops), then adopts the gateway's generations
-// in the core and the reporter. progressMu serialises it with rpc
-// drop-step, so a reset arriving meanwhile applies after the adoption.
-func (s *Server) syncProgress(ctx context.Context) {
-	if s.gw == nil {
-		return
-	}
-	s.progressMu.Lock()
-	defer s.progressMu.Unlock()
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	generations, err := s.gw.ProgressGenerations(ctx)
-	if err != nil {
+// unavailable and adopts the gateway's generations (the core's sync op),
+// best effort.
+func (s *Server) syncProgress(ctx context.Context, reconcile bool) {
+	if err := s.core.Sync(ctx, reconcile); err != nil {
 		s.log.Warn("progress generations", "err", err)
-		return
-	}
-	if err := s.core.SyncGenerations(ctx, generations); err != nil {
-		s.log.Warn("applying progress generations", "err", err)
-		return
-	}
-	if s.reporter != nil {
-		s.reporter.SyncGenerations(generations)
 	}
 }
 
-// purgeReports discards the queued reports a gateway reset makes stale
-// (the core's drop op).
-func (s *Server) purgeReports(lessonID string, generation int64) {
-	if s.reporter != nil {
-		s.reporter.Purge(lessonID, generation)
+// startProgress syncs the generations, queues every saved outcome, writes
+// state.json (version 2 from here on) and starts the outbox's sender,
+// which outlives runCtx until Close. The returned channel closes when the
+// sender stopped.
+func (s *Server) startProgress(runCtx context.Context) <-chan struct{} {
+	s.syncProgress(runCtx, true)
+	done := make(chan struct{})
+	if s.gw == nil {
+		close(done)
+		return done
 	}
+	go func() {
+		defer close(done)
+		s.outbox.Run(context.Background())
+	}()
+	return done
 }
 
-// restoreState loads the saved progress and queues the resume of the
-// active step (the core's resume op).
-func (s *Server) restoreState(ctx context.Context, saved session.Saved) {
-	s.core.RestoreSaved(saved)
-	s.syncProgress(ctx)
-	saved = s.core.Saved()
-	if s.reporter != nil {
-		s.reporter.Reconcile()
-	}
+// resume queues the resume of the saved active step (the core's resume
+// op).
+func (s *Server) resume(ctx context.Context) {
+	saved := s.core.Saved()
 	if saved.Active == nil {
 		return
 	}
@@ -777,6 +786,22 @@ func copyTree(src, dst string) error {
 }
 
 // --- background loops ------------------------------------------------------
+
+// autosaveLoop asks the core for an autosave of snapshot.json every
+// snapshot.AutosaveInterval (skipped while an op runs or waits).
+func (s *Server) autosaveLoop(ctx context.Context) {
+	defer s.bg.Done()
+	t := time.NewTicker(snapshot.AutosaveInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			s.core.Autosave()
+		}
+	}
+}
 
 func (s *Server) heartbeatLoop(ctx context.Context) {
 	defer s.bg.Done()

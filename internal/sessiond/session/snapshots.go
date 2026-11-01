@@ -25,6 +25,11 @@ type Snapshots interface {
 	// to the end once started, whatever ctx does. Errors wrap
 	// snapshot.ErrNoCheckpoint, ErrFiles or ErrEditor.
 	Restore(ctx context.Context, ref string) (snapshot.Report, error)
+	// RestoreEditor restores the editor state of checkpoint ref alone (a
+	// restore made while the agent was away).
+	RestoreEditor(ctx context.Context, ref string) error
+	// SaveEditorState writes the editor's window spec to snapshot.json.
+	SaveEditorState(ctx context.Context) (*protocol.WindowSpec, error)
 	// LastEditorState returns the saved window spec (snapshot.json), or
 	// nil.
 	LastEditorState() *protocol.WindowSpec

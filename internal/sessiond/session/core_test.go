@@ -17,6 +17,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent/fakeeditor"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/progress"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/snapshot"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
@@ -94,9 +95,9 @@ func TestDropPreemptsFastForward(t *testing.T) {
 	}
 }
 
-// A generation sync applies a missed reset as a drop op: the skip playing
-// the lesson's step is cancelled (its demo stops reaching Emacs), the step
-// goes, and the snapshot is adopted exactly.
+// Gateway resets arriving as drop ops (rpc drop-step) cancel the skip
+// playing the lesson's step (its demo stops reaching Emacs), the step
+// goes, and the generations rise.
 func TestSyncDropPreemptsSkip(t *testing.T) {
 	f := newDemoFixture(t)
 	if _, err := f.core.Load(context.Background(), protocol.ScenarioRequest{LessonID: demoID}); err != nil {
@@ -119,8 +120,10 @@ func TestSyncDropPreemptsSkip(t *testing.T) {
 	}()
 	<-inDemo
 	gens := protocol.ProgressGenerations{"": 1, demoID: 3}
-	if err := f.core.SyncGenerations(context.Background(), gens); err != nil {
-		t.Fatal(err)
+	for _, scope := range []string{"", demoID} {
+		if err := f.core.Drop(context.Background(), scope, gens[scope]); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := <-skipped; httpx.AsError(err).Status != 409 {
 		t.Fatalf("cancelled skip: %v", err)
@@ -129,7 +132,7 @@ func TestSyncDropPreemptsSkip(t *testing.T) {
 	if a := f.core.Active(); a != nil {
 		t.Fatalf("active after the sync %+v", a)
 	}
-	if got := f.core.Saved().Generations; !maps.Equal(got, gens) {
+	if got := f.core.d.Progress.(*progress.Outbox).Snapshot().Generations; !maps.Equal(got, gens) {
 		t.Fatalf("generations %v", got)
 	}
 	if evs := f.evs(); !strings.HasSuffix(evs, "step:open:dropped") || strings.Contains(evs, "skipped") {
@@ -141,7 +144,7 @@ func TestSyncDropPreemptsSkip(t *testing.T) {
 // it would have preempted finishes.
 func TestStaleDropDoesNotPreempt(t *testing.T) {
 	f := newDemoFixture(t)
-	f.core.dropGeneration(demoID, 2)
+	f.core.drop(demoID, 2)
 	release := make(chan struct{})
 	inReplay := make(chan struct{})
 	var once sync.Once

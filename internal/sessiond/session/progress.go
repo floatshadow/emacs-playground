@@ -4,39 +4,101 @@ import (
 	"context"
 	"maps"
 	"slices"
-	"strings"
+	"time"
 
 	"github.com/floatshadow/emacs-playground/internal/httpx"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/progress"
 )
 
-// TODO(sessiond, design.md §7): the progress outbox replaces the
-// once-per-process in-progress map, dropGeneration and SyncGenerations.
-
-// generationNewer reports whether dropGeneration(lessonID, generation)
-// would apply: generation zero, or newer than the one applied.
-func (c *Core) generationNewer(lessonID string, generation int64) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return generation == 0 || generation > c.lesson.Saved.Generations.ForLesson(lessonID)
+// Progress is the progress outbox (progress.Outbox). The core changes it
+// (Record, Drop, Sync) and reads it for state.json (Snapshot) only under
+// Core.mu, so every change to the outbox's generations and entries is one
+// change with the saved progress it belongs to; Newer only decides whether
+// a drop preempts.
+type Progress interface {
+	Record(protocol.ProgressReport)
+	Drop(scope string, generation int64) (protocol.ProgressGenerations, bool)
+	Newer(scope string, generation int64) bool
+	Sync(protocol.ProgressGenerations)
+	Snapshot() progress.Snapshot
 }
 
-// dropGeneration is the drop op's change to the lesson state, so it runs
-// only in the op worker: it applies a gateway reset once, retaining any
-// newer lesson reset; generation zero is an unconditional local drop. It
-// forgets the saved progress, the lap and the active step of lessonID
-// (with "" of every lesson); a forgotten step emits step {status:
-// dropped}. It reports whether a step was forgotten.
-func (c *Core) dropGeneration(lessonID string, generation int64) bool {
+// SyncTimeout bounds the fetch of the gateway's generations in the sync
+// op.
+const SyncTimeout = 5 * time.Second
+
+// Persistent returns the saved lesson state and the outbox's state read in
+// one hold of mu: every change to either (outcomes, drops, syncs) happens
+// under mu, so the pair is always one the session was in. state.json is
+// written from it (Deps.Persist), outside mu.
+func (c *Core) Persistent() (Saved, progress.Snapshot) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lesson.Saved.clone(), c.d.Progress.Snapshot()
+}
+
+// Sync implements the progress sync before every load and at startup: it
+// applies the gateway resets this session missed while it was unavailable
+// (whole-user first), then adopts the gateway's generations exactly. With
+// reconcile (startup) every saved outcome is queued again afterwards: a
+// gateway that lost its store, or a state.json without an outbox, gets
+// them back. It is an op, so no drop comes between the gateway's answer
+// and its adoption; a gateway that cannot answer leaves the generations
+// as they are.
+func (c *Core) Sync(ctx context.Context, reconcile bool) error {
+	_, err := c.do(ctx, &Op{Kind: OpSync, Req: reconcile, Deadline: SyncTimeout + time.Second})
+	return err
+}
+
+func (c *Core) sync(ctx context.Context, reconcile bool) error {
+	var err error
+	if c.d.Generations != nil {
+		gctx, cancel := context.WithTimeout(ctx, SyncTimeout)
+		var gens protocol.ProgressGenerations
+		gens, err = c.d.Generations(gctx)
+		cancel()
+		if err == nil {
+			for _, id := range slices.Sorted(maps.Keys(gens)) {
+				if g := gens[id]; g > 0 {
+					c.drop(id, g)
+				}
+			}
+			c.mu.Lock()
+			c.d.Progress.Sync(gens)
+			c.mu.Unlock()
+		}
+	}
+	if reconcile {
+		c.mu.Lock()
+		for _, r := range c.outcomesLocked() {
+			c.d.Progress.Record(r)
+		}
+		c.mu.Unlock()
+	}
+	c.persist()
+	return err
+}
+
+// drop is the drop op (rpc drop-step, and the sync op for a reset the
+// session missed): it applies a gateway reset once, keeping any newer
+// reset; generation zero is an unconditional local drop. The outbox purges
+// the scope's entries and raises the generation, and the saved progress,
+// the lap and the active step of lessonID (with "" of every lesson) are
+// forgotten; a forgotten step emits step {status: dropped}. Both happen in
+// one hold of mu, so an outcome recorded before the drop is purged and an
+// observation after it belongs to a past attempt. It reports whether a
+// step was forgotten.
+func (c *Core) drop(lessonID string, generation int64) bool {
 	c.mu.Lock()
 	l := &c.lesson
-	current := l.Saved.Generations.ForLesson(lessonID)
-	if generation > 0 && generation <= current {
+	gens, ok := c.d.Progress.Drop(lessonID, generation)
+	if !ok {
 		c.mu.Unlock()
 		return false
 	}
 	drop := func(id string) bool {
-		return (lessonID == "" || id == lessonID) && (generation == 0 || l.Saved.Generations.ForLesson(id) < generation)
+		return (lessonID == "" || id == lessonID) && (generation == 0 || gens.ForLesson(id) < generation)
 	}
 	dropped := false
 	if l.Scenario != nil && drop(l.Scenario.ID) {
@@ -62,67 +124,9 @@ func (c *Core) dropGeneration(lessonID string, generation int64) bool {
 			delete(l.Saved.Lessons, id)
 		}
 	}
-	for k := range c.reported {
-		id, _, _ := strings.Cut(k, "\x00")
-		if drop(id) {
-			delete(c.reported, k)
-		}
-	}
-	if generation > 0 {
-		if l.Saved.Generations == nil {
-			l.Saved.Generations = protocol.ProgressGenerations{}
-		}
-		l.Saved.Generations[lessonID] = generation
-	}
-	saved := c.savedLocked()
 	c.mu.Unlock()
-	c.persist(saved)
+	c.persist()
 	return dropped
-}
-
-// SyncGenerations applies the gateway's snapshot of reset generations: a
-// drop op (Drop) for every generation newer than the one applied, "" first,
-// then the snapshot is adopted exactly, including lower generations. A
-// drop that does not finish while ctx lasts still runs; the snapshot is
-// then not adopted (the next sync adopts it) and the error is returned.
-// The caller serialises syncs with rpc drop-step, so a reset the gateway
-// sends while a sync runs applies after the adoption.
-func (c *Core) SyncGenerations(ctx context.Context, generations protocol.ProgressGenerations) error {
-	ids := slices.Sorted(maps.Keys(generations))
-	for _, id := range ids {
-		if g := generations[id]; g > 0 && c.generationNewer(id, g) {
-			if err := c.Drop(ctx, id, g); err != nil {
-				return err
-			}
-		}
-	}
-	c.mu.Lock()
-	if maps.Equal(c.lesson.Saved.Generations, generations) {
-		c.mu.Unlock()
-		return nil
-	}
-	c.lesson.Saved.Generations = maps.Clone(generations)
-	saved := c.savedLocked()
-	c.mu.Unlock()
-	c.persist(saved)
-	return nil
-}
-
-// inProgressLocked is the in-progress report of the active step, once per
-// process and step, and never for a step already finished or demonstrated.
-func (c *Core) inProgressLocked() []protocol.ProgressReport {
-	a := c.activeLocked()
-	if a == nil {
-		return nil
-	}
-	key := a.LessonID + "\x00" + a.StepID
-	ls := c.lesson.Saved.Lessons[a.LessonID]
-	if c.reported[key] || ls.finished(a.StepID) || (ls != nil && ls.Demonstrated[a.StepID] != 0) {
-		return nil
-	}
-	c.reported[key] = true
-	return []protocol.ProgressReport{{LessonID: a.LessonID, StepID: a.StepID, Status: protocol.ProgressInProgress,
-		At: c.now().UnixMilli(), Generation: c.lesson.Saved.Generations.ForLesson(a.LessonID)}}
 }
 
 // Hint records that hint level was shown for stepID of the loaded lesson
@@ -145,10 +149,8 @@ func (c *Core) Hint(stepID string, level int) error {
 		return nil
 	}
 	ls.Hints[stepID] = level
-	rep := c.progressLocked(lessonID, stepID, statusOf(ls, stepID), c.now())
-	saved := c.savedLocked()
+	c.recordLocked(lessonID, stepID, statusOf(ls, stepID), c.now())
 	c.mu.Unlock()
-	c.report(rep)
-	c.persist(saved)
+	c.persist()
 	return nil
 }

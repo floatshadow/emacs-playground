@@ -14,13 +14,35 @@ import (
 // its demo (file events, compilation output).
 const skipSettle = 8 * time.Second
 
-// requireActive checks that stepID is the active step and no lap runs
-// (demo start and skip, before they queue); it returns the scenario and the
-// step's index.
-func (c *Core) requireActive(stepID string) (*protocol.Scenario, int, error) {
+// admitted is a demo start or skip of stepID admitted while attempt was
+// current. A load or advance queued before it replaces the attempt, and a
+// step of another lesson can have the same id, so the op runs only while
+// that attempt is still the current one.
+type admitted struct {
+	stepID  string
+	attempt Attempt
+}
+
+// admit checks that stepID is the active step and no lap runs (demo start
+// and skip, before they queue) and names the current attempt.
+func (c *Core) admit(stepID string) (admitted, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err := c.requireActiveLocked(stepID); err != nil {
+		return admitted{}, err
+	}
+	return admitted{stepID: stepID, attempt: c.lesson.Attempt}, nil
+}
+
+// begin starts a demo start or skip op: its attempt must still be current
+// and its step active. It returns the scenario and the step's index.
+func (c *Core) begin(req admitted) (*protocol.Scenario, int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lesson.Attempt.Seq != req.attempt.Seq || c.lesson.Attempt.Lesson != req.attempt.Lesson {
+		return nil, 0, errNotActiveStep()
+	}
+	if err := c.requireActiveLocked(req.stepID); err != nil {
 		return nil, 0, err
 	}
 	return c.lesson.Scenario, c.lesson.Index, nil
@@ -38,7 +60,7 @@ func (c *Core) requireActiveLocked(stepID string) error {
 }
 
 // enter puts the active step stepID into phase p (Watching with its demo
-// playing, or Skipping) after requireActive's checks, in the same hold of
+// playing, or Skipping) after admit's checks, in the same hold of
 // mu, so a completion Observe records first is never overwritten (the
 // step is then Advancing, not active). It returns the attempt's seq.
 func (c *Core) enter(stepID string, p Phase) (uint64, error) {
@@ -72,7 +94,10 @@ func (c *Core) restoreIfDirty(ctx context.Context, sc *protocol.Scenario, idx in
 		return false, nil
 	}
 	stepID := sc.Steps[idx].ID
-	if _, err := c.d.Snapshots.Restore(ctx, checkpoint.StepRef(sc.ID, stepID)); err != nil {
+	ref := checkpoint.StepRef(sc.ID, stepID)
+	rep, err := c.d.Snapshots.Restore(ctx, ref)
+	defer c.deferEditor(ref, rep)
+	if err != nil {
 		if !noCheckpoint(err) {
 			c.log.Warn("restoring the step before its demo", "lesson", sc.ID, "step", stepID, "err", err)
 		}
@@ -87,8 +112,9 @@ func (c *Core) restoreIfDirty(ctx context.Context, sc *protocol.Scenario, idx in
 // demoStart is rpc demo start (api.md §4.1): the active step, restored
 // first when dirty, gets a "Watch it" latch with its demo playing. A
 // second start keeps a latch that already demonstrated.
-func (c *Core) demoStart(ctx context.Context, stepID string) (protocol.DemoResult, error) {
-	sc, idx, err := c.requireActive(stepID)
+func (c *Core) demoStart(ctx context.Context, req admitted) (protocol.DemoResult, error) {
+	stepID := req.stepID
+	sc, idx, err := c.begin(req)
 	if err != nil {
 		return protocol.DemoResult{}, err
 	}
@@ -108,8 +134,9 @@ func (c *Core) demoStart(ctx context.Context, stepID string) (protocol.DemoResul
 // skipSettle, then it is recorded skipped and the next step activates. A
 // drop that cancels the op leaves the step to the drop; a deadline still
 // records the skip.
-func (c *Core) skip(ctx context.Context, stepID string) (protocol.SkipResult, error) {
-	sc, idx, err := c.requireActive(stepID)
+func (c *Core) skip(ctx context.Context, req admitted) (protocol.SkipResult, error) {
+	stepID := req.stepID
+	sc, idx, err := c.begin(req)
 	if err != nil {
 		return protocol.SkipResult{}, err
 	}
@@ -150,14 +177,12 @@ func (c *Core) skip(ctx context.Context, stepID string) (protocol.SkipResult, er
 		return protocol.SkipResult{}, errNotActiveStep()
 	}
 	l.Saved.lesson(sc.ID).Skipped[stepID] = now.UnixMilli()
-	rep := c.progressLocked(sc.ID, stepID, protocol.ProgressSkipped, now)
+	c.recordLocked(sc.ID, stepID, protocol.ProgressSkipped, now)
 	last := idx+1 >= len(sc.Steps)
 	c.emitLocked(&protocol.StepEvent{LessonID: sc.ID, StepID: stepID, Status: protocol.StepSkipped, Index: idx, Count: len(sc.Steps), LessonComplete: last})
 	c.finishLocked(last, false)
-	saved := c.savedLocked()
 	c.mu.Unlock()
-	c.report(rep)
-	c.persist(saved)
+	c.persist()
 	next, err := c.advance(ctx, seq)
 	return protocol.SkipResult{Next: next, DemoCompleted: completed}, err
 }

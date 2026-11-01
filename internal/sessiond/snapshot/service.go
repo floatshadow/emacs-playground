@@ -4,7 +4,11 @@
 // written through typed agent ops (Editor). The service also keeps
 // snapshot.json, the one editor state every recovery path reopens: the
 // periodic autosave, a restore (the checkpoint's windows) and the state
-// saved before Emacs stops.
+// saved before Emacs stops. It holds no recovery state and no lock of its
+// own: the session core calls Capture, Restore, RestoreEditor and
+// SaveEditorState from its ops, one at a time, and decides when an editor
+// state is reopened; BeforeStop runs inside an op's restart or after the
+// core stopped.
 package snapshot
 
 import (
@@ -16,8 +20,6 @@ import (
 	"os"
 	"slices"
 	"sort"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/floatshadow/emacs-playground/internal/protocol"
@@ -38,7 +40,8 @@ var (
 	ErrEditor = errors.New("restoring the editor state failed")
 )
 
-// AutosaveInterval is how often Autosave writes snapshot.json.
+// AutosaveInterval is how often sessiond writes snapshot.json
+// (SaveEditorState).
 const AutosaveInterval = 30 * time.Second
 
 // Report is what a restore did.
@@ -52,8 +55,9 @@ type Report struct {
 	Step *protocol.StepRef
 	// Editor is what restore-editor did.
 	Editor EditorReport
-	// EditorDeferred is set when the agent was not connected: the files
-	// are back and the editor state follows on the agent's next hello.
+	// EditorDeferred is set when the agent was not connected or went away
+	// during restore-editor: the files are back and the editor state is
+	// for the agent's next hello (RestoreEditor).
 	EditorDeferred bool
 }
 
@@ -64,42 +68,11 @@ type Service struct {
 	Modules *scenario.Modules
 	// StateFile is snapshot.json, the last editor state (restart restore).
 	StateFile string
-	// Busy reports a lesson op in progress; Autosave skips while it does,
-	// so the state an op puts in place is not overwritten halfway.
-	Busy func() bool
-	// Active returns the active step, or nil. A restore made while the
-	// agent was away gives the agent's next hello its editor state only
-	// while the step it was made for is still active.
-	Active func() *protocol.StepRef
 	// Now stamps manifests (default time.Now).
 	Now func() time.Time
 	// Emit announces a checkpoint (it must not block).
 	Emit func(protocol.Event)
 	Log  *slog.Logger
-	// Interval overrides AutosaveInterval (tests).
-	Interval time.Duration
-
-	// mu serialises the git and manifest phases of captures and restores.
-	mu sync.Mutex
-	// pendingMu guards pending: a restore made while the agent was away,
-	// whose editor state its next hello gets. A capture or another restore
-	// replaces it.
-	pendingMu sync.Mutex
-	pending   *pendingRestore
-	// stopping is set from BeforeStop to the end of AfterRestart: the
-	// daemon going away or the fresh one not yet reopened, whose state
-	// Autosave must not write over snapshot.json.
-	stopping atomic.Bool
-	fault    atomic.Pointer[func(point string) error]
-}
-
-// pendingRestore names the checkpoint of a restore made while the agent
-// was away and the step that must be active when its editor state is
-// applied: a different active step means a load or a restore replaced
-// that state since.
-type pendingRestore struct {
-	ref  string
-	step *protocol.StepRef
 }
 
 func (s *Service) log() *slog.Logger {
@@ -116,24 +89,6 @@ func (s *Service) now() time.Time {
 	return s.Now()
 }
 
-// SetFault installs a hook run at the named points of a capture ("publish":
-// after the manifest is written, before the ref is published); an error
-// from it ends the capture there, as a crash would. Tests only.
-func (s *Service) SetFault(f func(point string) error) {
-	if f == nil {
-		s.fault.Store(nil)
-		return
-	}
-	s.fault.Store(&f)
-}
-
-func (s *Service) faultAt(point string) error {
-	if f := s.fault.Load(); f != nil {
-		return (*f)(point)
-	}
-	return nil
-}
-
 // Init makes the workspace the repository of its checkpoints
 // (checkpoint.Manager.Init); it is idempotent.
 func (s *Service) Init(ctx context.Context) error { return s.Files.Init(ctx) }
@@ -141,13 +96,11 @@ func (s *Service) Init(ctx context.Context) error { return s.Files.Init(ctx) }
 // Capture records the checkpoint ref: the editor state first (within 5 s;
 // none without an agent), then the workspace commit, then the manifest
 // naming that commit, and last the ref, which publishes it. The
-// checkpoint event follows. A restore still waiting for the agent is
-// dropped: the workspace has moved on from it.
+// checkpoint event follows.
 func (s *Service) Capture(ctx context.Context, ref, label string, step *protocol.StepRef) (Manifest, error) {
 	if !checkpoint.ValidRef(ref) {
 		return Manifest{}, fmt.Errorf("checkpoint: invalid ref %q", ref)
 	}
-	s.setPending(nil)
 	m := Manifest{Version: ManifestVersion, Ref: ref, Label: label, Step: step}
 	if s.Editor != nil && s.Editor.Connected() {
 		ectx, cancel := context.WithTimeout(ctx, captureTimeout)
@@ -159,17 +112,12 @@ func (s *Service) Capture(ctx context.Context, ref, label string, step *protocol
 			m.Spec, m.Buffers, m.Globals = st.Spec, st.Buffers, st.Globals
 		}
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	tree, err := s.Files.TakeTree(ctx, ref, label)
 	if err != nil {
 		return Manifest{}, err
 	}
 	m.Commit, m.Nested, m.EmptyDirs, m.CreatedAt = tree.Commit, tree.Nested, tree.EmptyDirs, s.now().UnixMilli()
 	if err := writeJSON(manifestPath(s.Files.Workspace, ref), m, true); err != nil {
-		return Manifest{}, err
-	}
-	if err := s.faultAt("publish"); err != nil {
 		return Manifest{}, err
 	}
 	if err := s.Files.PublishRef(ctx, ref, tree.Commit); err != nil {
@@ -252,10 +200,9 @@ func (s *Service) List(ctx context.Context) ([]protocol.CheckpointInfo, error) {
 // repositories the manifest lacks dropped, files (restore, clean, nested,
 // empty directories), modules.el kept, the editor in one restore-editor
 // call, snapshot.json from the manifest's spec. Once started it runs to
-// the end whatever ctx does. Without an agent the editor state is restored
-// on its next hello while the checkpoint's step is active
-// (Report.EditorDeferred). Errors wrap ErrNoCheckpoint, ErrFiles or
-// ErrEditor.
+// the end whatever ctx does. Without an agent the editor state is left
+// to the caller (Report.EditorDeferred, RestoreEditor). Errors wrap
+// ErrNoCheckpoint, ErrFiles or ErrEditor.
 func (s *Service) Restore(ctx context.Context, ref string) (Report, error) {
 	ctx = context.WithoutCancel(ctx)
 	m, err := s.Read(ref)
@@ -266,19 +213,13 @@ func (s *Service) Restore(ctx context.Context, ref string) (Report, error) {
 		return Report{}, fmt.Errorf("%w: %s: the manifest is not the ref's", ErrNoCheckpoint, ref)
 	}
 	var unsaved []string
-	asked := s.connected()
-	if asked {
+	connected := s.connected()
+	if connected {
 		unsaved = s.modifiedFiles(ctx)
 	}
 	files, err := s.restoreFiles(ctx, ref, m)
 	if err != nil {
 		return Report{}, err
-	}
-	// Decided after the git phase: an agent that said hello during it
-	// found nothing pending, so it gets the editor state now.
-	connected := s.connected()
-	if connected && !asked {
-		unsaved = s.modifiedFiles(ctx)
 	}
 	changed := slices.Clone(files)
 	for _, f := range unsaved {
@@ -286,25 +227,16 @@ func (s *Service) Restore(ctx context.Context, ref string) (Report, error) {
 			changed = append(changed, f)
 		}
 	}
-	rep := Report{Files: changed, Step: m.Step}
-	st := m.Editor()
+	rep := Report{Files: changed, Step: m.Step, EditorDeferred: !connected}
 	var editorErr error
 	if connected {
-		rep.Editor, editorErr = s.Editor.Restore(ctx, st)
+		rep.Editor, editorErr = s.Editor.Restore(ctx, m.Editor())
 		for _, d := range rep.Editor.Degraded {
 			s.log().Warn("part of the editor state was not restored", "ref", ref, "part", d)
 		}
-	}
-	switch {
-	case !connected:
-		rep.EditorDeferred = true
-		s.deferEditor(ref, m.Step)
-	case errors.Is(editorErr, ErrDisconnected):
 		// The agent went away during the call: the restore failed, and the
 		// agent that says hello next still gets the checkpoint's state.
-		s.deferEditor(ref, m.Step)
-	default:
-		s.setPending(nil)
+		rep.EditorDeferred = errors.Is(editorErr, ErrDisconnected)
 	}
 	if m.Spec != nil {
 		if err := s.writeState(m.Spec); err != nil {
@@ -321,8 +253,6 @@ func (s *Service) Restore(ctx context.Context, ref string) (Report, error) {
 // only ever grow (emacs.md §4), and the running Emacs has the current set
 // loaded.
 func (s *Service) restoreFiles(ctx context.Context, ref string, m Manifest) ([]string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var mods []string
 	if s.Modules != nil {
 		mods = s.Modules.Current()
@@ -356,91 +286,22 @@ func (s *Service) modifiedFiles(ctx context.Context) []string {
 	return paths
 }
 
-// deferEditor leaves ref's editor state to the agent's next hello, for
-// the checkpoint's step or, for a checkpoint of no step, the step active
-// now.
-func (s *Service) deferEditor(ref string, step *protocol.StepRef) {
-	if step == nil {
-		step = s.active()
-	}
-	s.setPending(&pendingRestore{ref: ref, step: step})
-}
-
-func (s *Service) active() *protocol.StepRef {
-	if s.Active == nil {
-		return nil
-	}
-	return s.Active()
-}
-
-func (s *Service) setPending(p *pendingRestore) {
-	s.pendingMu.Lock()
-	s.pending = p
-	s.pendingMu.Unlock()
-}
-
-// takePending returns the restore waiting for the agent when its step is
-// the active one, and forgets it. A pending restore for another step stays
-// until a capture or restore replaces it: a hello that arrives before the
-// op activates the step must not discard it.
-func (s *Service) takePending() *pendingRestore {
-	s.pendingMu.Lock()
-	defer s.pendingMu.Unlock()
-	p := s.pending
-	if p == nil || !sameStep(p.step, s.active()) {
-		return nil
-	}
-	s.pending = nil
-	return p
-}
-
-func sameStep(a, b *protocol.StepRef) bool {
-	if a == nil || b == nil {
-		return a == b
-	}
-	return *a == *b
-}
-
-// OnHello finishes a restore made while the agent was away: the agent
-// that said hello gets that checkpoint's editor state, read again from
-// its manifest. It runs outside the agent's reader (agent.Handler must not
-// call the agent).
-func (s *Service) OnHello(ctx context.Context) {
-	if p := s.takePending(); p != nil {
-		s.restorePending(ctx, p)
-	}
-}
-
-// restorePending applies a pending restore's editor state; it reports
-// false when the checkpoint is gone.
-func (s *Service) restorePending(ctx context.Context, p *pendingRestore) bool {
-	m, err := s.Read(p.ref)
-	if err != nil || !s.published(ctx, p.ref, m) {
-		s.log().Info("the checkpoint of a restore made while the agent was away is gone", "ref", p.ref)
-		return false
+// RestoreEditor restores the editor state of checkpoint ref alone, read
+// again from its manifest: a restore made while the agent was away
+// (Report.EditorDeferred) finishes when it says hello.
+func (s *Service) RestoreEditor(ctx context.Context, ref string) error {
+	m, err := s.Read(ref)
+	if err != nil || !s.published(ctx, ref, m) {
+		return fmt.Errorf("%w: %s", ErrNoCheckpoint, ref)
 	}
 	rep, err := s.Editor.Restore(ctx, m.Editor())
 	if err != nil {
-		s.log().Warn("restoring the editor state of a restore made while the agent was away", "err", err)
-		return true
+		return err
 	}
 	for _, d := range rep.Degraded {
-		s.log().Warn("part of the editor state was not restored", "part", d)
+		s.log().Warn("part of the editor state was not restored", "ref", ref, "part", d)
 	}
-	return true
-}
-
-// AfterRestart reopens the editor state in a daemon that restarted: a
-// restore's state still waiting for the agent, else snapshot.json. It ends
-// the stop BeforeStop began.
-func (s *Service) AfterRestart(ctx context.Context) {
-	defer s.stopping.Store(false)
-	if p := s.takePending(); p != nil && s.restorePending(ctx, p) {
-		return
-	}
-	if err := s.Open(ctx, s.LastEditorState()); err != nil {
-		s.log().Warn("reopening the buffers after a restart", "err", err)
-	}
+	return nil
 }
 
 // Open visits a spec's files and applies its windows; nothing for a spec
@@ -459,10 +320,8 @@ func (s *Service) Visit(ctx context.Context, path string) (string, error) {
 
 // BeforeStop saves snapshot.json and the modified file buffers before
 // Emacs stops (a restart, sessiond's shutdown): the reopened spec visits
-// the files from disk, so unsaved edits would be lost. Autosave pauses
-// until AfterRestart reopened that state.
+// the files from disk, so unsaved edits would be lost.
 func (s *Service) BeforeStop(ctx context.Context) {
-	s.stopping.Store(true)
 	if _, err := s.SaveEditorState(ctx); err != nil {
 		s.log().Info("no fresh snapshot.json before Emacs stops", "err", err)
 	}
@@ -492,35 +351,6 @@ func (s *Service) SaveEditorState(ctx context.Context) (*protocol.WindowSpec, er
 		return nil, err
 	}
 	return st.Spec, s.writeState(st.Spec)
-}
-
-// Autosave writes snapshot.json every Interval until ctx ends, skipping
-// while a lesson op runs and while Emacs restarts (BeforeStop to
-// AfterRestart).
-func (s *Service) Autosave(ctx context.Context) {
-	iv := s.Interval
-	if iv <= 0 {
-		iv = AutosaveInterval
-	}
-	t := time.NewTicker(iv)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			s.autosave(ctx)
-		}
-	}
-}
-
-func (s *Service) autosave(ctx context.Context) {
-	if s.stopping.Load() || (s.Busy != nil && s.Busy()) {
-		return
-	}
-	if _, err := s.SaveEditorState(ctx); err != nil {
-		s.log().Debug("autosave of snapshot.json", "err", err)
-	}
 }
 
 // LastEditorState returns the spec in snapshot.json, or nil.

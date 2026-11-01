@@ -136,8 +136,6 @@ func (e *Editor) op(op protocol.AgentOp, raw json.RawMessage) (any, error) {
 		return map[string]any{"closed": true, "detail": ""}, nil
 	case protocol.AgentOpResumeLoop, protocol.AgentOpResetDebug:
 		return map[string]any{}, nil
-	case protocol.AgentOpSnapshot:
-		return e.snapshot(), nil
 	case protocol.AgentOpOpen:
 		var spec protocol.WindowSpec
 		if err := json.Unmarshal(raw, &spec); err != nil {
@@ -146,14 +144,6 @@ func (e *Editor) op(op protocol.AgentOp, raw json.RawMessage) (any, error) {
 		n := e.openSpec(&spec)
 		e.stateLocked()
 		return openReply{Opened: n}, nil
-	case protocol.AgentOpResetStep:
-		var a protocol.AgentResetStepArgs
-		if err := json.Unmarshal(raw, &a); err != nil {
-			return nil, err
-		}
-		r := e.resetStep(&a.Spec)
-		e.stateLocked()
-		return r, nil
 	case protocol.AgentOpSetup:
 		var a protocol.AgentSetupArgs
 		if err := json.Unmarshal(raw, &a); err != nil {

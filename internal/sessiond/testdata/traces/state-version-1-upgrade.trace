@@ -1,0 +1,4 @@
+# sessiond starts from a version 1 state.json
+gw:01-life/01-three/open:done:gen0
+gw:01-life/01-three/write:done:gen0
+= state.json version 2, pending []

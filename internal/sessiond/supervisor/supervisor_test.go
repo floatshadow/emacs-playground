@@ -294,7 +294,7 @@ func newHarness(t *testing.T, mutate func(*Options)) *harness {
 	// agent calls.
 	opt.Hooks = Hooks{
 		BeforeStop:   func(context.Context) { h.mu.Lock(); h.calls = append(h.calls, "before-stop"); h.mu.Unlock() },
-		AfterRestart: func(context.Context) { h.mu.Lock(); h.calls = append(h.calls, "after-restart"); h.mu.Unlock() },
+		AfterRestart: func(context.Context, bool) { h.mu.Lock(); h.calls = append(h.calls, "after-restart"); h.mu.Unlock() },
 	}
 	opt.OnDaemonStart = func(pid int) {
 		ctx, cancel := context.WithCancel(context.Background())

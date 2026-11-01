@@ -10,8 +10,10 @@
 // (healthz answers 503 "Emacs is starting" until the agent says hello, so
 // the gateway and Compose can poll from the first second); start the Emacs
 // daemon and wait for hello (60 s, restart once); start tmux and the
-// terminal frame; queue the resume of the step saved in
-// /work/.playground/state.json.
+// terminal frame; sync the progress generations, queue every saved
+// outcome in the progress outbox and start its sender; queue the resume
+// of the step saved in /work/.playground/state.json, whose one writer is
+// Server.persist (the core's saved state and the outbox).
 //
 // Options.Fake substitutes bash for Emacs, tmux and Xvnc and runs an
 // in-process fake agent, so the whole daemon runs on hosts without them
