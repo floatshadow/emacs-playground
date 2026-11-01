@@ -60,7 +60,7 @@
 (defconst playground-agent-version "0.1.0"
   "Version of playground-agent.el, reported in the hello message.")
 
-(defconst playground-agent-protocol 1
+(defconst playground-agent-protocol 2
   "Agent protocol version (api.md section 7).")
 
 (defcustom playground-agent-socket
@@ -256,6 +256,9 @@ Never saves, kills file buffers or reverts."
     (funcall hook-fn 'window-selection-change-functions #'playground--schedule-state)
     (funcall hook-fn 'window-buffer-change-functions #'playground--schedule-state)
     (funcall hook-fn 'after-change-major-mode-hook #'playground--schedule-state)
+    ;; A transient menu closed from outside the command loop gets no
+    ;; post-command run, and the state would keep it.
+    (funcall hook-fn 'transient-post-exit-hook #'playground--schedule-state)
     (funcall hook-fn 'kbd-macro-termination-hook #'playground--kmacro-changed)
     (funcall hook-fn 'compilation-start-hook #'playground--on-compilation-start)
     (funcall hook-fn 'server-after-make-frame-hook #'playground--on-make-frame)
@@ -273,9 +276,6 @@ Never saves, kills file buffers or reverts."
         (dolist (entry playground-agent-waiting-loops)
           (advice-add (car entry) :around (playground--waiting-advice entry)
                       '((name . playground-waiting))))
-        ;; A hydra closed by its :timeout or from outside the command
-        ;; loop gets no post-command run, and the state would keep it.
-        (advice-add 'hydra-disable :after #'playground--schedule-state)
         (unless set-message-function (setq set-message-function #'ignore))
         (add-function :before set-message-function #'playground--on-message)
         (add-function :before command-error-function #'playground--on-command-error))
@@ -288,7 +288,6 @@ Never saves, kills file buffers or reverts."
     (advice-remove 'eldoc-pre-command-refresh-echo-area #'playground--eldoc-quietly)
     (dolist (entry playground-agent-waiting-loops)
       (advice-remove (car entry) 'playground-waiting))
-    (advice-remove 'hydra-disable #'playground--schedule-state)
     (remove-function set-message-function #'playground--on-message)
     (remove-function command-error-function #'playground--on-command-error)))
 

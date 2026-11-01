@@ -4,9 +4,9 @@
 
 ;; What the agent knows about packages that change how Emacs reads
 ;; keys or shows lists (emacs.md section 10.3): loops that read keys of
-;; their own (menus, avy, which-key's pages), hydra, eldoc and eglot
-;; messages, and how Dired, ibuffer and the buffer list are made again
-;; after a restore.
+;; their own (menus, avy, which-key's pages), transient menus, eldoc
+;; and eglot messages, and how Dired, ibuffer and the buffer list are
+;; made again after a restore.
 
 ;;; Code:
 
@@ -30,13 +30,15 @@
 (declare-function ibuffer-mark-on-buffer "ibuf-ext" (func &optional ibuffer-mark-on-buffer-mark group))
 (declare-function ibuffer-jump-to-buffer "ibuf-ext" (name))
 (declare-function list-buffers-noselect "buff-menu" (&optional files-only buffer-list filter-predicate))
-(declare-function hydra-keyboard-quit "hydra" ())
+(declare-function transient-active-prefix "transient" (&optional prefixes))
+(declare-function transient--emergency-exit "transient" (&optional id))
+(declare-function eieio-oref "eieio-core" (obj slot))
+(declare-function eieio-oset "eieio-core" (obj slot value))
 (declare-function playground--schedule-state "playground-observe" (&rest _))
 (declare-function playground--echo "playground-observe" (text))
 (defvar dired-directory)
 (defvar ibuffer-filtering-qualifiers)
-(defvar hydra-curr-map)
-(defvar hydra-curr-body-fn)
+(defvar transient--prefix)
 (defvar playground--suppress-echo)
 
 (defvar playground--waiting nil
@@ -44,32 +46,35 @@
 Bound around the loop, so timers that run while it waits for a key
 see it.")
 
-(defun playground--hydra-name ()
-  "Name of the hydra whose keys are active (\"my-menu\"), or nil.
-\"\" when one is active but hydra does not say which.
-A hydra (the hydra package, lesson 13.5) is no loop: it pushes its
-keymap over every other and puts `hydra--clearfun' on the global
-`pre-command-hook' until it closes, and every key goes to the command
-loop as usual.  `hydra-curr-body-fn' is NAME/body.  C-g closes every
-kind of hydra (`hydra--clearfun' lets `keyboard-quit' through)."
-  (and (bound-and-true-p hydra-curr-map)
-       (memq 'hydra--clearfun (default-value 'pre-command-hook))
-       (let ((body (bound-and-true-p hydra-curr-body-fn)))
-         (if (and body (symbolp body))
-             (string-remove-suffix "/body" (symbol-name body))
-           ""))))
+(defun playground--menu-name ()
+  "Name of the transient menu that is open (\"my-menu\"), or nil.
+A transient prefix (lesson 13.5) is no loop: it pushes its keymap over
+every other and its keys go to the command loop as usual.  Nil while
+the menu is hidden or suspended (a suffix reading from the minibuffer):
+then the minibuffer is what waits.  C-g closes the menu (in a nested
+one it goes back to the outer menu)."
+  (when-let* (((featurep 'transient))
+              (prefix (transient-active-prefix)))
+    (symbol-name (eieio-oref prefix 'command))))
 
-(defun playground--hydra-what (name)
-  "\"the NAME hydra\", or \"a hydra\" for an empty NAME."
-  (if (string-empty-p name) "a hydra" (format "the %s hydra" name)))
+(defun playground--menu-what (name)
+  "\"the NAME menu\"."
+  (format "the %s menu" name))
 
-(defun playground--close-hydra ()
-  "Close the open hydra, if any; return \"closed the NAME hydra\" or nil.
-`hydra-keyboard-quit' takes its keymap away and deletes its hint
-window; it needs no key and works outside the command loop."
-  (when-let* ((name (playground--hydra-name)))
-    (playground--safely "close hydra" (hydra-keyboard-quit))
-    (concat "closed " (playground--hydra-what name))))
+(defun playground--close-menu ()
+  "Close the transient menu, if any; return \"closed the NAME menu\" or nil.
+Visible, hidden or suspended alike: `transient--prefix' is set from
+the menu's start to its end.  `transient--emergency-exit' takes its
+keymaps, hooks and window away and drops the outer menus of a nested
+one; it needs no key and works outside the command loop.  A suspended
+suffix would put the hooks back when it returns, so the prefix first
+forgets how (its `unwind-suffix')."
+  (when-let* ((prefix (bound-and-true-p transient--prefix)))
+    (let ((name (symbol-name (eieio-oref prefix 'command))))
+      (playground--safely "close menu"
+        (eieio-oset prefix 'unwind-suffix nil)
+        (transient--emergency-exit))
+      (concat "closed " (playground--menu-what name)))))
 
 (defun playground--waiting-advice (entry)
   "Around advice marking the loop of ENTRY, from `playground-agent-waiting-loops'."
@@ -188,32 +193,6 @@ directory is gone."
     (if (integerp pos)
         (cons (cons 'point pos) (assq-delete-all 'point (copy-alist props)))
       props)))
-
-(defun playground--first-doc-line (cmd)
-  "First line of the documentation of CMD."
-  (let ((doc (ignore-errors (documentation cmd t))))
-    (if doc (car (split-string doc "\n")) "")))
-
-(defun playground--hydra-doc (line)
-  "A gloss for a hydra's command whose first doc line is LINE, or nil.
-hydra documents the commands it defines as \"Call the head `CMD' in
-the \"NAME\" hydra.\" (NAME/CMD, NAME/CMD-and-exit, NAME/nil for the
-quit key) and \"Call the body in the \"NAME\" hydra.\" (NAME/body)."
-  (cond
-   ((string-match "\\`Call the body in the \"\\(.*?\\)\" hydra" line)
-    (format "Open the %s hydra: its keys stay active until it closes" (match-string 1 line)))
-   ((string-match "\\`Call the head `\\(.*?\\)' in the \"\\(.*?\\)\" hydra" line)
-    (let* ((cmd (match-string 1 line))
-           (name (match-string 2 line))
-           (sym (intern-soft cmd)))
-      (cond
-       ((equal cmd "nil") (format "Close the %s hydra" name))
-       ((and sym (fboundp sym))
-        (let ((doc (playground--first-doc-line sym)))
-          (if (string-empty-p doc)
-              (format "%s from the %s hydra" cmd name)
-            (format "%s from the %s hydra: %s" cmd name doc))))
-       (t (format "A key of the %s hydra" name)))))))
 
 (provide 'playground-compat)
 ;;; playground-compat.el ends here

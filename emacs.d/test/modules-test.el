@@ -9,12 +9,12 @@
 ;; Loads init.el with the base and editing modules, the set Part 1
 ;; runs with, using the packages the image ships, and checks settings
 ;; the lessons depend on: what Home, End and Delete arrive as in the
-;; terminal frame, the M-x messages, the mode-line colours, the mode
-;; line's minor modes, the M-y binding, the search's match count, and
-;; how the GUI frame is fitted to its display.  One test loads the
-;; files module on top, for ibuffer's groups.  The last one runs
-;; all-modules-test.el in a child Emacs: every module on, the set Part
-;; 13 reaches.
+;; terminal frame, the M-x messages, the mode-line and region colours,
+;; paging at the ends of a buffer, the mode line's minor modes, the M-y
+;; binding, the search's match count, and how the GUI frame is fitted
+;; to its display.  One test loads the files module on top, for
+;; ibuffer's groups.  The last one runs all-modules-test.el in a child
+;; Emacs: every module on, the set Part 13 reaches.
 
 ;;; Code:
 
@@ -126,6 +126,28 @@
     (should (>= (pg-modules--contrast fg-active active) 4.5))
     (should (>= (pg-modules--contrast fg-inactive inactive) 4.5))
     (should (> (pg-modules--luminance inactive) (pg-modules--luminance bg-main)))))
+
+(defun pg-modules--theme-background (face)
+  "FACE's background in the Modus theme's spec for colour displays.
+Batch Emacs has no colour display to resolve faces against."
+  (plist-get (cdar (cadr (assq 'modus-vivendi-tinted (get face 'theme-face)))) :background))
+
+(ert-deftest pg-modules/region-stands-out ()
+  "The region has a colour of its own, clear on the background, with readable text."
+  (require 'hl-line)
+  (require 'paren)
+  (let ((region (pg-modules--theme-background 'region)))
+    (should (equal region "#00808f"))
+    (dolist (face '(isearch lazy-highlight hl-line show-paren-match mode-line-active mode-line-inactive))
+      (let ((bg (pg-modules--theme-background face)))
+        (should (stringp bg))
+        (should-not (equal (downcase bg) region))))
+    (should (>= (pg-modules--contrast region (modus-themes-get-color-value 'bg-main t)) 3.0))
+    (should (>= (pg-modules--contrast (modus-themes-get-color-value 'fg-main t) region) 4.5))))
+
+(ert-deftest pg-modules/paging-reaches-the-ends ()
+  "On the last screen C-v moves to the end instead of signalling, M-v likewise."
+  (should (eq scroll-error-top-bottom t)))
 
 (ert-deftest pg-modules/no-ws-butler-lighter ()
   "ws-butler does its housekeeping without a \" wb\" in the mode line."

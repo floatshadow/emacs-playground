@@ -6,26 +6,23 @@
 ;; Icons from Iosevka Nerd Font in dired, completion lists, the corfu
 ;; popup and ibuffer (nerd-icons-*); a breadcrumb header line (project,
 ;; file, function); a brief highlight of the line you jumped to
-;; (pulsar); line numbers in code; ligatures in the GUI frame; helpful,
-;; a richer *Help* buffer; ef-themes, more themes to try with
-;; M-x load-theme; doom-modeline, an alternative mode line to try;
-;; hydra and pretty-hydra, menus of keys that stay open.
+;; (pulsar); line numbers in code; helpful, a richer *Help* buffer;
+;; ef-themes, more themes to try with M-x load-theme; doom-modeline, an
+;; alternative mode line to try.
 ;;
 ;; Keys added here:
 ;;   C-h f / C-h v / C-h k / C-h x   helpful versions of describe-*
 ;;   C-c C-d   helpful documentation of the symbol at point
-;; No hydra is bound here: the learner's menus are in
-;; user-lisp/my-hydras.el (C-c u m, C-c u s from lesson 13.5).
+;; No key menu is bound here: the learner's transient menus are in
+;; user-lisp/my-menus.el (C-c u m, C-c u s from lesson 13.5).
 ;;
 ;; Commands, by lesson:
 ;;   13.1  the learner turns breadcrumb-mode off below, as the
 ;;         "edit a module" way of changing a setting
-;;   13.5  pretty-hydra-define and defhydra in user-lisp/my-hydras.el,
-;;         M-x my-menu/body
+;;   13.5  transient-define-prefix in user-lisp/my-menus.el, M-x my-menu
 ;;   13.6  M-x ef-themes-select, M-x modus-themes-toggle (the pair is
 ;;         modus-themes-to-toggle), C-x C-+ / C-x C-- / C-x C-0,
-;;         M-x nerd-icons-completion-mode, M-x doom-modeline-mode,
-;;         M-x global-ligature-mode (GUI frame)
+;;         M-x nerd-icons-completion-mode, M-x doom-modeline-mode
 
 ;;;; Icons
 
@@ -73,26 +70,6 @@ signal an error on every redisplay."
 (add-hook 'prog-mode-hook #'display-line-numbers-mode)
 (setq display-line-numbers-width 3)
 
-;;;; Ligatures (GUI frame only)
-
-(playground-with-package ligature
-  (with-eval-after-load 'ligature
-    (ligature-set-ligatures
-     'prog-mode
-     '("<---" "<--" "<<-" "<-" "->" "-->" "--->" "<->" "<-->" "<--->" "<---->" "<!--"
-       "<==" "<===" "<=" "=>" "=>>" "==>" "===>" ">=" "<=>" "<==>" "<===>" "<====>" "<!---"
-       "<~~" "<~" "~>" "~~>" "::" ":::" "==" "!=" "===" "!==" ":=" ":-" ":+" "<*" "<*>" "*>"
-       "<|" "<|>" "|>" "+:" "-:" "=:" "<******>" "++" "+++")))
-  ;; Terminals cannot draw ligatures, so they are turned on when the
-  ;; first graphical frame opens.
-  (defun playground--ligatures-for-gui (&optional frame)
-    "Turn on ligatures once a graphical FRAME exists."
-    (when (display-graphic-p (or frame (selected-frame)))
-      (require 'ligature)
-      (global-ligature-mode 1)))
-  (add-hook 'after-make-frame-functions #'playground--ligatures-for-gui)
-  (when (display-graphic-p) (playground--ligatures-for-gui)))
-
 ;;;; Themes
 
 ;; ef-themes 2.2.1 autoloads its commands as plain functions, so M-x
@@ -118,41 +95,19 @@ signal an error on every redisplay."
         doom-modeline-height 1
         doom-modeline-buffer-file-name-style 'relative-from-project))
 
-;;;; Key menus (hydra)
+;;;; Key menus (transient)
 
-;; A hydra is a menu of keys that stays open (lesson 13.5): its hint
-;; sits in a window above the echo area (`lv', the default display,
-;; which works in the terminal frame and sends nothing to the echo
-;; area), and its keys win over every other keymap until it closes.
-;; Heads are complete keys, so which-key does not pop up for them; a
-;; prefix key that is no head (ESC in the terminal) still shows its
-;; popup, under the hint.
+(defun playground-menu-active-p (&rest _)
+  "Non-nil while a transient menu is open (lesson 13.5)."
+  (transient-active-prefix))
 
-(defun playground-hydra-active-p (&rest _)
-  "Non-nil while a hydra's keys are active.
-hydra pushes its keymap and puts `hydra--clearfun' on the global
-`pre-command-hook' while it is open, and takes both away when it
-closes (a red head closes and reopens it around its command)."
-  (and (bound-and-true-p hydra-curr-map)
-       (memq 'hydra--clearfun (default-value 'pre-command-hook))
-       t))
-
-;; A head sets `this-command' to the command it runs, so repeat-mode
-;; (base module) would arm that command's repeat map over the hydra:
-;; after a red `other-window' head, the next o would run plain
-;; other-window from `other-window-repeat-map', the hydra would close
-;; and the q meant for it would be typed into the buffer.  Inside a
-;; hydra, its own keys win.
-(playground-with-package hydra
-  (advice-add 'repeat-post-hook :before-until #'playground-hydra-active-p))
-
-;; pretty-hydra's toggle faces inherit from a quoted face name, which
-;; Emacs does not resolve: the (*) after a :toggle head would be
-;; uncoloured.
-(playground-with-package pretty-hydra
-  (with-eval-after-load 'pretty-hydra
-    (set-face-attribute 'pretty-hydra-toggle-on-face nil :inherit 'font-lock-keyword-face)
-    (set-face-attribute 'pretty-hydra-toggle-off-face nil :inherit 'font-lock-comment-face)))
+;; A `:transient t' suffix leaves `this-command' set to the command it
+;; runs, so repeat-mode (base module) would arm that command's repeat
+;; map over the menu: after an `other-window' suffix, O from
+;; `other-window-repeat-map' would bypass the menu, and "Repeat with"
+;; would take the echo area.  Inside a menu, only its own keys count.
+(with-eval-after-load 'transient
+  (advice-add 'repeat-post-hook :before-until #'playground-menu-active-p))
 
 ;;;; Helpful
 

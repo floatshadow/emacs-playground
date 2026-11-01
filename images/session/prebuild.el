@@ -42,7 +42,7 @@
     avy expreg multiple-cursors iedit vundo visual-replace ws-butler
     dirvish consult-dir ace-window popper burly olivetti helpful
     nerd-icons nerd-icons-dired nerd-icons-completion nerd-icons-corfu nerd-icons-ibuffer
-    breadcrumb pulsar ligature kkp markdown-mode pet doom-modeline
+    breadcrumb pulsar kkp markdown-mode pet doom-modeline
     forge vterm tuareg dune utop ocaml-eglot edit-indirect typst-ts-mode
     tex latex reftex cdlatex pdf-tools pdf-view pdf-sync citar citar-embark jinx
     org org-agenda org-capture ob-python ob-shell ob-ocaml ox-latex ox-beamer ox-html

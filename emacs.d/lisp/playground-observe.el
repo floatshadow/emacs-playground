@@ -280,17 +280,15 @@ buffer when it is the minibuffer, else `minibuffer-prompt'."
 
 (defun playground--waiting-object ()
   "The state's `waiting': {kind, what, leave} for a running loop, or :null.
-An open hydra is reported too (`playground--hydra-name')."
-  (cond
-   (playground--waiting
-    `((kind . ,(nth 1 playground--waiting))
-      (what . ,(nth 2 playground--waiting))
-      (leave . ,(nth 4 playground--waiting))))
-   ((playground--hydra-name)
-    `((kind . "hydra")
-      (what . ,(playground--hydra-what (playground--hydra-name)))
-      (leave . "C-g")))
-   (t :null)))
+An open transient menu is reported too (`playground--menu-name')."
+  (let ((menu (playground--menu-name)))
+    (cond
+     (playground--waiting
+      `((kind . ,(nth 1 playground--waiting))
+        (what . ,(nth 2 playground--waiting))
+        (leave . ,(nth 4 playground--waiting))))
+     (menu `((kind . "transient") (what . ,(playground--menu-what menu)) (leave . "C-g")))
+     (t :null))))
 
 (defun playground--emit-state (&optional force)
   "Send the state unless it equals the last one sent (FORCE sends anyway)."
@@ -351,10 +349,12 @@ runs `minibuffer-complete', which sets it to `completion-at-point'),
 so it can name a command the learner never ran.  M-x sets both to the
 command chosen by name.
 
-One exception: an amaranth hydra ignores keys it does not list by
-rewriting `this-command' to `hydra-amaranth-warn' before the command
-runs, so that warning is what the key did."
-  (if (eq this-command 'hydra-amaranth-warn) this-command real-this-command))
+One exception: transient rewrites `this-command' for keys its open
+menu refuses (`transient-undefined', `transient-inapt', `transient-noop')
+before the command runs, so that refusal is what the key did."
+  (if (memq this-command '(transient-undefined transient-inapt transient-noop))
+      this-command
+    real-this-command))
 
 (defun playground--pre-command ()
   "Remember the keys of the command about to run, and the command.

@@ -56,14 +56,14 @@ fixture.  Returns the number of buffers reverted or killed."
 
 (defun playground--op-setup (args &optional id)
   "Run a scenario's setup: open, layout, eval, compile (ARGS).
-A prompt, recursive edit, prefix key or hydra still open (the learner
+A prompt, recursive edit, prefix key or key menu still open (the learner
 switched lessons in the middle of a command) would swallow the lesson's
 first keys, so it is left first.  For the first three that needs a throw
 to the command loop, so, as in rescue, the setup then runs from a timer
 at top level and the reply to call ID is sent from there."
   (when (bound-and-true-p isearch-mode)
     (playground--safely "setup isearch" (isearch-done)))
-  (playground--close-hydra)
+  (playground--close-menu)
   (playground--at-top-level id (lambda () (playground--setup-now args))))
 
 (defconst playground--list-modes
@@ -256,9 +256,9 @@ buffers and in the windows that show them, before the setup's eval
     `((written . ,(abbreviate-file-name file)))))
 
 (defun playground--command-doc (cmd)
-  "The first line of CMD's documentation, or a gloss for a hydra's command."
-  (let ((line (playground--first-doc-line cmd)))
-    (or (playground--hydra-doc line) line)))
+  "The first line of CMD's documentation, or \"\"."
+  (let ((doc (ignore-errors (documentation cmd t))))
+    (if doc (car (split-string doc "\n")) "")))
 
 (defun playground--op-describe (args &rest _)
   "Describe the key sequence (or command name) in ARGS: {cmd, doc}."

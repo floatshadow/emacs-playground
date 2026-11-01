@@ -33,21 +33,21 @@
 
 (defun playground--op-rescue (_args &optional id)
   "Get the learner out of any confusing state; reply {did:[...]}.
-An open hydra is closed first (its keys would otherwise stay on top of
+An open key menu is closed first (its keys would otherwise stay on top of
 everything rescue leaves the learner in).  A loop reading keys of its
 own (`playground-agent-waiting-loops') is left next, with the keys
 that leave it, and the rest happens once it has ended.  Leaving
 minibuffers and recursive edits needs a throw to the command loop, so
 in that case the rest of the work runs from a timer at top level.  In
 both cases the reply is sent from there."
-  (let ((hydra (playground--close-hydra)))
+  (let ((menu (playground--close-menu)))
     (if (not playground--waiting)
-        (playground--rescue-from (and hydra (list hydra)) id)
+        (playground--rescue-from (and menu (list menu)) id)
       (let ((left (nth 3 playground--waiting)))
         (playground--quit-waiting
          (key-parse (nth 4 playground--waiting))
          (lambda ()
-           (let ((value (playground--rescue-from (delq nil (list hydra left)) id)))
+           (let ((value (playground--rescue-from (delq nil (list menu left)) id)))
              (when (and id (not (eq value 'playground--deferred)))
                (playground--reply id t value)))))
         'playground--deferred))))

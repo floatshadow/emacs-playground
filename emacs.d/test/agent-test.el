@@ -181,7 +181,7 @@ Pings are left out unless TYPE is \"ping\"."
   (pg-test-with-agent
     (let ((hello (car (pg-test-messages))))
       (should (equal (alist-get 't hello) "hello"))
-      (should (equal (alist-get 'protocol hello) 1))
+      (should (equal (alist-get 'protocol hello) 2))
       (should (equal (alist-get 'agent hello) playground-agent-version))
       (should (equal (alist-get 'emacs hello) emacs-version))
       (should (equal (alist-get 'pid hello) (emacs-pid))))
@@ -1637,166 +1637,139 @@ and lose the side window."
                      3)))
       (should (equal (alist-get 'did (pg-test-value reply)) '("closed the menu"))))))
 
-;;;; Hydras (lesson 13.5)
+;;;; Key menus (lesson 13.5)
 
-;; The agent loads no package, so these tests stand in for hydra: its
-;; keymap in `hydra-curr-map', `hydra--clearfun' on the global
-;; `pre-command-hook', NAME/body in `hydra-curr-body-fn', and a
-;; `hydra-keyboard-quit' that takes the first two away.  The real
-;; package is exercised by all-modules-test.el.
+;; Real transient menus: transient is built into Emacs.  The ui module's
+;; repeat-mode advice is exercised by all-modules-test.el.
 
-(defvar hydra-curr-map)
-(defvar hydra-curr-body-fn)
-(defvar pg-test--hydra-quits 0 "Times the fake `hydra-keyboard-quit' ran.")
+(require 'transient)
 
-(defun pg-test--hydra-clearfun ()
-  "Stands in for `hydra--clearfun' on the hook.")
+(defvar pg-test--menu-ran nil "What the test menus' suffixes recorded, newest first.")
 
-(defmacro pg-test-with-hydra (name &rest body)
-  "Run BODY with a fake hydra NAME (a string) open."
-  (declare (indent 1) (debug t))
-  `(let ((hydra-curr-map (make-sparse-keymap))
-         (hydra-curr-body-fn (intern (concat ,name "/body")))
-         (pg-test--hydra-quits 0))
-     (cl-letf (((symbol-function 'hydra--clearfun) #'pg-test--hydra-clearfun)
-               ((symbol-function 'hydra-keyboard-quit)
-                (lambda ()
-                  (cl-incf pg-test--hydra-quits)
-                  (remove-hook 'pre-command-hook 'hydra--clearfun)
-                  (setq hydra-curr-map nil))))
-       (add-hook 'pre-command-hook 'hydra--clearfun)
-       (unwind-protect (progn ,@body)
-         (remove-hook 'pre-command-hook 'hydra--clearfun)))))
+(transient-define-suffix pg-test-menu-record ()
+  "Record r and keep the menu open."
+  :transient t
+  (interactive)
+  (push 'r pg-test--menu-ran))
 
-(ert-deftest pg-agent/waiting-hydra ()
-  "An open hydra is the state's `waiting', which C-g leaves; a closed one is not."
+(transient-define-suffix pg-test-menu-ask ()
+  "Record a name read from the minibuffer and keep the menu open."
+  :transient t
+  (interactive)
+  (push (read-string "Name: ") pg-test--menu-ran))
+
+(transient-define-prefix pg-test-sizes ()
+  "A test menu opened from another."
+  ["Sizes" ("r" "record" pg-test-menu-record)])
+
+(transient-define-prefix pg-test-menu ()
+  "A test menu."
+  ["Test"
+   ("r" "record" pg-test-menu-record)
+   ("a" "ask" pg-test-menu-ask)
+   ("s" "sizes" pg-test-sizes)])
+
+(defmacro pg-test-with-menu (&rest body)
+  "Run BODY in *scratch* with `pg-test-menu' opened by M-x; close any menu after."
+  (declare (indent 0) (debug t))
+  `(progn
+     (delete-other-windows)
+     (switch-to-buffer "*scratch*")
+     (execute-kbd-macro (key-parse "M-x pg-test-menu RET"))
+     (unwind-protect (progn ,@body)
+       (playground--close-menu))))
+
+(defun pg-test-waiting-what ()
+  "The `what' of the state's `waiting', or :null."
+  (let ((w (alist-get 'waiting (playground--state))))
+    (if (eq w :null) w (alist-get 'what w))))
+
+(ert-deftest pg-agent/waiting-transient ()
+  "An open menu, nested too, is the state's `waiting', which C-g leaves."
   (pg-test-with-agent
     (should (eq (alist-get 'waiting (playground--state)) :null))
-    (pg-test-with-hydra "my-menu"
+    (pg-test-with-menu
       (should (equal (alist-get 'waiting (playground--state))
-                     '((kind . "hydra") (what . "the my-menu hydra") (leave . "C-g"))))
-      ;; A red head closes the hydra around its command (the hook goes,
-      ;; the map stays set): not open then.
-      (remove-hook 'pre-command-hook 'hydra--clearfun)
-      (should (eq (alist-get 'waiting (playground--state)) :null))
-      (add-hook 'pre-command-hook 'hydra--clearfun)
-      (let ((hydra-curr-body-fn nil))
-        (should (equal (alist-get 'what (alist-get 'waiting (playground--state))) "a hydra")))
-      (hydra-keyboard-quit)
-      (should (eq (alist-get 'waiting (playground--state)) :null)))
-    ;; A hydra closed by its :timeout reports a state.
-    (should (advice-member-p #'playground--schedule-state 'hydra-disable))))
+                     '((kind . "transient") (what . "the pg-test-menu menu") (leave . "C-g"))))
+      ;; The nested menu is the one reported; C-g goes back out.
+      (execute-kbd-macro (key-parse "s"))
+      (should (equal (pg-test-waiting-what) "the pg-test-sizes menu"))
+      (execute-kbd-macro (key-parse "C-g"))
+      (should (equal (pg-test-waiting-what) "the pg-test-menu menu"))
+      (execute-kbd-macro (key-parse "C-g"))
+      (should (eq (pg-test-waiting-what) :null)))
+    ;; A menu closed from outside the command loop reports a state.
+    (should (memq #'playground--schedule-state transient-post-exit-hook))))
 
-(ert-deftest pg-agent/rescue-closes-a-hydra ()
-  "Rescue closes an open hydra first and says so."
+(ert-deftest pg-agent/transient-refused-key ()
+  "A key the open menu refuses is reported as `transient-undefined'; a suffix as itself."
   (pg-test-with-agent
-    (delete-other-windows)
-    (switch-to-buffer "*scratch*")
-    (pg-test-with-hydra "my-menu"
-      (should (equal (pg-test-rescue) '("closed the my-menu hydra")))
-      (should (= pg-test--hydra-quits 1))
-      (should (eq (alist-get 'waiting (playground--state)) :null))
+    (let ((pg-test--menu-ran nil))
+      (pg-test-with-menu
+        (pg-test-clear)
+        (execute-kbd-macro (key-parse "x r"))
+        (pg-test-settle)
+        (should (equal (mapcar (lambda (k) (list (alist-get 'keys k) (alist-get 'cmd k)))
+                               (pg-test-messages "key"))
+                       '(("x" "transient-undefined") ("r" "pg-test-menu-record"))))
+        (should (equal pg-test--menu-ran '(r)))
+        (should (playground--menu-name))))))
+
+(ert-deftest pg-agent/close-menu-from-outside ()
+  "Rescue, setup and restore-editor close an open menu, nested too, and say so."
+  (pg-test-with-agent
+    (pg-test-with-menu
+      (should (equal (pg-test-rescue) '("closed the pg-test-menu menu")))
+      (should (eq (pg-test-waiting-what) :null))
+      (should-not (get-buffer-window transient--buffer-name))
       ;; Nothing open: nothing to say.
-      (should (equal (pg-test-rescue) nil))
-      (should (= pg-test--hydra-quits 1)))))
-
-(ert-deftest pg-agent/rescue-hydra-and-prompt ()
-  "A pink hydra open over a prompt is closed before the prompt is unwound."
-  (pg-test-with-agent
-    (delete-other-windows)
-    (switch-to-buffer "*scratch*")
-    (pg-test-with-hydra "my-sizes"
-      (let* ((unwound nil)
-             (playground-agent-rescue-unwind-function (lambda () (setq unwound pg-test--hydra-quits))))
-        (cl-letf (((symbol-function 'minibuffer-depth) (lambda () 1))
-                  ((symbol-function 'recursion-depth) (lambda () 1)))
-          (let ((did (pg-test-rescue)))
-            (should (eql unwound 1))
-            (should (equal (seq-take did 2) '("closed the my-sizes hydra" "cancelled the prompt")))))))))
-
-(ert-deftest pg-agent/setup-and-reset-close-a-hydra ()
-  "setup and restore-editor close an open hydra, whose keys would take the next ones."
-  (pg-test-with-agent
+      (should (equal (pg-test-rescue) nil)))
+    (pg-test-with-menu
+      (execute-kbd-macro (key-parse "s"))
+      (should (equal (playground--close-menu) "closed the pg-test-sizes menu"))
+      ;; The outer menu does not come back.
+      (should (eq (pg-test-waiting-what) :null))
+      (should-not (bound-and-true-p transient--prefix)))
     (pg-test-file "hello/README.md" "# hello\n")
-    (pg-test-with-hydra "my-menu"
+    (pg-test-with-menu
       (pg-test-value (pg-test-call "setup" `((open . ,(vector "hello/README.md"))
                                              (layout . "hello/README.md")
                                              (workspace . ,pg-test--dir))))
-      (should (= pg-test--hydra-quits 1))
-      (should (eq (alist-get 'waiting (playground--state)) :null)))
-    (pg-test-with-hydra "my-menu"
+      (should (eq (pg-test-waiting-what) :null)))
+    (pg-test-with-menu
       (pg-test-value
        (pg-test-call "restore-editor"
                      `((spec . ((files . ,(vector '((path . "hello/README.md") (point . 1) (visible . t))))
                                 (layout . "hello/README.md"))))))
-      (should (= pg-test--hydra-quits 1)))))
+      (should (eq (pg-test-waiting-what) :null)))))
 
-(defun pg-test-menu/body ()
-  "Call the body in the \"pg-test-menu\" hydra.
-
-The hint."
-  (interactive))
-
-(defun pg-test-menu/other-window ()
-  "Call the head `other-window' in the \"pg-test-menu\" hydra.
-
-The hint."
-  (interactive))
-
-(defun pg-test-menu/find-file-and-exit ()
-  "Call the head `find-file' in the \"pg-test-menu\" hydra.
-
-The hint."
-  (interactive))
-
-(defun pg-test-menu/nil ()
-  "Call the head `nil' in the \"pg-test-menu\" hydra.
-
-The hint."
-  (interactive))
-
-(defun pg-test-menu/lambda-x ()
-  "Call the head `(message \"x\")' in the \"pg-test-menu\" hydra.
-
-The hint."
-  (interactive))
-
-(ert-deftest pg-agent/describe-hydra-commands ()
-  "describe glosses the commands a hydra defines in words, not hydra's own text."
+(ert-deftest pg-agent/close-suspended-menu ()
+  "A menu suspended by its suffix's prompt is the prompt's, and still closes cleanly."
   (pg-test-with-agent
-    (cl-flet ((doc (cmd) (alist-get 'doc (pg-test-value (pg-test-call "describe" `((cmd . ,cmd)))))))
-      (should (equal (doc "pg-test-menu/body")
-                     "Open the pg-test-menu hydra: its keys stay active until it closes"))
-      (should (equal (doc "pg-test-menu/nil") "Close the pg-test-menu hydra"))
-      (should (string-match-p "\\`other-window from the pg-test-menu hydra: Select another window"
-                              (doc "pg-test-menu/other-window")))
-      (should (string-prefix-p "find-file from the pg-test-menu hydra: "
-                               (doc "pg-test-menu/find-file-and-exit")))
-      (should (equal (doc "pg-test-menu/lambda-x") "A key of the pg-test-menu hydra")))
-    ;; By key, too: inside a hydra its keys are found first.
-    (let ((map (make-sparse-keymap)))
-      (keymap-set map "C-c z" #'pg-test-menu/nil)
-      (let ((overriding-terminal-local-map map))
-        (should (equal (pg-test-value (pg-test-call "describe" '((keys . "C-c z"))))
-                       '((cmd . "pg-test-menu/nil") (doc . "Close the pg-test-menu hydra"))))))))
-
-(ert-deftest pg-agent/hydra-heads-in-key-events ()
-  "Key events name a head's own command; a key an amaranth hydra ignores is its warning."
-  (pg-test-with-agent
-    (pg-test-clear)
-    ;; A head sets `this-command' to the command it wraps.
-    (let ((real-this-command 'pg-test-menu/other-window)
-          (this-command 'other-window))
-      (cl-letf (((symbol-function 'playground--this-keys) (lambda () "o")))
-        (playground--post-command)))
-    (let ((real-this-command 'self-insert-command)
-          (this-command 'hydra-amaranth-warn))
-      (cl-letf (((symbol-function 'playground--this-keys) (lambda () "x")))
-        (playground--post-command)))
-    (pg-test-settle)
-    (should (equal (mapcar (lambda (k) (list (alist-get 'keys k) (alist-get 'cmd k)))
-                           (pg-test-messages "key"))
-                   '(("o" "pg-test-menu/other-window") ("x" "hydra-amaranth-warn"))))))
+    (let ((pg-test--menu-ran nil)
+          (inside nil)
+          (map (make-sparse-keymap)))
+      (keymap-set map "<f5>"
+                  (lambda ()
+                    (interactive)
+                    (setq inside (list (pg-test-waiting-what)
+                                       (alist-get 'prompt (alist-get 'minibuffer (playground--state)))
+                                       (playground--close-menu)))))
+      (let ((minibuffer-local-map (make-composed-keymap map minibuffer-local-map))
+            (log-start (with-current-buffer (messages-buffer) (point-max))))
+        (pg-test-with-menu
+          (execute-kbd-macro (key-parse "a b o <f5> b RET")))
+        ;; The suffix's return put no menu back: transient's hooks would
+        ;; signal without one (and Emacs would drop them).
+        (should-not (string-match-p "Error in .*command-hook"
+                                    (with-current-buffer (messages-buffer)
+                                      (buffer-substring log-start (point-max))))))
+      (should (equal inside '(:null "Name: " "closed the pg-test-menu menu")))
+      (should (equal pg-test--menu-ran '("bob")))
+      (should-not (bound-and-true-p transient--prefix))
+      (should-not (memq 'transient--pre-command pre-command-hook))
+      (should-not (memq 'transient--post-command post-command-hook))
+      (should (eq (pg-test-waiting-what) :null)))))
 
 ;;;; Frames
 

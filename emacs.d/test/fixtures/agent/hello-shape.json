@@ -16,7 +16,7 @@
       "ok": true,
       "reply": {
         "t": "hello",
-        "protocol": 1,
+        "protocol": 2,
         "agent": "0.1.0",
         "emacs": "31.1"
       },

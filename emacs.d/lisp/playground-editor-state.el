@@ -888,10 +888,10 @@ pointer goes back to its head."
 At top level: a prefix key typed before Reset (C-c waiting for its
 second key) would otherwise swallow the next keys, so it is cancelled,
 and so are prompts (see `playground--at-top-level'); the reply to call
-ID may come later.  An open hydra is closed: its keys would take the
-demo's or the learner's next keys, and the layout would delete its hint
+ID may come later.  An open key menu is closed: its keys would take the
+demo's or the learner's next keys, and the layout would delete its
 window while they stay active."
-  (playground--close-hydra)
+  (playground--close-menu)
   (playground--at-top-level id (lambda () (playground--restore-editor-now args))))
 
 (defun playground--restore-editor-now (args)

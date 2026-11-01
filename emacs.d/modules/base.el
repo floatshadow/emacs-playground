@@ -52,11 +52,15 @@
 ;; mode lines (#484d67 and #292d48) are hard to tell apart in a browser
 ;; terminal, so the active one takes the playground's violet and the
 ;; inactive ones are dimmed (a background contrast of about 2.8 between
-;; them; both keep their text above 4.5:1).  Theme-specific overrides,
-;; so another Modus theme chosen later keeps its own colours.
+;; them; both keep their text above 4.5:1).  The region is a palette
+;; teal (#00808f): above 3:1 on the background, white text above 4.5:1
+;; on it, unlike the search, hl-line, paren and mode-line backgrounds.
+;; Theme-specific overrides, so another Modus theme chosen later keeps
+;; its own colours.
 (defvar modus-vivendi-tinted-palette-overrides)
 (setq modus-vivendi-tinted-palette-overrides
-      '((bg-mode-line-active "#7a58c4")
+      '((bg-region bg-graph-cyan-1)
+        (bg-mode-line-active "#7a58c4")
         (fg-mode-line-active "#ffffff")
         (border-mode-line-active "#a990e6")
         (bg-mode-line-inactive "#232639")
@@ -218,7 +222,10 @@ seconds."
               fill-column 80)
 (setq sentence-end-double-space nil
       scroll-conservatively 101
-      scroll-preserve-screen-position t)
+      scroll-preserve-screen-position t
+      ;; On the last screen C-v moves to the end instead of signalling
+      ;; "End of buffer" (M-v likewise on the first).
+      scroll-error-top-bottom t)
 (global-so-long-mode 1)
 
 ;;;; Quitting (emacs.md section 7)
