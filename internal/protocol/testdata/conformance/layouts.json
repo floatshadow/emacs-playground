@@ -1,0 +1,19 @@
+[
+  {"name": "(vsplit main.rs *compilation*) on [\"vsplit\", 3, 7]", "pattern": "(vsplit main.rs *compilation*)", "layout": ["vsplit", 3, 7], "bufs": {"3": "main.rs<hello>", "7": "*compilation*", "9": "Cargo.toml"}, "want": true},
+  {"name": "(vsplit hello/src/main.rs *) on [\"vsplit\", 3, 7]", "pattern": "(vsplit hello/src/main.rs *)", "layout": ["vsplit", 3, 7], "bufs": {"3": "main.rs<hello>", "7": "*compilation*", "9": "Cargo.toml"}, "want": true},
+  {"name": "(hsplit main.rs *compilation*) on [\"vsplit\", 3, 7]", "pattern": "(hsplit main.rs *compilation*)", "layout": ["vsplit", 3, 7], "bufs": {"3": "main.rs<hello>", "7": "*compilation*", "9": "Cargo.toml"}, "want": false},
+  {"name": "(vsplit *compilation* main.rs) on [\"vsplit\", 3, 7]", "pattern": "(vsplit *compilation* main.rs)", "layout": ["vsplit", 3, 7], "bufs": {"3": "main.rs<hello>", "7": "*compilation*", "9": "Cargo.toml"}, "want": false},
+  {"name": "single on 3", "pattern": "single", "layout": 3, "bufs": {"3": "main.rs<hello>", "7": "*compilation*", "9": "Cargo.toml"}, "want": true},
+  {"name": "single on [\"vsplit\", 3, 7]", "pattern": "single", "layout": ["vsplit", 3, 7], "bufs": {"3": "main.rs<hello>", "7": "*compilation*", "9": "Cargo.toml"}, "want": false},
+  {"name": "main.rs on 3", "pattern": "main.rs", "layout": 3, "bufs": {"3": "main.rs<hello>", "7": "*compilation*", "9": "Cargo.toml"}, "want": true},
+  {"name": "(hsplit * (vsplit main.rs *compilation*)) on [\"hsplit\", 9, [\"vsplit\", 3, 7]]", "pattern": "(hsplit * (vsplit main.rs *compilation*))", "layout": ["hsplit", 9, ["vsplit", 3, 7]], "bufs": {"3": "main.rs<hello>", "7": "*compilation*", "9": "Cargo.toml"}, "want": true},
+  {"name": "same-orientation nesting is flattened on both sides", "pattern": "(vsplit main.rs *compilation* Cargo.toml)", "layout": ["vsplit", 3, ["vsplit", 7, 9]], "bufs": {"3": "main.rs<hello>", "7": "*compilation*", "9": "Cargo.toml"}, "want": true},
+  {"name": "(vsplit \"main.rs\" *) on [\"vsplit\", 3, 7]", "pattern": "(vsplit \"main.rs\" *)", "layout": ["vsplit", 3, 7], "bufs": {"3": "main.rs<hello>", "7": "*compilation*", "9": "Cargo.toml"}, "want": true},
+  {"name": "rejects \"\"", "pattern": "", "error": true},
+  {"name": "rejects \"(vsplit a)\"", "pattern": "(vsplit a)", "error": true},
+  {"name": "rejects \"(diag a b)\"", "pattern": "(diag a b)", "error": true},
+  {"name": "rejects \"(vsplit a b\"", "pattern": "(vsplit a b", "error": true},
+  {"name": "rejects \"a b\"", "pattern": "a b", "error": true},
+  {"name": "rejects \"(vsplit single a)\"", "pattern": "(vsplit single a)", "error": true},
+  {"name": "rejects \"(\\\"vsplit\\\" a b)\"", "pattern": "(\"vsplit\" a b)", "error": true}
+]

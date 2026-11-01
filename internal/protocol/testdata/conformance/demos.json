@@ -1,0 +1,12 @@
+[
+  {"name": "keys, text, pauses and escapes", "demo": "C-x C-f \"ma\" TAB ~400 RET \"say \\\"hi\\\"\\n\"", "want": [{"kind": "key", "key": "C-x"}, {"kind": "key", "key": "C-f"}, {"kind": "text", "text": "ma"}, {"kind": "key", "key": "TAB"}, {"kind": "pause", "pauseMs": 400}, {"kind": "key", "key": "RET"}, {"kind": "text", "text": "say \"hi\"\n"}]},
+  {"name": "keys are normalised", "demo": "F3 M-C-x", "want": [{"kind": "key", "key": "<f3>"}, {"kind": "key", "key": "C-M-x"}]},
+  {"name": "rejects \"\"", "demo": "", "error": true},
+  {"name": "rejects \"\\\"unterminated\"", "demo": "\"unterminated", "error": true},
+  {"name": "rejects \"~x\"", "demo": "~x", "error": true},
+  {"name": "rejects \"C-x \\\"a\\\"b\"", "demo": "C-x \"a\"b", "error": true},
+  {"name": "rejects \"Ctrl-x\"", "demo": "Ctrl-x", "error": true},
+  {"name": "rejects \"\\\"\\\"\"", "demo": "\"\"", "error": true},
+  {"name": "rejects \"\\\"\\\\q\\\"\"", "demo": "\"\\q\"", "error": true},
+  {"name": "rejects \"~70000\"", "demo": "~70000", "error": true}
+]

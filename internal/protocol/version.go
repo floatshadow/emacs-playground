@@ -1,9 +1,10 @@
 package protocol
 
 // Version is the protocol version carried as "protocol" in the events hello
-// (api.md §4) and the agent hello (api.md §7). Breaking changes to any type
-// in this package bump it together with the REST prefix.
-const Version = 1
+// (api.md §4) and the agent hello (api.md §7). Breaking changes to the
+// events, RPC or agent types bump it; the REST prefix changes only when the
+// gateway REST API breaks.
+const Version = 2
 
 // APIPrefix is the gateway REST prefix (api.md §2).
 const APIPrefix = "/api/v1"

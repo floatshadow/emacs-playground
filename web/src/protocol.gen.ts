@@ -127,7 +127,7 @@ export const SinceStep = "step" satisfies EventSince;
 export const SinceLesson = "lesson" satisfies EventSince;
 
 /** EventType is the "t" discriminator of an event (api.md §4). */
-export type EventType = "hello" | "key" | "prefix" | "state" | "echo" | "minibuffer" | "emacs" | "file" | "check" | "step" | "nudge" | "checkpoint" | "mode" | "modules" | "gap" | "error";
+export type EventType = "hello" | "key" | "prefix" | "state" | "echo" | "minibuffer" | "emacs" | "file" | "check" | "lesson" | "nudge" | "checkpoint" | "mode" | "modules" | "gap" | "error";
 export const EventHello = "hello" satisfies EventType;
 export const EventKey = "key" satisfies EventType;
 export const EventPrefix = "prefix" satisfies EventType;
@@ -137,7 +137,7 @@ export const EventMinibuffer = "minibuffer" satisfies EventType;
 export const EventEmacs = "emacs" satisfies EventType;
 export const EventFile = "file" satisfies EventType;
 export const EventCheck = "check" satisfies EventType;
-export const EventStep = "step" satisfies EventType;
+export const EventLesson = "lesson" satisfies EventType;
 export const EventNudge = "nudge" satisfies EventType;
 export const EventCheckpoint = "checkpoint" satisfies EventType;
 export const EventMode = "mode" satisfies EventType;
@@ -165,11 +165,29 @@ export type FrameKind = "terminal" | "gui";
 export const FrameTerminal = "terminal" satisfies FrameKind;
 export const FrameGUI = "gui" satisfies FrameKind;
 
+/** LessonChange says why a LessonEvent was published. */
+export type LessonChange = "loaded" | "reset" | "complete" | "demonstrated" | "skipped" | "dropped" | "phase" | "busy";
+export const ChangeLoaded = "loaded" satisfies LessonChange;
+export const ChangeReset = "reset" satisfies LessonChange;
+export const ChangeComplete = "complete" satisfies LessonChange;
+export const ChangeDemonstrated = "demonstrated" satisfies LessonChange;
+export const ChangeSkipped = "skipped" satisfies LessonChange;
+export const ChangeDropped = "dropped" satisfies LessonChange;
+export const ChangePhase = "phase" satisfies LessonChange;
+export const ChangeBusy = "busy" satisfies LessonChange;
+
 /** LessonMode is the frame a lesson runs in. */
 export type LessonMode = "terminal" | "gui" | "any";
 export const LessonTerminal = "terminal" satisfies LessonMode;
 export const LessonGUI = "gui" satisfies LessonMode;
 export const LessonAny = "any" satisfies LessonMode;
+
+/** LessonPhase is the lesson's phase in a LessonSnapshot. */
+export type LessonPhase = "idle" | "active" | "watching" | "complete";
+export const PhaseIdle = "idle" satisfies LessonPhase;
+export const PhaseActive = "active" satisfies LessonPhase;
+export const PhaseWatching = "watching" satisfies LessonPhase;
+export const PhaseComplete = "complete" satisfies LessonPhase;
 
 /**
  * LoginError is the error query parameter of /login when the OIDC
@@ -278,26 +296,17 @@ export type SplitKind = "vsplit" | "hsplit";
 export const VSplit = "vsplit" satisfies SplitKind;
 export const HSplit = "hsplit" satisfies SplitKind;
 
-/** StepStatus is the status reported by StepEvent. */
-export type StepStatus = "loaded" | "complete" | "reset" | "demonstrated" | "skipped" | "dropped";
-export const StepLoaded = "loaded" satisfies StepStatus;
-export const StepComplete = "complete" satisfies StepStatus;
-export const StepReset = "reset" satisfies StepStatus;
-export const StepDemonstrated = "demonstrated" satisfies StepStatus;
-export const StepSkipped = "skipped" satisfies StepStatus;
-export const StepDropped = "dropped" satisfies StepStatus;
-
 /** UserKind says how a user authenticated. */
 export type UserKind = "local" | "oidc";
 export const UserLocal = "local" satisfies UserKind;
 export const UserOIDC = "oidc" satisfies UserKind;
 
 /** WaitingKind names the loop of State.Waiting. */
-export type WaitingKind = "menu" | "avy" | "which-key" | "hydra";
+export type WaitingKind = "menu" | "avy" | "which-key" | "transient";
 export const WaitingMenu = "menu" satisfies WaitingKind;
 export const WaitingAvy = "avy" satisfies WaitingKind;
 export const WaitingWhichKey = "which-key" satisfies WaitingKind;
-export const WaitingHydra = "hydra" satisfies WaitingKind;
+export const WaitingTransient = "transient" satisfies WaitingKind;
 
 /** CheatRow is [keys, description]; YAML `- [M-., go to definition]`. */
 export type CheatRow = [keys: string, description: string];
@@ -350,7 +359,7 @@ export type LocalText = string | Record<string, string>;
  *     {in: [...]}, {not: v} (negates equality or a nested operator object),
  *     {gt: n}, {gte: n}, {lt: n}, {lte: n}, {exists: bool},
  *     {contains: v} (substring of a string or element of an array),
- *     {regex: "re"} (RE2 match on a string).
+ *     {regex: "re"} (RE2 match on a string; the pattern is in RegexDialect).
  *
  * YAML example (tables/exits.yaml):
  *
@@ -524,6 +533,11 @@ export interface CheckEvent {
   ts?: number;
   lessonId: string;
   stepId: string;
+  /**
+   * Attempt is the attempt evaluated (LessonSnapshot.Attempt); a check
+   * of another attempt is stale.
+   */
+  attempt: number;
   conditions: CondResult[];
   /** Complete is true when every condition holds. */
   complete: boolean;
@@ -716,10 +730,13 @@ export interface DemoRequest {
 
 /**
  * DemoResult reports whether demo start restored the step's checkpoint
- * first (a command ran since the step started or was last reset).
+ * first (a command ran since the step started or was last reset) and the
+ * attempt the demonstration belongs to: playback stops once the snapshot
+ * shows another.
  */
 export interface DemoResult {
   restored: boolean;
+  attempt: number;
 }
 
 /** DemoToken is one element of a step's demo string. */
@@ -769,7 +786,7 @@ export interface Diagnostic {
  * POST /progress/reset (sent by the gateway). With LessonID it forgets that
  * lesson's progress and the active step if it belongs to the lesson; with an
  * empty LessonID it forgets all progress and the active step. A forgotten
- * active step emits a StepEvent with status StepDropped.
+ * active step publishes a LessonEvent with change dropped.
  */
 export interface DropStepRequest {
   generation?: number;
@@ -1052,8 +1069,6 @@ export interface HelloEvent {
   emacs: EmacsInfo;
   /** Frames reports which frames exist. */
   frames: Frames;
-  /** Step is the active step, or null when no scenario is loaded. */
-  step: StepRef | null;
   /** Modules is the enabled configuration module set, in load order. */
   modules: string[];
   /**
@@ -1061,10 +1076,11 @@ export interface HelloEvent {
    * connected with ?after= and the gap was still in the ring buffer).
    */
   replayed: boolean;
-  /** Lap is the running lap, if any (ScenarioRequest.Lap). */
-  lap?: LapInfo;
-  /** Busy is the lesson operation in progress, if any. */
-  busy?: BusyInfo;
+  /**
+   * Lesson is the lesson snapshot, read after the subscription began:
+   * the browser applies it whatever its rev.
+   */
+  lesson: LessonSnapshot;
 }
 
 /** HintRequest records that the learner revealed a hint (progress counts it). */
@@ -1169,6 +1185,21 @@ export interface LessonBundle {
   assets: string[];
 }
 
+/**
+ * LessonEvent publishes a new LessonSnapshot. StepID names the step a
+ * change concerns; LapMs is a finished lap's time, on its last step's
+ * complete or skipped change.
+ */
+export interface LessonEvent {
+  t: "lesson";
+  seq?: number;
+  ts?: number;
+  change: LessonChange;
+  stepId?: string;
+  lapMs?: number;
+  lesson: LessonSnapshot;
+}
+
 /** LessonFront is the YAML front matter of lesson.md. */
 export interface LessonFront {
   title: string;
@@ -1207,6 +1238,27 @@ export interface LessonRef {
   status: Availability;
   /** Steps is the number of steps (0 for planned lessons). */
   steps?: number;
+}
+
+/**
+ * LessonSnapshot is sessiond's lesson state, the only source of lifecycle
+ * facts for the browser (api.md §4.1). Rev rises with every published
+ * change, per sessiond process.
+ */
+export interface LessonSnapshot {
+  rev: number;
+  /** LessonID is the loaded lesson, "" when none. */
+  lessonId?: string;
+  /** Step is the active step, null when none (idle, complete). */
+  step: StepPos | null;
+  phase: LessonPhase;
+  /** Attempt numbers the active step's activation, 0 without a step. */
+  attempt: number;
+  /** Outcomes are LessonID's saved done, skipped and demonstrated steps. */
+  outcomes: Record<string, ProgressStatus>;
+  lap?: LapInfo;
+  /** Busy is the lesson op in progress (load, skip, restore, …). */
+  busy?: BusyInfo;
 }
 
 /** LimitsConfig are per-session resource limits. */
@@ -2031,7 +2083,7 @@ export interface State {
   diagAtPoint: Diagnostic | null;
   /**
    * Waiting names a loop that reads keys of its own (a menu-bar menu,
-   * avy, which-key's pages) or an open hydra, or null. Such a loop is
+   * avy, which-key's pages) or an open transient menu, or null. Such a loop is
    * neither a prompt nor a recursive edit, and keys go to it first.
    */
   waiting: Waiting | null;
@@ -2049,15 +2101,13 @@ export interface StatusResult {
   versions?: Record<string, string>;
   /** ActiveWebSockets counts open /pty, /events and /vnc connections. */
   activeWebSockets: number;
-  /** Lap is the running lap, if any. */
-  lap?: LapInfo;
   /**
    * RemoteBox is true when the box alias is set up (key pair and
    * ~/.ssh/config written; deployment.md §6).
    */
   remoteBox?: boolean;
-  /** Busy is the lesson operation in progress, if any. */
-  busy?: BusyInfo;
+  /** Lesson is the lesson snapshot (HelloEvent.Lesson). */
+  lesson: LessonSnapshot;
 }
 
 /** Step is one goal of a lesson. */
@@ -2091,31 +2141,11 @@ export interface Step {
   mode?: LessonMode;
 }
 
-/**
- * StepEvent reports step transitions. After "complete" and "skipped" the
- * engine advances and emits "loaded" for the next step; for the last step it
- * sets LessonComplete instead.
- */
-export interface StepEvent {
-  t: "step";
-  seq?: number;
-  ts?: number;
-  lessonId: string;
-  stepId: string;
-  status: StepStatus;
-  /** Index is the 0-based position of the step in the scenario. */
+/** StepPos is the active step and its 0-based place in the scenario. */
+export interface StepPos {
+  id: string;
   index: number;
-  /** Count is the number of steps in the scenario. */
   count: number;
-  /**
-   * LessonComplete is true on the "complete" or "skipped" event of the
-   * last step.
-   */
-  lessonComplete?: boolean;
-  /** Lap is true while the step belongs to a lap (ScenarioRequest.Lap). */
-  lap?: boolean;
-  /** LapMs is the lap's time, on the event that completes it. */
-  lapMs?: number;
 }
 
 /** StepProgress is the progress of one step. */
@@ -2331,7 +2361,7 @@ export interface WindowSpec {
 }
 
 /** Every event on /s/{id}/events, discriminated by `t` (api.md §4). */
-export type Event = HelloEvent | KeyEvent | PrefixEvent | State | EchoEvent | MinibufferEvent | EmacsEvent | FileEvent | CheckEvent | StepEvent | NudgeEvent | CheckpointEvent | ModeEvent | ModulesEvent | GapEvent | ErrorEvent;
+export type Event = HelloEvent | KeyEvent | PrefixEvent | State | EchoEvent | MinibufferEvent | EmacsEvent | FileEvent | CheckEvent | LessonEvent | NudgeEvent | CheckpointEvent | ModeEvent | ModulesEvent | GapEvent | ErrorEvent;
 
 /** Session RPC success body (api.md §3.4). */
 export interface RpcOk<T> {
@@ -2385,6 +2415,7 @@ export const DemoCharDelayMs = 70;
 export const ProblemContentType = "application/problem+json";
 export const UndefinedCommand = "undefined";
 export const ExitSessionRoot = "session";
+export const RegexDialect = 1;
 export const TagRemote = "remote";
 export const TagGUI = "gui";
 export const TagProject = "project";
@@ -2409,7 +2440,7 @@ export const QueryRows = "rows";
 export const HeaderUser = "X-Playground-User";
 export const HeaderRequestID = "X-Request-Id";
 export const HeaderProxySecret = "X-Playground-Proxy";
-export const Version = 1;
+export const Version = 2;
 export const APIPrefix = "/api/v1";
 export const AgentVersion = "0.1.0";
 export const CurriculumFormat = 1;

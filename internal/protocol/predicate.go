@@ -1,7 +1,9 @@
 package protocol
 
 import (
+	"cmp"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"regexp"
@@ -31,7 +33,7 @@ import (
 //     {in: [...]}, {not: v} (negates equality or a nested operator object),
 //     {gt: n}, {gte: n}, {lt: n}, {lte: n}, {exists: bool},
 //     {contains: v} (substring of a string or element of an array),
-//     {regex: "re"} (RE2 match on a string).
+//     {regex: "re"} (RE2 match on a string; the pattern is in RegexDialect).
 //
 // YAML example (tables/exits.yaml):
 //
@@ -120,6 +122,9 @@ func validateExpectation(want any) error {
 			s, ok := arg.(string)
 			if !ok {
 				return fmt.Errorf("regex: want a string")
+			}
+			if err := ValidateRegexDialect(s); err != nil {
+				return fmt.Errorf("regex: %w", err)
 			}
 			if _, err := regexp.Compile(s); err != nil {
 				return fmt.Errorf("regex: %w", err)
@@ -404,4 +409,88 @@ func formatValue(v any) string {
 	}
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// RegexDialect is the version of the regex dialect of predicate regexes
+// (CURRICULUM.md B.4): a subset of RE2 whose matches the browser reproduces.
+const RegexDialect = 1
+
+var dialectRepeat = regexp.MustCompile(`^\{(0|[1-9][0-9]*)(,(0|[1-9][0-9]*)?)?\}`)
+
+// ValidateRegexDialect checks src against RegexDialect 1, an allow-list:
+// one leading (?ims) group; literals; \d \D \w \W \s \S \b \B \t \n \r
+// and escaped punctuation; classes of literals, ranges between literals,
+// \d \w \s \t \n \r and escaped punctuation; . ^ $ ( ) (?: ) |; and * + ?
+// {m} {m,} {m,n} (no leading zeros, never right after a group), each
+// optionally lazy. \b and \B do not combine with (?i), where the browser's
+// word characters differ. RE2's own errors (unbalanced groups, reversed
+// ranges, counts above 1000) are left to regexp.Compile.
+func ValidateRegexDialect(src string) error {
+	const punct = `\^$.|?*+()[]{}-/`
+	classEsc := map[rune]rune{'d': -1, 'w': -1, 's': -1, 't': '\t', 'n': '\n', 'r': '\r'}
+	rs, i, fold := []rune(src), 0, false
+	if j := strings.IndexByte(src, ')'); strings.HasPrefix(src, "(?") && j > 2 && strings.Trim(src[2:j], "ims") == "" {
+		i, fold = j+1, strings.Contains(src[:j], "i")
+	}
+	for canRepeat := false; i < len(rs); {
+		switch c, rest := rs[i], string(rs[i:]); {
+		case c == '\\':
+			if len(rest) < 2 || !strings.ContainsRune("dDwWsSbBtnr"+punct, rs[i+1]) || fold && strings.ContainsRune("bB", rs[i+1]) {
+				return fmt.Errorf("%.2s is not in regex dialect %d", rest, RegexDialect)
+			}
+			canRepeat, i = !strings.ContainsRune("bB", rs[i+1]), i+2
+		case c == '[':
+			j, prev := i+1, rune(-1)
+			if strings.HasPrefix(rest, "[^") {
+				j++
+			}
+			first := j
+			for ; j < len(rs) && rs[j] != ']'; j++ {
+				lit, isRange := rs[j], false
+				if lit == '-' && j > first && j+1 < len(rs) && rs[j+1] != ']' {
+					j, isRange = j+1, true
+					lit = rs[j]
+				}
+				if lit == '[' || lit == '^' || lit == '\\' && (j+1 == len(rs) || !strings.ContainsRune("dwstnr"+punct, rs[j+1])) {
+					return errors.New("a class holds literals ([ and ^ escaped), ranges, \\d \\w \\s \\t \\n \\r and escaped punctuation")
+				} else if lit == '\\' {
+					j++
+					lit = cmp.Or(classEsc[rs[j]], rs[j])
+				}
+				if isRange && (prev < 0 || lit < 0) {
+					return errors.New("a class range needs literal ends")
+				}
+				if prev = lit; isRange {
+					prev = -1
+				}
+			}
+			if j == first {
+				return errors.New("an empty class (escape a literal ])")
+			}
+			canRepeat, i = true, j+1
+		case c == '(' && strings.HasPrefix(rest, "(?") && !strings.HasPrefix(rest, "(?:"):
+			return errors.New("only (?:…) groups and one leading flag group are in the dialect")
+		case strings.ContainsRune("*+?{", c):
+			n := max(1, len(dialectRepeat.FindString(rest)))
+			if c == '{' && n == 1 {
+				return errors.New("a literal { must be escaped; counts have no leading zeros")
+			}
+			if !canRepeat {
+				return errors.New("nothing to repeat (a count never follows a group)")
+			}
+			if i += n; i < len(rs) && rs[i] == '?' {
+				i++
+			}
+			canRepeat = false
+		case c == ']' || c == '}':
+			return fmt.Errorf("a literal %c must be escaped", c)
+		default: // a literal, ., ^, $, |, ( or (?:
+			n := 1
+			if strings.HasPrefix(rest, "(?:") {
+				n = 3
+			}
+			canRepeat, i = !strings.ContainsRune("^$|(", c) && !strings.HasPrefix(rest, "){"), i+n
+		}
+	}
+	return nil
 }

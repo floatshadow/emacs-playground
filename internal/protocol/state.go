@@ -92,7 +92,7 @@ type State struct {
 	// DiagAtPoint is the Flymake diagnostic at point, or null.
 	DiagAtPoint *Diagnostic `json:"diagAtPoint"`
 	// Waiting names a loop that reads keys of its own (a menu-bar menu,
-	// avy, which-key's pages) or an open hydra, or null. Such a loop is
+	// avy, which-key's pages) or an open transient menu, or null. Such a loop is
 	// neither a prompt nor a recursive edit, and keys go to it first.
 	Waiting *Waiting `json:"waiting"`
 }
@@ -111,8 +111,9 @@ const (
 	WaitingAvy WaitingKind = "avy"
 	// WaitingWhichKey is which-key paging through a pending prefix's keys.
 	WaitingWhichKey WaitingKind = "which-key"
-	// WaitingHydra is a hydra whose keys stay active until it closes.
-	WaitingHydra WaitingKind = "hydra"
+	// WaitingTransient is a transient key menu, open until a suffix exits
+	// it or C-g closes it.
+	WaitingTransient WaitingKind = "transient"
 )
 
 // Waiting describes a loop that reads keys of its own.

@@ -253,13 +253,11 @@ type StatusResult struct {
 	Versions map[string]string `json:"versions,omitempty"`
 	// ActiveWebSockets counts open /pty, /events and /vnc connections.
 	ActiveWebSockets int `json:"activeWebSockets"`
-	// Lap is the running lap, if any.
-	Lap *LapInfo `json:"lap,omitempty"`
 	// RemoteBox is true when the box alias is set up (key pair and
 	// ~/.ssh/config written; deployment.md §6).
 	RemoteBox bool `json:"remoteBox,omitempty"`
-	// Busy is the lesson operation in progress, if any.
-	Busy *BusyInfo `json:"busy,omitempty"`
+	// Lesson is the lesson snapshot (HelloEvent.Lesson).
+	Lesson LessonSnapshot `json:"lesson"`
 }
 
 // BusyInfo describes the lesson operation sessiond is running (api.md
@@ -295,7 +293,7 @@ type DescribeResult struct {
 // POST /progress/reset (sent by the gateway). With LessonID it forgets that
 // lesson's progress and the active step if it belongs to the lesson; with an
 // empty LessonID it forgets all progress and the active step. A forgotten
-// active step emits a StepEvent with status StepDropped.
+// active step publishes a LessonEvent with change dropped.
 type DropStepRequest struct {
 	Generation int64  `json:"generation,omitempty"`
 	LessonID   string `json:"lessonId,omitempty"`
@@ -320,9 +318,12 @@ type DemoRequest struct {
 }
 
 // DemoResult reports whether demo start restored the step's checkpoint
-// first (a command ran since the step started or was last reset).
+// first (a command ran since the step started or was last reset) and the
+// attempt the demonstration belongs to: playback stops once the snapshot
+// shows another.
 type DemoResult struct {
-	Restored bool `json:"restored"`
+	Restored bool   `json:"restored"`
+	Attempt  uint64 `json:"attempt"`
 }
 
 // SkipRequest asks sessiond to do the active step for the learner ("Skip

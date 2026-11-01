@@ -1,0 +1,5 @@
+[
+  {"name": "the element that satisfied the predicate", "state": true, "predicate": {"otherWindows.mode": {"in": ["compilation-mode"]}}, "template": "A second window shows {otherWindows.buf} ({buf}, line {line}).", "want": "A second window shows *compilation* (main.rs, line 9)."},
+  {"name": "a missing value is empty", "state": true, "predicate": {}, "template": "[{nosuch}] {line}", "want": "[] 9"},
+  {"name": "the first value without a constraint", "state": true, "predicate": {}, "template": "{windows.buf}", "want": "main.rs"}
+]

@@ -19,7 +19,7 @@ const (
 	EventEmacs      EventType = "emacs"
 	EventFile       EventType = "file"
 	EventCheck      EventType = "check"
-	EventStep       EventType = "step"
+	EventLesson     EventType = "lesson"
 	EventNudge      EventType = "nudge"
 	EventCheckpoint EventType = "checkpoint"
 	EventMode       EventType = "mode"
@@ -92,8 +92,8 @@ func NewEvent(t EventType) Event {
 		return &FileEvent{}
 	case EventCheck:
 		return &CheckEvent{}
-	case EventStep:
-		return &StepEvent{}
+	case EventLesson:
+		return &LessonEvent{}
 	case EventNudge:
 		return &NudgeEvent{}
 	case EventCheckpoint:
@@ -114,7 +114,7 @@ func NewEvent(t EventType) Event {
 // exhaustive tests).
 var EventTypes = []EventType{
 	EventHello, EventKey, EventPrefix, EventState, EventEcho, EventMinibuffer,
-	EventEmacs, EventFile, EventCheck, EventStep, EventNudge, EventCheckpoint,
+	EventEmacs, EventFile, EventCheck, EventLesson, EventNudge, EventCheckpoint,
 	EventMode, EventModules, EventGap, EventError,
 }
 
@@ -185,17 +185,14 @@ type HelloEvent struct {
 	Emacs EmacsInfo `json:"emacs"`
 	// Frames reports which frames exist.
 	Frames Frames `json:"frames"`
-	// Step is the active step, or null when no scenario is loaded.
-	Step *StepRef `json:"step"`
 	// Modules is the enabled configuration module set, in load order.
 	Modules []string `json:"modules"`
 	// Replayed is true when the hello precedes replayed events (the client
 	// connected with ?after= and the gap was still in the ring buffer).
 	Replayed bool `json:"replayed"`
-	// Lap is the running lap, if any (ScenarioRequest.Lap).
-	Lap *LapInfo `json:"lap,omitempty"`
-	// Busy is the lesson operation in progress, if any.
-	Busy *BusyInfo `json:"busy,omitempty"`
+	// Lesson is the lesson snapshot, read after the subscription began:
+	// the browser applies it whatever its rev.
+	Lesson LessonSnapshot `json:"lesson"`
 }
 
 // Type implements Event.
@@ -341,8 +338,11 @@ type CondResult struct {
 // CheckEvent carries the latest evaluation of the active step.
 type CheckEvent struct {
 	Envelope
-	LessonID   string       `json:"lessonId"`
-	StepID     string       `json:"stepId"`
+	LessonID string `json:"lessonId"`
+	StepID   string `json:"stepId"`
+	// Attempt is the attempt evaluated (LessonSnapshot.Attempt); a check
+	// of another attempt is stale.
+	Attempt    uint64       `json:"attempt"`
 	Conditions []CondResult `json:"conditions"`
 	// Complete is true when every condition holds.
 	Complete bool `json:"complete"`
@@ -351,48 +351,72 @@ type CheckEvent struct {
 // Type implements Event.
 func (*CheckEvent) Type() EventType { return EventCheck }
 
-// StepStatus is the status reported by StepEvent.
-type StepStatus string
+// LessonPhase is the lesson's phase in a LessonSnapshot.
+type LessonPhase string
 
-// Step statuses (architecture.md §5.3, api.md §4.1).
+// Lesson phases (backend.md §3.8).
 const (
-	StepLoaded   StepStatus = "loaded"
-	StepComplete StepStatus = "complete"
-	StepReset    StepStatus = "reset"
-	// StepDemonstrated: every condition held while the step's demo latch was
-	// set ("Watch it"); the step stays active.
-	StepDemonstrated StepStatus = "demonstrated"
-	// StepSkipped: the learner skipped the step; the next step's "loaded"
-	// follows (or LessonComplete on the last step).
-	StepSkipped StepStatus = "skipped"
-	// StepDropped: a progress reset forgot the active step; no step is
-	// active until the next scenario load.
-	StepDropped StepStatus = "dropped"
+	PhaseIdle     LessonPhase = "idle"
+	PhaseActive   LessonPhase = "active"
+	PhaseWatching LessonPhase = "watching"
+	// PhaseComplete: every step of the loaded lesson is done or skipped.
+	PhaseComplete LessonPhase = "complete"
 )
 
-// StepEvent reports step transitions. After "complete" and "skipped" the
-// engine advances and emits "loaded" for the next step; for the last step it
-// sets LessonComplete instead.
-type StepEvent struct {
+// StepPos is the active step and its 0-based place in the scenario.
+type StepPos struct {
+	ID    string `json:"id"`
+	Index int    `json:"index"`
+	Count int    `json:"count"`
+}
+
+// LessonSnapshot is sessiond's lesson state, the only source of lifecycle
+// facts for the browser (api.md §4.1). Rev rises with every published
+// change, per sessiond process.
+type LessonSnapshot struct {
+	Rev uint64 `json:"rev"`
+	// LessonID is the loaded lesson, "" when none.
+	LessonID string `json:"lessonId,omitempty"`
+	// Step is the active step, null when none (idle, complete).
+	Step  *StepPos    `json:"step"`
+	Phase LessonPhase `json:"phase"`
+	// Attempt numbers the active step's activation, 0 without a step.
+	Attempt uint64 `json:"attempt"`
+	// Outcomes are LessonID's saved done, skipped and demonstrated steps.
+	Outcomes map[string]ProgressStatus `json:"outcomes"`
+	Lap      *LapInfo                  `json:"lap,omitempty"`
+	// Busy is the lesson op in progress (load, skip, restore, …).
+	Busy *BusyInfo `json:"busy,omitempty"`
+}
+
+// LessonChange says why a LessonEvent was published.
+type LessonChange string
+
+// Lesson changes.
+const (
+	ChangeLoaded       LessonChange = "loaded"
+	ChangeReset        LessonChange = "reset"
+	ChangeComplete     LessonChange = "complete"
+	ChangeDemonstrated LessonChange = "demonstrated"
+	ChangeSkipped      LessonChange = "skipped"
+	ChangeDropped      LessonChange = "dropped"
+	ChangePhase        LessonChange = "phase"
+	ChangeBusy         LessonChange = "busy"
+)
+
+// LessonEvent publishes a new LessonSnapshot. StepID names the step a
+// change concerns; LapMs is a finished lap's time, on its last step's
+// complete or skipped change.
+type LessonEvent struct {
 	Envelope
-	LessonID string     `json:"lessonId"`
-	StepID   string     `json:"stepId"`
-	Status   StepStatus `json:"status"`
-	// Index is the 0-based position of the step in the scenario.
-	Index int `json:"index"`
-	// Count is the number of steps in the scenario.
-	Count int `json:"count"`
-	// LessonComplete is true on the "complete" or "skipped" event of the
-	// last step.
-	LessonComplete bool `json:"lessonComplete,omitempty"`
-	// Lap is true while the step belongs to a lap (ScenarioRequest.Lap).
-	Lap bool `json:"lap,omitempty"`
-	// LapMs is the lap's time, on the event that completes it.
-	LapMs int64 `json:"lapMs,omitempty"`
+	Change LessonChange   `json:"change"`
+	StepID string         `json:"stepId,omitempty"`
+	LapMs  int64          `json:"lapMs,omitempty"`
+	Lesson LessonSnapshot `json:"lesson"`
 }
 
 // Type implements Event.
-func (*StepEvent) Type() EventType { return EventStep }
+func (*LessonEvent) Type() EventType { return EventLesson }
 
 // NudgeKind is the tone of a nudge card.
 type NudgeKind string
