@@ -2011,9 +2011,9 @@ export interface SkipResult {
  * State is the snapshot of the selected window's buffer and the frame layout
  * that the agent emits after commands and UI changes (api.md §5, emacs.md
  * §10.2). sessiond forwards it unchanged apart from stamping seq and ts.
- * The browser's exits table and the step engine's state and layout
- * conditions read it; field names are the paths used by those predicates
- * (for example "minibuffer.kind" or "windows.length").
+ * The browser's exits table and the state and layout conditions of
+ * sessiond's evaluator read it; field names are the paths used by those
+ * predicates (for example "minibuffer.kind" or "windows.length").
  */
 export interface State {
   t: "state";

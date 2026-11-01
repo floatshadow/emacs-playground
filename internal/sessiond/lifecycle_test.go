@@ -34,10 +34,10 @@ import (
 // section waits for the lines the action must produce (those the
 // scenario names and those the golden trace lists), then for quiet, and
 // lists the section's events in order followed by its gateway reports.
-// The step engine runs with a 10 ms debounce, so quiet is well above
-// any evaluation delay. Key, state, prefix, file, echo, minibuffer, mode, nudge,
-// hello and frame events are left out; consecutive identical check lines
-// are written once.
+// The evaluator (steps.Evaluator) runs with a 10 ms debounce, so quiet is
+// well above any evaluation delay. Key, state, prefix, file, echo,
+// minibuffer, mode, nudge, hello and frame events are left out;
+// consecutive identical check lines are written once.
 
 // Lessons the fake gateway serves. A: three steps a learner completes
 // with keys; B: needs the editing module (a restart); C: a shell
@@ -256,7 +256,8 @@ func newLifecycle(t *testing.T, opts ...func(*lifecycle)) *lifecycle {
 	return l
 }
 
-// withClock runs the step engine on a clock the scenario moves.
+// withClock runs the session core and the evaluator on a clock the
+// scenario moves.
 func withClock(l *lifecycle) {
 	l.clock = &testClock{now: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}
 }

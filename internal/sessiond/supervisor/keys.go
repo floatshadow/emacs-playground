@@ -1,12 +1,18 @@
 package supervisor
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"unicode/utf8"
 
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 )
+
+// ErrKeyNotSendable is wrapped by the errors for keys a frame has no input
+// for; its text sits inside their message ("key <f20> cannot be sent to a
+// terminal").
+var ErrKeyNotSendable = errors.New("cannot be sent")
 
 // TmuxKeys converts an Emacs key sequence to tmux send-keys arguments.
 func TmuxKeys(seq string) ([]string, error) {
@@ -51,7 +57,7 @@ func tmuxKey(k protocol.Key) (string, error) {
 		b.WriteString("S-")
 	}
 	if k.Mods&(protocol.ModSuper|protocol.ModHyper) != 0 {
-		return "", fmt.Errorf("key %s: super and hyper cannot be sent to a terminal", k)
+		return "", fmt.Errorf("key %s: super and hyper %w to a terminal", k, ErrKeyNotSendable)
 	}
 	switch {
 	case k.Func:
@@ -63,14 +69,14 @@ func tmuxKey(k protocol.Key) (string, error) {
 			}
 		}
 		if !ok {
-			return "", fmt.Errorf("key %s cannot be sent to a terminal", k)
+			return "", fmt.Errorf("key %s %w to a terminal", k, ErrKeyNotSendable)
 		}
 		b.WriteString(name)
 	case tmuxNamed[k.Base] != "":
 		b.WriteString(tmuxNamed[k.Base])
 	case k.Base == "LFD":
 		if b.Len() > 0 {
-			return "", fmt.Errorf("key %s cannot be sent to a terminal", k)
+			return "", fmt.Errorf("key %s %w to a terminal", k, ErrKeyNotSendable)
 		}
 		b.WriteString("C-j")
 	case k.Base == "NUL":
@@ -150,7 +156,7 @@ func xdotoolKey(k protocol.Key) (string, error) {
 		} else if strings.HasPrefix(k.Base, "kp-") {
 			name = "KP_" + k.Base[3:]
 		} else {
-			return "", fmt.Errorf("key %s cannot be sent to the GUI frame", k)
+			return "", fmt.Errorf("key %s %w to the GUI frame", k, ErrKeyNotSendable)
 		}
 	case xNamed[k.Base] != "":
 		name = xNamed[k.Base]

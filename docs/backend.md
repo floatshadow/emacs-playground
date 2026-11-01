@@ -103,7 +103,7 @@ Keep Emacs, tmux and Xvnc alive; serve PTY, events, VNC, RPC and preview; tap in
 
 ### 3.5 Agent connection and RPC
 
-One agent connection (api.md §7), replaced by a new one. Calls are serialised through one goroutine; each carries `timeoutMs` (default 2 s, at most 10 s) and sessiond waits that plus 500 ms. The supervisor's ops go through `supervisor.AgentOps`, the snapshot service's through `snapshot.Editor`; the RPC handlers (`eval`, `describe`, `rescue`), the session core (`setup`) and the evaluator (`check`) call the connection directly. TODO(sessiond, backend.md §3.5): `rpcKeys` maps supervisor errors to 400/409 by message text instead of sentinel errors.
+One agent connection (api.md §7), replaced by a new one. Calls are serialised through one goroutine; each carries `timeoutMs` (default 2 s, at most 10 s) and sessiond waits that plus 500 ms. The supervisor's ops go through `supervisor.AgentOps`, the snapshot service's through `snapshot.Editor`; the RPC handlers (`eval`, `describe`, `rescue`), the session core (`setup`) and the evaluator (`check`) call the connection directly.
 
 ### 3.6 Input tap
 

@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -25,8 +26,10 @@ import (
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/floatshadow/emacs-playground/internal/config"
+	"github.com/floatshadow/emacs-playground/internal/httpx"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent/fakeeditor"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/supervisor"
 )
 
 const testLesson = `{
@@ -837,6 +840,29 @@ func TestProxyAuth(t *testing.T) {
 	ProxyAuth("")(next).ServeHTTP(rec, httptest.NewRequest("POST", "/rpc/keys", nil))
 	if rec.Code != 200 {
 		t.Fatalf("without a secret: %d", rec.Code)
+	}
+}
+
+// Send-keys failures map to API errors by sentinel: a key the frame has
+// no input for is a bad request, keys for an inactive GUI frame a
+// conflict, anything else Emacs being unavailable.
+func TestKeysError(t *testing.T) {
+	_, terminal := supervisor.TmuxKeys("s-a")
+	_, gui := supervisor.XdotoolKeys("<mouse-1>")
+	for _, c := range []struct {
+		err    error
+		status int
+		msg    string
+	}{
+		{terminal, 400, "key s-a: super and hyper cannot be sent to a terminal"},
+		{gui, 400, "key <mouse-1> cannot be sent to the GUI frame"},
+		{supervisor.ErrGUINotActive, 409, "the GUI frame is not active"},
+		{errors.New("xdotool: exit status 1"), 503, "the keys could not be delivered"},
+	} {
+		he := httpx.AsError(keysError(c.err))
+		if he.Status != c.status || he.Message != c.msg {
+			t.Errorf("keysError(%v) = %d %q, want %d %q", c.err, he.Status, he.Message, c.status, c.msg)
+		}
 	}
 }
 

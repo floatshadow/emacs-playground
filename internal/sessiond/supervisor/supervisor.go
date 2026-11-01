@@ -33,6 +33,9 @@ const StillBusyMessage = "Emacs is still busy after Rescue. Restart Emacs to rec
 // ErrGUIDisabled is returned by SetMode when the GUI frame is disabled.
 var ErrGUIDisabled = errors.New("the GUI frame is disabled for this session")
 
+// ErrGUINotActive is returned by SendKeys for the GUI frame outside GUI mode.
+var ErrGUINotActive = errors.New("the GUI frame is not active")
+
 // Agent is what the supervisor needs from the agent connection.
 type Agent interface {
 	HelloCount() uint64
@@ -804,7 +807,7 @@ func (s *Supervisor) SendKeys(ctx context.Context, frame protocol.FrameKind, key
 	}
 	if frame == protocol.FrameGUI {
 		if s.Mode() != protocol.FrameGUI || s.opt.Commands.Xdotool == nil {
-			return errors.New("the GUI frame is not active")
+			return ErrGUINotActive
 		}
 		var args []string
 		if text != "" {

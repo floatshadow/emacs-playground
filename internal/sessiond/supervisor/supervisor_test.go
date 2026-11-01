@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net"
 	"os"
 	"os/exec"
@@ -442,6 +443,28 @@ func TestSupervisorLifecycle(t *testing.T) {
 	calls := strings.Join(h.agentCalls()[callsBefore:], " ")
 	if calls != "before-stop after-restart" {
 		t.Fatalf("hooks around the restart: %s", calls)
+	}
+}
+
+// SendKeys wraps the sentinels sessiond maps to API errors; nothing
+// reaches tmux when it fails.
+func TestSendKeysErrors(t *testing.T) {
+	h := newHarness(t, nil)
+	for _, c := range []struct {
+		frame protocol.FrameKind
+		keys  string
+		want  error
+	}{
+		{protocol.FrameTerminal, "s-a", ErrKeyNotSendable},
+		{"", "C-x <f20>", ErrKeyNotSendable},
+		{protocol.FrameGUI, "C-g", ErrGUINotActive},
+	} {
+		if err := h.sup.SendKeys(context.Background(), c.frame, c.keys, ""); !errors.Is(err, c.want) {
+			t.Errorf("SendKeys(%q, %q) = %v, want %v", c.frame, c.keys, err, c.want)
+		}
+	}
+	if len(h.tmux.sent) != 0 {
+		t.Fatalf("sent %q", h.tmux.sent)
 	}
 }
 

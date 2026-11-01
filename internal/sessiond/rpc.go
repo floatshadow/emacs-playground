@@ -167,15 +167,20 @@ func (s *Server) rpcKeys(ctx context.Context, req protocol.KeysRequest) (any, er
 	}
 	s.core.DemoTraffic()
 	if err := s.sup.SendKeys(ctx, req.Frame, req.Keys, req.Text); err != nil {
-		if strings.Contains(err.Error(), "cannot be sent") {
-			return nil, httpx.BadRequest(err.Error())
-		}
-		if strings.Contains(err.Error(), "not active") {
-			return nil, httpx.Conflict(err.Error())
-		}
-		return nil, httpx.EmacsUnavailable("the keys could not be delivered").Wrap(err)
+		return nil, keysError(err)
 	}
 	return protocol.Empty{}, nil
+}
+
+// keysError maps supervisor send-keys failures to API errors.
+func keysError(err error) error {
+	switch {
+	case errors.Is(err, supervisor.ErrKeyNotSendable):
+		return httpx.BadRequest(err.Error())
+	case errors.Is(err, supervisor.ErrGUINotActive):
+		return httpx.Conflict(err.Error())
+	}
+	return httpx.EmacsUnavailable("the keys could not be delivered").Wrap(err)
 }
 
 func (s *Server) rpcEval(ctx context.Context, req protocol.EvalRequest) (any, error) {
