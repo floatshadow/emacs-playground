@@ -320,14 +320,24 @@ func (ts *testServer) events(after string) *eventStream {
 	return es
 }
 
+// lessonLine renders a lesson event as lesson:<step>:<change>, with
+// :lesson-complete on a completion or skip that completes the lesson; busy
+// changes render as "" (their timing is not what tests pin).
+func lessonLine(e *protocol.LessonEvent) string {
+	if e.Change == protocol.ChangeBusy {
+		return ""
+	}
+	s := "lesson:" + e.StepID + ":" + string(e.Change)
+	if (e.Change == protocol.ChangeComplete || e.Change == protocol.ChangeSkipped) && e.Lesson.Phase == protocol.PhaseComplete {
+		s += ":lesson-complete"
+	}
+	return s
+}
+
 func describe(ev protocol.Event) string {
 	switch e := ev.(type) {
-	case *protocol.StepEvent:
-		s := "step:" + e.StepID + ":" + string(e.Status)
-		if e.LessonComplete {
-			s += ":lesson-complete"
-		}
-		return s
+	case *protocol.LessonEvent:
+		return lessonLine(e)
 	case *protocol.EmacsEvent:
 		return "emacs:" + string(e.Event)
 	case *protocol.ModulesEvent:
@@ -441,7 +451,7 @@ func TestServerFakeMode(t *testing.T) {
 	}
 	var st protocol.StatusResult
 	if ts.rpc("status", nil, &st) != 200 || st.Emacs.Version != "fake" || !st.Emacs.Agent || st.Mode != protocol.FrameTerminal ||
-		st.Versions["EMACS_VERSION"] != "31.1" || st.SessionID != "s1" || st.RemoteBox || st.Lap != nil {
+		st.Versions["EMACS_VERSION"] != "31.1" || st.SessionID != "s1" || st.RemoteBox || st.Lesson.Phase != protocol.PhaseIdle || st.Lesson.Lap != nil {
 		t.Fatalf("status %+v", st)
 	}
 	if code, body := ts.get("/status"); code != 200 || !strings.Contains(string(body), `"sessionId":"s1"`) {
@@ -450,7 +460,7 @@ func TestServerFakeMode(t *testing.T) {
 
 	es := ts.events("")
 	hello, ok := es.first().(*protocol.HelloEvent)
-	if !ok || hello.Protocol != 1 || hello.SessionID != "s1" || hello.Step != nil || strings.Join(hello.Modules, " ") != "base agent" {
+	if !ok || hello.Protocol != protocol.Version || hello.SessionID != "s1" || hello.Lesson.Step != nil || strings.Join(hello.Modules, " ") != "base agent" {
 		t.Fatalf("hello %+v", es.first())
 	}
 
@@ -467,7 +477,7 @@ func TestServerFakeMode(t *testing.T) {
 	es.wait("emacs:daemon-restarted")
 	es.wait("modules:false")
 	es.wait("checkpoint")
-	es.wait("step:open:loaded")
+	es.wait("lesson:open:loaded")
 	if b, _ := os.ReadFile(filepath.Join(ws, "hello", "src", "main.rs")); string(b) != "fn main() {}\n" {
 		t.Fatal("fixtures not extracted")
 	}
@@ -487,8 +497,8 @@ func TestServerFakeMode(t *testing.T) {
 	}
 	ts.srv.OnEvent(&protocol.KeyEvent{Keys: "C-x C-f", Cmd: "find-file", Buf: "README.md", Frame: protocol.FrameTerminal})
 	es.wait("key")
-	es.wait("step:open:complete")
-	es.wait("step:write:loaded")
+	es.wait("lesson:open:complete")
+	es.wait("lesson:write:loaded")
 
 	// Step 2: writing the file completes it (file event → evaluation); the
 	// stuck rule fires after a second.
@@ -500,8 +510,8 @@ func TestServerFakeMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	es.wait("file:hello/notes.txt:created")
-	es.wait("step:write:complete")
-	es.wait("step:last:complete:lesson-complete")
+	es.wait("lesson:write:complete")
+	es.wait("lesson:last:complete:lesson-complete")
 
 	// Progress reached the gateway: in-progress, hints, done.
 	deadline := time.Now().Add(10 * time.Second)
@@ -566,7 +576,7 @@ func TestServerFakeMode(t *testing.T) {
 	if ts.rpc("restore", protocol.RestoreRequest{Ref: "refs/playground/00-orientation/02-first-steps/write"}, &rr) != 200 {
 		t.Fatal("restore step")
 	}
-	es.wait("step:write:reset")
+	es.wait("lesson:write:reset")
 	if _, err := os.Stat(filepath.Join(ws, "hello", "notes.txt")); err == nil {
 		t.Fatal("notes.txt should be gone after restoring the write step's checkpoint")
 	}
@@ -665,7 +675,7 @@ func TestServerFakeMode(t *testing.T) {
 
 	// Replay: reconnect after seq 1 gets hello(replayed) and the rest.
 	es2 := ts.events("?after=1")
-	if h := es2.first().(*protocol.HelloEvent); !h.Replayed || h.Step == nil || h.Step.StepID != "write" {
+	if h := es2.first().(*protocol.HelloEvent); !h.Replayed || h.Lesson.Step == nil || h.Lesson.Step.ID != "write" {
 		t.Fatalf("replay hello %+v", h)
 	}
 
@@ -715,7 +725,7 @@ func TestServerFakeMode(t *testing.T) {
 	if ts.rpc("scenario", protocol.ScenarioRequest{LessonID: "00-orientation/02-first-steps", StepID: "write"}, &sr) != 200 {
 		t.Fatal("reload")
 	}
-	es.wait("step:write:loaded")
+	es.wait("lesson:write:loaded")
 
 	// Graceful shutdown: stopping event, 4003 on WebSockets.
 	stopped = true
@@ -758,7 +768,7 @@ func TestServerFakeMode(t *testing.T) {
 	defer ts2.stop()
 	// The resume may happen before we connect: replay from the start.
 	es3 := ts2.events("?after=0")
-	es3.wait("step:write:loaded")
+	es3.wait("lesson:write:loaded")
 	var reopened bool
 	for _, c := range ts2.srv.editor.Calls() {
 		reopened = reopened || (c.Op == protocol.AgentOpOpen && strings.Contains(string(c.Args), `"point":7`))

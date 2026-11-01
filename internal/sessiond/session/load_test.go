@@ -39,7 +39,7 @@ func TestLoadFlow(t *testing.T) {
 	if f.snaps.captured() != lessonID+"/open" {
 		t.Fatalf("checkpoints %v", f.snaps.captured())
 	}
-	if f.evs() != "step:open:loaded" {
+	if f.evs() != "lesson:open:loaded" {
 		t.Fatalf("events %s", f.evs())
 	}
 	if a := f.core.Active(); a == nil || a.StepID != "open" {
@@ -56,7 +56,7 @@ func TestLoadFlow(t *testing.T) {
 	// An explicit step loads it.
 	res, err = f.core.Load(ctx, protocol.ScenarioRequest{LessonID: lessonID, StepID: "save"})
 	if err != nil || res.Index != 1 {
-		t.Fatalf("step: %+v %v", res, err)
+		t.Fatalf("lesson: %+v %v", res, err)
 	}
 	// ETags were sent on the second fetch.
 	if !strings.Contains(strings.Join(f.fetch.gets, " "), `scenario:`+lessonID+`:"s"`) {
@@ -142,7 +142,7 @@ func TestLoadModuleRestart(t *testing.T) {
 		t.Fatalf("restarts %d", f.sup.numRestarts())
 	}
 	// The restart is over once the lesson is set up (the browser holds keys until then).
-	want := "modules:base,agent,git,editing,files:restarting step:open:loaded modules:base,agent,git,editing,files:done"
+	want := "modules:base,agent,git,editing,files:restarting lesson:open:loaded modules:base,agent,git,editing,files:done"
 	if f.evs() != want {
 		t.Fatalf("events %s", f.evs())
 	}
@@ -183,7 +183,7 @@ func TestDropDuringModuleRestart(t *testing.T) {
 	if a := f.core.Active(); a != nil {
 		t.Fatalf("active after the drop %+v", a)
 	}
-	if evs := f.evs(); evs != "modules:base,agent,editing,files:restarting modules:base,agent,editing,files:done" {
+	if evs := f.evs(); evs != "modules:base,agent,editing,files:restarting modules:base,agent,editing,files:done lesson::dropped" {
 		t.Fatalf("events %s", evs)
 	}
 }
@@ -361,7 +361,7 @@ func TestGoToStepRestoresItsCheckpoint(t *testing.T) {
 	if strings.Join(f.snaps.restored, ",") != "kill" || f.played() != "" || f.snaps.captured() != "" {
 		t.Fatalf("restored %v played %v checkpoints %v", f.snaps.restored, f.played(), f.snaps.captured())
 	}
-	if f.evs() != "step:kill:loaded" {
+	if f.evs() != "lesson:kill:loaded" {
 		t.Fatalf("events %s", f.evs())
 	}
 }
@@ -380,7 +380,7 @@ func TestGoToStepFastForwards(t *testing.T) {
 	if f.snaps.captured() != demoID+"/save" {
 		t.Fatalf("checkpoints %v", f.snaps.captured())
 	}
-	if f.evs() != "step:save:loaded" {
+	if f.evs() != "lesson:save:loaded" {
 		t.Fatalf("the replay must not emit: %s", f.evs())
 	}
 	if a := f.core.Active(); a == nil || a.StepID != "save" || f.dirty() {
@@ -573,7 +573,7 @@ func TestProjectSetupAndLap(t *testing.T) {
 	}
 
 	// A lap: reset, first step, timer started.
-	f.core.activate(f.core.Scenario(), 1, activation{status: protocol.StepLoaded, phase: Active, lap: lapEnd})
+	f.core.activate(f.core.Scenario(), 1, activation{change: protocol.ChangeLoaded, phase: Active, lap: lapEnd})
 	res, err = f.core.Load(ctx, protocol.ScenarioRequest{LessonID: id, Lap: true})
 	if err != nil || res.Lap == nil || res.Lap.StartedAt == 0 || res.Step.StepID != "scaffold" {
 		t.Fatalf("lap load %+v %v", res, err)

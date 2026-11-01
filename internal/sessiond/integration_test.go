@@ -400,7 +400,7 @@ func TestIntegrationSession(t *testing.T) {
 		if sr.Restarting {
 			ev.until(`"t":"emacs"`, `"event":"daemon-restarted"`)
 		}
-		ev.until(`"t":"step"`, `"stepId":"open"`, `"status":"loaded"`)
+		ev.until(`"t":"lesson"`, `"step":{"id":"open"`, `"phase":"active"`)
 		// Step 1: open a file with C-x C-f.
 		// Absolute paths: find-file ignores everything before "//", so the
 		// test does not depend on the buffer's default directory.
@@ -409,8 +409,8 @@ func TestIntegrationSession(t *testing.T) {
 		ev.until(`"t":"minibuffer"`)
 		text(ws + "/hello/README.md")
 		keys("RET")
-		ev.until(`"t":"step"`, `"stepId":"open"`, `"status":"complete"`)
-		ev.until(`"t":"step"`, `"stepId":"write"`, `"status":"loaded"`)
+		ev.until(`"t":"lesson"`, `"change":"complete"`, `"stepId":"open"`)
+		ev.until(`"t":"lesson"`, `"step":{"id":"write"`, `"phase":"active"`)
 		// Step 2: write notes.txt with "done" and save; step 3's shell
 		// condition is already true.
 		keys("C-x C-f")
@@ -420,8 +420,8 @@ func TestIntegrationSession(t *testing.T) {
 		text("all done")
 		keys("C-x C-s")
 		ev.until(`"t":"file"`, `"path":"hello/notes.txt"`)
-		ev.until(`"t":"step"`, `"stepId":"write"`, `"status":"complete"`)
-		ev.until(`"t":"step"`, `"stepId":"last"`, `"lessonComplete":true`)
+		ev.until(`"t":"lesson"`, `"change":"complete"`, `"stepId":"write"`)
+		ev.until(`"t":"lesson"`, `"stepId":"last"`, `"phase":"complete"`)
 		time.Sleep(time.Second)
 		gw.mu.Lock()
 		done := 0
@@ -440,7 +440,7 @@ func TestIntegrationSession(t *testing.T) {
 		if act("restore", protocol.RestoreRequest{Ref: "refs/playground/00-orientation/02-first-steps/write"}, &rr) != 200 || rr.RestoredFiles != 1 {
 			t.Fatalf("restore %+v", rr)
 		}
-		ev.until(`"t":"step"`, `"status":"reset"`)
+		ev.until(`"t":"lesson"`, `"change":"reset"`, `"step":{"id":"write"`)
 	}
 
 	// Manual checkpoints.

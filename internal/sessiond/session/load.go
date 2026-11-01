@@ -201,7 +201,7 @@ func (c *Core) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset
 		}
 		if !complete {
 			c.log.Warn("fast-forward incomplete: the step activates without a checkpoint", "lesson", sc.ID, "step", st.ID)
-			c.activate(sc, idx, activation{status: protocol.StepLoaded, phase: Active, lap: lap})
+			c.activate(sc, idx, activation{change: protocol.ChangeLoaded, phase: Active, lap: lap})
 			return nil
 		}
 		forceCheckpoint = true
@@ -214,7 +214,7 @@ func (c *Core) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset
 	if ctx.Err() != nil {
 		return interrupted(ctx)
 	}
-	c.activate(sc, idx, activation{status: protocol.StepLoaded, phase: Active, lap: lap})
+	c.activate(sc, idx, activation{change: protocol.ChangeLoaded, phase: Active, lap: lap})
 	return nil
 }
 
@@ -236,7 +236,7 @@ func (c *Core) restoreStep(ctx context.Context, sc *protocol.Scenario, idx int, 
 	if ctx.Err() != nil {
 		return false, interrupted(ctx)
 	}
-	c.activate(sc, idx, activation{status: protocol.StepLoaded, phase: Active, lap: lap})
+	c.activate(sc, idx, activation{change: protocol.ChangeLoaded, phase: Active, lap: lap})
 	return true, nil
 }
 

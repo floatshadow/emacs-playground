@@ -451,6 +451,9 @@ func (s *Server) healthz(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, protocol.HealthStatus{OK: true})
 }
 
+// hello builds the hello of an events connection; the events handler
+// calls it after subscribing, so a lesson change after its snapshot
+// arrives as an event with a higher rev.
 func (s *Server) hello(replayed bool) *protocol.HelloEvent {
 	st := s.sup.Status()
 	return &protocol.HelloEvent{
@@ -459,21 +462,10 @@ func (s *Server) hello(replayed bool) *protocol.HelloEvent {
 		Mode:      s.sup.Mode(),
 		Emacs:     protocol.EmacsInfo{Version: st.Version, UptimeMs: st.UptimeMs},
 		Frames:    s.sup.Frames(),
-		Step:      s.core.Active(),
 		Modules:   s.modules.Current(),
 		Replayed:  replayed,
-		Lap:       s.core.Lap(),
-		Busy:      s.busy(),
+		Lesson:    s.core.Snapshot(),
 	}
-}
-
-// busy describes the lesson op in progress for status and hello.
-func (s *Server) busy() *protocol.BusyInfo {
-	op := s.core.Busy()
-	if op == nil {
-		return nil
-	}
-	return &protocol.BusyInfo{Op: string(op.Kind), LessonID: op.LessonID, StepID: op.StepID, StartedAt: op.StartedAt.UnixMilli()}
 }
 
 func (s *Server) status() protocol.StatusResult {
@@ -486,9 +478,8 @@ func (s *Server) status() protocol.StatusResult {
 		Modules:          s.modules.Current(),
 		Versions:         readVersions(s.cfg.VersionsFile),
 		ActiveWebSockets: int(s.wsCount.Load()),
-		Lap:              s.core.Lap(),
 		RemoteBox:        s.boxReady.Load(),
-		Busy:             s.busy(),
+		Lesson:           s.core.Snapshot(),
 	}
 }
 

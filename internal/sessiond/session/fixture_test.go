@@ -347,8 +347,10 @@ type fixture struct {
 	ws     string
 	mu     sync.Mutex
 	events []string
-	cancel context.CancelFunc
-	done   chan struct{}
+	// lessons are the lesson events published, busy ones included.
+	lessons []*protocol.LessonEvent
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // newFixture returns a running core over fakes; mutate adjusts the deps
@@ -374,8 +376,11 @@ func newFixture(t *testing.T, mutate ...func(*fixture, *Deps)) *fixture {
 		f.mu.Lock()
 		defer f.mu.Unlock()
 		switch e := ev.(type) {
-		case *protocol.StepEvent:
-			f.events = append(f.events, "step:"+e.StepID+":"+string(e.Status))
+		case *protocol.LessonEvent:
+			f.lessons = append(f.lessons, e)
+			if s := lessonLine(e); s != "" {
+				f.events = append(f.events, s)
+			}
 		case *protocol.ModulesEvent:
 			f.events = append(f.events, "modules:"+strings.Join(e.Enabled, ",")+":"+map[bool]string{true: "restarting", false: "done"}[e.Restarting])
 		default:
@@ -451,4 +456,18 @@ func (f *fixture) waitFor(what string, cond func() bool) {
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
+
+// lessonLine renders a lesson event as lesson:<step>:<change>, with
+// :lesson-complete on a completion or skip that completes the lesson; busy
+// changes render as "" (their timing is not what tests pin).
+func lessonLine(e *protocol.LessonEvent) string {
+	if e.Change == protocol.ChangeBusy {
+		return ""
+	}
+	s := "lesson:" + e.StepID + ":" + string(e.Change)
+	if (e.Change == protocol.ChangeComplete || e.Change == protocol.ChangeSkipped) && e.Lesson.Phase == protocol.PhaseComplete {
+		s += ":lesson-complete"
+	}
+	return s
 }

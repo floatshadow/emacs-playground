@@ -1,19 +1,19 @@
 # load 01-life/01-three
 checkpoint:01-life/01-three/open
-step:open:loaded
+lesson:open:loaded
 check:open:false
 gw:01-life/01-three/open:in-progress:gen0
 # learner opens b.txt
 check:open:true
-step:open:complete
+lesson:open:complete
 checkpoint:01-life/01-three/write
-step:write:loaded
+lesson:write:loaded
 check:write:false
 gw:01-life/01-three/open:done:gen0
 gw:01-life/01-three/write:in-progress:gen0
 = snapshot.json layout life/b.txt
 # sessiond restarts
-step:write:loaded
+lesson:write:loaded
 check:write:false
 gw:01-life/01-three/open:done:gen0
 gw:01-life/01-three/write:in-progress:gen0

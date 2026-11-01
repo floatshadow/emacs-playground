@@ -85,7 +85,7 @@ func (c *Core) sync(ctx context.Context, reconcile bool) error {
 // reset; generation zero is an unconditional local drop. The outbox purges
 // the scope's entries and raises the generation, and the saved progress,
 // the lap and the active step of lessonID (with "" of every lesson) are
-// forgotten; a forgotten step emits step {status: dropped}. Both happen in
+// forgotten, and a lesson event {change: dropped} goes out. Both happen in
 // one hold of mu, so an outcome recorded before the drop is purged and an
 // observation after it belongs to a past attempt. It reports whether a
 // step was forgotten.
@@ -100,14 +100,12 @@ func (c *Core) drop(lessonID string, generation int64) bool {
 	drop := func(id string) bool {
 		return (lessonID == "" || id == lessonID) && (generation == 0 || gens.ForLesson(id) < generation)
 	}
-	dropped := false
+	dropped, stepID := false, ""
 	if l.Scenario != nil && drop(l.Scenario.ID) {
 		// A rehearsed step counts as active here: the page waiting for a
 		// load the drop cancelled learns the lesson's step went.
 		if l.hasStep() {
-			dropped = true
-			c.emitLocked(&protocol.StepEvent{LessonID: l.Scenario.ID, StepID: l.Scenario.Steps[l.Index].ID, Status: protocol.StepDropped,
-				Index: l.Index, Count: len(l.Scenario.Steps)})
+			dropped, stepID = true, l.Scenario.Steps[l.Index].ID
 		}
 		c.idleLocked(nil)
 		l.Saved.Active = nil
@@ -124,6 +122,7 @@ func (c *Core) drop(lessonID string, generation int64) bool {
 			delete(l.Saved.Lessons, id)
 		}
 	}
+	c.publishLocked(protocol.ChangeDropped, stepID, 0)
 	c.mu.Unlock()
 	c.persist()
 	return dropped

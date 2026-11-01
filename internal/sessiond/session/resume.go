@@ -34,7 +34,7 @@ func (c *Core) resume(ctx context.Context, ref protocol.StepRef) error {
 	if ctx.Err() != nil {
 		return interrupted(ctx)
 	}
-	c.activate(sc, idx, activation{status: protocol.StepLoaded, phase: Active, lap: lapKeep})
+	c.activate(sc, idx, activation{change: protocol.ChangeLoaded, phase: Active, lap: lapKeep})
 	return nil
 }
 

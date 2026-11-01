@@ -90,7 +90,7 @@ func TestDropPreemptsFastForward(t *testing.T) {
 		t.Fatalf("active after the drop %+v", a)
 	}
 	evs := f.evs()
-	if !strings.HasSuffix(evs, "step:open:dropped") || strings.Contains(evs, "kill") {
+	if !strings.HasSuffix(evs, "lesson:open:dropped") || strings.Contains(evs, "kill") {
 		t.Fatalf("events %s", evs)
 	}
 }
@@ -135,7 +135,7 @@ func TestSyncDropPreemptsSkip(t *testing.T) {
 	if got := f.core.d.Progress.(*progress.Outbox).Snapshot().Generations; !maps.Equal(got, gens) {
 		t.Fatalf("generations %v", got)
 	}
-	if evs := f.evs(); !strings.HasSuffix(evs, "step:open:dropped") || strings.Contains(evs, "skipped") {
+	if evs := f.evs(); !strings.HasSuffix(evs, "lesson:open:dropped lesson::dropped") || strings.Contains(evs, "skipped") {
 		t.Fatalf("events %s", evs)
 	}
 }
@@ -246,7 +246,7 @@ func TestDemoStartRestoresWhenDirty(t *testing.T) {
 	if res, err := f.core.DemoStart(ctx, "open"); err != nil || !res.Restored {
 		t.Fatalf("dirty step %+v %v", res, err)
 	}
-	if !strings.HasSuffix(f.evs(), "step:open:reset") || f.core.Saved().Lessons[lessonID].Resets["open"] != 0 || !f.core.Watching() || f.dirty() {
+	if !strings.HasSuffix(f.evs(), "lesson:open:reset lesson:open:phase") || f.core.Saved().Lessons[lessonID].Resets["open"] != 0 || !f.core.Watching() || f.dirty() {
 		t.Fatalf("events %s saved %+v", f.evs(), f.core.Saved().Lessons[lessonID])
 	}
 }
@@ -338,7 +338,7 @@ func newRestoreFixture(t *testing.T, ag Agent, emit func(protocol.Event)) *resto
 	}
 	ev := steps.New(steps.Options{})
 	core := New(Deps{Workspace: ws, Agent: ag, Sup: &fakeSup{eval: ev}, Snapshots: snaps, Modules: snaps.Modules, Evaluator: ev, Emit: emit})
-	core.activate(&protocol.Scenario{ID: "a/b", Steps: []protocol.Step{{ID: "one"}, {ID: "two"}}}, 1, activation{status: protocol.StepLoaded, phase: Active})
+	core.activate(&protocol.Scenario{ID: "a/b", Steps: []protocol.Step{{ID: "one"}, {ID: "two"}}}, 1, activation{change: protocol.ChangeLoaded, phase: Active})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go core.Run(ctx)
@@ -352,7 +352,7 @@ func TestRestoreSerializesActivation(t *testing.T) {
 	var once sync.Once
 	defer once.Do(func() { close(release) })
 	f := newRestoreFixture(t, nil, func(ev protocol.Event) {
-		if st, ok := ev.(*protocol.StepEvent); ok && st.Status == protocol.StepReset && st.StepID == "one" {
+		if st, ok := ev.(*protocol.LessonEvent); ok && st.Change == protocol.ChangeReset && st.StepID == "one" {
 			close(entered)
 			<-release
 		}

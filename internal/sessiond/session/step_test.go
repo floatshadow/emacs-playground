@@ -192,7 +192,7 @@ func (f *stepFixture) activate(sc *protocol.Scenario, idx int, lap ...lapMode) {
 	if len(lap) > 0 {
 		mode = lap[0]
 	}
-	f.core.activate(sc, idx, activation{status: protocol.StepLoaded, phase: Active, lap: mode})
+	f.core.activate(sc, idx, activation{change: protocol.ChangeLoaded, phase: Active, lap: mode})
 }
 
 // check evaluates now and waits for the ops it queued (an advance).
@@ -226,8 +226,10 @@ func (f *stepFixture) types() string {
 	var out []string
 	for _, ev := range f.events {
 		switch e := ev.(type) {
-		case *protocol.StepEvent:
-			out = append(out, "step:"+e.StepID+":"+string(e.Status))
+		case *protocol.LessonEvent:
+			if s := lessonLine(e); s != "" {
+				out = append(out, s)
+			}
 		case *protocol.CheckEvent:
 			out = append(out, "check:"+e.StepID)
 		case *protocol.NudgeEvent:
@@ -273,11 +275,11 @@ func (f *stepFixture) nudges() []*protocol.NudgeEvent {
 	return out
 }
 
-func (f *stepFixture) lastStep() *protocol.StepEvent {
+func (f *stepFixture) lastStep() *protocol.LessonEvent {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for i := len(f.events) - 1; i >= 0; i-- {
-		if e, ok := f.events[i].(*protocol.StepEvent); ok {
+		if e, ok := f.events[i].(*protocol.LessonEvent); ok && e.Change != protocol.ChangeBusy {
 			return e
 		}
 	}
@@ -313,7 +315,7 @@ func TestStepLifecycle(t *testing.T) {
 		t.Fatal("check without a scenario must report no active step")
 	}
 	f.activate(sc, f.core.firstIncomplete(sc))
-	if f.types() != "step:open:loaded" || f.statuses() != "open:in-progress" {
+	if f.types() != "lesson:open:loaded" || f.statuses() != "open:in-progress" {
 		t.Fatalf("events %s reports %s", f.types(), f.statuses())
 	}
 	f.clear()
@@ -326,7 +328,7 @@ func TestStepLifecycle(t *testing.T) {
 		t.Fatalf("should complete: %+v", res)
 	}
 	// check, complete, then the next step loads (its checkpoint is off).
-	if got := f.types(); got != "check:open step:open:complete step:save:loaded" {
+	if got := f.types(); got != "check:open lesson:open:complete lesson:save:loaded" {
 		t.Fatalf("events %s", got)
 	}
 	if f.snaps.captured() != "" {
@@ -352,7 +354,7 @@ func TestStepLifecycle(t *testing.T) {
 		t.Fatalf("save should complete: %+v", res)
 	}
 	// The layout step takes its checkpoint before loading.
-	if got := f.types(); got != "check:save step:save:complete step:layout:loaded" || f.snaps.captured() != sc.ID+"/layout" {
+	if got := f.types(); got != "check:save lesson:save:complete lesson:layout:loaded" || f.snaps.captured() != sc.ID+"/layout" {
 		t.Fatalf("events %s checkpoints %s", got, f.snaps.captured())
 	}
 	st := &protocol.State{Buf: "main.rs", Windows: []protocol.Window{{ID: 1, Buf: "main.rs", Selected: true}, {ID: 2, Buf: "*compilation*"}}}
@@ -361,7 +363,7 @@ func TestStepLifecycle(t *testing.T) {
 	if res := f.check(); !res.Complete {
 		t.Fatalf("layout should complete: %+v", res)
 	}
-	if last := f.lastStep(); !last.LessonComplete || last.Status != protocol.StepComplete || last.Index != 2 || last.Count != 3 {
+	if last := f.lastStep(); last.Lesson.Phase != protocol.PhaseComplete || last.Change != protocol.ChangeComplete || last.StepID != "layout" || last.Lesson.Step != nil {
 		t.Fatalf("last step event %+v", last)
 	}
 	if f.core.Active() != nil || f.phase() != Idle {
@@ -401,7 +403,7 @@ func TestHintsResetsDropAndPersistence(t *testing.T) {
 	if !f.core.resetTo(sc.ID, "open", true) {
 		t.Fatal("reset")
 	}
-	if f.types() != "step:open:reset" {
+	if f.types() != "lesson:open:reset" {
 		t.Fatalf("reset events %s", f.types())
 	}
 	r := f.reports[0]
@@ -477,7 +479,7 @@ func TestStaleObservationAfterGoTo(t *testing.T) {
 	}
 	f.completeOpen()
 	f.check()
-	if got := f.types(); got != "check:open step:open:complete step:save:loaded" {
+	if got := f.types(); got != "check:open lesson:open:complete lesson:save:loaded" {
 		t.Fatalf("events %s", got)
 	}
 }
@@ -505,7 +507,7 @@ func TestCompletionDuringAdvancing(t *testing.T) {
 	f.ev.Check(context.Background())
 	close(release)
 	f.idle()
-	if got := f.types(); got != "check:save step:save:complete step:layout:loaded" {
+	if got := f.types(); got != "check:save lesson:save:complete lesson:layout:loaded" {
 		t.Fatalf("events %s", got)
 	}
 	if got := f.statuses(); got != "save:done layout:in-progress" {
@@ -530,14 +532,14 @@ func TestDemoLatch(t *testing.T) {
 		t.Fatalf("complete %+v", res)
 	}
 	// Demonstrated, once; no advance and no next checkpoint.
-	if got := f.types(); got != "check:open step:open:demonstrated" {
+	if got := f.types(); got != "check:open lesson:open:demonstrated" {
 		t.Fatalf("events %s", got)
 	}
 	if got := f.statuses(); got != "open:demonstrated" {
 		t.Fatalf("reports %s", got)
 	}
 	f.check()
-	if got := f.types(); got != "check:open step:open:demonstrated check:open" {
+	if got := f.types(); got != "check:open lesson:open:demonstrated check:open" {
 		t.Fatalf("demonstrated twice: %s", got)
 	}
 	if a := f.core.Active(); a == nil || a.StepID != "open" || f.snaps.captured() != "" {
@@ -560,7 +562,7 @@ func TestDemoLatch(t *testing.T) {
 	if res, err := f.core.DemoStart(ctx, "open"); err != nil || !res.Restored || !f.core.Watching() {
 		t.Fatalf("dirty demo start %+v %v", res, err)
 	}
-	if got := f.types(); got != "step:open:reset" || f.statuses() != "open:in-progress" {
+	if got := f.types(); got != "lesson:open:reset lesson:open:phase" || f.statuses() != "open:in-progress" {
 		t.Fatalf("restart events %s reports %s", got, f.statuses())
 	}
 	if !f.core.resetTo(sc.ID, "open", true) || f.core.Watching() {
@@ -571,7 +573,7 @@ func TestDemoLatch(t *testing.T) {
 	f.clear()
 	f.completeOpen()
 	f.check()
-	if got := f.types(); got != "check:open step:open:complete step:save:loaded" {
+	if got := f.types(); got != "check:open lesson:open:complete lesson:save:loaded" {
 		t.Fatalf("events %s", got)
 	}
 	if !strings.Contains(f.statuses(), "open:done") {
@@ -673,7 +675,7 @@ func TestIdleDemoEnds(t *testing.T) {
 	f.clear()
 	f.completeOpen()
 	f.check()
-	if got := f.types(); got != "check:open step:open:complete step:save:loaded" || !strings.Contains(f.statuses(), "open:done") {
+	if got := f.types(); got != "check:open lesson:open:complete lesson:save:loaded" || !strings.Contains(f.statuses(), "open:done") {
 		t.Fatalf("events %s reports %s", got, f.statuses())
 	}
 
@@ -721,7 +723,7 @@ func TestSkip(t *testing.T) {
 	if err != nil || res.Next == nil || *res.Next != "layout" || res.DemoCompleted {
 		t.Fatalf("skip %+v %v", res, err)
 	}
-	if got := f.types(); got != "step:save:skipped step:layout:loaded" || f.snaps.captured() != sc.ID+"/layout" {
+	if got := f.types(); got != "lesson:save:skipped lesson:layout:loaded" || f.snaps.captured() != sc.ID+"/layout" {
 		t.Fatalf("events %s checkpoints %s", got, f.snaps.captured())
 	}
 	if got := f.statuses(); got != "save:skipped layout:in-progress" {
@@ -735,7 +737,8 @@ func TestSkip(t *testing.T) {
 	if err != nil || res.Next != nil || f.core.Active() != nil {
 		t.Fatalf("skipping the last step %+v %v", res, err)
 	}
-	if last := f.lastStep(); last.Status != protocol.StepSkipped || !last.LessonComplete {
+	// open was never finished: the lesson is not complete.
+	if last := f.lastStep(); last.Change != protocol.ChangeSkipped || last.Lesson.Phase != protocol.PhaseIdle || last.Lesson.Step != nil {
 		t.Fatalf("last %+v", last)
 	}
 	saved := f.core.Saved()
@@ -765,7 +768,7 @@ func TestSkipDemoCompletes(t *testing.T) {
 	if got := f.statuses(); got != "open:skipped save:in-progress" {
 		t.Fatalf("reports %s", got)
 	}
-	if strings.Contains(f.types(), "step:open:complete") || strings.Count(f.types(), "step:open:skipped") != 1 {
+	if strings.Contains(f.types(), "lesson:open:complete") || strings.Count(f.types(), "lesson:open:skipped") != 1 {
 		t.Fatalf("events %s", f.types())
 	}
 	if ls := f.core.Saved().Lessons[sc.ID]; ls.Done["open"] != 0 || ls.Skipped["open"] == 0 {
@@ -806,7 +809,7 @@ func TestRehearseIsQuiet(t *testing.T) {
 	f.core.activate(sc, 1, activation{phase: Rehearsing})
 	f.ev.OnKey(&protocol.KeyEvent{Cmd: "save-buffer"})
 	f.activate(sc, 2)
-	if got := f.types(); got != "step:layout:loaded" {
+	if got := f.types(); got != "lesson:layout:loaded" {
 		t.Fatalf("activate after rehearsal %s", got)
 	}
 	f.core.mu.Lock()
@@ -829,7 +832,7 @@ func TestDropAll(t *testing.T) {
 	if !f.core.drop("", 0) {
 		t.Fatal("drop all forgets the active step")
 	}
-	if ev := f.lastStep(); ev == nil || ev.Status != protocol.StepDropped || ev.StepID != "save" || ev.Index != 1 || ev.Count != 3 {
+	if ev := f.lastStep(); ev == nil || ev.Change != protocol.ChangeDropped || ev.StepID != "save" || ev.Lesson.LessonID != "" || ev.Lesson.Phase != protocol.PhaseIdle {
 		t.Fatalf("dropped event %+v", ev)
 	}
 	if s := f.core.Saved(); len(s.Lessons) != 0 || s.Active != nil {
@@ -844,7 +847,7 @@ func TestDropAll(t *testing.T) {
 	// Dropping another lesson keeps the active step.
 	f.activate(sc, 0)
 	f.clear()
-	if f.core.drop("00-orientation/01-reading-the-screen", 0) || f.core.Active() == nil || f.types() != "" {
+	if f.core.drop("00-orientation/01-reading-the-screen", 0) || f.core.Active() == nil || f.types() != "lesson::dropped" {
 		t.Fatal("drop of another lesson")
 	}
 }
@@ -1092,7 +1095,7 @@ func TestLap(t *testing.T) {
 	if lap == nil || lap.LessonID != sc.ID || lap.StartedAt != f.clock.now().UnixMilli() || lap.ID != protocol.LapID(sc.ID, lap.StartedAt) {
 		t.Fatalf("lap %+v", lap)
 	}
-	if ev := f.lastStep(); !ev.Lap {
+	if ev := f.lastStep(); ev.Lesson.Lap == nil {
 		t.Fatalf("loaded event without lap: %+v", ev)
 	}
 	errHint := f.core.Hint("scaffold", 1)
@@ -1122,7 +1125,7 @@ func TestLap(t *testing.T) {
 	f.check()
 	f.check()
 	last := f.lastStep()
-	if last == nil || !last.LessonComplete || !last.Lap || last.LapMs != 95000 {
+	if last == nil || last.Lesson.Phase != protocol.PhaseComplete || last.Lesson.Lap != nil || last.LapMs != 95000 {
 		t.Fatalf("lap completion %+v", last)
 	}
 	var laps []protocol.ProgressReport

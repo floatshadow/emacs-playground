@@ -1,10 +1,10 @@
 # load 01-life/01-three
 checkpoint:01-life/01-three/open
-step:open:loaded
+lesson:open:loaded
 check:open:false
 gw:01-life/01-three/open:in-progress:gen0
 = skip answered 409
 # gateway reset while the skip plays
-step:open:dropped
+lesson:open:dropped
 gw:reset:01-life/01-three
 = b.txt visited by the rest of the demo: false

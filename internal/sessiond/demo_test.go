@@ -44,7 +44,7 @@ func TestDemoSkipAndDropAll(t *testing.T) {
 	if code := ts.rpc("scenario", protocol.ScenarioRequest{LessonID: lesson}, &sr); code != 200 {
 		t.Fatalf("scenario %d", code)
 	}
-	es.wait("step:open:loaded")
+	es.wait("lesson:open:loaded")
 
 	// demo: only for the active step, and a valid phase.
 	if code := ts.rpc("demo", protocol.DemoRequest{StepID: "write", Phase: protocol.DemoStart}, nil); code != 409 {
@@ -58,7 +58,7 @@ func TestDemoSkipAndDropAll(t *testing.T) {
 		t.Fatalf("demo start %d %+v", code, dr)
 	}
 	ts.srv.OnEvent(&protocol.KeyEvent{Keys: "C-x C-f", Cmd: "find-file", Frame: protocol.FrameTerminal})
-	es.wait("step:open:demonstrated")
+	es.wait("lesson:open:demonstrated")
 	if code := ts.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoEnd}, &dr); code != 200 {
 		t.Fatalf("demo end %d", code)
 	}
@@ -70,15 +70,15 @@ func TestDemoSkipAndDropAll(t *testing.T) {
 	if code := ts.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoStart}, &dr); code != 200 || !dr.Restored {
 		t.Fatalf("second demo start %d %+v", code, dr)
 	}
-	es.wait("step:open:reset")
+	es.wait("lesson:open:reset")
 	// Do it yourself: restore {} clears the latch; the learner's completion
 	// is done and advances.
 	if ts.rpc("restore", protocol.RestoreRequest{}, nil) != 200 {
 		t.Fatal("restore")
 	}
 	ts.srv.OnEvent(&protocol.KeyEvent{Keys: "C-x C-f", Cmd: "find-file", Frame: protocol.FrameTerminal})
-	es.wait("step:open:complete")
-	es.wait("step:write:loaded")
+	es.wait("lesson:open:complete")
+	es.wait("lesson:write:loaded")
 
 	waitProgress(t, gw, "open:demonstrated", "open:done")
 
@@ -87,7 +87,7 @@ func TestDemoSkipAndDropAll(t *testing.T) {
 	if code := ts.rpc("drop-step", protocol.DropStepRequest{}, nil); code != 200 {
 		t.Fatalf("drop-step {} %d", code)
 	}
-	es.wait("step:write:dropped")
+	es.wait("lesson:write:dropped")
 	if ts.rpc("check", nil, nil) != 409 {
 		t.Fatal("no step is active after drop-step {}")
 	}
@@ -107,7 +107,7 @@ func TestDemoSkipAndDropAll(t *testing.T) {
 	if code := ts.rpc("skip", protocol.SkipRequest{StepID: "open"}, &sk); code != 200 || sk.Next == nil || *sk.Next != "write" || sk.DemoCompleted {
 		t.Fatalf("skip %d %+v", code, sk)
 	}
-	es.wait("step:open:skipped")
+	es.wait("lesson:open:skipped")
 	waitProgress(t, gw, "open:skipped")
 	if ts.rpc("status", nil, &st) != 200 || st.Step == nil || st.Step.StepID != "write" {
 		t.Fatalf("after skip: %+v", st.Step)
@@ -169,7 +169,7 @@ func TestRestoreOutlivesTheRequest(t *testing.T) {
 	if code := ts.rpc("scenario", protocol.ScenarioRequest{LessonID: lesson}, nil); code != 200 {
 		t.Fatalf("scenario %d", code)
 	}
-	es.wait("step:open:loaded")
+	es.wait("lesson:open:loaded")
 	ref := checkpoint.StepRef(lesson, "open")
 	deadline := time.Now().Add(10 * time.Second)
 	for !ts.srv.snap.Exists(context.Background(), ref) {

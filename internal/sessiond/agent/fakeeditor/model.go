@@ -501,8 +501,8 @@ func (e *Editor) stateObject() *protocol.State {
 		}
 		st.ReadOnlyReason = &reason
 	}
-	if e.m.Hydra != "" {
-		st.Waiting = &protocol.Waiting{Kind: protocol.WaitingHydra, What: "the " + e.m.Hydra + " hydra", Leave: "C-g"}
+	if e.m.Menu != "" {
+		st.Waiting = &protocol.Waiting{Kind: protocol.WaitingTransient, What: "the " + e.m.Menu + " menu", Leave: "C-g"}
 	}
 	return st
 }

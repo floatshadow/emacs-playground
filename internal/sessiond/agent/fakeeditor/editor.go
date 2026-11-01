@@ -110,8 +110,8 @@ type Model struct {
 	// Globals are session variables (kill-ring, …).
 	Globals    map[string]any
 	Minibuffer *protocol.Minibuffer
-	// Hydra is the open hydra's name ("" for none).
-	Hydra string
+	// Menu is the open transient menu's name ("" for none).
+	Menu string
 	// Recursion is the depth of recursive edits (minibuffers not counted).
 	Recursion    int
 	LearnerFrame protocol.FrameKind

@@ -282,11 +282,11 @@ func (e *Editor) flushBuffers() int {
 
 // --- rescue ----------------------------------------------------------------------
 
-// leaveTopLevel closes what an op at top level throws out of: the hydra,
+// leaveTopLevel closes what an op at top level throws out of: the menu,
 // prompts, recursive edits, a pending prefix, a search.
-func (e *Editor) leaveTopLevel() (hydra, prompt, recursive, search bool) {
-	if e.m.Hydra != "" {
-		e.m.Hydra, hydra = "", true
+func (e *Editor) leaveTopLevel() (menu, prompt, recursive, search bool) {
+	if e.m.Menu != "" {
+		e.m.Menu, menu = "", true
 	}
 	if e.prompt != nil {
 		e.emit(&protocol.MinibufferEvent{Envelope: protocol.Envelope{T: protocol.EventMinibuffer}, Open: false, Prompt: e.prompt.text, Depth: 1, Kind: protocol.MinibufferPrompt})
@@ -306,10 +306,10 @@ func (e *Editor) leaveTopLevel() (hydra, prompt, recursive, search bool) {
 // rescue is playground--op-rescue: the actions in the agent's order.
 func (e *Editor) rescue() []string {
 	did := []string{}
-	name := e.m.Hydra
-	hydra, prompt, recursive, search := e.leaveTopLevel()
-	if hydra {
-		did = append(did, "closed the "+name+" hydra")
+	name := e.m.Menu
+	menu, prompt, recursive, search := e.leaveTopLevel()
+	if menu {
+		did = append(did, "closed the "+name+" menu")
 	}
 	if prompt {
 		did = append(did, "cancelled the prompt")

@@ -78,6 +78,7 @@ func (c *Core) enter(stepID string, p Phase) (uint64, error) {
 	case Skipping:
 		l.Phase, l.Demo = Skipping, Demo{}
 	}
+	c.publishLocked(protocol.ChangePhase, stepID, 0)
 	return l.Attempt.Seq, nil
 }
 
@@ -122,10 +123,11 @@ func (c *Core) demoStart(ctx context.Context, req admitted) (protocol.DemoResult
 	if err != nil {
 		return protocol.DemoResult{}, err
 	}
-	if _, err := c.enter(stepID, Watching); err != nil {
+	seq, err := c.enter(stepID, Watching)
+	if err != nil {
 		return protocol.DemoResult{}, err
 	}
-	return protocol.DemoResult{Restored: restored}, nil
+	return protocol.DemoResult{Restored: restored, Attempt: seq}, nil
 }
 
 // skip is rpc skip ("Skip this step", api.md §3.4): the active step,
@@ -178,9 +180,8 @@ func (c *Core) skip(ctx context.Context, req admitted) (protocol.SkipResult, err
 	}
 	l.Saved.lesson(sc.ID).Skipped[stepID] = now.UnixMilli()
 	c.recordLocked(sc.ID, stepID, protocol.ProgressSkipped, now)
-	last := idx+1 >= len(sc.Steps)
-	c.emitLocked(&protocol.StepEvent{LessonID: sc.ID, StepID: stepID, Status: protocol.StepSkipped, Index: idx, Count: len(sc.Steps), LessonComplete: last})
-	c.finishLocked(last, false)
+	c.finishLocked(idx+1 >= len(sc.Steps), false)
+	c.publishLocked(protocol.ChangeSkipped, stepID, 0)
 	c.mu.Unlock()
 	c.persist()
 	next, err := c.advance(ctx, seq)

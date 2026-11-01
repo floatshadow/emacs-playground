@@ -188,6 +188,8 @@ type Core struct {
 	// dirty marks the active step dirty after a load that failed changed
 	// the workspace (until the next activation).
 	dirty bool
+	// last is the lesson snapshot published last (publishLocked).
+	last protocol.LessonSnapshot
 }
 
 // New returns a core; Run executes its ops.
@@ -207,8 +209,10 @@ func New(d Deps) *Core {
 	if d.Progress == nil {
 		d.Progress = progress.New(progress.Snapshot{}, nil, nil, d.Log)
 	}
-	return &Core{d: d, log: d.Log, wake: make(chan struct{}, 1),
+	c := &Core{d: d, log: d.Log, wake: make(chan struct{}, 1),
 		lesson: Lesson{Index: -1, Saved: Saved{Lessons: map[string]*LessonState{}}}}
+	c.last = c.snapshotLocked()
+	return c
 }
 
 func (c *Core) now() time.Time { return c.d.Now() }
@@ -249,6 +253,7 @@ func (c *Core) Run(ctx context.Context) {
 		op.cancel()
 		c.mu.Lock()
 		c.running = nil
+		c.publishLocked(protocol.ChangeBusy, "", 0)
 		c.mu.Unlock()
 		op.done <- Result{Value: v, Err: err}
 	}
@@ -269,6 +274,7 @@ func (c *Core) next(ctx context.Context) *Op {
 			op.ctx, op.cancel = context.WithTimeout(ctx, op.Deadline)
 			op.info.StartedAt = time.Now()
 			c.running = op
+			c.publishLocked(protocol.ChangeBusy, "", 0)
 			c.mu.Unlock()
 			return op
 		}
@@ -393,6 +399,7 @@ func (op *Op) post(v any) {
 func (c *Core) setTarget(op *Op, lessonID, stepID string) {
 	c.mu.Lock()
 	op.info.LessonID, op.info.StepID = lessonID, stepID
+	c.publishLocked(protocol.ChangeBusy, "", 0)
 	c.mu.Unlock()
 }
 

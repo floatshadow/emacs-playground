@@ -1,13 +1,13 @@
 # load 01-life/01-three
 checkpoint:01-life/01-three/open
-step:open:loaded
+lesson:open:loaded
 check:open:false
 gw:01-life/01-three/open:in-progress:gen0
 # learner completes with the gateway down
 check:open:true
-step:open:complete
+lesson:open:complete
 checkpoint:01-life/01-three/write
-step:write:loaded
+lesson:write:loaded
 check:write:false
 # the gateway comes back
 gw:01-life/01-three/open:done:gen0

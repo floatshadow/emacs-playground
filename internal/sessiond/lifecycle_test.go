@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -298,12 +299,8 @@ func (l *lifecycle) stop() {
 // traceLine renders a traced event, "" for the kinds left out.
 func traceLine(ev protocol.Event) string {
 	switch e := ev.(type) {
-	case *protocol.StepEvent:
-		s := "step:" + e.StepID + ":" + string(e.Status)
-		if e.LessonComplete {
-			s += ":lesson-complete"
-		}
-		return s
+	case *protocol.LessonEvent:
+		return lessonLine(e)
 	case *protocol.CheckEvent:
 		return fmt.Sprintf("check:%s:%v", e.StepID, e.Complete)
 	case *protocol.CheckpointEvent:
@@ -408,6 +405,46 @@ func (l *lifecycle) section(label string, want ...string) {
 	}
 	l.out = append(l.out, gws...)
 	l.mu.Unlock()
+	l.checkPublished(label)
+}
+
+// checkPublished asserts that nothing is unpublished: once a section is
+// quiet, the snapshot a browser holds (the hello's, then every lesson
+// event with a higher rev; revs strictly increase) is the one status
+// reports.
+func (l *lifecycle) checkPublished(label string) {
+	l.t.Helper()
+	l.mu.Lock()
+	ts, es := l.ts, l.es
+	l.mu.Unlock()
+	if ts == nil {
+		return
+	}
+	var held protocol.LessonSnapshot
+	var rev uint64
+	es.mu.Lock()
+	for _, ev := range es.evs {
+		switch e := ev.(type) {
+		case *protocol.HelloEvent:
+			held = e.Lesson
+		case *protocol.LessonEvent:
+			if e.Lesson.Rev <= rev {
+				l.t.Errorf("%s: lesson event rev %d after %d", label, e.Lesson.Rev, rev)
+			}
+			rev = e.Lesson.Rev
+			if e.Lesson.Rev > held.Rev {
+				held = e.Lesson
+			}
+		}
+	}
+	es.mu.Unlock()
+	var st protocol.StatusResult
+	if code := ts.rpc("status", nil, &st); code != 200 {
+		l.t.Fatalf("%s: status %d", label, code)
+	}
+	if !reflect.DeepEqual(held, st.Lesson) {
+		l.t.Errorf("%s: unpublished lesson state: held %+v, status %+v", label, held, st.Lesson)
+	}
 }
 
 // goldenSection returns the lines of the golden trace's section i (notes
@@ -533,12 +570,12 @@ func (l *lifecycle) keys(keys string) {
 // completeOpen loads lesson A and completes its first step.
 func (l *lifecycle) loadA() {
 	l.load(protocol.ScenarioRequest{LessonID: lessonA})
-	l.section("load "+lessonA, "step:open:loaded", "gw:"+lessonA+"/open:in-progress:gen0")
+	l.section("load "+lessonA, "lesson:open:loaded", "gw:"+lessonA+"/open:in-progress:gen0")
 }
 
 func (l *lifecycle) completeOpen() {
 	l.play(demoOpen)
-	l.section("learner opens b.txt", "step:open:complete", "step:write:loaded", "gw:"+lessonA+"/write:in-progress:gen0")
+	l.section("learner opens b.txt", "lesson:open:complete", "lesson:write:loaded", "gw:"+lessonA+"/write:in-progress:gen0")
 }
 
 // editorNote notes a.txt's and b.txt's buffers and the kill ring.
@@ -666,9 +703,9 @@ func TestLifecycle(t *testing.T) {
 			l.loadA()
 			l.completeOpen()
 			l.play(demoWrite)
-			l.section("learner writes done and saves", "step:write:complete", "step:split:loaded")
+			l.section("learner writes done and saves", "lesson:write:complete", "lesson:split:loaded")
 			l.play(demoSplit)
-			l.section("learner splits", "step:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0")
+			l.section("learner splits", "lesson:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0")
 		}},
 		{name: "reset-mid-step", run: func(l *lifecycle) {
 			l.loadA()
@@ -677,7 +714,7 @@ func TestLifecycle(t *testing.T) {
 			if code := l.rpc("restore", protocol.RestoreRequest{}, nil); code != 200 {
 				l.t.Fatalf("restore %d", code)
 			}
-			l.section("Reset", "step:write:reset", "gw:"+lessonA+"/write:in-progress:gen0")
+			l.section("Reset", "lesson:write:reset", "gw:"+lessonA+"/write:in-progress:gen0")
 			b := l.ed.Buffer("b.txt")
 			l.note("b.txt after Reset: %q modified=%v", b.Text, b.Modified)
 		}},
@@ -686,13 +723,13 @@ func TestLifecycle(t *testing.T) {
 			l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoStart}, nil)
 			l.play(demoOpen)
 			l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoEnd}, nil)
-			l.section("Watch it", "step:open:demonstrated", "gw:"+lessonA+"/open:demonstrated:gen0")
+			l.section("Watch it", "lesson:open:demonstrated", "gw:"+lessonA+"/open:demonstrated:gen0")
 			if code := l.rpc("restore", protocol.RestoreRequest{}, nil); code != 200 {
 				l.t.Fatalf("restore %d", code)
 			}
-			l.section("Do it yourself", "step:open:reset")
+			l.section("Do it yourself", "lesson:open:reset")
 			l.play(demoOpen)
-			l.section("learner opens b.txt", "step:open:complete", "gw:"+lessonA+"/open:done:gen0")
+			l.section("learner opens b.txt", "lesson:open:complete", "gw:"+lessonA+"/open:done:gen0")
 		}},
 		{name: "watch-it-clean", run: func(l *lifecycle) {
 			l.loadA()
@@ -701,7 +738,7 @@ func TestLifecycle(t *testing.T) {
 			l.note("demo start restored=%v", dr.Restored)
 			l.play(demoOpen)
 			l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoEnd}, nil)
-			l.section("Watch it", "step:open:demonstrated", "gw:"+lessonA+"/open:demonstrated:gen0")
+			l.section("Watch it", "lesson:open:demonstrated", "gw:"+lessonA+"/open:demonstrated:gen0")
 			var st protocol.StatusResult
 			l.rpc("status", nil, &st)
 			l.note("active after the demo: %s", st.Step.StepID)
@@ -712,10 +749,10 @@ func TestLifecycle(t *testing.T) {
 			var dr protocol.DemoResult
 			l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoStart}, &dr)
 			l.note("demo start restored=%v", dr.Restored)
-			l.section("demo start after a command", "step:open:reset")
+			l.section("demo start after a command", "lesson:open:reset")
 			l.play(demoOpen)
 			l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoEnd}, nil)
-			l.section("the demo plays", "step:open:demonstrated", "gw:"+lessonA+"/open:demonstrated:gen0")
+			l.section("the demo plays", "lesson:open:demonstrated", "gw:"+lessonA+"/open:demonstrated:gen0")
 		}},
 		{name: "watch-it-abandoned-by-pty-detach", run: func(l *lifecycle) {
 			l.loadA()
@@ -731,7 +768,7 @@ func TestLifecycle(t *testing.T) {
 			l.waitFor("the demo to be abandoned", func() bool { return !l.server().srv.core.Watching() })
 			l.section("the page with the demo goes away")
 			l.play(`"b.txt" RET`)
-			l.section("learner finishes the step", "step:open:complete", "gw:"+lessonA+"/open:done:gen0")
+			l.section("learner finishes the step", "lesson:open:complete", "gw:"+lessonA+"/open:done:gen0")
 		}},
 		{name: "watch-it-idle-expiry", opts: []func(*lifecycle){withClock}, run: func(l *lifecycle) {
 			l.loadA()
@@ -744,7 +781,7 @@ func TestLifecycle(t *testing.T) {
 			l.waitFor("the idle demo to expire", func() bool { return !l.server().srv.core.Watching() })
 			l.section("the demo idles past DemoIdle")
 			l.play(demoOpen)
-			l.section("learner opens b.txt", "step:open:complete", "gw:"+lessonA+"/open:done:gen0")
+			l.section("learner opens b.txt", "lesson:open:complete", "gw:"+lessonA+"/open:done:gen0")
 		}},
 		{name: "skip-clean", run: func(l *lifecycle) {
 			l.loadA()
@@ -753,7 +790,7 @@ func TestLifecycle(t *testing.T) {
 				l.t.Fatalf("skip %d", code)
 			}
 			l.note("skip next=%s demoCompleted=%v", *sk.Next, sk.DemoCompleted)
-			l.section("Skip", "step:open:skipped", "step:write:loaded", "gw:"+lessonA+"/open:skipped:gen0")
+			l.section("Skip", "lesson:open:skipped", "lesson:write:loaded", "gw:"+lessonA+"/open:skipped:gen0")
 		}},
 		{name: "skip-dirty", run: func(l *lifecycle) {
 			l.loadA()
@@ -763,21 +800,21 @@ func TestLifecycle(t *testing.T) {
 				l.t.Fatalf("skip %d", code)
 			}
 			l.note("skip next=%s demoCompleted=%v", *sk.Next, sk.DemoCompleted)
-			l.section("Skip after a command", "step:open:reset", "step:open:skipped", "step:write:loaded", "gw:"+lessonA+"/open:skipped:gen0")
+			l.section("Skip after a command", "lesson:open:reset", "lesson:open:skipped", "lesson:write:loaded", "gw:"+lessonA+"/open:skipped:gen0")
 		}},
 		{name: "go-to-step-with-checkpoint", run: func(l *lifecycle) {
 			l.loadA()
 			l.completeOpen()
 			l.play(demoWrite)
-			l.section("learner writes done", "step:write:complete", "step:split:loaded")
+			l.section("learner writes done", "lesson:write:complete", "lesson:split:loaded")
 			l.load(protocol.ScenarioRequest{LessonID: lessonA, StepID: "write"})
-			l.section("Go to step write", "step:write:loaded")
+			l.section("Go to step write", "lesson:write:loaded")
 			b := l.ed.Buffer("b.txt")
 			l.note("b.txt after the restore: %q", b.Text)
 		}},
 		{name: "go-to-step-without-checkpoint", run: func(l *lifecycle) {
 			l.load(protocol.ScenarioRequest{LessonID: lessonA, StepID: "split"})
-			l.section("Go to step split on a fresh session", "step:split:loaded")
+			l.section("Go to step split on a fresh session", "lesson:split:loaded")
 			disk, _ := os.ReadFile(filepath.Join(l.ws, "life", "b.txt"))
 			l.note("life/b.txt after the fast-forward: %q", disk)
 			l.note("find-file calls replayed: %v", l.ed.Buffer("b.txt") != nil)
@@ -786,14 +823,14 @@ func TestLifecycle(t *testing.T) {
 			l.loadA()
 			l.completeOpen()
 			l.gw.Reset(l.t, lessonA)
-			l.section("gateway reset of the lesson", "step:write:dropped")
+			l.section("gateway reset of the lesson", "lesson:write:dropped")
 			l.load(protocol.ScenarioRequest{LessonID: lessonA, Reset: true})
-			l.section("load with reset", "step:open:loaded", "gw:"+lessonA+"/open:in-progress:gen1")
+			l.section("load with reset", "lesson:open:loaded", "gw:"+lessonA+"/open:in-progress:gen1")
 		}},
 		{name: "start-over-during-a-step", run: func(l *lifecycle) {
 			l.loadA()
 			l.gw.Reset(l.t, "")
-			l.section("gateway reset of everything", "step:open:dropped")
+			l.section("gateway reset of everything", "lesson:open:dropped")
 			var st protocol.StatusResult
 			l.rpc("status", nil, &st)
 			l.note("active after the drop: %v", st.Step)
@@ -801,7 +838,7 @@ func TestLifecycle(t *testing.T) {
 		{name: "module-restart-on-load", run: func(l *lifecycle) {
 			res := l.load(protocol.ScenarioRequest{LessonID: lessonB})
 			l.note("scenario restarting=%v modules=%v", res.Restarting, res.Modules)
-			l.section("load a lesson needing editing", "modules:false", "step:quit:loaded")
+			l.section("load a lesson needing editing", "modules:false", "lesson:quit:loaded")
 			l.note("hello modules after the restart: %v", l.ed.Snapshot().Modules)
 		}},
 		{name: "second-load-during-module-restart", run: func(l *lifecycle) {
@@ -809,7 +846,7 @@ func TestLifecycle(t *testing.T) {
 			l.note("first scenario restarting=%v", res.Restarting)
 			res = l.load(protocol.ScenarioRequest{LessonID: lessonB})
 			l.note("second scenario restarting=%v step=%s", res.Restarting, res.Step.StepID)
-			l.section("load twice", "modules:false", "step:quit:loaded")
+			l.section("load twice", "modules:false", "lesson:quit:loaded")
 		}},
 		{name: "rpc-modules", run: func(l *lifecycle) {
 			var mr protocol.ModulesResult
@@ -826,7 +863,7 @@ func TestLifecycle(t *testing.T) {
 			_ = json.Unmarshal(snap, &spec)
 			l.note("snapshot.json layout %s", spec.Layout)
 			l.start("?after=0")
-			l.section("sessiond restarts", "step:write:loaded")
+			l.section("sessiond restarts", "lesson:write:loaded")
 			l.note("open calls: %d, setup calls: %d", l.ed.CountCalls(protocol.AgentOpOpen), l.ed.CountCalls(protocol.AgentOpSetup))
 		}},
 		{name: "resume-without-snapshot", run: func(l *lifecycle) {
@@ -836,7 +873,7 @@ func TestLifecycle(t *testing.T) {
 			_ = os.Remove(filepath.Join(l.ws, ".playground", "snapshot.json"))
 			setups := l.ed.CountCalls(protocol.AgentOpSetup)
 			l.start("?after=0")
-			l.section("sessiond restarts without a snapshot", "step:write:loaded")
+			l.section("sessiond restarts without a snapshot", "lesson:write:loaded")
 			var args protocol.AgentSetupArgs
 			for _, c := range l.ed.Calls() {
 				if c.Op == protocol.AgentOpSetup {
@@ -853,7 +890,7 @@ func TestLifecycle(t *testing.T) {
 			l.gw.Reset(l.t, lessonA)
 			code := <-done
 			l.note("skip answered %d", code)
-			l.section("gateway reset while the skip plays", "step:open:dropped")
+			l.section("gateway reset while the skip plays", "lesson:open:dropped")
 			// Re-recorded in the session core phase (defect fix): the skip
 			// is an op, so the drop cancels it and the rest of its demo
 			// never reaches Emacs (it used to visit b.txt after the drop).
@@ -873,7 +910,7 @@ func TestLifecycle(t *testing.T) {
 			took := time.Since(start)
 			l.note("scenario answered %d", <-done)
 			l.note("dropped within 1 s: %v", took < time.Second)
-			l.section("gateway reset during the fast-forward", "step:open:dropped")
+			l.section("gateway reset during the fast-forward", "lesson:open:dropped")
 			time.Sleep(500 * time.Millisecond)
 			l.section("later")
 			var st protocol.StatusResult
@@ -883,7 +920,7 @@ func TestLifecycle(t *testing.T) {
 		{name: "request-gone-mid-load", run: func(l *lifecycle) {
 			code := l.whileHeld(protocol.AgentOpSetup, "scenario", protocol.ScenarioRequest{LessonID: lessonA})
 			l.note("scenario answered %d after the page went away", code)
-			l.section("the load runs on", "step:open:loaded", "gw:"+lessonA+"/open:in-progress:gen0")
+			l.section("the load runs on", "lesson:open:loaded", "gw:"+lessonA+"/open:in-progress:gen0")
 		}},
 		{name: "request-gone-mid-restore", run: func(l *lifecycle) {
 			l.loadA()
@@ -891,7 +928,7 @@ func TestLifecycle(t *testing.T) {
 			l.play(`"xx"`)
 			code := l.whileHeld(protocol.AgentOpRestoreEditor, "restore", protocol.RestoreRequest{})
 			l.note("restore answered %d after the page went away", code)
-			l.section("the Reset runs on", "step:write:reset", "gw:"+lessonA+"/write:in-progress:gen0")
+			l.section("the Reset runs on", "lesson:write:reset", "gw:"+lessonA+"/write:in-progress:gen0")
 			b := l.ed.Buffer("b.txt")
 			l.note("b.txt after the Reset: %q modified=%v", b.Text, b.Modified)
 		}},
@@ -899,7 +936,7 @@ func TestLifecycle(t *testing.T) {
 			l.loadA()
 			l.gw.Down()
 			l.play(demoOpen)
-			l.section("learner completes with the gateway down", "step:open:complete", "step:write:loaded")
+			l.section("learner completes with the gateway down", "lesson:open:complete", "lesson:write:loaded")
 			l.gw.Up()
 			l.section("the gateway comes back", "gw:"+lessonA+"/open:done:gen0")
 			time.Sleep(time.Second)
@@ -916,15 +953,15 @@ func TestLifecycle(t *testing.T) {
 			l.rpc("status", nil, &st)
 			l.note("active after the restart: %v", st.Step)
 			l.load(protocol.ScenarioRequest{LessonID: lessonA})
-			l.section("load the lesson again", "step:open:loaded")
+			l.section("load the lesson again", "lesson:open:loaded")
 		}},
 		{name: "gateway-replace-then-restart", run: func(l *lifecycle) {
 			l.loadA()
 			l.completeOpen()
 			l.play(demoWrite)
-			l.section("learner writes done", "step:write:complete", "step:split:loaded")
+			l.section("learner writes done", "lesson:write:complete", "lesson:split:loaded")
 			l.play(demoSplit)
-			l.section("learner splits", "step:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0")
+			l.section("learner splits", "lesson:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0")
 			l.stop()
 			l.gw.Replace()
 			l.start("?after=0")
@@ -934,16 +971,16 @@ func TestLifecycle(t *testing.T) {
 		{name: "duplicate-lap-delivery", opts: []func(*lifecycle){withClock}, run: func(l *lifecycle) {
 			res := l.load(protocol.ScenarioRequest{LessonID: lessonA, Lap: true})
 			l.note("lap started: %v, id %s", res.Lap != nil, res.Lap.ID)
-			l.section("start the lap", "step:open:loaded")
+			l.section("start the lap", "lesson:open:loaded")
 			l.clock.Advance(time.Second)
 			l.play(demoOpen)
-			l.section("open", "step:write:loaded")
+			l.section("open", "lesson:write:loaded")
 			l.clock.Advance(time.Second)
 			l.play(demoWrite)
-			l.section("write", "step:split:loaded")
+			l.section("write", "lesson:split:loaded")
 			l.clock.Advance(time.Second)
 			l.play(demoSplit)
-			l.section("split", "step:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0:lap3000:"+res.Lap.ID)
+			l.section("split", "lesson:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0:lap3000:"+res.Lap.ID)
 			l.gw.mu.Lock()
 			last := l.gw.progress[len(l.gw.progress)-1]
 			l.gw.mu.Unlock()
@@ -958,18 +995,18 @@ func TestLifecycle(t *testing.T) {
 		}},
 		{name: "lap-refuses-help", opts: []func(*lifecycle){withClock}, run: func(l *lifecycle) {
 			res := l.load(protocol.ScenarioRequest{LessonID: lessonA, Lap: true})
-			l.section("start the lap", "step:open:loaded")
+			l.section("start the lap", "lesson:open:loaded")
 			l.note("hint answered %d", l.rpc("hint", protocol.HintRequest{StepID: "open", Level: 1}, nil))
 			l.note("demo start answered %d", l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoStart}, nil))
 			l.note("skip answered %d", l.rpc("skip", protocol.SkipRequest{StepID: "open"}, nil))
 			l.section("hint, demo and skip during the lap")
 			l.clock.Advance(2 * time.Second)
 			l.play(demoOpen)
-			l.section("open", "step:write:loaded")
+			l.section("open", "lesson:write:loaded")
 			l.play(demoWrite)
-			l.section("write", "step:split:loaded")
+			l.section("write", "lesson:split:loaded")
 			l.play(demoSplit)
-			l.section("split", "step:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0:lap2000:"+res.Lap.ID)
+			l.section("split", "lesson:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0:lap2000:"+res.Lap.ID)
 			l.note("laps counted: %d", l.gw.lapCount(lessonA))
 		}},
 		{name: "agent-disconnected-during-restore", run: func(l *lifecycle) {
@@ -980,7 +1017,7 @@ func TestLifecycle(t *testing.T) {
 			l.waitFor("the agent to drop", func() bool { return !l.server().srv.agent.Connected() })
 			code := l.rpc("restore", protocol.RestoreRequest{}, nil)
 			l.note("restore answered %d", code)
-			l.section("Reset without an agent", "step:write:reset")
+			l.section("Reset without an agent", "lesson:write:reset")
 			spec, _ := os.ReadFile(filepath.Join(l.ws, ".playground", "snapshot.json"))
 			l.note("snapshot.json is the checkpoint's: %v", strings.Contains(string(spec), `"layout":"life/b.txt"`))
 			l.ed.Reconnect()
@@ -1023,12 +1060,12 @@ func TestLifecycle(t *testing.T) {
 			l.note("life/b.txt after the crash: %q", disk)
 			l.ed.Reconnect()
 			l.start("?after=0")
-			l.section("sessiond restarts", "step:write:loaded", "check:write:false")
+			l.section("sessiond restarts", "lesson:write:loaded", "check:write:false")
 			l.editorNote("after the restart")
 			if code := l.rpc("restore", protocol.RestoreRequest{}, nil); code != 200 {
 				l.t.Fatalf("restore after the restart: %d", code)
 			}
-			l.section("Reset again", "step:write:reset", "check:write:false")
+			l.section("Reset again", "lesson:write:reset", "check:write:false")
 			disk, _ = os.ReadFile(filepath.Join(l.ws, "life", "b.txt"))
 			l.note("life/b.txt after Reset: %q", disk)
 		}},
@@ -1044,7 +1081,7 @@ func TestLifecycle(t *testing.T) {
 			l.note("manifest written: %v", err == nil)
 			l.start("?after=0")
 			l.load(protocol.ScenarioRequest{LessonID: lessonA})
-			l.section("load again", "checkpoint:"+lessonA+"/open", "step:open:loaded")
+			l.section("load again", "checkpoint:"+lessonA+"/open", "lesson:open:loaded")
 		}},
 		{name: "legacy-ref-without-manifest", run: func(l *lifecycle) {
 			// A ref whose manifest is missing (taken before manifests were
@@ -1063,7 +1100,7 @@ func TestLifecycle(t *testing.T) {
 				l.note("listed %s", it.Label)
 			}
 			l.load(protocol.ScenarioRequest{LessonID: lessonA, StepID: "open"})
-			l.section("Go to step open", "checkpoint:"+lessonA+"/open", "step:open:loaded")
+			l.section("Go to step open", "checkpoint:"+lessonA+"/open", "lesson:open:loaded")
 		}},
 		{name: "watch-it-leaves-no-kills-or-history", run: func(l *lifecycle) {
 			l.ed.Update(func(m *fakeeditor.Model) { m.Globals["extended-command-history"] = []string{"learner-command"} })
@@ -1075,12 +1112,12 @@ func TestLifecycle(t *testing.T) {
 			})
 			l.play(demoOpen)
 			l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoEnd}, nil)
-			l.section("Watch it kills a line", "step:open:demonstrated", "gw:"+lessonA+"/open:demonstrated:gen0")
+			l.section("Watch it kills a line", "lesson:open:demonstrated", "gw:"+lessonA+"/open:demonstrated:gen0")
 			l.editorNote("after the demo")
 			if code := l.rpc("restore", protocol.RestoreRequest{}, nil); code != 200 {
 				l.t.Fatalf("restore %d", code)
 			}
-			l.section("Do it yourself", "step:open:reset")
+			l.section("Do it yourself", "lesson:open:reset")
 			l.editorNote("after Do it yourself")
 			h, _ := json.Marshal(l.ed.Snapshot().Globals["extended-command-history"])
 			l.note("command history after Do it yourself: %s", h)
@@ -1093,12 +1130,12 @@ func TestLifecycle(t *testing.T) {
 			l.section("learner edits a.txt without saving")
 			l.completeOpen()
 			l.play(demoWrite)
-			l.section("learner writes done", "step:write:complete", "step:split:loaded", "check:split:false")
+			l.section("learner writes done", "lesson:write:complete", "lesson:split:loaded", "check:split:false")
 			l.play(`C-k`)
 			l.section("learner kills in b.txt")
 			l.editorNote("before Go to")
 			l.load(protocol.ScenarioRequest{LessonID: lessonA, StepID: "write"})
-			l.section("Go to step write", "step:write:loaded", "check:write:false")
+			l.section("Go to step write", "lesson:write:loaded", "check:write:false")
 			l.editorNote("after Go to")
 			l.play(`"yy"`)
 			var rr protocol.RestoreResult
@@ -1106,16 +1143,16 @@ func TestLifecycle(t *testing.T) {
 				l.t.Fatalf("restore %d", code)
 			}
 			l.note("Reset restoredFiles=%d", rr.RestoredFiles)
-			l.section("Reset", "step:write:reset", "check:write:false")
+			l.section("Reset", "lesson:write:reset", "check:write:false")
 			l.editorNote("after Reset")
 		}},
 		{name: "self-writing-shell-condition", run: func(l *lifecycle) {
 			l.load(protocol.ScenarioRequest{LessonID: lessonC})
-			l.section("load "+lessonC, "step:flag:loaded")
+			l.section("load "+lessonC, "lesson:flag:loaded")
 			if err := os.WriteFile(filepath.Join(l.ws, "sh", "done.flag"), nil, 0o644); err != nil {
 				l.t.Fatal(err)
 			}
-			l.section("the learner makes the flag", "step:flag:complete", "step:last:loaded", "gw:"+lessonC+"/flag:done:gen0")
+			l.section("the learner makes the flag", "lesson:flag:complete", "lesson:last:loaded", "gw:"+lessonC+"/flag:done:gen0")
 			time.Sleep(500 * time.Millisecond)
 			l.section("later")
 		}},
@@ -1123,11 +1160,11 @@ func TestLifecycle(t *testing.T) {
 			l.loadA()
 			l.gw.Down()
 			l.play(demoOpen)
-			l.section("open with the gateway down", "step:write:loaded")
+			l.section("open with the gateway down", "lesson:write:loaded")
 			l.play(demoWrite)
-			l.section("write with the gateway down", "step:split:loaded")
+			l.section("write with the gateway down", "lesson:split:loaded")
 			l.play(demoSplit)
-			l.section("split with the gateway down", "step:split:complete:lesson-complete")
+			l.section("split with the gateway down", "lesson:split:complete:lesson-complete")
 			l.gw.Up()
 			l.section("the gateway comes back",
 				"gw:"+lessonA+"/open:done:gen0", "gw:"+lessonA+"/write:done:gen0", "gw:"+lessonA+"/split:done:gen0")
@@ -1138,7 +1175,7 @@ func TestLifecycle(t *testing.T) {
 			l.loadA()
 			l.gw.Down()
 			l.play(demoOpen)
-			l.section("open with the gateway down", "step:write:loaded")
+			l.section("open with the gateway down", "lesson:write:loaded")
 			l.stop()
 			l.note("pending in state.json: %s", l.outboxNote())
 			l.gw.Reset(l.t, lessonA)
@@ -1147,20 +1184,20 @@ func TestLifecycle(t *testing.T) {
 			l.section("sessiond restarts after the reset")
 			l.note("pending after the restart: %s", l.outboxNote())
 			l.load(protocol.ScenarioRequest{LessonID: lessonA})
-			l.section("load the lesson again", "step:open:loaded", "gw:"+lessonA+"/open:in-progress:gen1")
+			l.section("load the lesson again", "lesson:open:loaded", "gw:"+lessonA+"/open:in-progress:gen1")
 		}},
 		{name: "stopped-after-delivery-before-persisting", opts: []func(*lifecycle){withClock}, run: func(l *lifecycle) {
 			l.load(protocol.ScenarioRequest{LessonID: lessonA, Lap: true})
-			l.section("start the lap", "step:open:loaded")
+			l.section("start the lap", "lesson:open:loaded")
 			l.clock.Advance(time.Second)
 			l.play(demoOpen)
-			l.section("open", "step:write:loaded", "gw:"+lessonA+"/write:in-progress:gen0")
+			l.section("open", "lesson:write:loaded", "gw:"+lessonA+"/write:in-progress:gen0")
 			l.clock.Advance(time.Second)
 			l.play(demoWrite)
-			l.section("write", "step:split:loaded", "gw:"+lessonA+"/split:in-progress:gen0")
+			l.section("write", "lesson:split:loaded", "gw:"+lessonA+"/split:in-progress:gen0")
 			l.clock.Advance(time.Second)
 			l.play(demoSplit)
-			l.section("split ends the lap", "step:split:complete:lesson-complete")
+			l.section("split ends the lap", "lesson:split:complete:lesson-complete")
 			l.stop()
 			// sessiond stopped after the gateway accepted the lap but
 			// before state.json lost it.
@@ -1189,8 +1226,8 @@ func TestLifecycle(t *testing.T) {
 			es2.first()
 			l.loadA()
 			l.load(protocol.ScenarioRequest{LessonID: lessonD})
-			l.section("the second tab loads "+lessonD, "step:quit:loaded")
-			es2.wait("step:quit:loaded")
+			l.section("the second tab loads "+lessonD, "lesson:quit:loaded")
+			es2.wait("lesson:quit:loaded")
 			l.note("the second stream saw %s loaded", lessonD)
 		}},
 	}

@@ -106,8 +106,8 @@ const (
 
 // activation says how activate starts a step.
 type activation struct {
-	// status is the step event's: loaded or reset.
-	status protocol.StepStatus
+	// change is the lesson event's: loaded or reset.
+	change protocol.LessonChange
 	// phase is Active, or Rehearsing for a fast-forward (no event, report
 	// or persist).
 	phase Phase
@@ -119,7 +119,7 @@ type activation struct {
 
 // activate makes step idx of sc the current attempt: the attempt number
 // rises, demo flags clear, the evaluator begins the attempt, Saved.Active
-// is persisted, the step event goes out, an in-progress entry goes to the
+// is persisted, the lesson event goes out, an in-progress entry goes to the
 // outbox, and an evaluation is scheduled. A reset forgets the step's
 // saved outcomes; a counted one adds to its resets.
 func (c *Core) activate(sc *protocol.Scenario, idx int, how activation) protocol.StepRef {
@@ -154,7 +154,7 @@ func (c *Core) activate(sc *protocol.Scenario, idx int, how activation) protocol
 	}
 	l.Saved.Active = &ref
 	ls := l.Saved.lesson(sc.ID)
-	if how.status == protocol.StepReset {
+	if how.change == protocol.ChangeReset {
 		if how.counted {
 			ls.Resets[step.ID]++
 		}
@@ -168,8 +168,7 @@ func (c *Core) activate(sc *protocol.Scenario, idx int, how activation) protocol
 	if statusOf(ls, step.ID) == protocol.ProgressInProgress {
 		c.recordLocked(sc.ID, step.ID, protocol.ProgressInProgress, now)
 	}
-	c.emitLocked(&protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: how.status,
-		Index: idx, Count: len(sc.Steps), Lap: c.inLapLocked()})
+	c.publishLocked(how.change, step.ID, 0)
 	c.mu.Unlock()
 	c.persist()
 	c.trigger()
@@ -221,7 +220,7 @@ func (c *Core) resetTo(lessonID, stepID string, counted bool) bool {
 	if idx < 0 {
 		return false
 	}
-	c.activate(sc, idx, activation{status: protocol.StepReset, phase: Active, counted: counted})
+	c.activate(sc, idx, activation{change: protocol.ChangeReset, phase: Active, counted: counted})
 	return true
 }
 
@@ -251,6 +250,7 @@ func (c *Core) Observe(o steps.Observation) {
 	}
 	c.expireDemoLocked(now)
 	sc, idx := l.Scenario, l.Index
+	c.publishLocked(protocol.ChangePhase, sc.Steps[idx].ID, 0)
 	step := &sc.Steps[idx]
 	changed := o.Forced || !reflect.DeepEqual(o.Results, c.obs.results) || o.Complete != c.obs.complete
 	c.obs.results, c.obs.complete = o.Results, o.Complete
@@ -259,7 +259,7 @@ func (c *Core) Observe(o steps.Observation) {
 		return
 	}
 	if changed {
-		c.emitLocked(&protocol.CheckEvent{LessonID: sc.ID, StepID: step.ID, Conditions: o.Results, Complete: o.Complete})
+		c.emitLocked(&protocol.CheckEvent{LessonID: sc.ID, StepID: step.ID, Attempt: l.Attempt.Seq, Conditions: o.Results, Complete: o.Complete})
 	}
 	if !o.Complete {
 		if !(l.Phase == Watching && l.Demo.Playing) && l.Phase != Skipping && !c.inLapLocked() {
@@ -283,8 +283,8 @@ func (c *Core) Observe(o steps.Observation) {
 		}
 		l.Demo.Demonstrated = true
 		l.Saved.lesson(sc.ID).Demonstrated[step.ID] = now.UnixMilli()
-		c.emitLocked(&protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepDemonstrated, Index: idx, Count: len(sc.Steps)})
 		c.recordLocked(sc.ID, step.ID, protocol.ProgressDemonstrated, now)
+		c.publishLocked(protocol.ChangeDemonstrated, step.ID, 0)
 		c.mu.Unlock()
 		c.persist()
 		return
@@ -292,13 +292,10 @@ func (c *Core) Observe(o steps.Observation) {
 	// Active: record done, then advance.
 	l.Saved.lesson(sc.ID).Done[step.ID] = now.UnixMilli()
 	last := idx+1 >= len(sc.Steps)
-	ev := &protocol.StepEvent{LessonID: sc.ID, StepID: step.ID, Status: protocol.StepComplete, Index: idx, Count: len(sc.Steps),
-		LessonComplete: last, Lap: c.inLapLocked()}
 	e := l.Saved.lesson(sc.ID).report(sc.ID, step.ID, protocol.ProgressDone, now)
-	if last && ev.Lap {
+	if last && c.inLapLocked() {
 		lap := l.Saved.Lap
-		ev.LapMs = max(now.UnixMilli()-lap.StartedAt, 1)
-		e.LapMs, e.LapID = ev.LapMs, lap.ID
+		e.LapMs, e.LapID = max(now.UnixMilli()-lap.StartedAt, 1), lap.ID
 		if e.LapID == "" {
 			// A lap saved before laps had ids.
 			e.LapID = protocol.LapID(lap.LessonID, lap.StartedAt)
@@ -306,8 +303,8 @@ func (c *Core) Observe(o steps.Observation) {
 		l.Saved.Lap = nil
 	}
 	c.d.Progress.Record(e)
-	c.emitLocked(ev)
 	c.finishLocked(last, true)
+	c.publishLocked(protocol.ChangeComplete, step.ID, e.LapMs)
 	c.mu.Unlock()
 	c.persist()
 }
@@ -333,7 +330,7 @@ func (c *Core) advanceOp(a Attempt) *Op {
 
 // advance is the advance op for attempt seq, a no-op unless that attempt
 // is still current and Advancing: after the last step no step is active
-// (the step event said lessonComplete); otherwise the next step's
+// (the snapshot already said complete); otherwise the next step's
 // checkpoint is taken when it takes one (a failure is logged) and the step
 // activates, unless a drop cancelled the op. It returns the next step's id.
 func (c *Core) advance(ctx context.Context, seq uint64) (*string, error) {
@@ -346,6 +343,7 @@ func (c *Core) advance(ctx context.Context, seq uint64) (*string, error) {
 	sc, next := l.Scenario, l.Index+1
 	if next >= len(sc.Steps) {
 		c.idleLocked(sc)
+		c.publishLocked(protocol.ChangePhase, "", 0)
 		c.mu.Unlock()
 		return nil, nil
 	}
@@ -365,16 +363,17 @@ func (c *Core) advance(ctx context.Context, seq uint64) (*string, error) {
 	if !still {
 		return nil, nil
 	}
-	c.activate(sc, next, activation{status: protocol.StepLoaded, phase: Active})
+	c.activate(sc, next, activation{change: protocol.ChangeLoaded, phase: Active})
 	id := st.ID
 	return &id, nil
 }
 
 // endRehearsal ends a rehearsal for a load that activates nothing: the
-// step active before it (prev) is active again, as after a load that
-// failed before its fast-forward, with nothing emitted (the page never saw
-// it go). The step counts as dirty, since the load changed the workspace,
-// so demo start and skip restore its checkpoint first.
+// step active before it (prev) is Active again, whatever its phase was
+// (Watching included), with no demo latch and a new attempt; without a
+// step before it the lesson is idle. The step counts as dirty, since the
+// load changed the workspace, so demo start and skip restore its
+// checkpoint first.
 func (c *Core) endRehearsal(prev Lesson) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -383,6 +382,7 @@ func (c *Core) endRehearsal(prev Lesson) {
 	}
 	if prev.Scenario == nil || prev.Index < 0 || prev.Index >= len(prev.Scenario.Steps) || prev.Phase == Idle {
 		c.idleLocked(prev.Scenario)
+		c.publishLocked(protocol.ChangePhase, "", 0)
 		return
 	}
 	l := &c.lesson
@@ -392,6 +392,7 @@ func (c *Core) endRehearsal(prev Lesson) {
 	c.obs = observed{nudged: map[string]bool{}}
 	c.beginLocked(step, prev.Scenario.Setup.Root)
 	c.dirty = true
+	c.publishLocked(protocol.ChangePhase, step.ID, 0)
 }
 
 // attemptSeq returns the current attempt's number.
@@ -452,6 +453,7 @@ func (c *Core) DemoTraffic() {
 func (c *Core) AbandonDemo() {
 	c.mu.Lock()
 	ended := c.abandonDemoLocked()
+	c.publishLocked(protocol.ChangePhase, c.lesson.Attempt.Step, 0)
 	c.mu.Unlock()
 	if ended {
 		c.trigger()
