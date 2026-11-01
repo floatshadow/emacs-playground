@@ -21,6 +21,7 @@
 .flag {
   display: inline-block;
   font: 11.5px var(--mono);
+  font-variant-ligatures: none;
   background: var(--warn-soft);
   color: var(--warn);
   padding: 2px 6px;

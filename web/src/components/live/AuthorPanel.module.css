@@ -16,6 +16,7 @@
 .panel code,
 .panel pre {
   font: 11.5px/1.4 var(--mono);
+  font-variant-ligatures: none;
 }
 .panel pre {
   background: var(--paper-2);

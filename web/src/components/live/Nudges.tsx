@@ -31,7 +31,7 @@ export function Nudges() {
   const state = useSessionStore((s) => s.state)
   const minibufferSince = useSessionStore((s) => s.minibufferSince)
   const mentions = useSessionStore((s) => s.mentions)
-  const activeStep = useSessionStore((s) => s.activeStep)
+  const lesson = useSessionStore((s) => s.lesson)
   const dismiss = useSessionStore((s) => s.dismiss)
   const [showAll, setShowAll] = useState(false)
   const tick = useNow(5000)
@@ -40,10 +40,10 @@ export function Nudges() {
   const nudges = useMemo(
     () =>
       selectNudges(
-        { cards, serverNudges, dismissed, ticker, state, minibufferSince, mentions, activeStep },
+        { cards, serverNudges, dismissed, ticker, state, minibufferSince, mentions, lesson },
         now,
       ),
-    [cards, serverNudges, dismissed, ticker, state, minibufferSince, mentions, activeStep, now],
+    [cards, serverNudges, dismissed, ticker, state, minibufferSince, mentions, lesson, now],
   )
   if (nudges.length === 0) return <div className={styles.empty}>{t('nudges.empty')}</div>
   const shown = showAll ? nudges : nudges.slice(0, NUDGES_SHOWN)

@@ -67,7 +67,7 @@ export default function SessionScreen() {
   const me = useMe()
   const sessionId = useSessionStore((s) => s.sessionId)
   const modules = useSessionStore((s) => s.modules)
-  const modulesRestarting = useSessionStore((s) => s.modulesRestarting)
+  const applying = useSessionStore((s) => s.lesson?.busy?.op === 'set-modules')
   const info = useSessionInfo(sessionId, true)
   const status = useStatus(sessionId, true)
   const prefs = useUiStore()
@@ -273,9 +273,9 @@ export default function SessionScreen() {
           <Button
             variant="primary"
             onClick={() => void applyModules()}
-            disabled={busy || !selected || modulesRestarting}
+            disabled={busy || !selected || applying}
           >
-            {modulesRestarting ? t('session.applying') : t('session.apply')}
+            {applying ? t('session.applying') : t('session.apply')}
           </Button>
         </section>
 

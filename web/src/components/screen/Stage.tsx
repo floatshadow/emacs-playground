@@ -23,7 +23,8 @@ export function Stage() {
   const [vncMounted, setVncMounted] = useState(mode === 'gui')
   if (mode === 'gui' && !vncMounted) setVncMounted(true)
   return (
-    <main className={styles.stage} aria-label={t('screen.stageLabel')}>
+    // "stage" is how focus mode finds it in the work grid (Layout.module.css).
+    <main className={`${styles.stage} stage`} aria-label={t('screen.stageLabel')}>
       <div className={styles.top}>
         <FocusBanner />
         <ScreenHeader />

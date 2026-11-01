@@ -17,7 +17,7 @@ let ensurePromise: Promise<SessionInfo> | null = null
 let events: EventsClient | null = null
 const listeners = new Set<(ev: Event) => void>()
 
-/** Subscribes to every event after it went through applyEvent. */
+/** Subscribes to every event after it went through applyEvent (lesson events: applied ones). */
 export function onSessionEvent(fn: (ev: Event) => void): () => void {
   listeners.add(fn)
   return () => listeners.delete(fn)
@@ -26,7 +26,9 @@ export function onSessionEvent(fn: (ev: Event) => void): () => void {
 function sideEffects(ev: Event) {
   switch (ev.t) {
     case 'hello':
-      if (ev.step && !ev.replayed) void rpc('check', {}, { silent: true }).catch(() => undefined)
+      // The check cache starts empty with every hello.
+      if (useSessionStore.getState().lesson?.step)
+        void rpc('check', {}, { silent: true }).catch(() => undefined)
       break
     case 'error':
       toast(ev.message, 'error')
@@ -55,6 +57,8 @@ export function startEvents(sessionId: string): EventsClient {
     getLastSeq: () => store.getState().lastSeq,
     onEvent: (ev) => {
       store.getState().applyEvent(ev)
+      // A lesson event the rev rule ignored is old news: no side effects.
+      if (ev.t === 'lesson' && store.getState().lesson !== ev.lesson) return
       sideEffects(ev)
       for (const fn of listeners) fn(ev)
     },

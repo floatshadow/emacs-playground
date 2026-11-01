@@ -20,7 +20,7 @@ import { FileTree } from '../components/project/FileTree'
 import { TaskPanel } from '../components/project/TaskPanel'
 import { Stage } from '../components/screen/Stage'
 import { LESSON_PANE_ID } from '../components/screen/paneIds'
-import { useSessionStore } from '../store/session'
+import { activeStep, useSessionStore } from '../store/session'
 import { useUiStore } from '../store/ui'
 import projectStyles from '../components/project/Project.module.css'
 
@@ -41,7 +41,7 @@ function ProjectView({ projectId, taskId }: { projectId: string; taskId: string 
   const steps = useLessonSteps(lessonId, scenario)
   const load = useScenarioLoad(lessonId, scenario, taskId)
   useLessonMentions(lessonId, bundle.data?.markdown, scenario)
-  const active = useSessionStore((s) => s.activeStep)
+  const active = useSessionStore(activeStep)
   const previewHidden = useUiStore((s) => s.previewHidden)
   const modeName = useSessionStore((s) => s.state?.modeName)
   const project = curriculum.data?.projects.find((p) => p.id === lessonId)

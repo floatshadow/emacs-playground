@@ -4,7 +4,7 @@ import { APIPrefix } from '../../protocol.gen'
 import { api } from '../../api/http'
 import { useLesson, useMe } from '../../api/queries'
 import { lt } from '../../lib/localtext'
-import { useSessionStore } from '../../store/session'
+import { activeStep, useSessionStore } from '../../store/session'
 import { toast } from '../../store/ui'
 import { Button } from '../common/Button'
 import { ConfirmDialog, Dialog } from '../common/Dialog'
@@ -21,17 +21,17 @@ import { errorMessage } from '../../lib/errors'
 export function RescueCard() {
   const { t, i18n } = useTranslation()
   const me = useMe()
-  const activeStep = useSessionStore((s) => s.activeStep)
+  const active = useSessionStore(activeStep)
   const sessionId = useSessionStore((s) => s.sessionId)
-  const lesson = useLesson(activeStep?.lessonId)
+  const lesson = useLesson(active?.lessonId)
   const [stuckOpen, setStuckOpen] = useState(false)
   const [sent, setSent] = useState(false)
   const [confirmReset, setConfirmReset] = useState(false)
   const [note, setNote] = useState('')
   const [sending, setSending] = useState(false)
   const stuckEnabled = me.data?.features?.stuckReports !== false
-  const step = lesson.data?.scenario?.steps.find((s) => s.id === activeStep?.stepId)
-  const goal = step ? lt(step.goal, i18n.language) : (activeStep?.stepId ?? '')
+  const step = lesson.data?.scenario?.steps.find((s) => s.id === active?.stepId)
+  const goal = step ? lt(step.goal, i18n.language) : (active?.stepId ?? '')
 
   const closeStuck = () => {
     setStuckOpen(false)
@@ -44,12 +44,12 @@ export function RescueCard() {
     try {
       await api.post(`${APIPrefix}/stuck`, {
         sessionId,
-        lessonId: activeStep?.lessonId,
-        stepId: activeStep?.stepId,
+        lessonId: active?.lessonId,
+        stepId: active?.stepId,
         note,
       })
       setNote('')
-      if (activeStep) setSent(true)
+      if (active) setSent(true)
       else {
         toast(t('stuck.sent'))
         closeStuck()
@@ -62,7 +62,7 @@ export function RescueCard() {
   }
 
   const skip = () => {
-    const st = activeStep
+    const st = active
     closeStuck()
     if (st) void doSkipStep(st.stepId, goal)
   }
@@ -79,7 +79,7 @@ export function RescueCard() {
       <div className={styles.actions}>
         <Button
           onClick={() => setConfirmReset(true)}
-          disabled={!activeStep}
+          disabled={!active}
           title={t('rescue.resetTitle')}
         >
           {t('rescue.reset')}
@@ -115,7 +115,7 @@ export function RescueCard() {
           sent ? (
             <>
               <Button onClick={closeStuck}>{t('stuck.close')}</Button>
-              <Button variant="primary" onClick={skip} disabled={!activeStep} data-autofocus>
+              <Button variant="primary" onClick={skip} disabled={!active} data-autofocus>
                 {t('stuck.skip')}
               </Button>
             </>

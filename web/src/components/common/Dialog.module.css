@@ -31,6 +31,7 @@
   margin: 4px 0 10px;
   padding-left: 18px;
   font: 13px/1.6 var(--mono);
+  font-variant-ligatures: none;
   max-height: 200px;
   overflow: auto;
 }

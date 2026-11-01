@@ -7,7 +7,7 @@
 //
 // Scenarios (screenshots in artifacts/verify/<n>.png):
 //   1  compose services healthy; /api/v1/me and /api/v1/curriculum
-//   2  course map: 15 parts, the lesson rows of Parts 0-3
+//   2  course map: 16 parts, the lesson rows of Parts 0-3
 //   3  lesson 2.3: within 20 s of navigating, the mode line of the file its
 //      setup opens (lib.rs) and that buffer in Where am I
 //   4  the focusing click adds no ticker entry; C-x shows a pending prefix,
@@ -230,10 +230,18 @@ async function waitWhere(pred, timeout, what) {
   throw new Error(`Where am I never showed ${what}; it said: ${txt.slice(0, 400)}`)
 }
 
+/** Shows the steps: an unstarted lesson opens in Read, its steps are in Do. */
+async function showDo(page) {
+  const b = page.getByRole('button', { name: /^Do \d+\/\d+$/ })
+  await b.waitFor({ timeout: 30000 })
+  if ((await b.getAttribute('aria-pressed')) !== 'true') await b.click()
+}
+
 /** Opens a lesson and waits for its scenario to be loaded into Emacs. */
 async function openLesson(id, firstGoal) {
   await page.goto(`${url}/lesson/${id}`, { waitUntil: 'load' })
   await page.locator('.pg-terminal .xterm-screen').waitFor({ timeout: 20000 })
+  await showDo(page)
   if (firstGoal) await activeStep().filter({ hasText: firstGoal }).waitFor({ timeout: 30000 })
   // The scenario is loaded once the step list has an active step and the
   // loading note is gone.
@@ -293,19 +301,19 @@ try {
       throw new Error(`/me: ${JSON.stringify(me)}`)
     const cur = await api('/api/v1/curriculum')
     const parts = cur.body?.parts ?? []
-    if (cur.status !== 200 || !/json/.test(cur.type) || parts.length !== 15)
+    if (cur.status !== 200 || !/json/.test(cur.type) || parts.length !== 16)
       throw new Error(`/curriculum: ${parts.length} parts`)
     await page.goto(`${url}/api/v1/me`, { waitUntil: 'load' })
     return `health ${JSON.stringify(health)}; mode ${me.body.mode}; ${parts.length} parts`
   })
 
-  await scenario(2, 'course map lists 15 parts and the lessons of Parts 0-3', async () => {
+  await scenario(2, 'course map lists 16 parts and the lessons of Parts 0-3', async () => {
     const cur = (await api('/api/v1/curriculum')).body
     await page.goto(url + '/', { waitUntil: 'load' })
     await page.locator('h1').first().waitFor({ timeout: 15000 })
     await page.locator('section[aria-labelledby^="part-"]').nth(14).waitFor({ timeout: 15000 })
     const partCount = await page.locator('section[aria-labelledby^="part-"]').count()
-    if (partCount !== 15) throw new Error(`${partCount} part sections`)
+    if (partCount !== 16) throw new Error(`${partCount} part sections`)
     let rows = 0
     for (const part of cur.parts.filter((p) => p.n <= 3)) {
       for (const l of part.lessons) {
@@ -346,6 +354,7 @@ try {
         `Where am I did not name lib.rs ${ms} ms after navigating: ${txt.slice(0, 300)}`,
       )
     // The rest of the scenarios need the lesson loaded into Emacs.
+    await showDo(page)
     await activeStep().filter({ hasText: 'Open src/main.rs' }).waitFor({ timeout: 30000 })
     await page
       .getByText('Loading the lesson into Emacs…')
@@ -387,11 +396,11 @@ try {
     // and the step stays active.
     const ev = await waitEvent(
       t0,
-      (e) => e.t === 'step' && e.stepId === 'open' && /demonstrated|complete/.test(e.status),
+      (e) => e.t === 'lesson' && e.stepId === 'open' && /demonstrated|complete/.test(e.change),
       30000,
       'step demonstrated for step open',
     )
-    if (ev.status !== 'demonstrated') throw new Error('Watch it completed the step')
+    if (ev.change !== 'demonstrated') throw new Error('Watch it completed the step')
     await caption.waitFor({ state: 'detached', timeout: 30000 })
     if (
       await toastText(/Demo stopped/)
@@ -404,13 +413,13 @@ try {
     // keys (here the demo's, sent as input) complete it for real.
     const t1 = Date.now()
     await activeStep().getByRole('button', { name: 'Do it yourself' }).click()
-    await waitEvent(t1, (e) => e.t === 'step' && e.status === 'reset', 15000, 'step reset')
+    await waitEvent(t1, (e) => e.t === 'lesson' && e.change === 'reset', 15000, 'step reset')
     await page.waitForTimeout(600)
     const lesson = await api('/api/v1/curriculum/lessons/' + LESSON_23)
     await playKeys(lesson.body.scenario.steps[0].demo)
     const done = await waitEvent(
       t1,
-      (e) => e.t === 'step' && e.stepId === 'open' && e.status === 'complete',
+      (e) => e.t === 'lesson' && e.stepId === 'open' && e.change === 'complete',
       15000,
       'step complete for step open',
     )
@@ -458,7 +467,7 @@ try {
     const said = await toast.innerText()
     await waitEvent(
       t0,
-      (e) => e.t === 'step' && e.stepId === 'edit' && e.status === 'reset',
+      (e) => e.t === 'lesson' && e.stepId === 'edit' && e.change === 'reset',
       8000,
       'step reset',
     )

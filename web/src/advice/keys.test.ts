@@ -1,34 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { isKeySequence, keyify, normalizeKeys, parseKey, parseKeys, isPrintableKey } from './keys'
+import { isKeySequence, keyify, parseKey, isPrintableKey } from './keys'
 
-describe('parseKey and normalizeKeys (port of TestParseKeys)', () => {
-  const ok: Record<string, string> = {
-    'C-x C-f': 'C-x C-f',
-    'M-C-x': 'C-M-x',
-    'C-M-%': 'C-M-%',
-    F3: '<f3>',
-    '<f4>': '<f4>',
-    'C-x 4 f': 'C-x 4 f',
-    'ESC ESC ESC': 'ESC ESC ESC',
-    'C--': 'C--',
-    '-': '-',
-    'M-<': 'M-<',
-    'C-<left>': 'C-<left>',
-    'S-<up>': 'S-<up>',
-    's-a': 's-a',
-    'C-;': 'C-;',
-    'C-`': 'C-`',
-    'C-\\': 'C-\\',
-    'M-g M-g': 'M-g M-g',
-    RET: 'RET',
-    é: 'é',
-  }
-  for (const [input, want] of Object.entries(ok)) {
-    it(`normalises ${input}`, () => expect(normalizeKeys(input)).toBe(want))
-  }
-  for (const bad of ['', 'Ctrl-x', 'C-C-x', 'X-a', 'foo', '<>', 'C-', '<f 3>']) {
-    it(`rejects ${JSON.stringify(bad)}`, () => expect(() => parseKeys(bad)).toThrow())
-  }
+describe('parseKey', () => {
   it('knows printable keys', () => {
     expect(isPrintableKey(parseKey('a'))).toBe(true)
     expect(isPrintableKey(parseKey('C-a'))).toBe(false)

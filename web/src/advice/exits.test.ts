@@ -53,15 +53,15 @@ describe('exits table over real states (the demo whereAmI as data)', () => {
     expect(w.exits.map((e) => e.id)).toContain('isearch')
   })
 
-  it('an open hydra gets its own row, not the generic loop row', () => {
+  it('an open transient menu gets its own row, not the generic loop row', () => {
     const state: State = {
       ...calmState(),
-      waiting: { kind: 'hydra', what: 'the my-menu hydra', leave: 'C-g' },
+      waiting: { kind: 'transient', what: 'the my-menu menu', leave: 'C-g' },
     }
     const rows = evaluateExits(state, DEFAULT_EXITS)
-    expect(rows.map((r) => r.id)).toEqual(['hydra'])
+    expect(rows.map((r) => r.id)).toEqual(['transient'])
     expect(rows[0]?.why).toBe(
-      'A key menu is open (the my-menu hydra): the keys it lists stay active until it closes.',
+      'A key menu is open (the my-menu menu): the keys it lists stay active until it closes.',
     )
     const menu: State = { ...calmState(), waiting: { kind: 'menu', what: 'a menu', leave: 'C-g' } }
     expect(evaluateExits(menu, DEFAULT_EXITS).map((r) => r.id)).toEqual(['waiting'])

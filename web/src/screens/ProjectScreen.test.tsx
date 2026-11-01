@@ -5,7 +5,14 @@ import { QueryClient } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import WS from 'vitest-websocket-mock'
-import type { CurriculumIndex, Event, LessonBundle, LessonProgress } from '../protocol.gen'
+import type {
+  CurriculumIndex,
+  Event,
+  LessonBundle,
+  LessonChange,
+  LessonProgress,
+  LessonSnapshot,
+} from '../protocol.gen'
 import { DEFAULT_TABLES } from '../advice/defaults'
 import { disconnectSession } from '../api/session/connection'
 import { useSessionStore } from '../store/session'
@@ -152,6 +159,7 @@ beforeEach(() => {
   remoteBox = true
   bundle = P6_BUNDLE
   useSessionStore.getState().reset()
+  rev = 1
   useUiStore.setState({ hintLevels: {}, toasts: [], demo: null, previewTab: {}, previewExtra: {} })
   window.history.pushState({}, '', '/project/p6-polyglot')
 })
@@ -167,25 +175,44 @@ function send(ev: Event) {
 const hello: Event = {
   t: 'hello',
   seq: 1,
-  protocol: 1,
+  protocol: 2,
   sessionId: 'local',
   mode: 'terminal',
   emacs: { version: '31.1', uptimeMs: 1000 },
   frames: { terminal: true, gui: false },
-  step: null,
   modules: ['base', 'agent'],
   replayed: false,
+  lesson: { rev: 1, step: null, phase: 'idle', attempt: 0, outcomes: {} },
 }
 
-const step = (over: Partial<Extract<Event, { t: 'step' }>>): Event => ({
-  t: 'step',
-  lessonId: P6,
-  stepId: stepIds[0] ?? '',
-  status: 'loaded',
-  index: 0,
-  count: stepIds.length,
-  ...over,
-})
+let rev = 1
+/** A lesson event of P6 with task index active (null: none), with the next rev. */
+const lessonEv = (
+  change: LessonChange,
+  index: number | null,
+  over: Partial<LessonSnapshot> = {},
+  ev: Partial<Extract<Event, { t: 'lesson' }>> = {},
+): Event => {
+  rev++
+  const id = index === null ? undefined : stepIds[index]
+  return {
+    t: 'lesson',
+    change,
+    ...(id ? { stepId: id } : {}),
+    lesson: {
+      rev,
+      lessonId: P6,
+      step: id && index !== null ? { id, index, count: stepIds.length } : null,
+      phase: id ? 'active' : 'idle',
+      attempt: rev,
+      outcomes: {},
+      ...over,
+    },
+    ...ev,
+  }
+}
+const doneUpTo = (n: number) =>
+  Object.fromEntries(stepIds.slice(0, n).map((id) => [id, 'done' as const]))
 
 async function openProject() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -205,15 +232,12 @@ describe('ProjectScreen', () => {
   it('shows the tasks with progress, the file tree and its own checkpoints by task', async () => {
     await openProject()
     await waitFor(() =>
-      expect(rpcCalls.find((c) => c.op === 'scenario')?.body).toEqual({
-        lessonId: P6,
-        stepId: stepIds[0],
-      }),
+      expect(rpcCalls.find((c) => c.op === 'scenario')?.body).toEqual({ lessonId: P6 }),
     )
-    send(step({}))
+    send(lessonEv('loaded', 0))
     expect(await screen.findByText(`0 of ${stepIds.length} tasks done`)).toBeInTheDocument()
-    send(step({ status: 'complete' }))
-    send(step({ stepId: stepIds[1], index: 1 }))
+    send(lessonEv('complete', 0, { outcomes: doneUpTo(1) }))
+    send(lessonEv('loaded', 1, { outcomes: doneUpTo(1) }))
     expect(await screen.findByText(`1 of ${stepIds.length} tasks done`)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: `Task 2 of ${stepIds.length}` })).toBeInTheDocument()
 
@@ -251,7 +275,8 @@ describe('ProjectScreen', () => {
     await waitFor(() =>
       expect(rpcCalls).toContainEqual({ op: 'scenario', body: { lessonId: P6, lap: true } }),
     )
-    send(step({ lap: true, ts: Date.now() }))
+    const lap = { id: `${P6}@1`, lessonId: P6, startedAt: Date.now() }
+    send(lessonEv('loaded', 0, { lap }))
     expect(await screen.findByText(/Lap without hints/)).toBeInTheDocument()
     expect(screen.getByText('target 15:00')).toBeInTheDocument()
     expect(screen.getByText(`0 of ${stepIds.length} tasks done`)).toBeInTheDocument()
@@ -259,16 +284,14 @@ describe('ProjectScreen', () => {
     expect(screen.queryByRole('button', { name: /Watch it/ })).toBeNull()
     expect(screen.queryByRole('button', { name: /Go to this step|Do this step again/ })).toBeNull()
 
-    const last = stepIds.length - 1
+    const last = stepIds[stepIds.length - 1] ?? ''
     send(
-      step({
-        stepId: stepIds[last],
-        index: last,
-        status: 'complete',
-        lap: true,
-        lessonComplete: true,
-        lapMs: 754_000,
-      }),
+      lessonEv(
+        'complete',
+        null,
+        { phase: 'complete', outcomes: doneUpTo(stepIds.length) },
+        { stepId: last, lapMs: 754_000 },
+      ),
     )
     expect(await screen.findByText(/Lap finished in 12:34\./)).toBeInTheDocument()
     expect(screen.getByText(/Within the target/)).toBeInTheDocument()
@@ -280,9 +303,10 @@ describe('ProjectScreen', () => {
     const user = userEvent.setup()
     await openProject()
     await user.click(await screen.findByRole('button', { name: 'Start the lap' }))
-    send(step({ lap: true, ts: Date.now() }))
-    send(step({ status: 'complete', lap: true }))
-    send(step({ stepId: stepIds[1], index: 1, lap: true }))
+    const lap = { id: `${P6}@1`, lessonId: P6, startedAt: Date.now() }
+    send(lessonEv('loaded', 0, { lap }))
+    send(lessonEv('complete', 0, { lap, outcomes: doneUpTo(1) }))
+    send(lessonEv('loaded', 1, { lap, outcomes: doneUpTo(1) }))
     await user.click(await screen.findByRole('button', { name: 'Stop the lap' }))
     await waitFor(() =>
       expect(rpcCalls).toContainEqual({
@@ -290,15 +314,14 @@ describe('ProjectScreen', () => {
         body: { lessonId: P6, stepId: stepIds[1] },
       }),
     )
-    send(step({ stepId: stepIds[1], index: 1 }))
+    send(lessonEv('loaded', 1, { outcomes: doneUpTo(1) }))
     await waitFor(() => expect(screen.queryByText(/Lap without hints/)).toBeNull())
   })
 
-  it('after a reload, a finished project whose last task is active still offers the lap', async () => {
+  it('after a reload, a complete project offers the lap', async () => {
     progress = { [P6]: allDone() }
     await openProject()
-    const last = stepIds.length - 1
-    send(step({ stepId: stepIds[last], index: last }))
+    send(lessonEv('loaded', null, { phase: 'complete', outcomes: doneUpTo(stepIds.length) }))
     expect(await screen.findByRole('button', { name: 'Start the lap' })).toBeInTheDocument()
     expect(
       screen.getByText(`${stepIds.length} of ${stepIds.length} tasks done`),
@@ -366,7 +389,7 @@ describe('ProjectScreen', () => {
     bundle = { ...P6_BUNDLE, scenario: { ...P6_BUNDLE.scenario, tags: ['project', 'gui'] } }
     await openProject()
     await waitFor(() => expect(rpcCalls.find((c) => c.op === 'scenario')).toBeDefined())
-    send(step({}))
+    send(lessonEv('loaded', 0))
     await waitFor(() => expect(rpcCalls).toContainEqual({ op: 'mode', body: { mode: 'gui' } }))
     expect(screen.queryByText(/SSH box/)).toBeNull()
     send({ t: 'mode', mode: 'gui' })
@@ -384,10 +407,10 @@ describe('ProjectScreen', () => {
     bundle = { ...P6_BUNDLE, scenario: { ...P6_BUNDLE.scenario, steps } }
     await openProject()
     await waitFor(() => expect(rpcCalls.find((c) => c.op === 'scenario')).toBeDefined())
-    send(step({}))
+    send(lessonEv('loaded', 0))
     await new Promise((r) => setTimeout(r, 50))
     expect(rpcCalls.find((c) => c.op === 'mode')).toBeUndefined()
-    send(step({ stepId: stepIds[1] ?? '', index: 1 }))
+    send(lessonEv('loaded', 1))
     await waitFor(() => expect(rpcCalls).toContainEqual({ op: 'mode', body: { mode: 'gui' } }))
   })
 
@@ -397,7 +420,7 @@ describe('ProjectScreen', () => {
     await openProject()
     expect(await screen.findByText(/has turned off/)).toBeInTheDocument()
     await waitFor(() => expect(rpcCalls.find((c) => c.op === 'scenario')).toBeDefined())
-    send(step({}))
+    send(lessonEv('loaded', 0))
     await new Promise((r) => setTimeout(r, 50))
     expect(rpcCalls.find((c) => c.op === 'mode')).toBeUndefined()
   })

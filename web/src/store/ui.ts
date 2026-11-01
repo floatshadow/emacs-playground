@@ -16,6 +16,8 @@ export interface Prefs {
   locale: string
   reducedMotion: boolean
   screenReaderMode: boolean
+  /** The lesson pane's width the learner dragged it to (px), null for the default. */
+  lessonWidth: number | null
 }
 
 const PREFS_KEY = 'pg.prefs'
@@ -26,6 +28,7 @@ function loadPrefs(): Prefs {
       typeof navigator !== 'undefined' && navigator.language?.startsWith('zh') ? 'zh-CN' : 'en',
     reducedMotion: false,
     screenReaderMode: false,
+    lessonWidth: null,
   }
   try {
     const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(PREFS_KEY) : null
@@ -80,6 +83,8 @@ export interface UiStore extends Prefs {
   toasts: Toast[]
   /** Hint level per "<lessonId>#<stepId>". */
   hintLevels: Record<string, number>
+  /** The lesson pane's view the learner chose, per lesson (this tab only). */
+  lessonTab: Record<string, 'read' | 'do'>
   demo: DemoState | null
   guiStarting: boolean
   /** Current terminal size in cells, for the screen header. */
@@ -99,6 +104,7 @@ export interface UiStore extends Prefs {
   toast(text: string, tone?: Toast['tone']): void
   dismissToast(id: number): void
   setHintLevel(key: string, level: number): void
+  setLessonTab(lessonId: string, tab: 'read' | 'do'): void
   /** Start over: hint levels of every lesson, or of one (keys "<lessonId>#<stepId>"). */
   clearHintLevels(lessonId?: string): void
   setDemo(d: DemoState | null): void
@@ -125,6 +131,7 @@ export const useUiStore = create<UiStore>()((set, get) => ({
   reservedKeyToastShown: false,
   toasts: [],
   hintLevels: {},
+  lessonTab: {},
   demo: null,
   guiStarting: false,
   termSize: null,
@@ -169,6 +176,7 @@ export const useUiStore = create<UiStore>()((set, get) => ({
   },
   dismissToast: (id) => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
   setHintLevel: (key, level) => set((s) => ({ hintLevels: { ...s.hintLevels, [key]: level } })),
+  setLessonTab: (lessonId, tab) => set((s) => ({ lessonTab: { ...s.lessonTab, [lessonId]: tab } })),
   clearHintLevels: (lessonId) =>
     set((s) => ({
       hintLevels: lessonId
@@ -185,8 +193,8 @@ export const useUiStore = create<UiStore>()((set, get) => ({
   setGuiStarting: (guiStarting) => set({ guiStarting }),
   setPrefs: (p) => {
     set(p)
-    const { locale, reducedMotion, screenReaderMode } = get()
-    savePrefs({ locale, reducedMotion, screenReaderMode })
+    const { locale, reducedMotion, screenReaderMode, lessonWidth } = get()
+    savePrefs({ locale, reducedMotion, screenReaderMode, lessonWidth })
   },
 }))
 

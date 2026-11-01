@@ -7,9 +7,10 @@
  * chord or one typed character at a time, at human pace (600 ms per chord,
  * 120 ms per character), while the caption strip under the screen names
  * every key; rpc('demo', end) follows in any case. Any learner keypress in
- * the terminal stops it, and so does any change of the active step (Go to
- * this step, another lesson, the step ending): the demo's keys belong to the
- * step it was started on and are never sent into another.
+ * the terminal stops it, and so does a snapshot of another attempt (Go to
+ * this step, another lesson, a reset, a drop) or one whose phase left
+ * "watching": the demo's keys belong to the attempt demo start returned and
+ * are never sent into another.
  */
 import { parseDemo, planDemo, WATCH_PACING, type DemoAction } from '../../lib/demo'
 import { sleep } from '../../lib/time'
@@ -71,13 +72,9 @@ export async function runActions(
   }
 }
 
-/** True for an rpc error meaning "this sessiond does not know the op" (an older image). */
-function unknownOp(e: unknown): boolean {
-  return e instanceof ApiError && (e.status === 404 || e.status === 400 || e.status === 501)
-}
-
 export async function playDemo(stepId: string, goal: string, demo: string): Promise<void> {
   cancelDemo()
+  if (useSessionStore.getState().incompatible) return
   let actions: DemoAction[]
   try {
     actions = planDemo(parseDemo(demo), WATCH_PACING)
@@ -91,8 +88,6 @@ export async function playDemo(stepId: string, goal: string, demo: string): Prom
   const session = useSessionStore.getState()
   ui.setDemo({ stepId, goal, actions, sent: 0, restored: false })
   session.setDemoPlaying(true)
-  const lessonId = session.activeStep?.lessonId
-  if (lessonId) session.markWatched(lessonId, stepId)
   focusTerminal()
   const offInput = onTerminalInput(() => {
     if (current === ctl) {
@@ -100,12 +95,20 @@ export async function playDemo(stepId: string, goal: string, demo: string): Prom
       toast(i18n.t('demo.cancelled'))
     }
   })
-  const onStep = () => {
-    const a = useSessionStore.getState().activeStep
-    return !!a && a.lessonId === lessonId && a.stepId === stepId
+  // The attempt demo start returned. The keys wait for a snapshot that shows
+  // it watching (older attempts' snapshots are ignored) and stop once a later
+  // snapshot leaves it: they are never sent into another attempt.
+  let attempt = -1
+  let watched = false
+  let release = () => {}
+  const onAttempt = () => {
+    const l = useSessionStore.getState().lesson
+    return l?.attempt === attempt && l.phase === 'watching'
   }
   const offStep = useSessionStore.subscribe((s, prev) => {
-    if (s.activeStep !== prev.activeStep && current === ctl && !onStep()) cancelDemo()
+    if (s.lesson === prev.lesson || attempt < 0 || current !== ctl) return
+    if (onAttempt()) release()
+    else if (watched || !s.lesson || s.lesson.attempt > attempt) cancelDemo()
   })
   const off = () => {
     offInput()
@@ -116,6 +119,16 @@ export async function playDemo(stepId: string, goal: string, demo: string): Prom
     try {
       const r = await rpc('demo', { stepId, phase: 'start' }, { signal: ctl.signal, silent: true })
       latched = true
+      attempt = r.attempt
+      await new Promise<void>((resolve, reject) => {
+        release = () => {
+          watched = true
+          resolve()
+        }
+        ctl.signal.addEventListener('abort', () => reject(ctl.signal.reason), { once: true })
+        if (ctl.signal.aborted) reject(ctl.signal.reason)
+        else if (onAttempt()) release()
+      })
       if (r.restored) {
         useUiStore.getState().setDemoRestored(stepId)
         await sleep(RESTORED_PAUSE_MS, ctl.signal)
@@ -126,15 +139,14 @@ export async function playDemo(stepId: string, goal: string, demo: string): Prom
         toast(i18n.t('demo.notActive'), 'error')
         return
       }
-      // An older sessiond without the demo op: play anyway (it counts as done there).
-      if (!unknownOp(e)) throw e
+      throw e
     }
     await runActions(
       actions,
       ctl.signal,
       sendRpc,
       (n) => useUiStore.getState().setDemoSent(stepId, n),
-      onStep,
+      onAttempt,
     )
   } catch (e) {
     if (!ctl.signal.aborted) toast(i18n.t('demo.failed', { error: errorMessage(e) }), 'error')

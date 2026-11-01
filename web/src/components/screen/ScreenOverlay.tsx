@@ -1,7 +1,9 @@
-import { useEffect, type ReactNode } from 'react'
+import { type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useEnsureSession, useLesson, useStatus } from '../../api/queries'
-import { serverStepJump, useSessionStore } from '../../store/session'
+import { APIPrefix } from '../../protocol.gen'
+import { api } from '../../api/http'
+import { useEnsureSession, useLesson, useMe } from '../../api/queries'
+import { useSessionStore } from '../../store/session'
 import { useUiStore } from '../../store/ui'
 import { sessionStartError } from '../../lib/sessionError'
 import { Button } from '../common/Button'
@@ -22,26 +24,25 @@ function Card({ title, body, children }: { title: string; body: string; children
 }
 
 /**
- * The "Going to step N" veil of a load sessiond runs that this page did not
- * start (it was reloaded meanwhile): hello's busy names it, status polls
- * until it ends, and the step event that ends it clears it sooner.
+ * The "Going to step N" veil of a load of a later step sessiond runs (one
+ * this page started shows the same veil from useUiStore.stepJump): the
+ * snapshot's busy names it, and the snapshot that clears it ends it.
  */
 function useServerStepJump(): { n: number; goal: string } | null {
-  const sessionId = useSessionStore((s) => s.sessionId)
   const locale = useUiStore((s) => s.locale)
-  const load = useSessionStore(serverStepJump)
+  const busy = useSessionStore((s) => s.lesson?.busy)
+  const load = busy?.op === 'load' ? busy : null
   const lesson = useLesson(load?.lessonId)
-  const status = useStatus(load ? sessionId : null, () => true)
-  // Only a status fetched after hello named the op tells it ended.
-  const since = useSessionStore((s) => s.serverBusySince)
-  useEffect(() => {
-    if (load && status.data && status.dataUpdatedAt > since)
-      useSessionStore.getState().setServerBusy(status.data.busy ?? null)
-  }, [load, since, status.data, status.dataUpdatedAt])
   const steps = lesson.data?.scenario.steps ?? []
   const i = load ? steps.findIndex((s) => s.id === load.stepId) : -1
   const step = steps[i]
-  return step ? { n: i + 1, goal: lt(step.goal, locale) } : null
+  return step && i > 0 ? { n: i + 1, goal: lt(step.goal, locale) } : null
+}
+
+/** Stops the session (the version gate) and reloads, which starts a current one. */
+async function stopAndReload(sessionId: string | null) {
+  await api.del(`${APIPrefix}/sessions/${encodeURIComponent(sessionId ?? '')}`).catch(() => {})
+  window.location.reload()
 }
 
 /**
@@ -58,14 +59,29 @@ export function ScreenOverlay({ onReattach }: { onReattach(): void }) {
   const pty = useSessionStore((s) => s.connection.pty)
   const events = useSessionStore((s) => s.connection.events)
   const emacs = useSessionStore((s) => s.emacs)
-  const modulesRestarting = useSessionStore((s) => s.modulesRestarting)
+  const incompatible = useSessionStore((s) => s.incompatible)
+  const local = useMe().data?.mode !== 'server'
   const mode = useSessionStore((s) => s.mode)
   const skipping = useUiStore((s) => s.skipping)
   const serverJump = useServerStepJump()
   const stepJump = useUiStore((s) => s.stepJump) ?? serverJump
 
   let card: ReactNode = null
-  if (skipping) {
+  if (incompatible) {
+    // The session speaks another protocol (an older image): nothing
+    // automatic runs. A local stack is shared by every page: restart it.
+    card = (
+      <Card title={t('overlay.incompatible')} body={t('overlay.incompatibleBody')}>
+        {local ? (
+          <span>{t('overlay.restartStack')}</span>
+        ) : (
+          <Button variant="primary" onClick={() => void stopAndReload(sessionId)}>
+            {t('overlay.stop')}
+          </Button>
+        )}
+      </Card>
+    )
+  } else if (skipping) {
     // "Skip this step": Emacs plays the step; the learner watches
     // through a light veil and their keys wait (the terminal swallows them).
     card = (
@@ -104,15 +120,17 @@ export function ScreenOverlay({ onReattach }: { onReattach(): void }) {
       </Card>
     )
   } else if (emacs.overlay === 'restarting') {
-    card = <Card title={t('overlay.restarting')} body={t('overlay.restartingBody')} />
+    card = /module/i.test(emacs.reason ?? '') ? (
+      <Card title={t('overlay.modules')} body={t('overlay.modulesBody')} />
+    ) : (
+      <Card title={t('overlay.restarting')} body={t('overlay.restartingBody')} />
+    )
   } else if (emacs.overlay === 'frame-closed') {
     card = <Card title={t('overlay.frameClosed')} body={t('overlay.frameClosedBody')} />
   } else if (emacs.overlay === 'suspended') {
     card = <Card title={t('overlay.suspended')} body={t('overlay.suspendedBody')} />
   } else if (emacs.overlay === 'stopping') {
     card = <Card title={t('overlay.stopping')} body={t('overlay.stoppingBody')} />
-  } else if (modulesRestarting) {
-    card = <Card title={t('overlay.modules')} body={t('overlay.modulesBody')} />
   } else if (pty === 'unavailable' && mode === 'terminal') {
     card = <Card title={t('overlay.unavailable')} body={t('overlay.unavailableBody')} />
   }

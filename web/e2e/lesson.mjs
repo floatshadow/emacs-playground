@@ -35,6 +35,13 @@ const shot = async (name) => {
 }
 const ticker = () => page.locator('[aria-label^="Key ticker"]')
 const activeStep = () => page.locator('li[aria-current="step"]')
+/** Shows the steps: an unstarted lesson opens in Read, its steps are in Do. */
+async function showDo(page) {
+  const b = page.getByRole('button', { name: /^Do \d+\/\d+$/ })
+  await b.waitFor({ timeout: 30000 })
+  if ((await b.getAttribute('aria-pressed')) !== 'true') await b.click()
+}
+
 async function focusTerminal() {
   await page
     .locator('.xterm')
@@ -47,6 +54,7 @@ try {
     await page.goto(url + '/lesson/02-buffers-and-files/03-opening-files', { waitUntil: 'load' })
     await page.locator('h1', { hasText: 'Opening files' }).waitFor()
     await page.locator('.xterm-screen').waitFor()
+    await showDo(page)
     await activeStep().filter({ hasText: 'Open src/main.rs' }).waitFor({ timeout: 15000 })
     await page.waitForTimeout(800)
     await shot('e2e-1-lesson')

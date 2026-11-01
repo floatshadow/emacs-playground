@@ -39,18 +39,19 @@ export function useStepTransition(
   useEffect(
     () =>
       onSessionEvent((ev) => {
-        if (ev.t !== 'step' || ev.lessonId !== lessonId) return
-        if (ev.status !== 'complete' && ev.status !== 'skipped') return
+        if (ev.t !== 'lesson' || ev.lesson.lessonId !== lessonId || !ev.stepId) return
+        if (ev.change !== 'complete' && ev.change !== 'skipped') return
+        const stepId = ev.stepId
         const { scenario: sc, t: tr, language } = latest.current
-        const step = sc?.steps.find((s) => s.id === ev.stepId)
-        const goal = step ? lt(step.goal, language) : ev.stepId
+        const step = sc?.steps.find((s) => s.id === stepId)
+        const goal = step ? lt(step.goal, language) : stepId
         setAnnounce(
-          tr(ev.status === 'complete' ? 'steps.completedAnnounce' : 'steps.skippedAnnounce', {
+          tr(ev.change === 'complete' ? 'steps.completedAnnounce' : 'steps.skippedAnnounce', {
             goal,
           }),
         )
         setEnded((cur) => ({
-          stepId: ev.stepId,
+          stepId,
           n: (cur?.n ?? 0) + 1,
           reduced: prefersReducedMotion(),
         }))

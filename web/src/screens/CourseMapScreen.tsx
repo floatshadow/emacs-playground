@@ -16,13 +16,13 @@ export default function CourseMapScreen() {
   const { t } = useTranslation()
   const curriculum = useCurriculum()
   const progress = useProgress()
-  const active = useSessionStore((s) => s.activeStep)
+  const loaded = useSessionStore((s) => s.lesson?.lessonId || null)
   const location = useLocation()
   // Wait for progress too: without it every learner would briefly be told
   // to start at 0.1.
   const current =
     curriculum.data && !progress.isPending
-      ? currentLesson(curriculum.data, progress.data, active?.lessonId ?? null)
+      ? currentLesson(curriculum.data, progress.data, loaded)
       : null
   // Start over appears once there is something to clear.
   const hasProgress = Object.keys(progress.data?.lessons ?? {}).length > 0

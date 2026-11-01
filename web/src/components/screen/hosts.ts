@@ -16,7 +16,7 @@ import { PtyClient } from '../../api/session/pty'
 import { sessionBase, wsUrl } from '../../api/session/rpc'
 import { VncClient } from '../../api/session/vnc'
 import { debounce } from '../../lib/debounce'
-import { serverStepJump, useSessionStore } from '../../store/session'
+import { useSessionStore } from '../../store/session'
 import { toast, useUiStore } from '../../store/ui'
 import i18n from '../../i18n'
 import { MODUS_VIVENDI_TINTED, TERMINAL_FONT } from './theme'
@@ -35,7 +35,10 @@ export function terminalOptions(screenReaderMode: boolean): ITerminalOptions {
     allowProposedApi: true,
     scrollback: 0,
     macOptionIsMeta: true,
-    cursorBlink: false,
+    // Blinking while the terminal has focus, a solid block without it:
+    // the cursor stays visible either way.
+    cursorBlink: true,
+    cursorInactiveStyle: 'block',
     vtExtensions: { kittyKeyboard: true },
     screenReaderMode,
   }
@@ -65,13 +68,15 @@ const clipboardProvider: IClipboardProvider = {
 }
 
 /**
- * Emacs is restarting, or sessiond replays steps for a "Go to this step"
- * this page did not start (the veil's serverStepJump): keys typed now
- * would be lost or misplaced.
+ * The learner's keys wait: the session speaks another protocol, sessiond
+ * runs a lesson op (a load, Go to, Skip, a restore, a module change), this
+ * page plays steps, or Emacs restarts. Keys typed now would be lost or land
+ * where the op is about to change things.
  */
 export function keysHeld(): boolean {
-  const s = useSessionStore.getState()
-  return s.modulesRestarting || s.emacs.overlay === 'restarting' || serverStepJump(s) !== null
+  const { incompatible, lesson, emacs } = useSessionStore.getState()
+  const { skipping, stepJump } = useUiStore.getState()
+  return incompatible || !!(lesson?.busy || skipping || stepJump) || emacs.overlay === 'restarting'
 }
 
 const isFirefox = () => typeof navigator !== 'undefined' && /firefox/i.test(navigator.userAgent)
@@ -195,8 +200,7 @@ class TerminalHost {
       // Emacs restarts (and, for modules, the lesson is set up again), the
       // learner's keys wait: they would reach a frame that is gone, or one
       // that setup is about to change.
-      const ui = useUiStore.getState()
-      if (ui.skipping || ui.stepJump || keysHeld()) {
+      if (keysHeld()) {
         e.preventDefault()
         return false
       }
@@ -244,7 +248,10 @@ class TerminalHost {
       if (e.type === 'keydown') this.extKeyDown = null
       return true
     })
-    term.onData((d) => this.pty?.send(d))
+    // The same guard covers what bypasses the key handler (a paste).
+    term.onData((d) => {
+      if (!keysHeld()) this.pty?.send(d)
+    })
     term.onBinary((d) => {
       const bytes = new Uint8Array(d.length)
       for (let i = 0; i < d.length; i++) bytes[i] = d.charCodeAt(i) & 0xff
@@ -388,6 +395,15 @@ class TerminalHost {
     }
     return out
   }
+
+  /** The background of one visible cell: #rrggbb, palette:N or default. */
+  cellBg(row: number, col: number): string {
+    const buf = this.term?.buffer.active
+    const cell = buf?.getLine(buf.viewportY + row)?.getCell(col)
+    if (!cell || cell.isBgDefault()) return 'default'
+    const c = cell.getBgColor()
+    return cell.isBgRGB() ? '#' + c.toString(16).padStart(6, '0') : `palette:${c}`
+  }
 }
 
 class VncHost {
@@ -458,10 +474,13 @@ export function getTerminalHost(): TerminalHost {
   if (!terminalHost) {
     const host = new TerminalHost()
     terminalHost = host
-    // End-to-end tests read the canvas-rendered screen through this hook
-    // (web/e2e/smoke.mjs); it exposes nothing the learner cannot see.
-    ;(window as unknown as { __pgScreenText?: () => string[] }).__pgScreenText = () =>
-      host.screenText()
+    // End-to-end tests read the canvas-rendered screen through these hooks
+    // (web/e2e/smoke.mjs, review.mjs); they expose nothing the learner
+    // cannot see.
+    Object.assign(window, {
+      __pgScreenText: () => host.screenText(),
+      __pgScreenCellBg: (row: number, col: number) => host.cellBg(row, col),
+    })
     followSession(host)
   }
   return terminalHost

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { describeDemo, parseDemo } from '../../lib/demo'
 import type { StepView } from '../../store/selectors'
@@ -31,7 +32,8 @@ const STATUS_LABEL: Record<StepView['status'], string> = {
  * One step: the goal, details, ordered conditions (met, next, unmet,
  * unknown), the hint for the first unmet condition, Show a hint and Watch
  * it. A watched step offers "Do it yourself"; skipped and watched steps
- * carry their own marks (contracts b and c).
+ * carry their own marks (contracts b and c). With collapse, a step that is
+ * not active shows its goal, status and Go to until its goal is clicked.
  */
 export function Step({
   view,
@@ -40,6 +42,7 @@ export function Step({
   showDetails,
   flash,
   hintsOff,
+  collapse,
 }: {
   view: StepView
   onHint(view: StepView): void
@@ -50,8 +53,10 @@ export function Step({
   flash?: boolean
   /** No hints, no demo (the project lap). */
   hintsOff?: boolean
+  collapse?: boolean
 }) {
   const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
   const playing = useUiStore((s) => s.demo?.stepId === view.step.id)
   const active = view.status === 'active'
   const done = view.status === 'done'
@@ -62,13 +67,25 @@ export function Step({
     flash ? styles.justDone : '',
   ].join(' ')
   const maxLevel = maxHintLevel(view)
+  const folded = !!collapse && !active && !open
   return (
     <li className={cls} aria-current={active ? 'step' : undefined}>
       <span className={styles.mark} aria-hidden="true" />
       <div>
         <div className={styles.goal}>
           <span className="sr-only">{t(STATUS_LABEL[view.status])}</span>
-          {view.goal}
+          {collapse && !active ? (
+            <button
+              type="button"
+              className={styles.goalToggle}
+              aria-expanded={open}
+              onClick={() => setOpen(!open)}
+            >
+              {view.goal}
+            </button>
+          ) : (
+            view.goal
+          )}
           {view.status === 'skipped' && (
             <span className={styles.stateTag}> {t('steps.skippedTag')}</span>
           )}
@@ -76,12 +93,12 @@ export function Step({
             <span className={styles.stateTag}> {t('steps.watchedTag')}</span>
           )}
         </div>
-        {view.detail && (
+        {view.detail && !folded && (
           <div className={styles.detail}>
             <Markdown markdown={view.detail} inline />
           </div>
         )}
-        <ul className={styles.conds}>
+        <ul className={styles.conds} hidden={folded}>
           {view.conds.map((c) => (
             <li key={c.id} className={styles[c.status]}>
               <span className="sr-only">{t('steps.cond.' + c.status)} </span>

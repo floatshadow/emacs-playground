@@ -112,6 +112,7 @@
 .n {
   color: var(--ink-3);
   font: 12.5px var(--mono);
+  font-variant-ligatures: none;
   margin-right: 8px;
 }
 .vs {
@@ -122,6 +123,7 @@
 }
 .tag {
   font: 11.5px var(--mono);
+  font-variant-ligatures: none;
   color: var(--ink-2);
   background: var(--paper-3);
   padding: 2px 6px;
@@ -219,6 +221,7 @@
 }
 .langs {
   font: 12px var(--mono);
+  font-variant-ligatures: none;
   color: var(--violet-ink);
   margin-top: 10px;
 }

@@ -46,7 +46,7 @@ function validateExpectation(want: unknown): string | null {
     case 'regex':
       if (typeof arg !== 'string') return 'regex: want a string'
       try {
-        compileRe2(arg)
+        compileDialect(arg)
       } catch (e) {
         return 'regex: ' + errorMessage(e)
       }
@@ -159,7 +159,7 @@ function matchOne(v: unknown, want: unknown): boolean {
         return false
       case 'regex': {
         const s = typeof v === 'string' ? v : ''
-        const re = cachedRe2(String(arg))
+        const re = cachedDialect(String(arg))
         return re ? re.test(s) : false
       }
       case 'exists':
@@ -199,219 +199,108 @@ function equal(a: unknown, b: unknown): boolean {
 }
 
 /* ------------------------------------------------------------------ */
-/* RE2 patterns in JavaScript                                          */
+/* Regex dialect 1 in JavaScript                                       */
 /* ------------------------------------------------------------------ */
 
+const PUNCT = '\\^$.|?*+()[]{}-/'
+const SPACE = '\\t\\n\\f\\r '
+const CONTROL: Record<string, number> = { t: 9, n: 10, r: 13 }
+
 /**
- * The tables are written for Go's RE2 (internal/protocol/predicate.go), and
- * JavaScript's RegExp rejects RE2 syntax that authors use: the inline flag
- * group `(?i)` ("Invalid group"), scoped modifiers `(?i:…)` (only engines
- * from 2025 on have them) and named groups `(?P<name>…)`. Counting a rejected
- * pattern as "no match" would make `{not: {regex: "(?i)…"}}` hold for every
- * prompt, so translateRe2 rewrites those constructs:
- *
- *   - a leading `(?flags)` with i, m, s becomes RegExp flags;
- *   - `(?i:…)` and `(?s:…)` (also `(?is:…)`) become `(?:…)` with letters
- *     expanded to both cases (`a` → `[aA]`, `[a-z]` → `[a-zA-Z]`) and `.`
- *     to `[\s\S]`, which every engine understands;
- *   - `(?P<name>…)` becomes `(?<name>…)`;
- *   - patterns use Unicode code points and RE2's ASCII whitespace classes.
- *
- * Anything else RE2-specific that JavaScript cannot express (a flag group
- * that does not start the pattern, `(?m:…)`, `(?-i:…)`, the U flag) is an
- * error, so validatePredicate rejects it instead of the row never matching.
+ * Compiles a predicate regex of regex dialect 1 (CURRICULUM.md B.4; Go's
+ * protocol.ValidateRegexDialect is the reference) to a RegExp with RE2's
+ * matches: the same allow-list tokenizer, then flag u (and i) with the
+ * constructs whose JavaScript meaning differs spelled out: `.` excludes
+ * only \n (all under s), ^ and $ under m stop only at \n, \s and \S are
+ * ASCII, and \- outside a class is a literal -. Counts have no leading
+ * zeros and never follow a group. Anything else outside the dialect throws,
+ * so validatePredicate rejects it.
  */
-export function translateRe2(src: string): { source: string; flags: string } {
-  let flags = 'u'
-  let s = src
-  const lead = /^\(\?([a-zA-Z]+)\)/.exec(s)
-  if (lead) {
-    for (const f of lead[1] ?? '') {
-      if (f !== 'i' && f !== 'm' && f !== 's') throw new Error(`flag ${f} is not supported`)
-      if (!flags.includes(f)) flags += f
-    }
-    s = s.slice(lead[0].length)
+export function compileDialect(src: string): RegExp {
+  const rs = Array.from(src)
+  const lead = /^\(\?([ims]+)\)/.exec(src)?.[1] ?? ''
+  const fail = (m: string): never => {
+    throw new Error(m)
   }
-  // Per open group: the case folding and dot-all of the enclosing scope, to
-  // restore at its ")".
-  const scopes: { fold: boolean; dotAll: boolean }[] = []
-  let fold = false
-  let dotAll = false
-  let inClass = false
+  let i = lead ? lead.length + 3 : 0
   let out = ''
-  const isLetter = (c: string | undefined) => c !== undefined && /^[a-zA-Z]$/.test(c)
-  const other = (c: string) => (c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase())
-  for (let i = 0; i < s.length; i++) {
-    const c = s.charAt(i)
+  let canRepeat = false
+  while (i < rs.length) {
+    const c = rs[i] as string
+    const rest = rs.slice(i).join('')
     if (c === '\\') {
-      const next = s.charAt(i + 1)
-      if (next === '') throw new Error('trailing backslash')
-      if (next === 's' || next === 'S') {
-        const space = '\\t\\n\\f\\r '
-        out += inClass
-          ? next === 's'
-            ? space
-            : '\\x00-\\x08\\x0b\\x0e-\\x1f\\x21-\\u{10ffff}'
-          : next === 's'
-            ? `[${space}]`
-            : `[^${space}]`
-        i++
-        continue
-      }
-      if ((next === 'p' || next === 'P') && s.charAt(i + 2) === '{') {
-        const end = s.indexOf('}', i + 3)
-        if (end < 0) throw new Error('unterminated \\p{…}')
-        out += s.slice(i, end + 1)
-        i = end
-        continue
-      }
-      // RE2 permits escaped punctuation that Unicode-mode JS rejects.
-      if (!/[a-zA-Z0-9]/.test(next) && !'^$.*+?()[]{}|/\\'.includes(next)) {
-        const point = s.codePointAt(i + 1)!
-        out += `\\u{${point.toString(16)}}`
-        i += point > 0xffff ? 2 : 1
-        continue
-      }
-      if (next === 'A' || next === 'z') {
-        out += next === 'A' ? '(?<![\\s\\S])' : '(?![\\s\\S])'
-        i++
-        continue
-      }
-      if (next === 'Q') {
-        const end = s.indexOf('\\E', i + 2)
-        const quoted = s.slice(i + 2, end < 0 ? undefined : end)
-        for (const literal of quoted) {
-          out +=
-            fold && isLetter(literal)
-              ? `[${literal}${other(literal)}]`
-              : `\\u{${literal.codePointAt(0)!.toString(16)}}`
+      const e = rs[i + 1] ?? fail('trailing backslash')
+      if (!'dDwWsSbBtnr'.includes(e) && !PUNCT.includes(e)) fail(`\\${e} is not in regex dialect 1`)
+      if (lead.includes('i') && 'bB'.includes(e)) fail(`\\${e} does not combine with (?i)`)
+      out += e === 's' ? `[${SPACE}]` : e === 'S' ? `[^${SPACE}]` : e === '-' ? '-' : c + e
+      canRepeat = !'bB'.includes(e)
+      i += 2
+    } else if (c === '[') {
+      let j = rest.startsWith('[^') ? i + 2 : i + 1
+      const first = j
+      let prev = -1
+      let body = ''
+      for (; j < rs.length && rs[j] !== ']'; j++) {
+        let lit = rs[j] as string
+        const range = lit === '-' && j > first && j + 1 < rs.length && rs[j + 1] !== ']'
+        if (range) lit = rs[++j] as string
+        let point = lit.codePointAt(0) ?? -1
+        let item = lit
+        if (lit === '[' || lit === '^') fail(`a literal ${lit} in a class must be escaped`)
+        if (lit === '\\') {
+          const e = rs[++j] ?? fail('trailing backslash')
+          if (!'dwstnr'.includes(e) && !PUNCT.includes(e)) fail(`\\${e} is not in a dialect class`)
+          point = 'dws'.includes(e) ? -1 : (CONTROL[e] ?? e.codePointAt(0) ?? -1)
+          item = e === 's' ? SPACE : lit + e
         }
-        i = end < 0 ? s.length : end + 1
-        continue
+        if (range && (prev < 0 || point < prev)) fail('a class range needs literal ends in order')
+        prev = range ? -1 : point
+        body += range ? '-' + item : item
       }
-      if (next === 'a') {
-        out += '\\x07'
-        i++
-        continue
-      }
-      if (next === 'x' && s.charAt(i + 2) === '{') {
-        const end = s.indexOf('}', i + 3)
-        if (end < 0) throw new Error('unterminated hexadecimal escape')
-        out += `\\u${s.slice(i + 2, end + 1)}`
-        i = end
-        continue
-      }
-      const octal = /^[0-7]{1,3}/.exec(s.slice(i + 1))
-      if (octal) {
-        if (octal[0].length === 1 && next !== '0')
-          throw new Error('backreferences are not supported by RE2')
-        out += `\\u{${parseInt(octal[0], 8).toString(16)}}`
-        i += octal[0].length
-        continue
-      }
-      out += c + next
-      i++
-      continue
+      if (j === first || j === rs.length) fail('an empty or unterminated class')
+      out += (first === i + 2 ? '[^' : '[') + body + ']'
+      canRepeat = true
+      i = j + 1
+    } else if ('*+?{'.includes(c)) {
+      const count = c === '{' ? /^\{(0|[1-9][0-9]*)(?:,(0|[1-9][0-9]*)?)?\}/.exec(rest) : null
+      if (c === '{' && !count) fail('a literal { must be escaped; counts have no leading zeros')
+      if (count && (Number(count[1]) > 1000 || Number(count[2] || 0) > 1000))
+        fail('repeat counts are at most 1000')
+      if (!canRepeat) fail('nothing to repeat (a count never follows a group)')
+      const n = (count?.[0].length ?? 1) + (rs[i + (count?.[0].length ?? 1)] === '?' ? 1 : 0)
+      out += rs.slice(i, i + n).join('')
+      canRepeat = false
+      i += n
+    } else if (c === '(' && rest.startsWith('(?') && !rest.startsWith('(?:')) {
+      fail('only (?:…) groups and one leading flag group are in regex dialect 1')
+    } else if (c === ']' || c === '}') {
+      fail(`a literal ${c} must be escaped`)
+    } else {
+      const n = rest.startsWith('(?:') ? 3 : 1
+      if (c === '.') out += lead.includes('s') ? '[\\s\\S]' : '[^\\n]'
+      else if (lead.includes('m') && c === '^') out += '(?<![^\\n])'
+      else if (lead.includes('m') && c === '$') out += '(?![^\\n])'
+      else out += rs.slice(i, i + n).join('')
+      canRepeat = !'^$|('.includes(c) && !rest.startsWith('){')
+      i += n
     }
-    if (inClass) {
-      if (c === ']') {
-        inClass = false
-        out += c
-      } else if (fold && isLetter(c)) {
-        const hi = s.charAt(i + 2)
-        if (s.charAt(i + 1) === '-' && isLetter(hi)) {
-          // A range a-z gains its other-case twin A-Z.
-          out += `${c}-${hi}${other(c)}-${other(hi)}`
-          i += 2
-        } else {
-          out += c + other(c)
-        }
-      } else {
-        out += c
-      }
-      continue
-    }
-    if (c === '[') {
-      inClass = true
-      out += c
-      if (s.charAt(i + 1) === '^') {
-        out += '^'
-        i++
-      }
-      // A ] right after [ or [^ is a literal in RE2.
-      if (s.charAt(i + 1) === ']') {
-        out += '\\]'
-        i++
-      }
-      continue
-    }
-    if (c === '{') {
-      const repeat = /^\{[0-9]+(?:,[0-9]*)?\}/.exec(s.slice(i))
-      if (repeat) {
-        out += repeat[0]
-        i += repeat[0].length - 1
-      } else out += '\\{'
-      continue
-    }
-    if (c === '}' || c === ']') {
-      out += `\\${c}`
-      continue
-    }
-    if (c === '(') {
-      scopes.push({ fold, dotAll })
-      if (s.startsWith('(?P<', i)) {
-        out += '(?<'
-        i += 3
-        continue
-      }
-      const mod = /^\(\?([a-zA-Z]*)(-[a-zA-Z]*)?([:)])/.exec(s.slice(i))
-      if (mod && (mod[1] || mod[2])) {
-        if (mod[3] === ')') throw new Error(`flag group ${mod[0]} must start the pattern`)
-        if (mod[2]) throw new Error(`clearing flags (${mod[0]}) is not supported`)
-        for (const f of mod[1] ?? '') {
-          if (f === 'i') fold = !flags.includes('i')
-          else if (f === 's') dotAll = !flags.includes('s')
-          else throw new Error(`flag ${f} in ${mod[0]} is not supported`)
-        }
-        out += '(?:'
-        i += mod[0].length - 1
-        continue
-      }
-      out += c
-      continue
-    }
-    if (c === ')') {
-      const top = scopes.pop()
-      if (top) ({ fold, dotAll } = top)
-      out += c
-      continue
-    }
-    if (c === '.' && dotAll) out += '[\\s\\S]'
-    else if (fold && isLetter(c)) out += `[${c}${other(c)}]`
-    else out += c
   }
-  return { source: out, flags }
+  return new RegExp(out, lead.includes('i') ? 'ui' : 'u')
 }
 
-/** Compiles an RE2 pattern for JavaScript (translateRe2); throws when it cannot. */
-export function compileRe2(src: string): RegExp {
-  const { source, flags } = translateRe2(src)
-  return new RegExp(source, flags)
-}
+const dialectCache = new Map<string, RegExp | null>()
 
-const re2Cache = new Map<string, RegExp | null>()
-
-/** compileRe2 with a cache; null for a pattern that does not compile. */
-function cachedRe2(src: string): RegExp | null {
-  let re = re2Cache.get(src)
+/** compileDialect with a cache; null for a pattern outside the dialect. */
+function cachedDialect(src: string): RegExp | null {
+  let re = dialectCache.get(src)
   if (re === undefined) {
     try {
-      re = compileRe2(src)
+      re = compileDialect(src)
     } catch {
       re = null
     }
-    if (re2Cache.size > 500) re2Cache.clear()
-    re2Cache.set(src, re)
+    if (dialectCache.size > 500) dialectCache.clear()
+    dialectCache.set(src, re)
   }
   return re
 }

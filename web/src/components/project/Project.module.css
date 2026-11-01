@@ -23,6 +23,7 @@
 }
 .tree {
   font: 13px/1.65 var(--mono);
+  font-variant-ligatures: none;
   list-style: none;
   padding: 0;
   margin: 0;
@@ -35,6 +36,7 @@
 .dir {
   color: var(--violet-ink);
   font: 600 13px/1.65 var(--mono);
+  font-variant-ligatures: none;
   background: none;
   border: 0;
   padding: 0 4px;
@@ -59,6 +61,7 @@
   border-radius: 3px;
   display: inline-block;
   font: 13px/1.65 var(--mono);
+  font-variant-ligatures: none;
   background: none;
   border: 0;
   color: var(--ink);
@@ -204,6 +207,7 @@
 }
 .lapClock {
   font: 600 22px var(--mono);
+  font-variant-ligatures: none;
   font-variant-numeric: tabular-nums;
 }
 .lapClock small {

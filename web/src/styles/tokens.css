@@ -114,8 +114,8 @@
   --mono:
     'Iosevka Nerd Font', Iosevka, 'JetBrains Mono', 'Fira Code', 'DejaVu Sans Mono', monospace;
 
-  /* Layout (demo .work grid; collapses at 1440 px and 860 px). */
-  --lesson-width: 380px;
+  /* Layout (.work grid; collapses at 1440 px and 860 px). --lesson-width is
+     set on the grid only once the learner drags the splitter. */
   --rail-width: 320px;
   --topbar-height: 50px;
   --radius: 5px;

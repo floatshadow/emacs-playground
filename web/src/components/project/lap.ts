@@ -3,12 +3,10 @@
  * api.md §3.4): `scenario {lap: true}` reloads the project from its first
  * task with the fixtures restored and starts sessiond's timer; until the
  * last task completes, hint, demo and skip answer 409, so the task list
- * hides them. Any other load ends the lap. The store follows the lap from
- * hello and step events (session.ts); finished laps are in progress
- * (`laps`).
+ * hides them. Any other load ends the lap. The lesson snapshot carries the
+ * running lap (session.ts); finished laps are in progress (`laps`).
  */
 import { rpc } from '../../api/session/rpc'
-import { useSessionStore } from '../../store/session'
 import { useUiStore } from '../../store/ui'
 import { cancelDemo } from '../lesson/demoPlayer'
 import { focusTerminal } from '../screen/focus'
@@ -18,8 +16,7 @@ export async function startLap(lessonId: string): Promise<void> {
   cancelDemo()
   useUiStore.getState().clearHintLevels(lessonId)
   try {
-    const r = await rpc('scenario', { lessonId, lap: true })
-    if (r.lap && r.lap.startedAt > 0) useSessionStore.getState().setLap(r.lap)
+    await rpc('scenario', { lessonId, lap: true })
   } catch {
     // toasted
   } finally {
@@ -33,8 +30,7 @@ export async function startLap(lessonId: string): Promise<void> {
  */
 export async function stopLap(lessonId: string, stepId: string): Promise<void> {
   try {
-    const r = await rpc('scenario', { lessonId, stepId })
-    useSessionStore.getState().setLap(r.lap ?? null)
+    await rpc('scenario', { lessonId, stepId })
   } catch {
     // toasted
   } finally {

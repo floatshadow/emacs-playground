@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next'
 import type { Scenario } from '../../protocol.gen'
 import { evaluateExits } from '../../advice/exits'
-import { useSessionStore } from '../../store/session'
+import { activeStep, useSessionStore } from '../../store/session'
 import styles from './AuthorPanel.module.css'
 
 /**
@@ -19,8 +19,8 @@ export function AuthorPanel({
   const { t } = useTranslation()
   const state = useSessionStore((s) => s.state)
   const exits = useSessionStore((s) => s.tables.exits)
-  const active = useSessionStore((s) => s.activeStep)
-  const check = useSessionStore((s) => (s.activeStep ? s.checks[s.activeStep.stepId] : undefined))
+  const active = useSessionStore(activeStep)
+  const check = useSessionStore((s) => (active ? s.checks[active.stepId] : undefined))
   const matched = state ? evaluateExits(state, exits).map((e) => e.id) : []
   return (
     <div className={styles.panel}>

@@ -3,12 +3,13 @@ import { Link } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import type { LessonBundle, LessonRef } from '../../protocol.gen'
-import { resetProgress, useMe } from '../../api/queries'
-import { rpc } from '../../api/session/rpc'
+import { resetProgress, useMe, useProgress } from '../../api/queries'
+import { useSessionStore } from '../../store/session'
 import { toast, useUiStore } from '../../store/ui'
 import { useStepTransition } from './stepTransition'
 import { buttonClass } from '../common/buttonClass'
 import { Button } from '../common/Button'
+import { SegmentedControl } from '../common/SegmentedControl'
 import { LESSON_PANE_ID } from '../screen/paneIds'
 import { LessonNotices } from './LessonNotices'
 import { Markdown } from './Markdown'
@@ -27,67 +28,15 @@ function stripTitle(markdown: string, title: string): string {
   return markdown
 }
 
-/**
- * While the current step is scrolled out of the lesson pane (a long lesson
- * puts its steps below the fold), a chip at the pane's bottom edge names it
- * and scrolls to it, so "what do I do now" is always one click away.
- */
-function CurrentStepJump({
-  pane,
-  goal,
-  stepId,
-}: {
-  pane: React.RefObject<HTMLElement | null>
-  goal: string
-  stepId: string
-}) {
-  const { t } = useTranslation()
-  const reducedMotion = useUiStore((s) => s.reducedMotion)
-  // Where the step with this id is, as last reported by the observer; a new
-  // current step starts as "visible" until the observer says otherwise.
-  const [seen, setSeen] = useState<{ stepId: string; where: 'above' | 'below' | null }>({
-    stepId,
-    where: null,
-  })
-  useEffect(() => {
-    const root = pane.current
-    const li = root?.querySelector<HTMLElement>('li[aria-current="step"]')
-    if (!root || !li || typeof IntersectionObserver === 'undefined') return
-    const io = new IntersectionObserver(
-      ([e]) => {
-        if (!e) return
-        const where = e.isIntersecting
-          ? null
-          : e.boundingClientRect.top < (e.rootBounds?.top ?? 0)
-            ? 'above'
-            : 'below'
-        setSeen({ stepId, where })
-      },
-      { root, threshold: 0.25 },
-    )
-    io.observe(li)
-    return () => io.disconnect()
-  }, [pane, stepId])
-  const where = seen.stepId === stepId ? seen.where : null
-  if (!where) return null
-  const jump = () =>
-    pane.current
-      ?.querySelector<HTMLElement>('li[aria-current="step"]')
-      ?.scrollIntoView({ block: 'center', behavior: reducedMotion ? 'auto' : 'smooth' })
-  return (
-    <div className={styles.jumpWrap}>
-      <button type="button" className={styles.jump} onClick={jump}>
-        <span className={styles.jumpLabel}>{t('steps.statusActive')}</span> {goal}{' '}
-        <span aria-hidden="true">{where === 'below' ? '↓' : '↑'}</span>
-      </button>
-    </div>
-  )
-}
+export type LessonTab = 'read' | 'do'
 
 /**
- * The lesson pane (frontend.md §7): title, lede, the Markdown with
- * directives, the step list (at ::steps or at the end), and the
- * lesson-complete box with the next lesson.
+ * The lesson pane (frontend.md §7): title, lede and two views behind a
+ * switch. Read is the Markdown with directives (::steps is a link to Do);
+ * Do is the step list, the active step expanded, and the lesson-complete
+ * box with the next lesson. The view is the learner's choice per lesson
+ * (Read until the lesson is started); no event switches it: a step that
+ * ends while they read pulses the Do label and is announced.
  */
 export function LessonPane({
   bundle,
@@ -107,15 +56,37 @@ export function LessonPane({
   const markdown = useMemo(() => stripTitle(bundle.markdown, title), [bundle.markdown, title])
   const inline = hasStepsMarker(markdown)
   const pane = useRef<HTMLElement>(null)
-  const current = steps.views.find((v) => v.status === 'active')
   const { flash, announce } = useStepTransition(bundle.id, bundle.scenario, pane)
+  // Started: past the first step, or an outcome live (the snapshot's) or saved.
+  const progress = useProgress()
+  const live = useSessionStore(
+    (s) => s.lesson?.lessonId === bundle.id && Object.keys(s.lesson.outcomes).length > 0,
+  )
+  const saved = Object.values(progress.data?.lessons?.[bundle.id]?.steps ?? {}).map((x) => x.status)
+  const started =
+    steps.activeIndex > 0 ||
+    live ||
+    saved.some((x) => x === 'done' || x === 'skipped' || x === 'demonstrated')
+  const chosen = useUiStore((s) => s.lessonTab[bundle.id])
+  const tab = chosen ?? (started ? 'do' : 'read')
+  const setTab = (v: LessonTab) => useUiStore.getState().setLessonTab(bundle.id, v)
+  // The default is decided once the snapshot and progress are in, then kept.
+  const ready = useSessionStore((s) => !!s.hello) && !progress.isLoading
+  useEffect(() => {
+    if (!chosen && ready && steps.views.length > 0) setTab(tab)
+  })
+  const n = steps.views.length
+  const at =
+    steps.activeIndex >= 0
+      ? steps.activeIndex + 1
+      : steps.views.filter((v) => v.status === 'done' || v.status === 'skipped').length
   const qc = useQueryClient()
   const [restarting, setRestarting] = useState(false)
   const startLessonOver = async () => {
     setRestarting(true)
     try {
       await resetProgress(qc, bundle.id)
-      await rpc('scenario', { lessonId: bundle.id, reset: true }, { silent: true })
+      load.loadHere(true)
       toast(t('lesson.startLessonOverDone'))
     } catch (e) {
       const msg = errorMessage(e)
@@ -124,6 +95,13 @@ export function LessonPane({
       setRestarting(false)
     }
   }
+  const toDo = (
+    <p>
+      <Button size="small" onClick={() => setTab('do')}>
+        {t('lesson.toDo', { n: at, count: n })}
+      </Button>
+    </p>
+  )
   const list = (
     <>
       {load.error && (
@@ -141,10 +119,8 @@ export function LessonPane({
         onGoTo={steps.onGoTo}
         showDetails={author}
         flash={flash}
+        collapse={!author}
       />
-      <div className="sr-only" role="status" aria-live="polite">
-        {announce}
-      </div>
       {steps.complete && (
         <div className={styles.doneAll} role="status">
           {t('lesson.complete')}{' '}
@@ -180,20 +156,37 @@ export function LessonPane({
     >
       <h1>{title}</h1>
       {bundle.front?.summary && <p className={styles.lede}>{bundle.front.summary}</p>}
+      <div className={`${styles.tabs} ${flash && tab === 'read' ? styles.pulse : ''}`}>
+        <SegmentedControl
+          label={t('lesson.view')}
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: 'read', label: t('lesson.read') },
+            { value: 'do', label: t('lesson.do', { n: at, count: n }) },
+          ]}
+        />
+      </div>
+      <div className="sr-only" role="status" aria-live="polite">
+        {announce}
+      </div>
       <LessonNotices scenario={bundle.scenario} />
       {load.displaced && !load.loading && (
         <div className={styles.notice} role="status">
           <p>{t('lesson.displaced')}</p>
-          <Button size="small" variant="primary" onClick={load.loadHere}>
+          <Button size="small" variant="primary" onClick={() => load.loadHere()}>
             {t('lesson.loadHere')}
           </Button>
         </div>
       )}
-      <StepsSlotContext.Provider value={inline ? list : null}>
-        <Markdown markdown={markdown} lessonId={bundle.id} className={styles.prose} />
-      </StepsSlotContext.Provider>
-      {!inline && list}
-      {current && <CurrentStepJump pane={pane} goal={current.goal} stepId={current.step.id} />}
+      {tab === 'do' ? (
+        list
+      ) : (
+        <StepsSlotContext.Provider value={inline ? toDo : null}>
+          <Markdown markdown={markdown} lessonId={bundle.id} className={styles.prose} />
+          {!inline && toDo}
+        </StepsSlotContext.Provider>
+      )}
     </aside>
   )
 }

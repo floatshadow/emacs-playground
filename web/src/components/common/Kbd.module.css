@@ -1,5 +1,6 @@
 .kbd {
   font: 600 12px/1 var(--mono);
+  font-variant-ligatures: none;
   background: #fff;
   color: var(--ink);
   border: 1px solid #c9c3da;

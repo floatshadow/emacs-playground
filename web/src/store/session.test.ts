@@ -1,8 +1,14 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import type { Event, LessonProgress, Scenario } from '../protocol.gen'
+import type { Event, LessonChange, LessonProgress, LessonSnapshot, Scenario } from '../protocol.gen'
 import { record, type Recorder } from '../test/recorder'
-import { resumeStep, selectStepView, selectWhereAmI, stepStatuses } from './selectors'
-import { initialSessionData, reduce, useSessionStore, type SessionData } from './session'
+import { lessonComplete, selectStepView, selectWhereAmI, stepStatuses } from './selectors'
+import {
+  activeStep,
+  initialSessionData,
+  reduce,
+  useSessionStore,
+  type SessionData,
+} from './session'
 
 let rec: Recorder | null = null
 afterEach(() => rec?.dispose())
@@ -10,18 +16,47 @@ afterEach(() => rec?.dispose())
 const run = (events: Event[], start: SessionData = initialSessionData()) =>
   events.reduce((s, ev, i) => reduce(s, ev, 1000 + i), start)
 
+/** A snapshot of lesson L/1 with its first step active. */
+const snap = (over: Partial<LessonSnapshot> = {}): LessonSnapshot => ({
+  rev: 1,
+  lessonId: 'L/1',
+  step: { id: 'open', index: 0, count: 2 },
+  phase: 'active',
+  attempt: 1,
+  outcomes: {},
+  ...over,
+})
+
 const hello = (over: Partial<Extract<Event, { t: 'hello' }>> = {}): Event => ({
   t: 'hello',
   seq: 10,
-  protocol: 1,
+  protocol: 2,
   sessionId: 'local',
   mode: 'terminal',
   emacs: { version: '31.1', uptimeMs: 5 },
   frames: { terminal: true, gui: false },
-  step: { lessonId: 'L/1', stepId: 'open' },
   modules: ['base', 'agent'],
   replayed: false,
+  lesson: snap(),
   ...over,
+})
+
+const lesson = (
+  change: LessonChange,
+  over: Partial<LessonSnapshot>,
+  ev: Partial<Extract<Event, { t: 'lesson' }>> = {},
+): Event => ({ t: 'lesson', change, lesson: snap(over), ...ev })
+
+const check = (attempt: number, ok = true): Event => ({
+  t: 'check',
+  lessonId: 'L/1',
+  stepId: 'open',
+  attempt,
+  conditions: [
+    { id: 'open/1', ok },
+    { id: 'open/2', ok: false },
+  ],
+  complete: false,
 })
 
 const SCENARIO: Scenario = {
@@ -49,12 +84,62 @@ const SCENARIO: Scenario = {
 }
 
 describe('applyEvent reducer', () => {
-  it('hello sets the session, mode, modules and active step', () => {
+  it('hello sets the session, mode, modules and lesson snapshot', () => {
     const s = run([hello()])
     expect(s.sessionId).toBe('local')
     expect(s.modules).toEqual(['base', 'agent'])
-    expect(s.activeStep).toEqual({ lessonId: 'L/1', stepId: 'open' })
+    expect(activeStep(s)).toEqual({ lessonId: 'L/1', stepId: 'open', index: 0, count: 2 })
+    expect(activeStep(s)).toBe(activeStep(s))
+    expect(s.incompatible).toBe(false)
     expect(s.lastSeq).toBe(10)
+    expect(run([hello({ protocol: 1 })]).incompatible).toBe(true)
+  })
+
+  it('a lesson event applies only with a higher rev', () => {
+    let s = run([hello(), lesson('loaded', { rev: 3, step: { id: 'save', index: 1, count: 2 } })])
+    expect(activeStep(s)?.stepId).toBe('save')
+    // A replayed or reordered event is old news.
+    const same = reduce(s, lesson('loaded', { rev: 2 }), 2000)
+    expect(same).toBe(s)
+    s = run([lesson('complete', { rev: 4, step: null, phase: 'complete' })], s)
+    expect(activeStep(s)).toBeNull()
+    expect(s.lesson?.phase).toBe('complete')
+  })
+
+  it('hello always applies, also after a restart whose seq range overlaps the old one', () => {
+    let s = run([hello({ seq: 40, lesson: snap({ rev: 9, attempt: 7 }) }), check(7)])
+    expect(s.checks['open']).toBeDefined()
+    // sessiond restarted: its hello has a lower rev and seq, and is the truth.
+    s = run(
+      [hello({ seq: 3, lesson: snap({ rev: 1, attempt: 1, outcomes: { open: 'done' } }) })],
+      s,
+    )
+    expect(s.lesson?.rev).toBe(1)
+    expect(s.lesson?.outcomes).toEqual({ open: 'done' })
+    expect(s.checks).toEqual({})
+    // Replayed events of the new process below the hello's rev change nothing.
+    expect(reduce(s, lesson('reset', { rev: 1 }), 3000)).toBe(s)
+    s = run([lesson('reset', { rev: 2, attempt: 2 })], s)
+    expect(s.lesson?.attempt).toBe(2)
+  })
+
+  it('a check of another attempt is stale; a new attempt clears the checks', () => {
+    let s = run([hello(), check(0), check(1)])
+    expect(s.checks['open']?.attempt).toBe(1)
+    s = run([lesson('phase', { rev: 2, phase: 'watching' }), check(1, false)], s)
+    expect(s.checks['open']?.conditions[0]?.ok).toBe(false)
+    s = run([lesson('reset', { rev: 3, attempt: 2 })], s)
+    expect(s.checks).toEqual({})
+    expect(run([check(1)], s).checks).toEqual({})
+  })
+
+  it('lapDone comes from lapMs; a new lap or another lesson clears it', () => {
+    const lap = { id: 'P@1', lessonId: 'L/1', startedAt: 1 }
+    let s = run([hello({ lesson: snap({ lap }) })])
+    s = run([lesson('complete', { rev: 2, step: null, phase: 'complete' }, { lapMs: 61000 })], s)
+    expect(s.lapDone).toEqual({ lessonId: 'L/1', ms: 61000 })
+    s = run([lesson('loaded', { rev: 3, lap: { ...lap, id: 'P@2' } })], s)
+    expect(s.lapDone).toBeNull()
   })
 
   it('tracks lastSeq for replay, and a fresh hello resets it (sessiond restarted)', () => {
@@ -137,12 +222,9 @@ describe('applyEvent reducer', () => {
     s = run([{ t: 'emacs', event: 'daemon-restarted' }], s)
     expect(s.emacs.overlay).toBeNull()
     expect(s.emacs.restartedAt).toBeDefined()
-    // A restart for modules lasts until its modules event (after setup).
-    s = run([{ t: 'modules', enabled: ['base'], restarting: true }], s)
-    s = run([{ t: 'emacs', event: 'daemon-restarted', reason: 'module set changed' }], s)
-    expect(s.modulesRestarting).toBe(true)
-    s = run([{ t: 'modules', enabled: ['base'], restarting: false }], s)
-    expect(s.modulesRestarting).toBe(false)
+    // The restart's reason names a module change (the overlay's text).
+    s = run([{ t: 'emacs', event: 'restarting', reason: 'module set changed' }], s)
+    expect(s.emacs.reason).toBe('module set changed')
     s = run([{ t: 'emacs', event: 'unresponsive' }], s)
     expect(s.emacs.busy).toBe(true)
     s = run([{ t: 'emacs', event: 'responsive' }], s)
@@ -167,100 +249,6 @@ describe('applyEvent reducer', () => {
     expect(s.treeVersion).toBe(1)
   })
 
-  it('check and step events: complete, advance, reset, redo', () => {
-    let s = run([
-      hello(),
-      {
-        t: 'check',
-        lessonId: 'L/1',
-        stepId: 'open',
-        conditions: [
-          { id: 'open/1', ok: true },
-          { id: 'open/2', ok: false },
-        ],
-        complete: false,
-      },
-    ])
-    expect(s.checks['open']?.conditions[0]?.ok).toBe(true)
-    s = run(
-      [
-        { t: 'step', lessonId: 'L/1', stepId: 'open', status: 'complete', index: 0, count: 2 },
-        { t: 'step', lessonId: 'L/1', stepId: 'save', status: 'loaded', index: 1, count: 2 },
-      ],
-      s,
-    )
-    expect(s.outcomes['L/1']).toEqual({ open: 'done' })
-    expect(s.activeStep).toEqual({ lessonId: 'L/1', stepId: 'save', index: 1, count: 2 })
-    s = run(
-      [
-        {
-          t: 'step',
-          lessonId: 'L/1',
-          stepId: 'save',
-          status: 'complete',
-          index: 1,
-          count: 2,
-          lessonComplete: true,
-        },
-      ],
-      s,
-    )
-    expect(s.lessonsComplete).toEqual(['L/1'])
-    // Redo the first step: it loses this visit's outcome until it ends again.
-    s = run(
-      [{ t: 'step', lessonId: 'L/1', stepId: 'open', status: 'loaded', index: 0, count: 2 }],
-      s,
-    )
-    expect(s.outcomes['L/1']).toEqual({ save: 'done' })
-    expect(s.lessonsComplete).toEqual([])
-  })
-
-  it('demonstrated, skipped and dropped steps (contracts a-c)', () => {
-    let s = run([
-      hello(),
-      { t: 'step', lessonId: 'L/1', stepId: 'open', status: 'demonstrated', index: 0, count: 2 },
-    ])
-    // A demonstration does not advance: the step stays active, watched.
-    expect(s.activeStep?.stepId).toBe('open')
-    expect(s.outcomes['L/1']).toEqual({ open: 'demonstrated' })
-    expect(s.watched).toEqual({ lessonId: 'L/1', stepId: 'open' })
-    // Do it yourself: restore {} resets the step, which is no longer watched.
-    s = run(
-      [{ t: 'step', lessonId: 'L/1', stepId: 'open', status: 'reset', index: 0, count: 2 }],
-      s,
-    )
-    expect(s.watched).toBeNull()
-    expect(s.outcomes['L/1']).toEqual({})
-    // Skip: the step is skipped and the next one loads.
-    s = run(
-      [
-        { t: 'step', lessonId: 'L/1', stepId: 'open', status: 'skipped', index: 0, count: 2 },
-        { t: 'step', lessonId: 'L/1', stepId: 'save', status: 'loaded', index: 1, count: 2 },
-      ],
-      s,
-    )
-    expect(s.outcomes['L/1']).toEqual({ open: 'skipped' })
-    expect(s.activeStep?.stepId).toBe('save')
-    // Start over: sessiond drops the active step, and the page forgets the
-    // lesson's outcomes, so it resumes at the first step.
-    s = run(
-      [{ t: 'step', lessonId: 'L/1', stepId: 'save', status: 'dropped', index: 1, count: 2 }],
-      s,
-    )
-    expect(s.activeStep).toBeNull()
-    expect(s.outcomes['L/1']).toBeUndefined()
-  })
-
-  it('a reset from the demo’s own restore keeps the step watched', () => {
-    let s = run([hello()])
-    s = { ...s, demoPlaying: true, watched: { lessonId: 'L/1', stepId: 'open' } }
-    s = run(
-      [{ t: 'step', lessonId: 'L/1', stepId: 'open', status: 'reset', index: 0, count: 2 }],
-      s,
-    )
-    expect(s.watched).toEqual({ lessonId: 'L/1', stepId: 'open' })
-  })
-
   it('a stale prefix after the command that used its keys is ignored', () => {
     const s = run([
       hello(),
@@ -281,8 +269,8 @@ describe('applyEvent reducer', () => {
 
   it('the ticker, the prefix and the habit cards belong to the lesson', () => {
     let s = run([
-      hello(),
-      { t: 'step', lessonId: 'L/1', stepId: 'open', status: 'loaded', index: 0, count: 2 },
+      hello({ lesson: snap({ lessonId: '' }) }),
+      lesson('loaded', { rev: 2 }),
       {
         t: 'key',
         keys: 'C-z',
@@ -296,13 +284,10 @@ describe('applyEvent reducer', () => {
     expect(s.ticker.length).toBe(2)
     expect(s.cards.length).toBe(1)
     // Another step of the same lesson keeps them.
-    s = run(
-      [{ t: 'step', lessonId: 'L/1', stepId: 'save', status: 'loaded', index: 1, count: 2 }],
-      s,
-    )
+    s = run([lesson('loaded', { rev: 3, step: { id: 'save', index: 1, count: 2 } })], s)
     expect(s.ticker.length).toBe(2)
     // Another lesson starts empty.
-    s = run([{ t: 'step', lessonId: 'L/2', stepId: 'a', status: 'loaded', index: 0, count: 1 }], s)
+    s = run([lesson('loaded', { rev: 4, lessonId: 'L/2' })], s)
     expect(s.ticker).toEqual([])
     expect(s.prefix).toBeNull()
     expect(s.cards).toEqual([])
@@ -324,7 +309,6 @@ describe('applyEvent reducer', () => {
     expect(s.checkpointsVersion).toBe(1)
     expect(s.mode).toBe('gui')
     expect(s.modules).toEqual(['base', 'agent', 'files'])
-    expect(s.modulesRestarting).toBe(true)
     expect(s.ticker.at(-1)?.kind).toBe('gap')
     expect(s.lastError?.message).toBe('boom')
   })
@@ -370,24 +354,11 @@ describe('applyEvent reducer', () => {
 
 describe('step views', () => {
   it('marks done, active, met, next and the hint for the first unmet condition', () => {
-    const s = run([
-      hello(),
-      {
-        t: 'check',
-        lessonId: 'L/1',
-        stepId: 'open',
-        conditions: [
-          { id: 'open/1', ok: true },
-          { id: 'open/2', ok: false },
-        ],
-        complete: false,
-      },
-    ])
+    const s = run([hello(), check(1)])
     const views = selectStepView({
       scenario: SCENARIO,
       lessonId: 'L/1',
-      activeStepId: 'open',
-      outcomes: s.outcomes['L/1'] ?? {},
+      lesson: s.lesson,
       progress: undefined,
       checks: s.checks,
       hintLevels: { 'L/1#open': 1 },
@@ -399,35 +370,6 @@ describe('step views', () => {
     expect(views[0]?.hint).toEqual({ forText: 'b', text: 'hb' })
   })
 
-  it('a step demonstrated before the page opened is still watched until it starts again', () => {
-    const progress: LessonProgress = {
-      status: 'in-progress',
-      counts: { done: 0, demonstrated: 1, skipped: 0, total: 2 },
-      steps: { open: { status: 'demonstrated', hintsUsed: 0, resets: 0 } },
-    }
-    const view = (startedHere: boolean) =>
-      selectStepView({
-        scenario: SCENARIO,
-        lessonId: 'L/1',
-        activeStepId: 'open',
-        outcomes: {},
-        progress,
-        startedHere,
-        checks: {},
-        hintLevels: {},
-        locale: 'en',
-      })[0]
-    expect(view(false)?.watched).toBe(true)
-    expect(view(true)?.watched).toBe(false)
-    // The reducer records which step started while the page listened.
-    const s = run([
-      hello(),
-      { t: 'step', lessonId: 'L/1', stepId: 'open', status: 'reset', index: 0, count: 2 },
-    ])
-    expect(s.startedHere).toEqual({ lessonId: 'L/1', stepId: 'open' })
-    expect(run([hello()]).startedHere).toBeNull()
-  })
-
   it('a condition without a hint gives an empty hint text (the view says try Watch it)', () => {
     const views = selectStepView({
       scenario: {
@@ -435,8 +377,7 @@ describe('step views', () => {
         steps: [{ id: 'open', goal: 'Open', conditions: [{ text: 'a', elisp: 't' }] }],
       },
       lessonId: 'L/1',
-      activeStepId: 'open',
-      outcomes: {},
+      lesson: snap(),
       progress: undefined,
       checks: {},
       hintLevels: { 'L/1#open': 1 },
@@ -449,14 +390,14 @@ describe('step views', () => {
     const views = selectStepView({
       scenario: SCENARIO,
       lessonId: 'L/1',
-      activeStepId: 'open',
-      outcomes: {},
+      lesson: snap(),
       progress: undefined,
       checks: {
         open: {
           t: 'check',
           lessonId: 'L/1',
           stepId: 'open',
+          attempt: 1,
           conditions: [{ id: 'open/1', ok: false, unknown: true }],
           complete: false,
         },
@@ -486,45 +427,46 @@ describe('step views', () => {
     ),
   })
 
-  it('the active step is active whatever progress says; later steps show no tick', () => {
+  const at = (step: string | null, over: Partial<LessonSnapshot> = {}) =>
+    snap({
+      step: step ? { id: step, index: ['open', 'save', 'close'].indexOf(step), count: 3 } : null,
+      ...over,
+    })
+
+  it('the snapshot of this lesson decides: its step is active, later steps show no tick', () => {
     const progress = saved({ open: 'done', save: 'done', close: 'done' })
-    expect(stepStatuses(THREE, 'save', {}, progress)).toEqual(['done', 'active', 'todo'])
+    expect(stepStatuses(THREE, at('save'), progress)).toEqual(['todo', 'active', 'todo'])
+    expect(
+      stepStatuses(
+        THREE,
+        at('close', { outcomes: { open: 'skipped', save: 'demonstrated' } }),
+        progress,
+      ),
+    ).toEqual(['skipped', 'demonstrated', 'active'])
+    const done = at(null, {
+      phase: 'complete',
+      outcomes: { open: 'done', save: 'skipped', close: 'done' },
+    })
+    expect(stepStatuses(THREE, done, undefined)).toEqual(['done', 'skipped', 'done'])
+    expect(lessonComplete(THREE, done, undefined)).toBe(true)
   })
 
-  it('earlier steps show this visit’s outcome, else a saved done, watched or skipped', () => {
-    const progress = saved({ open: 'skipped', save: 'demonstrated' })
-    expect(stepStatuses(THREE, 'close', {}, progress)).toEqual([
-      'skipped',
-      'demonstrated',
-      'active',
-    ])
-    expect(stepStatuses(THREE, 'close', { save: 'done' }, progress)).toEqual([
-      'skipped',
-      'done',
-      'active',
-    ])
-    // No active step in this lesson: outcomes and progress decide.
-    expect(stepStatuses(THREE, null, {}, saved({ save: 'in-progress', close: 'done' }))).toEqual([
-      'todo',
-      'todo',
-      'done',
-    ])
-    // The last step completed in this visit shows done although it stays "active".
-    expect(stepStatuses(THREE, 'close', { close: 'done' }, undefined)).toEqual([
-      'todo',
-      'todo',
-      'done',
-    ])
+  it('another lesson in the snapshot: saved progress decides', () => {
+    const other = at('save', { lessonId: 'L/2' })
+    const progress = saved({ open: 'done', save: 'skipped', close: 'in-progress' })
+    expect(stepStatuses(THREE, other, progress)).toEqual(['done', 'skipped', 'todo'])
+    expect(lessonComplete(THREE, other, progress)).toBe(false)
+    expect(
+      lessonComplete(THREE, null, saved({ open: 'done', save: 'skipped', close: 'done' })),
+    ).toBe(true)
   })
 
-  it('a watched active step offers Do it yourself', () => {
+  it('a watched active step offers Do it yourself, also after a reload', () => {
     const views = selectStepView({
       scenario: THREE,
       lessonId: 'L/1',
-      activeStepId: 'save',
-      outcomes: { save: 'demonstrated' },
+      lesson: at('save', { phase: 'watching', outcomes: { save: 'demonstrated' } }),
       progress: undefined,
-      watched: true,
       checks: {},
       hintLevels: {},
       locale: 'en',
@@ -534,68 +476,5 @@ describe('step views', () => {
       ['active', true],
       ['todo', false],
     ])
-  })
-
-  it('resumes at the first step neither done nor skipped; a watched step is practised', () => {
-    expect(resumeStep(THREE, {}, saved({ open: 'skipped', save: 'demonstrated' }))).toBe('save')
-    expect(resumeStep(THREE, { save: 'done' }, saved({ open: 'done' }))).toBe('close')
-    expect(resumeStep(THREE, {}, saved({ open: 'done', save: 'done', close: 'skipped' }))).toBe(
-      undefined,
-    )
-  })
-})
-
-describe('the "again, without hints" lap', () => {
-  const step = (over: Partial<Extract<Event, { t: 'step' }>>): Event => ({
-    t: 'step',
-    lessonId: 'projects/p1',
-    stepId: 'a',
-    status: 'loaded',
-    index: 0,
-    count: 2,
-    ...over,
-  })
-
-  it('starts with a lap step, finishes with lapMs on the completing event', () => {
-    const s = run([
-      hello({ step: null }),
-      step({ lap: true, ts: 5000 }),
-      step({ status: 'complete', lap: true }),
-      step({ stepId: 'b', index: 1, lap: true }),
-    ])
-    expect(s.lap).toEqual({ lessonId: 'projects/p1', startedAt: 5000 })
-    const done = reduce(
-      s,
-      step({
-        stepId: 'b',
-        index: 1,
-        status: 'complete',
-        lap: true,
-        lessonComplete: true,
-        lapMs: 61000,
-      }),
-      9000,
-    )
-    expect(done.lap).toBeNull()
-    expect(done.lapDone).toEqual({ lessonId: 'projects/p1', ms: 61000 })
-    expect(done.lessonsComplete).toContain('projects/p1')
-  })
-
-  it('a load without lap ends it; hello carries the running lap', () => {
-    let s = run([hello({ step: null }), step({ lap: true, ts: 5000 })])
-    s = reduce(s, step({ stepId: 'b', index: 1 }), 6000)
-    expect(s.lap).toBeNull()
-    s = reduce(s, hello({ lap: { lessonId: 'projects/p1', startedAt: 7 } }), 7000)
-    expect(s.lap).toEqual({ lessonId: 'projects/p1', startedAt: 7 })
-    s = reduce(s, hello({}), 8000)
-    expect(s.lap).toBeNull()
-  })
-
-  it('a reset inside the lap keeps the timer; dropping the lesson ends it', () => {
-    let s = run([hello({ step: null }), step({ lap: true, ts: 5000 })])
-    s = reduce(s, step({ status: 'reset', lap: true, ts: 6000 }), 6000)
-    expect(s.lap?.startedAt).toBe(5000)
-    s = reduce(s, step({ status: 'dropped' }), 7000)
-    expect(s.lap).toBeNull()
   })
 })

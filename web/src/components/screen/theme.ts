@@ -10,7 +10,9 @@ export const MODUS_VIVENDI_TINTED: ITheme = {
   foreground: '#ffffff',
   cursor: '#ffffff',
   cursorAccent: '#0d0e1c',
-  selectionBackground: '#555a66',
+  // The Emacs region's colour (emacs.d base.el bg-region), so an xterm
+  // selection looks like one.
+  selectionBackground: '#00808f',
   selectionForeground: '#ffffff',
   black: '#0d0e1c',
   red: '#ff5f59',

@@ -74,6 +74,7 @@
   background: var(--screen);
   color: #e8e8f0;
   font: 12.5px/1.55 var(--mono);
+  font-variant-ligatures: none;
   padding: 10px 12px;
   border-radius: 5px;
   overflow: auto;

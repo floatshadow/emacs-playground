@@ -5,7 +5,7 @@ import { QueryClient } from '@tanstack/react-query'
 import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import WS from 'vitest-websocket-mock'
-import type { CurriculumIndex, Event } from '../protocol.gen'
+import type { CurriculumIndex, Event, LessonChange, LessonSnapshot } from '../protocol.gen'
 import { DEFAULT_TABLES } from '../advice/defaults'
 import { disconnectSession } from '../api/session/connection'
 import { useSessionStore } from '../store/session'
@@ -73,6 +73,8 @@ const server = setupServer(
     }
     if (params['op'] === 'describe')
       return HttpResponse.json({ ok: true, result: { cmd: '', doc: '' } })
+    if (params['op'] === 'demo')
+      return HttpResponse.json({ ok: true, result: { restored: false, attempt: 1 } })
     return HttpResponse.json({ ok: true, result: {} })
   }),
 )
@@ -90,7 +92,7 @@ afterAll(() => {
 beforeEach(() => {
   rpcCalls.length = 0
   useSessionStore.getState().reset()
-  useUiStore.setState({ hintLevels: {}, toasts: [], demo: null })
+  useUiStore.setState({ hintLevels: {}, toasts: [], demo: null, lessonTab: {} })
   window.history.pushState({}, '', `/lesson/${LESSON}`)
 })
 afterEach(() => {
@@ -107,17 +109,44 @@ function send(ev: Event) {
   act(() => ws.send(ev))
 }
 
+const STEPS = ['open', 'edit', 'save', 'oops']
+
+/** The lesson snapshot with step of LESSON active (null: none). */
+const at = (step: string | null, over: Partial<LessonSnapshot> = {}): LessonSnapshot => ({
+  rev: 1,
+  lessonId: LESSON,
+  step: step ? { id: step, index: STEPS.indexOf(step), count: 4 } : null,
+  phase: step ? 'active' : 'idle',
+  attempt: step ? 1 : 0,
+  outcomes: {},
+  ...over,
+})
+
+/** A lesson event; its rev is its seq. */
+const lessonEv = (
+  seq: number,
+  change: LessonChange,
+  lesson: LessonSnapshot,
+  stepId?: string,
+): Event => ({
+  t: 'lesson',
+  seq,
+  change,
+  ...(stepId ? { stepId } : {}),
+  lesson: { ...lesson, rev: seq },
+})
+
 const hello: Event = {
   t: 'hello',
   seq: 1,
-  protocol: 1,
+  protocol: 2,
   sessionId: 'local',
   mode: 'terminal',
   emacs: { version: '31.1', uptimeMs: 1000 },
   frames: { terminal: true, gui: false },
-  step: null,
   modules: ['base', 'agent'],
   replayed: false,
+  lesson: { rev: 1, step: null, phase: 'idle', attempt: 0, outcomes: {} },
 }
 
 const state = (over: Record<string, unknown> = {}): Event => ({
@@ -161,31 +190,27 @@ const state = (over: Record<string, unknown> = {}): Event => ({
   ...over,
 })
 
-async function openLesson() {
+/** Opens the lesson with step open loaded; tab do switches to the steps. */
+async function openLesson(tab: 'read' | 'do' = 'do') {
   renderApp()
   await waitFor(() => expect(ws.server.clients().length).toBe(1))
   send(hello)
   send(state())
   await waitFor(() => expect(rpcCalls.find((c) => c.op === 'scenario')).toBeDefined())
-  expect(rpcCalls.find((c) => c.op === 'scenario')?.body).toEqual({
-    lessonId: LESSON,
-    stepId: 'open',
-  })
-  send({
-    t: 'step',
-    seq: 3,
-    lessonId: LESSON,
-    stepId: 'open',
-    status: 'loaded',
-    index: 0,
-    count: 4,
-  })
+  expect(rpcCalls.find((c) => c.op === 'scenario')?.body).toEqual({ lessonId: LESSON })
+  send(lessonEv(3, 'loaded', at('open'), 'open'))
   await screen.findByRole('heading', { level: 1, name: 'Opening files' })
+  if (tab === 'do') await userEvent.click(screen.getByRole('button', { name: 'Do 1/4' }))
 }
 
 describe('LessonScreen against a fake events stream', () => {
   it('loads the scenario once the session says hello and renders the steps', async () => {
-    await openLesson()
+    await openLesson('read')
+    // An unstarted lesson opens in Read: the prose with its directives.
+    expect(screen.getByRole('complementary', { name: 'Coming from VS Code.' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: /try it/ }).length).toBeGreaterThan(0)
+    expect(screen.queryByRole('list', { name: 'Steps' })).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: 'Do 1/4' }))
     const steps = screen.getByRole('list', { name: 'Steps' })
     const items = within(steps)
       .getAllByRole('listitem')
@@ -193,9 +218,34 @@ describe('LessonScreen against a fake events stream', () => {
     expect(items).toHaveLength(4)
     expect(items[0]).toHaveAttribute('aria-current', 'step')
     expect(within(items[0] as HTMLElement).getByText('Open src/main.rs')).toBeInTheDocument()
-    // Directives rendered: the VS Code box, a try-it button and a keycap.
-    expect(screen.getByRole('complementary', { name: 'Coming from VS Code.' })).toBeInTheDocument()
-    expect(screen.getAllByRole('button', { name: /try it/ }).length).toBeGreaterThan(0)
+  })
+
+  it('Do shows one expanded step: the others show their goal until clicked', async () => {
+    await openLesson()
+    const steps = screen.getByRole('list', { name: 'Steps' })
+    const items = within(steps)
+      .getAllByRole('listitem')
+      .filter((li) => li.parentElement === steps) as HTMLElement[]
+    expect(within(items[0] as HTMLElement).getByText('the Find file prompt was used')).toBeVisible()
+    const later = items[1] as HTMLElement
+    expect(later.querySelector('ul')).not.toBeVisible()
+    await userEvent.click(within(later).getByRole('button', { name: 'Change the greeting' }))
+    expect(later.querySelector('ul')).toBeVisible()
+  })
+
+  it('a completion while reading changes neither the tab nor the scroll', async () => {
+    await openLesson('read')
+    const scrolled = vi.fn()
+    Element.prototype.scrollIntoView = scrolled
+    const done = { outcomes: { open: 'done' as const } }
+    send(lessonEv(6, 'complete', at('open', done), 'open'))
+    send(lessonEv(7, 'loaded', at('edit', { ...done, attempt: 2 }), 'edit'))
+    expect(screen.getByText('Step done: Open src/main.rs')).toBeInTheDocument()
+    await new Promise((r) => setTimeout(r, 800))
+    expect(screen.getByRole('button', { name: 'Read' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Do 2/4' })).toBeInTheDocument()
+    expect(screen.queryByRole('list', { name: 'Steps' })).toBeNull()
+    expect(scrolled).not.toHaveBeenCalled()
   })
 
   it('reveals hints level by level and records them', async () => {
@@ -206,6 +256,7 @@ describe('LessonScreen against a fake events stream', () => {
       seq: 4,
       lessonId: LESSON,
       stepId: 'open',
+      attempt: 1,
       conditions: [
         { id: 'open/1', ok: false },
         { id: 'open/2', ok: false },
@@ -233,6 +284,7 @@ describe('LessonScreen against a fake events stream', () => {
       seq: 5,
       lessonId: LESSON,
       stepId: 'open',
+      attempt: 1,
       conditions: [
         { id: 'open/1', ok: true },
         { id: 'open/2', ok: false },
@@ -244,24 +296,9 @@ describe('LessonScreen against a fake events stream', () => {
 
   it('marks a completed step done and moves to the next', async () => {
     await openLesson()
-    send({
-      t: 'step',
-      seq: 6,
-      lessonId: LESSON,
-      stepId: 'open',
-      status: 'complete',
-      index: 0,
-      count: 4,
-    })
-    send({
-      t: 'step',
-      seq: 7,
-      lessonId: LESSON,
-      stepId: 'edit',
-      status: 'loaded',
-      index: 1,
-      count: 4,
-    })
+    const done = { outcomes: { open: 'done' as const } }
+    send(lessonEv(6, 'complete', at('open', done), 'open'))
+    send(lessonEv(7, 'loaded', at('edit', { ...done, attempt: 2 }), 'edit'))
     const steps = screen.getByRole('list', { name: 'Steps' })
     const items = within(steps)
       .getAllByRole('listitem')
@@ -352,15 +389,14 @@ describe('LessonScreen against a fake events stream', () => {
   it('a demonstrated step stays active and offers Do it yourself', async () => {
     const user = userEvent.setup()
     await openLesson()
-    send({
-      t: 'step',
-      seq: 20,
-      lessonId: LESSON,
-      stepId: 'open',
-      status: 'demonstrated',
-      index: 0,
-      count: 4,
-    })
+    send(
+      lessonEv(
+        20,
+        'demonstrated',
+        at('open', { phase: 'watching', outcomes: { open: 'demonstrated' } }),
+        'open',
+      ),
+    )
     const steps = screen.getByRole('list', { name: 'Steps' })
     const first = within(steps)
       .getAllByRole('listitem')
@@ -369,15 +405,7 @@ describe('LessonScreen against a fake events stream', () => {
     expect(within(first).getByText('You watched this step. Now do it yourself.')).toBeVisible()
     await user.click(within(first).getByRole('button', { name: 'Do it yourself' }))
     await waitFor(() => expect(rpcCalls).toContainEqual({ op: 'restore', body: {} }))
-    send({
-      t: 'step',
-      seq: 21,
-      lessonId: LESSON,
-      stepId: 'open',
-      status: 'reset',
-      index: 0,
-      count: 4,
-    })
+    send(lessonEv(21, 'reset', at('open', { attempt: 2 }), 'open'))
     expect(within(first).queryByText('You watched this step. Now do it yourself.')).toBeNull()
   })
 
@@ -397,67 +425,23 @@ describe('LessonScreen against a fake events stream', () => {
     await waitFor(() => expect(rpcCalls).toContainEqual({ op: 'restore', body: {} }))
   })
 
-  it('a progress reset from another page reloads the lesson at its first step', async () => {
-    let openDone = false
-    server.use(
-      http.get('/api/v1/progress', () =>
-        HttpResponse.json({
-          lessons: openDone
-            ? {
-                [LESSON]: {
-                  status: 'in-progress',
-                  counts: { done: 1, demonstrated: 0, skipped: 0, total: 4 },
-                  steps: { open: { status: 'done', hintsUsed: 0, resets: 0 } },
-                },
-              }
-            : {},
-          updatedAt: 2,
-        }),
-      ),
-    )
+  it('a progress reset from another page is not undone here: Load this lesson here', async () => {
+    const user = userEvent.setup()
     await openLesson()
-    openDone = true
-    send({
-      t: 'step',
-      seq: 40,
-      lessonId: LESSON,
-      stepId: 'open',
-      status: 'complete',
-      index: 0,
-      count: 4,
-    })
-    send({
-      t: 'step',
-      seq: 41,
-      lessonId: LESSON,
-      stepId: 'edit',
-      status: 'loaded',
-      index: 1,
-      count: 4,
-    })
-    await waitFor(() =>
-      expect(
-        screen.getByRole('list', { name: 'Steps' }).querySelector('[aria-current="step"]'),
-      ).toHaveTextContent(/./),
-    )
+    send(lessonEv(40, 'complete', at('open', { outcomes: { open: 'done' } }), 'open'))
+    send(lessonEv(41, 'loaded', at('edit', { attempt: 2, outcomes: { open: 'done' } }), 'edit'))
     rpcCalls.length = 0
-    // Another page (or a script) resets the lesson's progress: sessiond
-    // drops the active step. This page must not reload the lesson at the
-    // step after the one it saw done.
-    openDone = false
-    send({
-      t: 'step',
-      seq: 42,
-      lessonId: LESSON,
-      stepId: 'edit',
-      status: 'dropped',
-      index: 1,
-      count: 4,
-    })
-    await waitFor(() => expect(rpcCalls.find((c) => c.op === 'scenario')).toBeDefined())
-    expect(rpcCalls.filter((c) => c.op === 'scenario').map((c) => c.body)).toEqual([
-      { lessonId: LESSON, stepId: 'open' },
-    ])
+    // Another page resets the lesson's progress: sessiond forgets the lesson.
+    send(lessonEv(42, 'dropped', { ...at(null), lessonId: '' }, 'edit'))
+    const button = await screen.findByRole('button', { name: 'Load this lesson here' })
+    await new Promise((r) => setTimeout(r, 300))
+    expect(rpcCalls.some((c) => c.op === 'scenario')).toBe(false)
+    await user.click(button)
+    await waitFor(() =>
+      expect(rpcCalls.filter((c) => c.op === 'scenario').map((c) => c.body)).toEqual([
+        { lessonId: LESSON },
+      ]),
+    )
   })
 
   it('after a stuck report the learner can skip the step', async () => {
@@ -477,24 +461,9 @@ describe('LessonScreen against a fake events stream', () => {
     await user.click(within(dialog).getByRole('button', { name: 'Skip this step' }))
     await waitFor(() => expect(rpcCalls).toContainEqual({ op: 'skip', body: { stepId: 'open' } }))
     expect(await screen.findByText('Skipped: Open src/main.rs')).toBeInTheDocument()
-    send({
-      t: 'step',
-      seq: 30,
-      lessonId: LESSON,
-      stepId: 'open',
-      status: 'skipped',
-      index: 0,
-      count: 4,
-    })
-    send({
-      t: 'step',
-      seq: 31,
-      lessonId: LESSON,
-      stepId: 'edit',
-      status: 'loaded',
-      index: 1,
-      count: 4,
-    })
+    const skipped = { outcomes: { open: 'skipped' as const } }
+    send(lessonEv(30, 'skipped', at('open', skipped), 'open'))
+    send(lessonEv(31, 'loaded', at('edit', { ...skipped, attempt: 2 }), 'edit'))
     const steps = screen.getByRole('list', { name: 'Steps' })
     const items = within(steps)
       .getAllByRole('listitem')
@@ -516,32 +485,16 @@ describe('LessonScreen against a fake events stream', () => {
       frame: 'terminal',
     })
     // Step "edit" says "C-s finds text as you type": no "C-s is not save".
-    send({
-      t: 'step',
-      seq: 40,
-      lessonId: LESSON,
-      stepId: 'edit',
-      status: 'loaded',
-      index: 1,
-      count: 4,
-    })
+    send(lessonEv(40, 'loaded', at('edit', { attempt: 2 }), 'edit'))
     send(cs(41))
     expect(screen.queryByText(/is not save/)).toBeNull()
     // Step "open" does not mention C-s (the lesson only has C-x C-s): the card fires.
-    send({
-      t: 'step',
-      seq: 42,
-      lessonId: LESSON,
-      stepId: 'open',
-      status: 'loaded',
-      index: 0,
-      count: 4,
-    })
+    send(lessonEv(42, 'loaded', at('open', { attempt: 3 }), 'open'))
     send(cs(43))
     expect(screen.getByText(/is not save/)).toBeInTheDocument()
   })
 
-  it('a demo stops when the active step changes: no keys go into another step', async () => {
+  it('a demo stops when the attempt changes: no keys go into another step', async () => {
     const user = userEvent.setup()
     await openLesson()
     await user.click(screen.getByRole('button', { name: 'Watch it' }))
@@ -549,15 +502,7 @@ describe('LessonScreen against a fake events stream', () => {
     await waitFor(() =>
       expect(rpcCalls).toContainEqual({ op: 'demo', body: { stepId: 'open', phase: 'start' } }),
     )
-    send({
-      t: 'step',
-      seq: 50,
-      lessonId: LESSON,
-      stepId: 'save',
-      status: 'loaded',
-      index: 2,
-      count: 4,
-    })
+    send(lessonEv(50, 'loaded', at('save', { attempt: 2 }), 'save'))
     expect(screen.queryByRole('status', { name: 'Demo caption' })).toBeNull()
     await waitFor(() =>
       expect(rpcCalls).toContainEqual({ op: 'demo', body: { stepId: 'open', phase: 'end' } }),
@@ -592,49 +537,28 @@ describe('LessonScreen against a fake events stream', () => {
 
   it('after a reload during Go to this step the screen stays covered until the step is active', async () => {
     const busy = { op: 'load', lessonId: LESSON, stepId: 'save', startedAt: 1 }
-    server.use(
-      http.post('/s/local/rpc/status', () =>
-        HttpResponse.json({ ok: true, result: { sessionId: 'local', busy } }),
-      ),
-    )
     renderApp()
     await waitFor(() => expect(ws.server.clients().length).toBe(1))
-    send({ ...hello, busy } as Event)
+    send({ ...hello, lesson: at('open', { busy }) } as Event)
     send(state())
     expect(
       await screen.findByRole('status', { name: 'Going to step 3: Save it…' }),
     ).toBeInTheDocument()
-    send({
-      t: 'step',
-      seq: 3,
-      lessonId: LESSON,
-      stepId: 'save',
-      status: 'loaded',
-      index: 2,
-      count: 4,
-    })
+    send(lessonEv(3, 'loaded', at('save', { attempt: 2, busy }), 'save'))
+    send(lessonEv(4, 'busy', at('save', { attempt: 2 })))
     await waitFor(() => expect(screen.queryByRole('status', { name: /^Going to step/ })).toBeNull())
+    // The snapshot ended it: no status poll, and the step this page did
+    // not ask for is not loaded again.
+    expect(rpcCalls.some((c) => c.op === 'status' || c.op === 'scenario')).toBe(false)
   })
 
   it('after a reload a demonstrated step still offers Do it yourself', async () => {
-    server.use(
-      http.get('/api/v1/progress', () =>
-        HttpResponse.json({
-          lessons: {
-            [LESSON]: {
-              status: 'in-progress',
-              counts: { done: 0, demonstrated: 1, skipped: 0, total: 4 },
-              steps: { open: { status: 'demonstrated', hintsUsed: 0, resets: 0 } },
-            },
-          },
-          updatedAt: 2,
-        }),
-      ),
-    )
     renderApp()
     await waitFor(() => expect(ws.server.clients().length).toBe(1))
-    send({ ...hello, step: { lessonId: LESSON, stepId: 'open' } } as Event)
+    const watching = at('open', { phase: 'watching', outcomes: { open: 'demonstrated' } })
+    send({ ...hello, lesson: watching } as Event)
     send(state())
+    // A demonstrated step counts as started: the lesson opens in Do.
     const steps = await screen.findByRole('list', { name: 'Steps' })
     const first = await waitFor(() => {
       const li = steps.querySelector('[aria-current="step"]')
@@ -644,15 +568,7 @@ describe('LessonScreen against a fake events stream', () => {
     expect(within(first).getByRole('button', { name: 'Do it yourself' })).toBeInTheDocument()
     expect(rpcCalls.some((c) => c.op === 'scenario')).toBe(false)
     // Once the step starts again (Do it yourself, a reset) it is the learner's.
-    send({
-      t: 'step',
-      seq: 3,
-      lessonId: LESSON,
-      stepId: 'open',
-      status: 'reset',
-      index: 0,
-      count: 4,
-    })
+    send(lessonEv(3, 'reset', at('open', { attempt: 2 }), 'open'))
     expect(within(first).queryByRole('button', { name: 'Do it yourself' })).toBeNull()
   })
 
@@ -682,34 +598,57 @@ describe('LessonScreen against a fake events stream', () => {
     send(hello)
     send(state())
     expect(await screen.findByText(/Lesson complete\./)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Start this lesson over' })).toBeInTheDocument()
     await new Promise((r) => setTimeout(r, 300))
     expect(rpcCalls.some((c) => c.op === 'scenario')).toBe(false)
+    // Start this lesson over: the reset, then a load with reset, whatever
+    // the snapshot shows meanwhile.
+    let reset: unknown = null
+    server.use(
+      http.post('/api/v1/progress/reset', async ({ request }) => {
+        reset = await request.json()
+        return new HttpResponse(null, { status: 204 })
+      }),
+    )
+    await userEvent.click(screen.getByRole('button', { name: 'Start this lesson over' }))
+    await waitFor(() =>
+      expect(rpcCalls).toContainEqual({ op: 'scenario', body: { lessonId: LESSON, reset: true } }),
+    )
+    expect(reset).toEqual({ lessonId: LESSON })
   })
 
   it('when another page loads another lesson, this one offers to load it again', async () => {
     const user = userEvent.setup()
     await openLesson()
     rpcCalls.length = 0
-    send({
-      t: 'step',
-      seq: 60,
-      lessonId: '00-orientation/02-getting-unstuck',
-      stepId: 'prompt',
-      status: 'loaded',
-      index: 0,
-      count: 3,
-    })
+    send(
+      lessonEv(
+        60,
+        'loaded',
+        { ...at(null), lessonId: '00-orientation/02-getting-unstuck', phase: 'active' },
+        'prompt',
+      ),
+    )
     const button = await screen.findByRole('button', { name: 'Load this lesson here' })
     await new Promise((r) => setTimeout(r, 300))
     expect(rpcCalls.some((c) => c.op === 'scenario')).toBe(false)
     await user.click(button)
     await waitFor(() =>
-      expect(rpcCalls).toContainEqual({
-        op: 'scenario',
-        body: { lessonId: LESSON, stepId: 'open' },
-      }),
+      expect(rpcCalls).toContainEqual({ op: 'scenario', body: { lessonId: LESSON } }),
     )
+  })
+
+  it('an incompatible session loads nothing and says how to recover', async () => {
+    renderApp()
+    await waitFor(() => expect(ws.server.clients().length).toBe(1))
+    send({ ...hello, protocol: 1 })
+    send(state())
+    expect(
+      await screen.findByRole('alert', {
+        name: 'This session runs an older version of the playground.',
+      }),
+    ).toHaveTextContent('Restart the stack (make local).')
+    await new Promise((r) => setTimeout(r, 300))
+    expect(rpcCalls.some((c) => c.op === 'scenario')).toBe(false)
   })
 
   it('Rescue calls the rpc and names what was done', async () => {

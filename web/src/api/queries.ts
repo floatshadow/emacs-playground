@@ -108,15 +108,14 @@ export function useProgress(enabled = true) {
 /**
  * POST /progress/reset (api.md §2.4): with a lesson id
  * that lesson's records, without one every record of the user ("Start
- * over", posted with no body). The page then forgets what it remembers of
- * that progress (outcomes, hint levels, habit cards and keys seen) and
- * refetches progress; sessiond drops the active step and says so with a
- * "dropped" step event.
+ * over", posted with no body). The page then forgets its hint levels (and
+ * for everything, its habit cards and keys seen) and refetches progress;
+ * sessiond forgets the lesson and publishes a "dropped" lesson event.
  */
 export async function resetProgress(qc: QueryClient, lessonId?: string): Promise<void> {
   if (lessonId) await api.post<void>(`${APIPrefix}/progress/reset`, { lessonId })
   else await request<void>(`${APIPrefix}/progress/reset`, { method: 'POST' })
-  useSessionStore.getState().forgetProgress(lessonId)
+  if (!lessonId) useSessionStore.getState().forgetProgress()
   useUiStore.getState().clearHintLevels(lessonId)
   await qc.invalidateQueries({ queryKey: qk.progress })
 }
@@ -188,13 +187,14 @@ export function useCheckpoints(enabled = true) {
   })
 }
 
-/** Invalidates progress whenever a step loads, completes or resets. */
+/** Invalidates progress whenever a lesson event says a step loaded, ended, reset or went. */
 export function useProgressInvalidation() {
   const qc = useQueryClient()
   useEffect(
     () =>
       onSessionEvent((ev) => {
-        if (ev.t === 'step') void qc.invalidateQueries({ queryKey: qk.progress })
+        if (ev.t === 'lesson' && ev.change !== 'busy' && ev.change !== 'phase')
+          void qc.invalidateQueries({ queryKey: qk.progress })
       }),
     [qc],
   )

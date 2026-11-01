@@ -12,6 +12,7 @@ export function Steps({
   label,
   flash,
   hintsOff,
+  collapse,
 }: {
   views: StepView[]
   onHint(view: StepView): void
@@ -22,6 +23,8 @@ export function Steps({
   flash?: string | null
   /** The project lap: hints and demos are hidden (sessiond refuses them). */
   hintsOff?: boolean
+  /** Steps other than the active one show their goal until clicked. */
+  collapse?: boolean
 }) {
   const { t } = useTranslation()
   return (
@@ -35,6 +38,7 @@ export function Steps({
           {...(onGoTo ? { onGoTo } : {})}
           {...(showDetails ? { showDetails } : {})}
           {...(hintsOff ? { hintsOff } : {})}
+          {...(collapse ? { collapse } : {})}
         />
       ))}
     </ol>

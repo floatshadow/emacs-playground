@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { record, type Recorder } from '../test/recorder'
 import { selectNudges } from '../store/selectors'
 import { initialSessionData, reduce, type SessionData } from '../store/session'
-import type { Event } from '../protocol.gen'
+import type { Event, LessonSnapshot } from '../protocol.gen'
 import { proseKeys } from './mentions'
 import { patternNudges } from './patterns'
 import type { TickerEntry } from './ticker'
@@ -10,6 +10,16 @@ import { calmState } from './fixtures'
 
 let rec: Recorder | null = null
 afterEach(() => rec?.dispose())
+
+/** A lesson snapshot with stepId of lessonId active. */
+const snapAt = (lessonId: string, stepId: string): LessonSnapshot => ({
+  rev: 1,
+  lessonId,
+  step: { id: stepId, index: 0, count: 1 },
+  phase: 'active',
+  attempt: 1,
+  outcomes: {},
+})
 
 const ids = (s: SessionData, now: number) => selectNudges(s, now).map((n) => n.id)
 
@@ -143,7 +153,7 @@ describe('habit cards (layer 2)', () => {
     // 1.4 teaches C-s: no "C-s is not save".
     let s: SessionData = {
       ...initialSessionData(),
-      activeStep: { lessonId: 'L', stepId: 'a' },
+      lesson: snapAt('L', 'a'),
       mentions: { lessonId: 'L', lesson: ['C-s', 'C-r'], steps: {} },
     }
     s = reduce(s, cs, 1000)
@@ -167,12 +177,12 @@ describe('habit cards (layer 2)', () => {
     const mentions = { lessonId: 'L', lesson: [], steps: { a: ['C-b'] } }
     let s: SessionData = {
       ...initialSessionData(),
-      activeStep: { lessonId: 'L', stepId: 'a' },
+      lesson: snapAt('L', 'a'),
       mentions,
     }
     s = reduce(s, cb, 1000)
     expect(s.cards).toEqual([])
-    s = { ...s, activeStep: { lessonId: 'L', stepId: 'b' } }
+    s = { ...s, lesson: snapAt('L', 'b') }
     s = reduce(s, cb, 2000)
     expect(s.cards.map((c) => c.id)).toEqual(['habit:C-b'])
   })
@@ -189,7 +199,7 @@ describe('habit cards (layer 2)', () => {
     const detail = '`C-x p c`, clear the offered command (`C-a C-k`), type `sh build.sh`, `RET`.'
     let s: SessionData = {
       ...initialSessionData(),
-      activeStep: { lessonId: 'L', stepId: 'build' },
+      lesson: snapAt('L', 'build'),
       mentions: { lessonId: 'L', lesson: [], steps: { build: proseKeys(detail) } },
     }
     s = reduce(s, key('C-a', 'move-beginning-of-line'), 1000)

@@ -3,7 +3,7 @@
  * top bar, the rescue card and the overlays. Toasts name what was done.
  */
 import { rpc } from '../../api/session/rpc'
-import { useSessionStore } from '../../store/session'
+import { activeStep, useSessionStore } from '../../store/session'
 import { toast, useUiStore } from '../../store/ui'
 import i18n from '../../i18n'
 import { cancelDemo } from '../lesson/demoPlayer'
@@ -36,7 +36,7 @@ export async function doRescue(): Promise<void> {
  * "Reset this step" in api.md §3.4: it also clears a demo latch.
  */
 export async function doResetStep(): Promise<void> {
-  const step = useSessionStore.getState().activeStep
+  const step = activeStep(useSessionStore.getState())
   if (!step) {
     toast(i18n.t('rescue.noStep'))
     return

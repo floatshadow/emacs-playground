@@ -1,5 +1,5 @@
 // Acceptance checks for the UX contracts (frontend.md, api.md §4.1): one check
-// per contract, under a stable id (B1..B18, L1, X3, X11, S1..S5, R1, R9, R10;
+// per contract, under a stable id (B1..B18, L1..L3, K1, K2, X3, X11, S1..S6, R1, R9, R10;
 // `PG_REVIEW_ONLY` takes them). Each check
 // drives the running local stack (http://127.0.0.1:8080) through headless
 // Chrome on CDP :9222 and asserts the expected behaviour.
@@ -94,12 +94,21 @@ const text = (v) => (typeof v === 'string' ? v : (v?.en ?? ''))
 
 // --- Browser --------------------------------------------------------------
 
+/** Shows the steps: an unstarted lesson opens in Read, its steps are in Do. */
+async function showDo(page) {
+  const b = page.getByRole('button', { name: /^Do \d+\/\d+$/ })
+  await b.waitFor({ timeout: 30000 })
+  if ((await b.getAttribute('aria-pressed')) !== 'true') await b.click()
+}
+
 /** A fresh context and page with /events and /pty frames recorded. */
 async function freshPage(viewport = { width: 1600, height: 1000 }) {
   const context = await browser.newContext({ viewport })
   const page = await context.newPage()
   const events = []
   const resizes = []
+  // Everything the page sends on /pty: terminal input as hex, controls as text.
+  const ptySent = []
   page.on('websocket', (ws) => {
     if (/\/events/.test(ws.url())) {
       ws.on('framereceived', (f) => {
@@ -116,6 +125,10 @@ async function freshPage(viewport = { width: 1600, height: 1000 }) {
       ws.on('framesent', (f) => {
         if (typeof f.payload === 'string' && f.payload.includes('"resize"'))
           resizes.push({ at: Date.now(), payload: f.payload })
+        ptySent.push({
+          at: Date.now(),
+          data: typeof f.payload === 'string' ? f.payload : Buffer.from(f.payload).toString('hex'),
+        })
       })
     }
   })
@@ -124,6 +137,7 @@ async function freshPage(viewport = { width: 1600, height: 1000 }) {
     page,
     events,
     resizes,
+    ptySent,
     since: (t, pred = () => true) => events.filter((e) => e._at >= t && pred(e)),
     async waitEvent(t, pred, timeout, what) {
       const until = Date.now() + timeout
@@ -195,6 +209,7 @@ async function freshPage(viewport = { width: 1600, height: 1000 }) {
       await pageLoad()
       await page.goto(`${url}/lesson/${lessonId}`, { waitUntil: 'load' })
       await page.locator('.pg-terminal .xterm-screen').waitFor({ timeout: 30000 })
+      await showDo(page)
       await page
         .getByText('Loading the lesson into Emacs…')
         .waitFor({ state: 'detached', timeout: 60000 })
@@ -396,7 +411,7 @@ await check(
     const dem = await h
       .waitEvent(
         t,
-        (e) => e.t === 'step' && e.stepId === first.id && /demonstrated|complete/.test(e.status),
+        (e) => e.t === 'lesson' && e.stepId === first.id && /demonstrated|complete/.test(e.change),
         45000,
         'demonstrated event for ' + first.id,
       )
@@ -404,14 +419,14 @@ await check(
         const c = h.since(t, (x) => x.t === 'check').at(-1)
         throw new Error(`${e.message}; last check ${JSON.stringify(c?.conditions)}`)
       })
-    note(`(a) Watch it from /work/hello/src/main.rs -> step ${dem.status}`)
-    assert(dem.status === 'demonstrated', 'the demo completed the step as done')
+    note(`(a) Watch it from /work/hello/src/main.rs -> step ${dem.change}`)
+    assert(dem.change === 'demonstrated', 'the demo completed the step as done')
     t = Date.now()
     await h
       .active()
       .getByRole('button', { name: /Do it yourself/ })
       .click()
-    await h.waitEvent(t, (e) => e.t === 'step' && e.status === 'reset', 15000, 'reset event')
+    await h.waitEvent(t, (e) => e.t === 'lesson' && e.change === 'reset', 15000, 'reset event')
     await sleep(800)
     await h.focus()
     await h.press(['Control+x', 'Control+f', 'Control+a', 'Control+k'], 200)
@@ -422,7 +437,7 @@ await check(
     const dlg = h.page.getByRole('dialog')
     if (await dlg.isVisible().catch(() => false))
       await dlg.getByRole('button', { name: /^Reset/ }).click()
-    await h.waitEvent(t, (e) => e.t === 'step' && e.status === 'reset', 15000, 'reset event')
+    await h.waitEvent(t, (e) => e.t === 'lesson' && e.change === 'reset', 15000, 'reset event')
     await sleep(2500)
     const st = h.lastState(t)
     note(`(b) after Reset: file=${st?.file} windows=${st?.windows?.map((w) => w.buf).join(',')}`)
@@ -434,7 +449,7 @@ await check(
     assert(r.status === 200, 'rpc scenario switch: ' + JSON.stringify(r.body))
     await h.waitEvent(
       t,
-      (e) => e.t === 'step' && e.stepId === 'switch' && e.status === 'loaded',
+      (e) => e.t === 'lesson' && e.stepId === 'switch' && e.change === 'loaded',
       90000,
       'loaded event for switch',
     )
@@ -444,7 +459,7 @@ await check(
     const done = await h
       .waitEvent(
         t2,
-        (e) => e.t === 'step' && e.stepId === 'switch' && e.status === 'complete',
+        (e) => e.t === 'lesson' && e.stepId === 'switch' && e.change === 'complete',
         15000,
         'complete event for switch',
       )
@@ -452,7 +467,7 @@ await check(
         const c = h.since(t2, (x) => x.t === 'check').at(-1)
         throw new Error(`${e.message}; last check ${JSON.stringify(c?.conditions)}`)
       })
-    note(`(c) Go to step "switch", then its demo -> ${done.status}`)
+    note(`(c) Go to step "switch", then its demo -> ${done.change}`)
   },
 )
 
@@ -463,7 +478,7 @@ await check('B3', '3.1 step 2 with the learner’s own comment', async (h, note)
   await h.press(['Control+x', '2'], 300)
   await h.waitEvent(
     t,
-    (e) => e.t === 'step' && e.stepId === 'split' && e.status === 'complete',
+    (e) => e.t === 'lesson' && e.stepId === 'split' && e.change === 'complete',
     5000,
     'split complete',
   )
@@ -474,7 +489,7 @@ await check('B3', '3.1 step 2 with the learner’s own comment', async (h, note)
   const ev = await h
     .waitEvent(
       t,
-      (e) => e.t === 'step' && e.stepId === 'edit' && e.status === 'complete',
+      (e) => e.t === 'lesson' && e.stepId === 'edit' && e.change === 'complete',
       6000,
       'edit complete',
     )
@@ -482,7 +497,7 @@ await check('B3', '3.1 step 2 with the learner’s own comment', async (h, note)
       const c = h.since(t, (x) => x.t === 'check' && x.stepId === 'edit').at(-1)
       throw new Error(`${e.message}; last check ${JSON.stringify(c?.conditions)}`)
     })
-  note(`edit -> ${ev.status}`)
+  note(`edit -> ${ev.change}`)
 })
 
 await check('B4', 'no stale ESC prefix after ESC ESC ESC', async (h, note) => {
@@ -595,15 +610,15 @@ await check('B6', 'Watch it demonstrates; Do it yourself', async (h, note) => {
   note(`caption while playing: ${JSON.stringify(caption.slice(0, 80))}`)
   const dem = await h.waitEvent(
     t,
-    (e) => e.t === 'step' && e.stepId === 'search' && /demonstrated|complete/.test(e.status),
+    (e) => e.t === 'lesson' && e.stepId === 'search' && /demonstrated|complete/.test(e.change),
     20000,
     'step event for search',
   )
   await sleep(500)
   const keys = h.since(t, (e) => e.t === 'key')
   const span = keys.length ? keys.at(-1)._at - keys[0]._at : 0
-  note(`step ${dem.status}; demo keys span ${span} ms (${keys.map((k) => k.keys).join(' ')})`)
-  assert(dem.status === 'demonstrated', 'Watch it completed the step')
+  note(`step ${dem.change}; demo keys span ${span} ms (${keys.map((k) => k.keys).join(' ')})`)
+  assert(dem.change === 'demonstrated', 'Watch it completed the step')
   assert(span >= 3000, 'the demo is not at human pace (600 ms per chord, 120 per character)')
   assert(/C-s/.test(caption), 'no running caption with the keys')
   assert(
@@ -615,7 +630,7 @@ await check('B6', 'Watch it demonstrates; Do it yourself', async (h, note) => {
     .active()
     .getByRole('button', { name: /Do it yourself/ })
     .click()
-  await h.waitEvent(t, (e) => e.t === 'step' && e.status === 'reset', 15000, 'reset event')
+  await h.waitEvent(t, (e) => e.t === 'lesson' && e.change === 'reset', 15000, 'reset event')
   await sleep(800)
   await h.focus()
   t = Date.now()
@@ -624,7 +639,7 @@ await check('B6', 'Watch it demonstrates; Do it yourself', async (h, note) => {
   await h.press(['Control+g', 'Control+g'], 500)
   await h.waitEvent(
     t,
-    (e) => e.t === 'step' && e.stepId === 'search' && e.status === 'complete',
+    (e) => e.t === 'lesson' && e.stepId === 'search' && e.change === 'complete',
     6000,
     'complete by the learner',
   )
@@ -648,7 +663,7 @@ await check('B7', 'no terminal resize while a demo plays', async (h, note) => {
   await h
     .waitEvent(
       t,
-      (e) => e.t === 'step' && /demonstrated|complete/.test(e.status),
+      (e) => e.t === 'lesson' && /demonstrated|complete/.test(e.change),
       45000,
       'end of demo',
     )
@@ -999,7 +1014,7 @@ await check('B17', '0.2 buffer-list step text and ibuffer', async (h, note) => {
   await h.press(['q'], 300)
   await h.waitEvent(
     t,
-    (e) => e.t === 'step' && e.stepId === 'buffer-list' && e.status === 'complete',
+    (e) => e.t === 'lesson' && e.stepId === 'buffer-list' && e.change === 'complete',
     4000,
     'buffer-list complete',
   )
@@ -1022,7 +1037,7 @@ await check('B18', 'help menu condition before the second key', async (h, note) 
   await h.press(['b'], 300)
   await h.waitEvent(
     t,
-    (e) => e.t === 'step' && e.stepId === 'menu' && e.status === 'complete',
+    (e) => e.t === 'lesson' && e.stepId === 'menu' && e.change === 'complete',
     4000,
     'menu complete',
   )
@@ -1079,7 +1094,7 @@ await check('X11', '2.7 compile needs the learner’s own build', async (h, note
       .map((r) => `${r.id}:${r.ok ? 'Y' : 'n'}`)
       .join(' ')
   const completed = (t) =>
-    h.since(t, (e) => e.t === 'step' && e.stepId === 'compile' && e.status === 'complete').length
+    h.since(t, (e) => e.t === 'lesson' && e.stepId === 'compile' && e.change === 'complete').length
   // An earlier build (lesson 3.5 builds the same crate) leaves *compilation*.
   await h.load(L35, 'build')
   await h.focus()
@@ -1087,7 +1102,7 @@ await check('X11', '2.7 compile needs the learner’s own build', async (h, note
   await playDemo((await steps(L35))[0].demo)
   await h.waitEvent(
     t,
-    (e) => e.t === 'step' && e.stepId === 'build' && e.status === 'complete',
+    (e) => e.t === 'lesson' && e.stepId === 'build' && e.change === 'complete',
     15000,
     '3.5 build complete',
   )
@@ -1107,7 +1122,7 @@ await check('X11', '2.7 compile needs the learner’s own build', async (h, note
     .click()
   await h.waitEvent(
     t,
-    (e) => e.t === 'step' && e.stepId === 'compile' && /demonstrated|complete/.test(e.status),
+    (e) => e.t === 'lesson' && e.stepId === 'compile' && /demonstrated|complete/.test(e.change),
     40000,
     'end of the demo',
   )
@@ -1117,7 +1132,7 @@ await check('X11', '2.7 compile needs the learner’s own build', async (h, note
     .active()
     .getByRole('button', { name: /Do it yourself/ })
     .click()
-  await h.waitEvent(t, (e) => e.t === 'step' && e.status === 'reset', 15000, 'reset event')
+  await h.waitEvent(t, (e) => e.t === 'lesson' && e.change === 'reset', 15000, 'reset event')
   await sleep(1000)
   await h.focus()
   t = Date.now()
@@ -1134,7 +1149,7 @@ await check('X11', '2.7 compile needs the learner’s own build', async (h, note
   await h.press(['Enter'], 300)
   await h.waitEvent(
     t,
-    (e) => e.t === 'step' && e.stepId === 'compile' && e.status === 'complete',
+    (e) => e.t === 'lesson' && e.stepId === 'compile' && e.change === 'complete',
     15000,
     'compile complete after the learner’s build',
   )
@@ -1173,13 +1188,13 @@ await check('S2', 'Skip this step behind I’m stuck', async (h, note) => {
   await skip.click()
   await h.waitEvent(
     t,
-    (e) => e.t === 'step' && e.stepId === first.id && e.status === 'skipped',
+    (e) => e.t === 'lesson' && e.stepId === first.id && e.change === 'skipped',
     60000,
     'skipped event',
   )
   await h.waitEvent(
     t,
-    (e) => e.t === 'step' && e.stepId === all[1].id && e.status === 'loaded',
+    (e) => e.t === 'lesson' && e.stepId === all[1].id && e.change === 'loaded',
     15000,
     'next step loaded',
   )
@@ -1266,6 +1281,7 @@ await check('R9', 'the ticker belongs to the lesson', async (h, note) => {
   await rpc('scenario', { lessonId: L02, reset: true })
   await h.page.getByRole('link', { name: 'Course' }).first().click()
   await h.page.locator(`a[href="/lesson/${L02}"]`).first().click()
+  await showDo(h.page)
   await h.page.locator('li[aria-current="step"]').first().waitFor({ timeout: 30000 })
   await sleep(1500)
   const after = await h.ticker()
@@ -1288,10 +1304,211 @@ await check('R10', 'Reset this step asks first', async (h, note) => {
     .catch(() => false)
   if (shown) await dlg.getByRole('button', { name: 'Cancel' }).click()
   await sleep(1500)
-  const resets = h.since(t, (e) => e.t === 'step' && e.status === 'reset').length
+  const resets = h.since(t, (e) => e.t === 'lesson' && e.change === 'reset').length
   note(`confirmation dialog: ${shown}; reset events: ${resets}`)
   assert(shown, 'Reset this step does not ask for confirmation')
   assert(resets === 0, 'Cancel still reset the step')
+})
+
+await check(
+  'L2',
+  'the lesson pane width is resizable and survives a reload; focus mode shows the stage',
+  async (h, note) => {
+    await h.load(L01)
+    const pane = () =>
+      h.page.evaluate(() =>
+        Math.round(document.getElementById('lesson-pane')?.getBoundingClientRect().width ?? 0),
+      )
+    const before = await pane()
+    const sep = h.page.getByRole('separator', { name: /Resize the lesson pane/ })
+    await sep.focus()
+    await h.press(['ArrowRight', 'ArrowRight', 'ArrowRight'], 150)
+    await sleep(500)
+    const wider = await pane()
+    await pageLoad()
+    await h.page.reload({ waitUntil: 'load' })
+    await h.page.locator('.pg-terminal .xterm-screen').waitFor({ timeout: 30000 })
+    await sleep(1500)
+    const reloaded = await pane()
+    note(`pane ${before} px, after 3 x ArrowRight ${wider} px, after a reload ${reloaded} px`)
+    assert(wider >= before + 60, 'the arrow keys did not widen the pane')
+    assert(Math.abs(reloaded - wider) <= 2, 'the width did not survive the reload')
+    await sep.focus()
+    await h.press(['Home'], 300)
+    for (const [width, height] of [
+      [1600, 900],
+      [1300, 760],
+    ]) {
+      await h.page.setViewportSize({ width, height })
+      await sleep(800)
+      await h.page.getByRole('button', { name: 'Focus mode' }).first().click()
+      await sleep(1500)
+      const stage = await h.page.evaluate(() => {
+        const r = document.querySelector('main.stage')?.getBoundingClientRect()
+        return r ? Math.round(r.width) : 0
+      })
+      const lessonShown = await h.page
+        .locator('aside h1')
+        .first()
+        .isVisible()
+        .catch(() => false)
+      const sepShown = await sep.isVisible().catch(() => false)
+      note(
+        `${width}x${height} focus mode: stage ${stage} px, lesson pane ${lessonShown}, splitter ${sepShown}`,
+      )
+      assert(
+        stage >= width - 40 && !lessonShown && !sepShown,
+        `focus mode does not show only the stage at ${width} px`,
+      )
+      await h.page
+        .getByRole('button', { name: /Leave focus mode|Focus mode/ })
+        .first()
+        .click()
+      await sleep(1000)
+    }
+  },
+)
+
+await check('L3', 'Read and Do: a completion while reading keeps the view', async (h, note) => {
+  await h.load(L01)
+  const read = h.page.getByRole('button', { name: 'Read', exact: true })
+  await read.click()
+  await sleep(500)
+  const prose = h.page.locator('#lesson-pane')
+  const top = await prose.evaluate((el) => el.scrollTop)
+  const first = (await steps(L01))[0]
+  const t = Date.now()
+  await playDemo(first.demo)
+  await h.waitEvent(
+    t,
+    (e) => e.t === 'lesson' && e.stepId === first.id && e.change === 'complete',
+    20000,
+    'complete event',
+  )
+  await sleep(1500)
+  const pressed = await read.getAttribute('aria-pressed')
+  const after = await prose.evaluate((el) => el.scrollTop)
+  const label = await h.page.getByRole('button', { name: /^Do \d+\/\d+$/ }).innerText()
+  const announced = await h.page.getByText(`Step done: ${text(first.goal)}`).count()
+  note(
+    `Read pressed ${pressed}; scrollTop ${top} -> ${after}; Do label "${label}"; announced ${announced}`,
+  )
+  assert(pressed === 'true', 'the completion switched the view to Do')
+  assert(after === top, 'the completion scrolled the reading view')
+  assert(/^Do 2\//.test(label), 'the Do label does not count the next step')
+  await h.page.getByRole('button', { name: /^Do \d+\/\d+$/ }).click()
+  const expanded = await h.page.locator('li[aria-current="step"] ul:visible').count()
+  const folded = await h.page.locator('li:not([aria-current]) > div > ul[hidden]').count()
+  note(`Do: the active step's conditions shown ${expanded}, other steps folded ${folded}`)
+  assert(expanded >= 1 && folded >= 1, 'Do does not show one expanded step')
+})
+
+/** Pages through tour.md with real keys (K1) at the current viewport. */
+async function pageThrough(h, note, label) {
+  const keyCmds = (t) => h.since(t, (e) => e.t === 'key').map((e) => e.cmd)
+  const sent = (t) =>
+    h.ptySent.filter((f) => f.at >= t && !f.data.startsWith('{')).map((f) => f.data)
+  await h.focus()
+  const focus = await h.page.evaluate(() => {
+    const a = document.activeElement
+    return `${a?.tagName.toLowerCase()}.${a?.className}`.slice(0, 60)
+  })
+  for (const key of ['Control+v', 'Control+v', 'Alt+v']) {
+    const before = (await h.screen()).join('\n')
+    const t = Date.now()
+    await h.page.keyboard.press(key)
+    await sleep(900)
+    const after = (await h.screen()).join('\n')
+    note(
+      `${label} ${key}: focus ${focus}; sent ${sent(t).join(' ')}; commands ${keyCmds(t).join(' ')}; screen moved ${before !== after}`,
+    )
+    const want = key === 'Alt+v' ? 'scroll-down-command' : 'scroll-up-command'
+    assert(keyCmds(t).includes(want), `${label}: ${key} did not run ${want}`)
+    assert(before !== after, `${label}: ${key} did not move the view`)
+  }
+}
+
+await check(
+  'K1',
+  'C-v and M-v page through the tour with real keys',
+  Object.assign(
+    async (h, note) => {
+      await h.load(L11, 'page')
+      await playDemo('C-x b ~200 "tour.md" RET ~600')
+      await pageThrough(h, note, '1600x900')
+      await playDemo('M-< ~400')
+      await h.page.setViewportSize({ width: 1300, height: 760 })
+      await sleep(1500)
+      const size = await h.headerSize()
+      await pageThrough(h, note, `1300x760 (${size?.label})`)
+    },
+    { viewport: { width: 1600, height: 900 } },
+  ),
+)
+
+await check('K2', 'keys typed in the lesson prose stay with the page', async (h, note) => {
+  await h.load(L11, 'page')
+  await h.page.locator('#lesson-pane h1').click()
+  const t = Date.now()
+  await h.page.keyboard.press('Control+v')
+  await sleep(1000)
+  const focus = await h.page.evaluate(
+    () => document.activeElement?.closest('.pg-terminal') !== null,
+  )
+  const sent = h.ptySent.filter((f) => f.at >= t && !f.data.startsWith('{')).length
+  const keys = h.since(t, (e) => e.t === 'key').length
+  note(
+    `after a click in the prose, Control+v: focus in the terminal ${focus}; pty frames ${sent}; key events ${keys}`,
+  )
+  assert(!focus && sent === 0 && keys === 0, 'Control+v in the prose reached Emacs')
+})
+
+await check('S6', 'the cursor and the region are visible', async (h, note) => {
+  await h.load(L11)
+  await h.focus()
+  await h.press(['Control+Space', 'Control+n', 'Control+n'], 300)
+  await sleep(800)
+  const hits = await h.page.evaluate(() => {
+    const bg = window.__pgScreenCellBg
+    const out = []
+    for (let r = 0; r < 40 && typeof bg === 'function'; r++)
+      for (let c = 0; c < 30; c++) if (bg(r, c) === '#00808f') out.push([r, c])
+    return out
+  })
+  note(
+    `cells in the region colour #00808f: ${hits.length}${hits[0] ? ' from ' + hits[0].join(',') : ''}`,
+  )
+  assert(hits.length > 0, 'no cell shows the region colour')
+  const term = h.page.locator('.pg-terminal').first()
+  // Only the cursor's cell is compared (xterm.js keeps its helper textarea
+  // on it): Emacs redraws elsewhere on its own (eldoc, the echo area).
+  const shots = async (name) => {
+    await term.screenshot({ path: join(out, `S6-${name}.png`) })
+    const clip = await h.page
+      .locator('.pg-terminal .xterm-helper-textarea')
+      .evaluate((e) => e.getBoundingClientRect().toJSON())
+    const a = await h.page.screenshot({ clip })
+    for (let i = 0; i < 4; i++) {
+      await sleep(350)
+      if (!a.equals(await h.page.screenshot({ clip }))) return true
+    }
+    return false
+  }
+  const focusedChanges = await shots('focused')
+  await h.page.locator('#lesson-pane h1').click()
+  await sleep(500)
+  const unfocusedChanges = await shots('unfocused')
+  note(
+    `the cursor cell changes within 1.4 s: focused ${focusedChanges}, unfocused ${unfocusedChanges} (a steady block)`,
+  )
+  assert(focusedChanges, 'the focused cursor does not blink')
+  assert(!unfocusedChanges, 'the cursor still blinks without focus')
+  await rpc('mode', { mode: 'gui' })
+  await sleep(9000)
+  await playDemo('C-g C-SPC C-n C-n ~800')
+  await h.page.screenshot({ path: join(out, 'S6-gui.png') })
+  await rpc('mode', { mode: 'terminal' })
+  await sleep(2000)
 })
 
 await check(

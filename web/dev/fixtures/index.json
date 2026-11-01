@@ -959,7 +959,7 @@
         {
           "id": "13-making-it-yours/07-key-menus",
           "n": "13.5",
-          "title": "Key menus with hydra",
+          "title": "Key menus with transient",
           "minutes": 15,
           "vscode": "Command Palette categories, Ctrl+K chords",
           "status": "planned",

@@ -6,7 +6,7 @@
 import type {
   CheckEvent,
   LessonProgress,
-  ProgressStatus,
+  LessonSnapshot,
   Scenario,
   State,
   Step,
@@ -17,7 +17,7 @@ import type { Nudge } from '../advice/habits'
 import { mentionedNow } from '../advice/mentions'
 import { mergeNudges, patternNudges } from '../advice/patterns'
 import { lt } from '../lib/localtext'
-import type { SessionData, StepOutcome } from './session'
+import { activeStep, type SessionData } from './session'
 
 /** Memoises a function on the identity of its arguments (last call only). */
 export function memoLast<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) => R {
@@ -79,7 +79,7 @@ export function selectNudges(
     | 'state'
     | 'minibufferSince'
     | 'mentions'
-    | 'activeStep'
+    | 'lesson'
   >,
   now: number,
 ): Nudge[] {
@@ -88,7 +88,7 @@ export function selectNudges(
     state: s.state,
     minibufferSince: s.minibufferSince,
     now,
-    mentioned: mentionedNow(s.mentions, s.activeStep),
+    mentioned: mentionedNow(s.mentions, activeStep(s)),
   })
   return mergeNudges([patterns, [...s.serverNudges].reverse(), [...s.cards].reverse()], s.dismissed)
 }
@@ -131,16 +131,10 @@ export interface StepView {
 export interface StepsInput {
   scenario: Scenario
   lessonId: string
-  /** Active step id when the active step belongs to this lesson. */
-  activeStepId: string | null
-  /** This visit's outcomes for the lesson's steps (session store `outcomes`). */
-  outcomes: Readonly<Record<string, StepOutcome>>
+  /** sessiond's lesson snapshot (session store `lesson`). */
+  lesson: LessonSnapshot | null
   /** The lesson's saved progress, if any. */
   progress: LessonProgress | undefined
-  /** The active step was watched (session store `watched`). */
-  watched?: boolean
-  /** The active step was loaded or reset while this page listened (session store `startedHere`). */
-  startedHere?: boolean
   checks: Record<string, CheckEvent>
   hintLevels: Record<string, number>
   locale: string
@@ -152,39 +146,50 @@ export function condId(stepId: string, index: number, explicit?: string): string
   return explicit ?? `${stepId}/${index + 1}`
 }
 
-/** A saved progress status as a step outcome, if it is one. */
-function savedOutcome(s: ProgressStatus | undefined): StepOutcome | undefined {
-  return s === 'done' || s === 'demonstrated' || s === 'skipped' ? s : undefined
-}
-
 /**
- * The status of each step: the engine's active step is always active,
- * whatever progress says; steps after it show no tick (they are evaluated
- * again when reached); other steps show this visit's outcome, else their
- * saved status when it is done, demonstrated or skipped, else to do.
+ * The status of each step. While the snapshot shows this lesson it says
+ * everything: its step is active, steps after it show no tick (they are
+ * evaluated again when reached), the others show their saved outcome.
+ * Otherwise the saved progress does.
  */
 export function stepStatuses(
   scenario: Scenario,
-  activeStepId: string | null,
-  outcomes: Readonly<Record<string, StepOutcome>>,
+  lesson: LessonSnapshot | null,
   progress: LessonProgress | undefined,
 ): StepStatus[] {
-  const activeIndex = activeStepId ? scenario.steps.findIndex((s) => s.id === activeStepId) : -1
+  const live = lesson?.lessonId === scenario.id ? lesson : null
+  const activeIndex = live?.step ? scenario.steps.findIndex((s) => s.id === live.step?.id) : -1
   return scenario.steps.map((step, index) => {
-    if (index === activeIndex) {
-      // The last step stays the active one after it completes (the lesson
-      // is complete); only an ending seen in this visit shows over it.
-      const o = outcomes[step.id]
-      return o === 'done' || o === 'skipped' ? o : 'active'
-    }
+    if (index === activeIndex) return 'active'
     if (activeIndex >= 0 && index > activeIndex) return 'todo'
-    return outcomes[step.id] ?? savedOutcome(progress?.steps?.[step.id]?.status) ?? 'todo'
+    const o = live ? live.outcomes[step.id] : progress?.steps?.[step.id]?.status
+    return o === 'done' || o === 'demonstrated' || o === 'skipped' ? o : 'todo'
   })
 }
 
+/**
+ * The lesson is complete: the snapshot says so while it shows the lesson,
+ * else every step is done or skipped in the saved progress.
+ */
+export function lessonComplete(
+  scenario: Scenario,
+  lesson: LessonSnapshot | null,
+  progress: LessonProgress | undefined,
+): boolean {
+  if (lesson?.lessonId === scenario.id) return lesson.phase === 'complete'
+  return (
+    scenario.steps.length > 0 &&
+    scenario.steps.every((s) => {
+      const st = progress?.steps?.[s.id]?.status
+      return st === 'done' || st === 'skipped'
+    })
+  )
+}
+
 export function selectStepView(inp: StepsInput): StepView[] {
-  const { scenario, activeStepId, outcomes, progress, checks, hintLevels, locale, lessonId } = inp
-  const statuses = stepStatuses(scenario, activeStepId, outcomes, progress)
+  const { scenario, lesson, progress, checks, hintLevels, locale, lessonId } = inp
+  const statuses = stepStatuses(scenario, lesson, progress)
+  const watching = lesson?.lessonId === scenario.id && lesson.phase === 'watching'
   return scenario.steps.map((step, index) => {
     const status: StepStatus = statuses[index] ?? 'todo'
     // Only the active step's latest check is current; others may be stale.
@@ -211,18 +216,11 @@ export function selectStepView(inp: StepsInput): StepView[] {
       status === 'active' && hintLevel > 0 && unmet
         ? { forText: unmet.text, text: unmet.hint }
         : null
-    // A step that was demonstrated before this page opened (a reload) and
-    // has not started again since is still latched in sessiond: it offers
-    // "Do it yourself" like a step watched in this visit.
-    const watchedBefore =
-      !inp.startedHere &&
-      outcomes[step.id] === undefined &&
-      progress?.steps?.[step.id]?.status === 'demonstrated'
     return {
       step,
       index,
       status,
-      watched: status === 'active' && (!!inp.watched || watchedBefore),
+      watched: status === 'active' && watching,
       goal: lt(step.goal, locale),
       detail: lt(step.detail, locale),
       conds,
@@ -231,21 +229,4 @@ export function selectStepView(inp: StepsInput): StepView[] {
       hint,
     }
   })
-}
-
-/**
- * Where to resume a lesson (sessiond's session core agrees): the
- * first step that is neither done nor skipped, by this visit's outcome or
- * else the saved status. A demonstrated step is resumed, so the learner
- * practises what they watched.
- */
-export function resumeStep(
-  scenario: Scenario,
-  outcomes: Readonly<Record<string, StepOutcome>>,
-  progress: LessonProgress | undefined,
-): string | undefined {
-  return scenario.steps.find((s) => {
-    const o = outcomes[s.id] ?? savedOutcome(progress?.steps?.[s.id]?.status)
-    return o !== 'done' && o !== 'skipped'
-  })?.id
 }

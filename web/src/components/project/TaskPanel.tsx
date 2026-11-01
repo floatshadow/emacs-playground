@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { LapStats, LessonBundle } from '../../protocol.gen'
 import { useProgress } from '../../api/queries'
-import { useSessionStore } from '../../store/session'
+import { activeStep, useSessionStore } from '../../store/session'
 import { Markdown } from '../lesson/Markdown'
 import { Steps } from '../lesson/Steps'
 import type { LessonSteps, ScenarioLoad } from '../lesson/useLesson'
@@ -56,11 +56,12 @@ function LapPanel({
   stats: LapStats | undefined
 }) {
   const { t } = useTranslation()
-  const lap = useSessionStore((s) => (s.lap?.lessonId === lessonId ? s.lap : null))
+  const lap = useSessionStore((s) => (s.lesson?.lap?.lessonId === lessonId ? s.lesson.lap : null))
   const done = useSessionStore((s) => (s.lapDone?.lessonId === lessonId ? s.lapDone : null))
-  const activeStep = useSessionStore((s) =>
-    s.activeStep?.lessonId === lessonId ? s.activeStep.stepId : undefined,
-  )
+  const activeStepId = useSessionStore((s) => {
+    const a = activeStep(s)
+    return a?.lessonId === lessonId ? a.stepId : undefined
+  })
   const [busy, setBusy] = useState(false)
   const now = useNow(!!lap)
   const run = (f: () => Promise<void>) => {
@@ -84,9 +85,9 @@ function LapPanel({
         <Button
           size="small"
           variant="quiet"
-          disabled={busy || !activeStep}
+          disabled={busy || !activeStepId}
           title={t('project.lapStopTitle')}
-          onClick={() => activeStep && run(() => stopLap(lessonId, activeStep))}
+          onClick={() => activeStepId && run(() => stopLap(lessonId, activeStepId))}
         >
           {t('project.lapStop')}
         </Button>
@@ -151,10 +152,10 @@ export function TaskPanel({
 }) {
   const { t } = useTranslation()
   const lessonId = bundle.id
-  const lapOn = useSessionStore((s) => s.lap?.lessonId === lessonId)
+  const lapOn = useSessionStore((s) => s.lesson?.lap?.lessonId === lessonId)
   const progress = useProgress()
   const saved = progress.data?.lessons?.[lessonId]
-  const p = projectProgress(steps.views, steps.activeIndex, steps.complete, saved, lapOn)
+  const p = projectProgress(steps.views, steps.activeIndex, steps.complete, lapOn)
   const n = steps.views.length
   const i = steps.activeIndex
   const active = i >= 0 ? steps.views[i] : undefined
@@ -180,7 +181,7 @@ export function TaskPanel({
       {load.displaced && !load.loading && (
         <div className={lessonStyles.notice} role="status">
           <p>{t('lesson.displaced')}</p>
-          <Button size="small" variant="primary" onClick={load.loadHere}>
+          <Button size="small" variant="primary" onClick={() => load.loadHere()}>
             {t('lesson.loadHere')}
           </Button>
         </div>
@@ -192,6 +193,7 @@ export function TaskPanel({
         // Another load ends the lap: no "Go to this task" while it runs.
         {...(lapOn ? { hintsOff: true } : { onGoTo: steps.onGoTo })}
         label={t('project.tasks')}
+        collapse
       />
       {p.finished && (
         <div className={lessonStyles.doneAll} role="status">

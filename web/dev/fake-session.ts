@@ -25,15 +25,19 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { dirname, extname, join, normalize, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CurriculumFormat } from '../src/protocol.gen.ts'
+import { CurriculumFormat, Version } from '../src/protocol.gen.ts'
 import type {
+  BusyInfo,
   CheckEvent,
   CheckpointInfo,
   CurriculumIndex,
   Event,
   LessonBundle,
+  LessonChange,
   LessonProgress,
   LessonRef,
+  LessonSnapshot,
+  ProgressStatus,
   Progress,
   Scenario,
   SessionInfo,
@@ -318,7 +322,9 @@ export async function startFakeSession(opts: FakeOptions) {
   interface Active {
     scenario: Scenario
     lessonId: string
+    /** The active step, -1 once the last one ended (sessiond's idle). */
     index: number
+    attempt: number
     base: Record<string, number>
     startedAt: number
     fired: Set<string>
@@ -337,10 +343,65 @@ export async function startFakeSession(opts: FakeOptions) {
   /** The running "again, without hints" lap (scenario {lap: true}). */
   let lap: { lessonId: string; startedAt: number } | null = null
   const inLap = () => !!lap && !!active && lap.lessonId === active.lessonId
-  /** Marks a step event of the running lap. */
-  const lapMark = (ev: Event) => {
-    if (inLap() && ev.t === 'step') ev.lap = true
-    return ev
+  /** sessiond's saved outcomes by lesson (they go on a reset, unlike progress). */
+  const outcomes: Record<string, Record<string, ProgressStatus>> = {}
+  let attempts = 0
+  let rev = 0
+  let busy: BusyInfo | null = null
+
+  /** The lesson snapshot as sessiond's session core builds it (backend.md §3.8). */
+  function lessonSnapshot(): LessonSnapshot {
+    const snap: LessonSnapshot = { rev, step: null, phase: 'idle', attempt: 0, outcomes: {} }
+    if (active) {
+      const steps = active.scenario.steps
+      const saved = outcomes[active.lessonId] ?? {}
+      snap.lessonId = active.lessonId
+      for (const st of steps) {
+        const o = saved[st.id]
+        if (o) snap.outcomes[st.id] = o
+      }
+      const step = steps[active.index]
+      if (step) {
+        snap.step = { id: step.id, index: active.index, count: steps.length }
+        snap.attempt = active.attempt
+        snap.phase = active.latched ? 'watching' : 'active'
+      } else if (steps.every((st) => saved[st.id] === 'done' || saved[st.id] === 'skipped'))
+        snap.phase = 'complete'
+      if (lap && inLap() && lap.startedAt > 0) snap.lap = { ...lap }
+    }
+    if (busy) snap.busy = busy
+    return snap
+  }
+  function publishLesson(change: LessonChange, stepId = '', lapMs = 0) {
+    rev++
+    publish({
+      t: 'lesson',
+      change,
+      ...(stepId ? { stepId } : {}),
+      ...(lapMs ? { lapMs } : {}),
+      lesson: lessonSnapshot(),
+    })
+  }
+  function setOutcome(lessonId: string, stepId: string, o: ProgressStatus | null) {
+    const m = (outcomes[lessonId] ??= {})
+    if (o) m[stepId] = o
+    else delete m[stepId]
+  }
+  /** Runs a lesson op with busy set in the snapshot. */
+  async function asBusy<T>(
+    op: string,
+    lessonId: string,
+    stepId: string,
+    f: () => Promise<T>,
+  ): Promise<T> {
+    busy = { op, lessonId, stepId, startedAt: Date.now() }
+    publishLesson('busy')
+    try {
+      return await f()
+    } finally {
+      busy = null
+      publishLesson('busy')
+    }
   }
   function conflictInLap(op: string) {
     if (inLap())
@@ -415,19 +476,11 @@ export async function startFakeSession(opts: FakeOptions) {
     active.lastCheck = ''
     active.latched = false
     active.demonstrated = false
+    active.attempt = ++attempts
     snapshot(`${active.lessonId}/${step.id}`, { lessonId: active.lessonId, stepId: step.id })
     setProgress(active.lessonId, step.id, { status: 'in-progress' })
     if (lap && lap.lessonId === active.lessonId && lap.startedAt === 0) lap.startedAt = Date.now()
-    publish(
-      lapMark({
-        t: 'step',
-        lessonId: active.lessonId,
-        stepId: step.id,
-        status: 'loaded',
-        index,
-        count: active.scenario.steps.length,
-      }),
-    )
+    publishLesson('loaded', step.id)
     schedule()
   }
 
@@ -450,6 +503,7 @@ export async function startFakeSession(opts: FakeOptions) {
       t: 'check',
       lessonId: active.lessonId,
       stepId: step.id,
+      attempt: active.attempt,
       conditions: r.conditions,
       complete: r.complete,
     }
@@ -464,33 +518,20 @@ export async function startFakeSession(opts: FakeOptions) {
       if (!active.demonstrated) {
         active.demonstrated = true
         setProgress(active.lessonId, step.id, { status: 'demonstrated' })
-        publish({
-          t: 'step',
-          lessonId: active.lessonId,
-          stepId: step.id,
-          status: 'demonstrated',
-          index: active.index,
-          count: active.scenario.steps.length,
-        })
+        if (!outcomes[active.lessonId]?.[step.id])
+          setOutcome(active.lessonId, step.id, 'demonstrated')
+        publishLesson('demonstrated', step.id)
       }
       return ev
     }
     if (r.complete) {
       const last = active.index === active.scenario.steps.length - 1
       setProgress(active.lessonId, step.id, { status: 'done', completedAt: Date.now() })
-      const done: Event = {
-        t: 'step',
-        lessonId: active.lessonId,
-        stepId: step.id,
-        status: 'complete',
-        index: active.index,
-        count: active.scenario.steps.length,
-      }
-      if (last) done.lessonComplete = true
-      lapMark(done)
-      if (last && lap && done.lap) {
+      setOutcome(active.lessonId, step.id, 'done')
+      let lapMs = 0
+      if (last && lap && inLap()) {
         const ms = Date.now() - lap.startedAt
-        done.lapMs = ms
+        lapMs = ms
         const lp = progress[active.lessonId]
         if (lp) {
           const prev = lp.laps
@@ -503,9 +544,9 @@ export async function startFakeSession(opts: FakeOptions) {
         }
         lap = null
       }
-      publish(done)
+      if (last) active.index = -1
+      publishLesson('complete', step.id, lapMs)
       if (!last) startStep(active.index + 1)
-      else active.lastCheck = 'complete'
     }
     return ev
   }
@@ -519,6 +560,12 @@ export async function startFakeSession(opts: FakeOptions) {
       })
     const scenario = bundle.scenario
     const same = active?.lessonId === lessonId
+    // sessiond resumes at the first step neither done nor skipped.
+    const saved = outcomes[lessonId] ?? {}
+    const resume = scenario.steps.find(
+      (st) => saved[st.id] !== 'done' && saved[st.id] !== 'skipped',
+    )
+    stepId ??= resume?.id
     const want = scenario.modules ?? []
     if (want.join(' ') !== modules.join(' ')) {
       modules = want
@@ -540,6 +587,7 @@ export async function startFakeSession(opts: FakeOptions) {
       scenario,
       lessonId,
       index,
+      attempt: 0,
       base: {},
       startedAt: Date.now(),
       fired: new Set(),
@@ -640,22 +688,15 @@ export async function startFakeSession(opts: FakeOptions) {
         active.base = { ...eng.counts }
         active.startedAt = Date.now()
         active.lastCheck = ''
+        active.attempt = ++attempts
+        active.latched = false
+        active.demonstrated = false
+        setOutcome(active.lessonId, cp.step.stepId, null)
         if (countReset) {
-          active.latched = false
-          active.demonstrated = false
           const resets = (progress[active.lessonId]?.steps[cp.step.stepId]?.resets ?? 0) + 1
           setProgress(active.lessonId, cp.step.stepId, { resets })
         }
-        publish(
-          lapMark({
-            t: 'step',
-            lessonId: active.lessonId,
-            stepId: cp.step.stepId,
-            status: 'reset',
-            index: idx,
-            count: active.scenario.steps.length,
-          }),
-        )
+        publishLesson('reset', cp.step.stepId)
       }
     }
     afterInput()
@@ -664,22 +705,51 @@ export async function startFakeSession(opts: FakeOptions) {
 
   /** Progress reset (api.md §2.4): one lesson, or all with an empty id; drops the active step. */
   function dropProgress(lessonId: string) {
-    if (lessonId) delete progress[lessonId]
-    else for (const k of Object.keys(progress)) delete progress[k]
+    for (const m of [progress, outcomes])
+      for (const k of Object.keys(m)) if (!lessonId || k === lessonId) delete m[k]
     progressAt = Date.now()
+    let stepId = ''
     if (active && (!lessonId || active.lessonId === lessonId)) {
       lap = null
-      const step = active.scenario.steps[active.index]
-      publish({
-        t: 'step',
-        lessonId: active.lessonId,
-        stepId: step?.id ?? '',
-        status: 'dropped',
-        index: active.index,
-        count: active.scenario.steps.length,
-      })
+      stepId = active.scenario.steps[active.index]?.id ?? ''
       active = null
     }
+    publishLesson('dropped', stepId)
+  }
+
+  /** "Skip this step" (api.md §3.4): play the demo here, record skipped, advance. */
+  async function skip(a: Active, step: Scenario['steps'][number]) {
+    const cp = activeCheckpoint()
+    if (cp && commandsSinceStart() > 0) restoreCheckpoint(cp, false)
+    a.skipping = true
+    let demoCompleted = false
+    try {
+      if (step.demo) {
+        for (const t of step.demo.match(/"(?:[^"\\]|\\.)*"|\S+/g) ?? []) {
+          if (t.startsWith('~')) await new Promise((r) => setTimeout(r, delay(Number(t.slice(1)))))
+          else if (t.startsWith('"')) feed(textToKeys(JSON.parse(t) as string))
+          else feed([t])
+          await new Promise((r) => setTimeout(r, delay(170)))
+        }
+      }
+      const st: State = eng.state(mode)
+      demoCompleted = evaluateStep(a.scenario, step.id, {
+        eng,
+        state: st,
+        disk,
+        base: a.base,
+      }).complete
+    } finally {
+      a.skipping = false
+    }
+    const last = a.index === a.scenario.steps.length - 1
+    setProgress(a.lessonId, step.id, { status: 'skipped' })
+    setOutcome(a.lessonId, step.id, 'skipped')
+    const next = last ? null : (a.scenario.steps[a.index + 1]?.id ?? null)
+    if (last) a.index = -1
+    publishLesson('skipped', step.id)
+    if (!last) startStep(a.index + 1)
+    return { next, demoCompleted }
   }
 
   /* ---------------- RPC ---------------- */
@@ -728,10 +798,9 @@ export async function startFakeSession(opts: FakeOptions) {
         // A lap reloads from the first step with the fixtures restored; any other load ends it.
         const lessonId = String(b['lessonId'] ?? '')
         lap = b['lap'] === true ? { lessonId, startedAt: 0 } : null
-        const r = await loadScenario(
-          lessonId,
-          b['lap'] === true ? undefined : b['stepId'] ? String(b['stepId']) : undefined,
-          b['reset'] === true || b['lap'] === true,
+        const stepId = b['lap'] === true ? undefined : b['stepId'] ? String(b['stepId']) : undefined
+        const r = await asBusy('load', lessonId, stepId ?? '', () =>
+          loadScenario(lessonId, stepId, b['reset'] === true || b['lap'] === true),
         )
         return lap ? { ...r, lap: { ...lap } } : r
       }
@@ -745,6 +814,7 @@ export async function startFakeSession(opts: FakeOptions) {
           ? {
               lessonId: ev.lessonId,
               stepId: ev.stepId,
+              attempt: ev.attempt,
               conditions: ev.conditions,
               complete: ev.complete,
             }
@@ -803,56 +873,18 @@ export async function startFakeSession(opts: FakeOptions) {
           }
           active.latched = true
           active.demonstrated = false
+          publishLesson('phase', step.id)
         }
-        void step
-        return { restored }
+        return { restored, attempt: active?.attempt ?? 0 }
       }
       case 'skip': {
         // "Skip this step" (api.md §3.4): play the demo here, record skipped, advance.
         conflictInLap('skip')
         const step = activeStepOr409(String(b['stepId'] ?? ''))
         const a = active as Active
-        const cp = activeCheckpoint()
-        if (cp && commandsSinceStart() > 0) restoreCheckpoint(cp, false)
-        a.skipping = true
-        let demoCompleted = false
-        try {
-          if (step.demo) {
-            for (const t of step.demo.match(/"(?:[^"\\]|\\.)*"|\S+/g) ?? []) {
-              if (t.startsWith('~'))
-                await new Promise((r) => setTimeout(r, delay(Number(t.slice(1)))))
-              else if (t.startsWith('"')) feed(textToKeys(JSON.parse(t) as string))
-              else feed([t])
-              await new Promise((r) => setTimeout(r, delay(170)))
-            }
-          }
-          const st: State = eng.state(mode)
-          demoCompleted = evaluateStep(a.scenario, step.id, {
-            eng,
-            state: st,
-            disk,
-            base: a.base,
-          }).complete
-        } finally {
-          a.skipping = false
-        }
-        const last = a.index === a.scenario.steps.length - 1
-        setProgress(a.lessonId, step.id, { status: 'skipped' })
-        const ev: Event = {
-          t: 'step',
-          lessonId: a.lessonId,
-          stepId: step.id,
-          status: 'skipped',
-          index: a.index,
-          count: a.scenario.steps.length,
-        }
-        if (last) ev.lessonComplete = true
-        publish(ev)
-        const next = last ? null : (a.scenario.steps[a.index + 1]?.id ?? null)
-        if (!last) startStep(a.index + 1)
-        else a.lastCheck = 'complete'
-        return { next, demoCompleted }
+        return asBusy('skip', a.lessonId, step.id, () => skip(a, step))
       }
+
       case 'mode': {
         const want = b['mode'] === 'gui' ? 'gui' : 'terminal'
         if (want !== mode) {
@@ -872,10 +904,11 @@ export async function startFakeSession(opts: FakeOptions) {
         modules = enabled
         publish({ t: 'modules', enabled, restarting: change })
         if (change) {
-          setTimeout(() => {
+          void asBusy('set-modules', '', '', async () => {
+            await new Promise((r) => setTimeout(r, delay(1200)))
             publish({ t: 'emacs', event: 'daemon-restarted', reason: 'module set changed' })
             publish({ t: 'modules', enabled, restarting: false })
-          }, delay(1200))
+          })
         }
         return { restarting: change }
       }
@@ -917,9 +950,7 @@ export async function startFakeSession(opts: FakeOptions) {
       },
       frames: { terminal: true, gui: mode === 'gui' },
       mode,
-      step: active
-        ? { lessonId: active.lessonId, stepId: active.scenario.steps[active.index]?.id ?? '' }
-        : null,
+      step: activeRef(),
       modules,
       versions: {
         emacs: '31.1 (fake)',
@@ -930,9 +961,14 @@ export async function startFakeSession(opts: FakeOptions) {
         tmux: '3.5a',
       },
       activeWebSockets: subscribers.size + (pty ? 1 : 0) + rfbs.size,
-      ...(lap && lap.startedAt > 0 ? { lap: { ...lap } } : {}),
       remoteBox: true,
+      lesson: lessonSnapshot(),
     }
+  }
+
+  function activeRef() {
+    const step = active?.scenario.steps[active.index]
+    return active && step ? { lessonId: active.lessonId, stepId: step.id } : null
   }
 
   function sessionInfo(): SessionInfo {
@@ -946,11 +982,8 @@ export async function startFakeSession(opts: FakeOptions) {
       emacs: { version: '31.1', uptimeMs: Date.now() - started },
       mode,
     }
-    if (active)
-      info.step = {
-        lessonId: active.lessonId,
-        stepId: active.scenario.steps[active.index]?.id ?? '',
-      }
+    const step = activeRef()
+    if (step) info.step = step
     return info
   }
 
@@ -1165,21 +1198,17 @@ export async function startFakeSession(opts: FakeOptions) {
   }
 
   function hello(replayed: boolean): Event {
-    const step = active
-      ? { lessonId: active.lessonId, stepId: active.scenario.steps[active.index]?.id ?? '' }
-      : null
     return {
       t: 'hello',
       seq,
-      protocol: 1,
+      protocol: Version,
       sessionId: SESSION,
       mode,
       emacs: { version: '31.1', uptimeMs: Date.now() - started },
       frames: { terminal: true, gui: mode === 'gui' },
-      step,
       modules,
       replayed,
-      ...(lap && lap.startedAt > 0 ? { lap: { ...lap } } : {}),
+      lesson: lessonSnapshot(),
     }
   }
 

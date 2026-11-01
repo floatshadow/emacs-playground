@@ -28,6 +28,19 @@ kbd {
   white-space: nowrap;
   vertical-align: 1px;
 }
+/* No ligatures in code: M-> is three keys, not an arrow. A module rule that
+   sets font with var(--mono) repeats font-variant-ligatures: none (the font
+   shorthand resets it; none also turns off contextual alternates). */
+kbd,
+code,
+pre,
+samp,
+.xterm {
+  font-variant-ligatures: none;
+  font-feature-settings:
+    'liga' 0,
+    'calt' 0;
+}
 :focus-visible {
   outline: 2px solid var(--violet);
   outline-offset: 2px;

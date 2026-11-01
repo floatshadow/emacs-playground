@@ -5,15 +5,15 @@ import { keysHeld } from './hosts'
 beforeEach(() => useSessionStore.getState().reset())
 
 describe('the terminal key guard', () => {
-  it('holds keys while sessiond runs a Go to this step the page did not start', () => {
+  it('holds keys while sessiond runs a lesson op or the session speaks another protocol', () => {
     expect(keysHeld()).toBe(false)
-    const store = useSessionStore.getState()
-    store.setServerBusy({ op: 'load', lessonId: 'a/b', stepId: 'save', startedAt: 1 })
+    const lesson = { rev: 1, step: null, phase: 'idle' as const, attempt: 0, outcomes: {} }
+    const busy = { op: 'restore', lessonId: 'a/b', stepId: 'save', startedAt: 1 }
+    useSessionStore.setState({ lesson: { ...lesson, busy } })
     expect(keysHeld()).toBe(true)
-    // Other lesson ops show no veil and hold no keys.
-    store.setServerBusy({ op: 'restore', lessonId: 'a/b', stepId: 'save', startedAt: 1 })
+    useSessionStore.setState({ lesson })
     expect(keysHeld()).toBe(false)
-    store.setServerBusy(null)
-    expect(keysHeld()).toBe(false)
+    useSessionStore.setState({ incompatible: true })
+    expect(keysHeld()).toBe(true)
   })
 })

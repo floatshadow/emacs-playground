@@ -57,12 +57,23 @@ it('reconnects after a gap from the last received sequence', () => {
 })
 
 it.each([
-  { replayed: false, step: { lessonId: 'a/b', stepId: 'one' }, checks: 1 },
-  { replayed: true, step: { lessonId: 'a/b', stepId: 'one' }, checks: 0 },
+  { replayed: false, step: { id: 'one', index: 0, count: 1 }, checks: 1 },
+  { replayed: true, step: { id: 'one', index: 0, count: 1 }, checks: 1 },
   { replayed: false, step: null, checks: 0 },
-])('refreshes checks on fresh hello: %j', ({ replayed, step, checks }) => {
-  startEvents('local')
-  FakeWS.all[0]!.event({ t: 'hello', seq: 0, replayed, step })
-  expect(rpc).toHaveBeenCalledTimes(checks)
-  if (checks) expect(rpc).toHaveBeenCalledWith('check', {}, { silent: true })
-})
+])(
+  'refreshes checks on every hello whose snapshot has a step: %j',
+  ({ replayed, step, checks }) => {
+    startEvents('local')
+    const lesson = {
+      rev: 1,
+      lessonId: 'a/b',
+      step,
+      phase: 'active' as const,
+      attempt: 1,
+      outcomes: {},
+    }
+    FakeWS.all[0]!.event({ t: 'hello', seq: 0, replayed, lesson })
+    expect(rpc).toHaveBeenCalledTimes(checks)
+    if (checks) expect(rpc).toHaveBeenCalledWith('check', {}, { silent: true })
+  },
+)

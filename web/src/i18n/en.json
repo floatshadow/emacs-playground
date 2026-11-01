@@ -50,6 +50,9 @@
     "starting": "Graphical frame: the same Emacs drawn with images and mouse menus. Starting…",
     "guiTimeout": "The GUI frame did not start. The terminal frame keeps working; try again from the session page."
   },
+  "layout": {
+    "resize": "Resize the lesson pane (arrow keys; Home resets)"
+  },
   "screen": {
     "stageLabel": "Emacs",
     "terminalLabel": "Emacs, terminal frame. Shift+Escape moves focus to the lesson.",
@@ -82,6 +85,10 @@
     "unavailableBody": "Retrying. If this lasts, use Restart Emacs on the session page.",
     "modules": "Loading new configuration modules…",
     "modulesBody": "Emacs restarts with the modules this part teaches and the lesson is set up again. Your buffers come back; your keys wait until then.",
+    "incompatible": "This session runs an older version of the playground.",
+    "incompatibleBody": "Stop it and reload to start a current one.",
+    "stop": "Stop and reload",
+    "restartStack": "Restart the stack (make local).",
     "busy": "Emacs is busy.",
     "busyBody": "It has not answered for a few seconds.",
     "reconnecting": "reconnecting…"
@@ -168,7 +175,11 @@
     "notFoundBody": "It is on the course map as planned. Pick another lesson for now.",
     "noSuchLesson": "There is no lesson at this address.",
     "noSuchLessonBody": "The link may be mistyped or out of date. Every lesson is on the course map.",
-    "displaced": "Emacs is now showing another lesson, opened in another tab or window. This lesson's steps are not being checked.",
+    "displaced": "Emacs no longer shows this lesson (another tab or window changed it). Its steps are not being checked.",
+    "view": "Lesson view",
+    "read": "Read",
+    "do": "Do {{n}}/{{count}}",
+    "toDo": "The steps: Do {{n}}/{{count}}",
     "loadHere": "Load this lesson here",
     "error": "Could not load this lesson."
   },

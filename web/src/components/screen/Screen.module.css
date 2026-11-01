@@ -166,6 +166,7 @@
   right: 10px;
   z-index: 2;
   font: 12px var(--mono);
+  font-variant-ligatures: none;
   background: var(--warn-soft);
   color: var(--warn);
   padding: 3px 8px;
