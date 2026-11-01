@@ -70,13 +70,13 @@ RFB to Xvnc (`binary` subprotocol). Only in GUI mode; else, and on switching to 
 
 ### 3.4 RPC (`POST /rpc/{op}`)
 
-Result `{"ok":true,"result":…}` or problem+json. *(n)*: not idempotent. Ops needing Emacs answer `503 emacs_unavailable` / `504 timeout`; ops on the active step `409` when none is active or another is named.
+Result `{"ok":true,"result":…}` or problem+json. *(n)*: not idempotent. Ops needing Emacs answer `503 emacs_unavailable` / `504 timeout`; ops on the active step `409` when none is active or another is named. `scenario`, `restore`, `modules`, `drop-step` and the restore of `demo start` and `skip` run one at a time in sessiond, each to completion even when its request goes away (backend.md §3.12); a request arriving meanwhile waits its turn. An op ended by a drop answers `409`, one past its deadline `504`.
 
 - `keys {keys}|{text}, frame?` → `{}` *(n)*: one of validated Emacs keys or literal text (≤ 4096 bytes) into `frame` (default the current mode; `409` if inactive). Learner input.
 - `eval {form, timeoutMs?}` → `{value}`: author mode only (`403`); 2 s default, 10 s max; symbol-keyed alists become objects.
 - `open {path}` → `{buffer}`: visits a workspace file.
 - `rescue {}` → `{did}`: `playground-rescue` (emacs.md §10.3), or C-g through tmux when Emacs is unresponsive.
-- `scenario {lessonId, stepId?, reset?, lap?}` → `{step, index, count, modules, restarting, lap?}`: backend.md §3.12. Returns when the step is active, or with `restarting: true` before a daemon restart. `lap: true` starts the lap (CURRICULUM.md B.3): reset, first step, `lap {lessonId, startedAt}`; until it ends `hint`, `demo start` and `skip` answer `409`. A plain reload keeps the lap; an explicit `stepId` without `lap` ends it.
+- `scenario {lessonId, stepId?, reset?, lap?}` → `{step, index, count, modules, restarting, lap?}`: backend.md §3.12. Returns when the step is active, or with `restarting: true` once a daemon restart begins (the load then finishes in the background; a request arriving meanwhile gets the final result). `lap: true` starts the lap (CURRICULUM.md B.3): reset, first step, `lap {lessonId, startedAt}`; until it ends `hint`, `demo start` and `skip` answer `409`. A plain reload keeps the lap; an explicit `stepId` without `lap` ends it.
 - `check {}` → `{lessonId, stepId, conditions:[{id, ok, unknown?, detail?}], complete}`.
 - `hint {stepId, level}` → `{}`.
 - `checkpoint {label}` → `{ref, createdAt}`; `checkpoints {}` → `{items:[{label, ref, createdAt, files, step?}]}`, newest first; `files` would change on restore.
@@ -85,10 +85,10 @@ Result `{"ok":true,"result":…}` or problem+json. *(n)*: not idempotent. Ops ne
 - `modules {enabled}` → `{restarting}`: sets the set exactly (`scenario` only adds).
 - `restart-emacs {}` → `{}`: background restart, reported by `emacs` events.
 - `stuck {note}` → `{events}`: last 200 events. Through the proxy (`X-Forwarded-For` present) sessiond also files the report.
-- `status {}` (also `GET /status`) → `{sessionId, emacs, frames, mode, step, modules, versions?, activeWebSockets, lap?, remoteBox?}`; `remoteBox` once the box alias is written (deployment.md §6).
+- `status {}` (also `GET /status`) → `{sessionId, emacs, frames, mode, step, modules, versions?, activeWebSockets, lap?, remoteBox?, busy?}`; `remoteBox` once the box alias is written (deployment.md §6); `busy {op, lessonId?, stepId?, startedAt}` while an op runs (`op` names its kind, e.g. `load` or `restore`; an open set the page never switches on), so a reloaded page can veil "Going to step N…".
 - `describe {keys}` → `{cmd, doc}`: for ticker glosses; `cmd` `""` when unbound or a prefix.
 - `demo {stepId, phase: start|end}` → `{restored}` *(n)*; `skip {stepId}` → `{next|null, demoCompleted}` *(n)*, `409` while another skip runs: §4.1.
-- `drop-step {lessonId}|{}` → `{}`: internal (gateway only); forgets that lesson's (or all) saved progress and the active step if it belongs to it.
+- `drop-step {lessonId?, generation?}` → `{}`: internal (gateway only); forgets that lesson's (without `lessonId` every lesson's) saved progress and the active step if it belongs to it; a `generation` not newer than the one applied is ignored. It runs before queued ops and, unless ignored, cancels a running op on that lesson.
 
 ### 3.5 `GET /preview/{path}`
 
@@ -102,7 +102,7 @@ A workspace file via `os.Root`; `.playground/` never served. `no-store`, `nosnif
 
 Envelope `{t, seq, ts, …}`, `seq` monotonic from 1 per process; unknown types are ignored.
 
-- `hello`: `protocol, sessionId, mode, emacs, frames, step|null, modules, replayed, lap?`.
+- `hello`: `protocol, sessionId, mode, emacs, frames, step|null, modules, replayed, lap?, busy?` (`busy` as in `status`).
 - `key`: `keys, cmd, buf, mode, frame, prefixArg?, mx?`. `cmd` is `real-this-command` (emacs.md §10.1), `"<lambda>"` or `"undefined"`; with `mx: true` (M-x) `keys` are the reader's.
 - `prefix`: `keys, source: tap|agent`; `""` clears. Advisory; never follows the `key` that consumed it.
 - `state` (§5): coalesced, duplicates suppressed. `echo`: `text` ≤ 500 characters, noise filtered. `minibuffer`: `open, prompt, depth, kind: prompt|isearch`.

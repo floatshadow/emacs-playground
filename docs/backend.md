@@ -12,7 +12,7 @@ internal/httpx       problem+json, JSON, middleware, WebSocket helpers
 internal/curriculum  loader, validator, bundle builder
 internal/docker      Engine client wrapper, hardening
 internal/gateway/    auth sessions proxy store curriculum progress limit
-internal/sessiond/   supervisor pty agent inputtap events steps checkpoint preview vnc scenario gwclient sshbox
+internal/sessiond/   session supervisor pty agent inputtap events steps checkpoint preview vnc scenario gwclient sshbox
 web/embed.go         bundle in the gateway binary (tag embedweb)
 ```
 
@@ -86,7 +86,7 @@ Keep Emacs, tmux and Xvnc alive; serve PTY, events, VNC, RPC and preview; tap in
 3. Start HTTP; `/healthz` answers 503 until step 4 is done.
 4. Start the daemon and wait for `hello` (60 s, then restart once).
 5. Start tmux and the terminal frame.
-6. Resume the step in `.playground/state.json`, if any, without fixtures or checkpoint: re-open `snapshot.json` when it shows a file under the lesson root, else run setup without `reset`. Snapshots are held until then, so the fresh `*scratch*` never replaces the learner's windows.
+6. Resume the step in `.playground/state.json`, if any, as the session core's resume op (§3.12), without fixtures or checkpoint: re-open `snapshot.json` when it shows a file under the lesson root, else run setup without `reset`. A lesson loaded meanwhile wins. The periodic snapshot skips while an op runs, so the fresh `*scratch*` never replaces the learner's windows.
 
 ### 3.3 Supervisor
 
@@ -129,7 +129,7 @@ Statuses and the demo latch: api.md §4.1. Internals:
 
 - The restore of `demo start` or `skip` emits `step reset` without counting a reset.
 - `skip` holds completions while `protocol.PlayDemo` plays, detached from the request.
-- `Engine.Rehearse` (fast-forward, §3.12) activates a step with nothing recorded, emitted or persisted.
+- `Engine.Rehearse` (fast-forward, §3.12) activates a step with nothing recorded, emitted or persisted; a drop during it emits `step dropped` for the rehearsed step. A load that ends mid-rehearsal calls `EndRehearsal`, which makes the step active before it active again (dirty, nothing emitted), as after a load that fails earlier.
 - `.playground/state.json` keeps the active step, the running lap and per lesson the done, skipped and demonstrated times, hints and resets.
 - Laps (`Engine.ActivateLap`): started by `scenario {lap}`, kept on resume, ended by any other activation or `drop-step`; hints, demos and skips are refused and stuck rules pause; the last completion reports `lapMs`.
 
@@ -141,13 +141,13 @@ The workspace is a git repository. A checkpoint is a commit at `refs/playground/
 
 - `spec`: the agent's `WindowSpec` (api.md §7).
 - `buffers`: each file buffer's unsaved text (≤ 256 KiB) and readable undo entries (≤ 128 KiB), 512 KiB in all. A step usually starts with the previous step's edit still unsaved (auto-save waits 5 s).
-- `globals`: printed `sessiond.GlobalVars` (kill ring, minibuffer and search histories, last macro and counters; ≤ 256 KiB), so Watch it then Do it yourself leaves none of the demo's kills, history or macro counts.
+- `globals`: printed `session.GlobalVars` (kill ring, minibuffer and search histories, last macro and counters; ≤ 256 KiB), so Watch it then Do it yourself leaves none of the demo's kills, history or macro counts.
 - `emptyDirs` (≤ 1000).
 - `nested`: each nested git repository (≤ 50) as two commits, its working tree (its own ignores apply) and its `.git` (minus lock files), kept reachable as extra parents of the checkpoint commit.
 
 Restore: remove the `.git` of nested repositories the checkpoint lacks; `git restore --worktree --staged` and `git clean -fd` against the temporary index, outside the checkpoint's nested repositories (removing exactly what the checkpoint lacks, except build output and `.playground`); restore each nested repository's `.git`, then its working tree; recreate empty directories; keep `emacs.d/modules.el` (emacs.md §4); agent `reset-step`; then unsaved text (`replace-buffer-contents`) and undo with recording off; then globals. `restoredFiles` counts files changed on disk plus buffers whose unsaved edits were discarded.
 
-Restore requires readable checkpoint metadata; an existing ref with unreadable metadata returns `409`. A mutex serialises files, Emacs restoration and the following step activation; a failed `reset-step` returns an incomplete-restore error before buffers, globals or activation run. External file buffers stay untouched. A started restore runs to the end without the request's cancellation (`Server.restoreCheckpoint`). Git commands are serialised, detached and bounded by `checkpoint.GitTimeout`; a lock older than `checkpoint.StaleLockAge` (10 s) that blocks a command is removed and the command retried once.
+Restore requires readable checkpoint metadata; an existing ref with unreadable metadata returns `409`. Every restore entry point (Reset, Do it yourself, Watch it and Skip after a command, Go to this step, `restore` by label or ref) runs inside an op of the session core (§3.12), so files, Emacs restoration and the following step activation never interleave with another restore or load. A failed `reset-step` returns an incomplete-restore error before buffers, globals or activation run, and nothing activates. External file buffers stay untouched. A started restore runs to the end whatever the request or a drop does (`session.Checkpoints.Restore`). Git commands are serialised, detached and bounded by `checkpoint.GitTimeout`; a lock older than `checkpoint.StaleLockAge` (10 s) that blocks a command is removed and the command retried once.
 
 Not captured: the staging area of `/work` itself (nested repositories keep theirs), minor modes a demo turned on, variables outside `GlobalVars` such as `display-buffer-alist`. `/work` being the checkpoint repository makes project.el treat it as a project (`emacs.d` in `project-files`); hiding it needs a separate `GIT_DIR`.
 
@@ -159,16 +159,18 @@ Not captured: the staging area of `/work` itself (nested repositories keep their
 
 `/vnc` copies bytes between the WebSocket and Xvnc on `127.0.0.1:5901`, feeding client bytes to the RFB decoder. sessiond is the only way to Xvnc.
 
-### 3.12 Scenario loader
+### 3.12 Session core and scenario load
 
-`rpc scenario {lessonId, stepId?, reset?}`, serialised:
+`session.Core` owns lesson orchestration. `scenario`, `restore`, `modules`, `drop-step`, the restore before `demo start` and `skip`, and the startup resume are ops that one worker runs one at a time, each detached from its request (a request that goes away changes nothing) and bounded from its start: load 3 min (fast-forward included), restore 2 min, resume 1 min, module change 3 min, drop 10 s. An op checks its context between phases; once the context ends nothing activates. `drop-step` jumps the queue and, when its generation is newer than the one applied, cancels the running op when it concerns the same lesson (any lesson for `{}`), so a dropped lesson's fast-forward stops at once and loads nothing. While an op runs, `status` and `hello` carry `busy` (api.md §3.4). Demo start and skip play outside the queue after their restore op; completion and advance stay in the step engine.
+
+The load op, `rpc scenario {lessonId, stepId?, reset?, lap?}`:
 
 1. Reloading the active lesson (same or no `stepId`, no `reset`) returns at once, never re-running setup.
 2. Fetch scenario and fixtures, cached by ETag in `.playground/cache` and used from there when the gateway is down.
 3. Extract fixtures into `/work/<setup.root>`, keeping existing files unless `reset` (request, `setup.reset` or `lap`), which makes the root match the fixtures exactly (except build output and `.git`). Then `setup.repos` (`git init`, re-created on reset) and `setup.run` (≤ 120 s); failures are `error` events.
-4. Modules = current ∪ scenario's (emacs.md §4). On change: write `modules.el`, emit `modules {restarting: true}`, return `restarting: true`, finish after the restart, then emit `modules {restarting: false}` (the browser holds keys until then, so none land before setup).
+4. Modules = current ∪ scenario's (emacs.md §4). On change: write `modules.el`, emit `modules {restarting: true}`, answer the request early with `restarting: true`, restart the daemon (≤ 3 min; once `modules.el` is written the restart runs to the end whatever a drop or the deadline does, so modified buffers are saved first) and go on; `modules {restarting: false}` follows the activation (the browser holds keys until then, so none land before setup). Requests arriving meanwhile queue behind the op and get final results.
 5. Agent `setup` (emacs.md §10.3), after waiting ≤ 15 s for a restart and for the terminal frame, so layouts never land in the daemon's invisible frame. `compile` runs in the project root of the first `open` file. TODO(sessiond, CURRICULUM.md Part B.3): `.eld` layouts are ignored.
-6. A later step (Go to this step, resume mid-lesson) starts from its checkpoint; without one the loader fast-forwards, rehearsing each earlier step and playing its demo (≤ 10 s per step, 3 min total, detached from the request). A later step's checkpoint is never overwritten with the lesson's initial state.
+6. A later step (Go to this step, resume mid-lesson) starts from its checkpoint; without one the op fast-forwards, rehearsing each earlier step and playing its demo (≤ 10 s per step, 3 min total, leaving 20 s of the deadline for the checkpoint and activation; with less left it does not start). The step's checkpoint is taken only when every earlier step was replayed to completion; otherwise the step activates without one. A later step's checkpoint is never overwritten with the lesson's initial state.
 7. Take the step's checkpoint if missing or fixtures were re-extracted, activate the step, emit `step loaded`, return.
 
 ### 3.13 Configuration and proxy auth

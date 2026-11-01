@@ -66,7 +66,7 @@ Rules: CURRICULUM.md B.3 and B.4. Beyond them:
 - **Name the copy** by absolute path (`/work/hello` or `/work/projects/hello`): a wrong copy uniquifies buffer names and breaks demos that type them.
 - **Demos and hints start from the step's checkpoint**, not the previous demo's end: type absolute paths, never rely on the prompt's directory or point.
 - **Commands that read their own keys** (`help-for-help`, `query-replace`, which-key paging) send `key` only when they finish: check the screen state (`{"windows.buf": " *Metahelp*"}`).
-- **Session state:** add to `sessiond.GlobalVars` what a lesson relies on (backend.md §3.9). Demos never depend on the learner's history (2.2 finds its command with `M-r`; 1.6 sets the macro counter first).
+- **Session state:** add to `session.GlobalVars` what a lesson relies on (backend.md §3.9). Demos never depend on the learner's history (2.2 finds its command with `M-r`; 1.6 sets the macro counter first).
 - **Setups never ask:** bind `kill-buffer-query-functions` to nil to kill a buffer with a process.
 - **Write the keys out:** keys in the lesson or step text silence habit cards, paraphrased ones do not. `:try` clicks are learner input.
 - **Command names:** keep older names (`kill-region` for `C-k`) as alternatives; `M-y` is `consult-yank-pop` only from lesson 4.2.

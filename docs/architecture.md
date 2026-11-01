@@ -98,14 +98,14 @@ The browser never evaluates conditions. It renders the latest `check` and select
 
 ### 3.3 Scenario load
 
-`POST /rpc/scenario {lessonId, stepId?, reset?}`; a reload of the active lesson without `reset` answers at once without re-running setup.
+`POST /rpc/scenario {lessonId, stepId?, reset?}`; a reload of the active lesson without `reset` answers at once without re-running setup. Loads, restores, module changes and drops run one at a time in sessiond's session core, each to completion even when the request goes away (backend.md §3.12).
 
 1. sessiond fetches the scenario and the fixture tarball from the gateway (`GET /internal/curriculum/...`), cached by ETag under `/work/.playground/cache`; when the gateway is unreachable it uses the cached scenario.
 2. It extracts the fixtures into the lesson root without overwriting the learner's files, unless `setup.reset` (or `reset`) is set: then edited files are overwritten and files the fixtures do not contain are removed, keeping `target`, `_build`, `.venv`, `node_modules` and `.git`.
-3. If the union of the current module set and the scenario's `modules` differs from the current set, it writes `modules.el` and restarts the daemon (§5.2); the RPC returns `restarting: true` and the load finishes in the background. Modules are never removed (DESIGN.md ADR-021).
+3. If the union of the current module set and the scenario's `modules` differs from the current set, it writes `modules.el` and restarts the daemon (§5.2); the RPC returns `restarting: true` and the load finishes in the background, while later requests wait for it. Modules are never removed (DESIGN.md ADR-021).
 4. It waits (up to 15 s) for a restart in progress and for the terminal frame, then asks the agent to `setup`: `open`, `layout`, `eval`, `compile` in one call. With `reset` the agent first reverts or kills the buffers of changed or removed files, closes other tabs and clears unmodified leftovers and save-place positions under the root, so a replayed lesson starts on line 1 of its files (emacs.md §10).
 5. For a `stepId` after the first ("Go to this step") it restores that step's checkpoint, or else fast-forwards by replaying the earlier steps' demos while the engine rehearses them quietly (10 s per step, 3 minutes in all).
-6. It takes the step's checkpoint `refs/playground/<lesson>/<step>` and emits `step {status: loaded}`.
+6. It takes the step's checkpoint `refs/playground/<lesson>/<step>` (not after a fast-forward that did not complete every earlier step) and emits `step {status: loaded}`.
 
 ### 3.4 Rescue and reset
 
@@ -117,7 +117,7 @@ Reset (`POST /rpc/restore`, `{}` for the active step):
 2. The agent's `reset-step` with the stored window spec: revert visiting buffers, kill buffers of files that no longer exist, reopen windows by file, remake Dired, ibuffer, buffer-list and help buffers, restore tabs, and close unmodified workspace file buffers the spec does not list.
 3. sessiond puts back the unsaved text and undo history of file buffers and the session variables steps rely on (kill ring, histories, keyboard macro), captured with the checkpoint (backend.md §3.9).
 
-A restore, once started, runs to the end even if the request is cancelled; a git lock older than 10 s that blocks a command is removed and the command retried.
+A restore runs in sessiond's op queue, after any load in progress, and once started runs to the end even if the request is cancelled; a git lock older than 10 s that blocks a command is removed and the command retried.
 
 ### 3.5 Frame switch
 
