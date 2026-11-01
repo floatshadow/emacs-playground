@@ -68,6 +68,9 @@ type LapRecord struct {
 	BestMs   int64  `json:"bestMs"`
 	LastMs   int64  `json:"lastMs"`
 	LastAt   int64  `json:"lastAt"`
+	// LastLapID is the id of the last lap counted (empty for laps
+	// reported without one).
+	LastLapID string `json:"lastLapId,omitempty"`
 }
 
 // StuckReport is an "I'm stuck" report (stuck_reports table).

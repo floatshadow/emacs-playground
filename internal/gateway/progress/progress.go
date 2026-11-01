@@ -76,6 +76,13 @@ func (s *Service) now() time.Time {
 	return time.Now()
 }
 
+// validLapID reports whether lapID has the shape protocol.LapID gives
+// a lap of lessonID, so a stored id is bounded by the lesson id.
+func validLapID(lessonID, lapID string) bool {
+	digits, ok := strings.CutPrefix(lapID, lessonID+"@")
+	return ok && digits != "" && len(digits) <= 19 && strings.Trim(digits, "0123456789") == ""
+}
+
 // Apply records a progress report for userID.
 func (s *Service) Apply(ctx context.Context, userID string, rep protocol.ProgressReport) error {
 	if rep.LessonID == "" || rep.StepID == "" {
@@ -103,6 +110,9 @@ func (s *Service) Apply(ctx context.Context, userID string, rep protocol.Progres
 	}
 	if (rep.HintsUsed != nil && *rep.HintsUsed < 0) || (rep.Resets != nil && *rep.Resets < 0) {
 		return httpx.BadRequest("hintsUsed and resets must not be negative")
+	}
+	if rep.LapID != "" && !validLapID(rep.LessonID, rep.LapID) {
+		return httpx.BadRequest("lapId must be the lesson id, @ and the lap's start time")
 	}
 	unlock := s.lockUser(userID)
 	defer unlock()
@@ -158,7 +168,8 @@ func (s *Service) Apply(ctx context.Context, userID string, rep protocol.Progres
 }
 
 // addLap records a finished lap: only on the done report of the lesson's
-// last step (the engine sends it there).
+// last step (the session core sends it there). A lap counts once per id;
+// a report without one (an older sessiond) counts once per (at, ms).
 func (s *Service) addLap(ctx context.Context, userID string, rep protocol.ProgressReport, now int64) error {
 	if rep.Status != protocol.ProgressDone {
 		return httpx.BadRequest("lapMs comes with a done report")
@@ -178,11 +189,11 @@ func (s *Service) addLap(ctx context.Context, userID string, rep protocol.Progre
 			lr = l
 		}
 	}
-	if rep.At != 0 && lr.LastAt == rep.At && lr.LastMs == rep.LapMs {
+	if rep.LapID != "" && rep.LapID == lr.LastLapID || rep.LapID == "" && rep.At != 0 && lr.LastAt == rep.At && lr.LastMs == rep.LapMs {
 		return nil
 	}
 	lr.Count++
-	lr.LastMs = rep.LapMs
+	lr.LastMs, lr.LastLapID = rep.LapMs, rep.LapID
 	if lr.BestMs == 0 || rep.LapMs < lr.BestMs {
 		lr.BestMs = rep.LapMs
 	}

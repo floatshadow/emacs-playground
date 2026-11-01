@@ -261,6 +261,7 @@ func TestSQLiteDropsOldSignInCodes(t *testing.T) {
 		`INSERT INTO users (id, kind, display_name, created_at) VALUES ('u-old', 'oidc', 'Old', 1)`,
 		`DELETE FROM schema_migrations WHERE version >= 3`,
 		`DROP TABLE progress_resets`,
+		`ALTER TABLE laps DROP COLUMN last_lap_id`,
 	} {
 		if _, err := db.ExecContext(ctx, q); err != nil {
 			t.Fatalf("%s: %v", q, err)
@@ -302,5 +303,94 @@ func TestJSONDropsOldSignInCodes(t *testing.T) {
 	var raw map[string]any
 	if err := json.Unmarshal(data, &raw); err != nil || raw["invites"] != nil || raw["version"] != float64(jsonVersion) {
 		t.Fatalf("not rewritten: %v %s", err, data)
+	}
+}
+
+// TestSQLiteLapIDs: a database of the previous release (before 0005)
+// keeps its rows and gains laps.last_lap_id.
+func TestSQLiteLapIDs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SQLiteFile)
+	s, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := s.(*sqlStore).db
+	ctx := context.Background()
+	// Rewind to the schema before 0005, with rows.
+	for _, q := range []string{
+		`ALTER TABLE laps DROP COLUMN last_lap_id`,
+		`DELETE FROM schema_migrations WHERE version >= 5`,
+		`INSERT INTO users (id, kind, display_name, created_at) VALUES ('u', 'local', 'You', 1)`,
+		`INSERT INTO progress (user_id, lesson_id, step_id, status, hints_used, resets, completed_at, updated_at) VALUES ('u', 'a/b', 'one', 'done', 1, 2, 3, 4)`,
+		`INSERT INTO laps (user_id, lesson_id, count, best_ms, last_ms, last_at) VALUES ('u', 'a/b', 2, 50, 60, 70)`,
+		`INSERT INTO progress_resets (user_id, lesson_id, generation) VALUES ('u', 'a/b', 9)`,
+	} {
+		if _, err := db.ExecContext(ctx, q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	s.Close()
+	s, err = OpenSQLite(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	laps, err := s.Progress().Laps(ctx, "u")
+	if err != nil || len(laps) != 1 || laps[0] != (LapRecord{UserID: "u", LessonID: "a/b", Count: 2, BestMs: 50, LastMs: 60, LastAt: 70}) {
+		t.Fatalf("laps %v %+v", err, laps)
+	}
+	recs, err := s.Progress().List(ctx, "u")
+	if err != nil || len(recs) != 1 || recs[0].Status != protocol.ProgressDone || recs[0].Resets != 2 {
+		t.Fatalf("progress %v %+v", err, recs)
+	}
+	if g, err := s.Progress().Generations(ctx, "u"); err != nil || g["a/b"] != 9 {
+		t.Fatalf("generations %v %v", err, g)
+	}
+	laps[0].Count, laps[0].LastLapID = 3, "a/b@1"
+	if err := s.Progress().PutLap(ctx, laps[0]); err != nil {
+		t.Fatal(err)
+	}
+	if laps, _ := s.Progress().Laps(ctx, "u"); laps[0].LastLapID != "a/b@1" || laps[0].Count != 3 {
+		t.Fatalf("lap id not stored: %+v", laps)
+	}
+}
+
+// TestJSONLapIDs: a version 2 local.json keeps its rows and is rewritten
+// as version 3, whose laps carry lastLapId.
+func TestJSONLapIDs(t *testing.T) {
+	dir := t.TempDir()
+	old := `{"version":2,"users":{"local":{"id":"local","kind":"local","displayName":"You","createdAt":1}},"sessions":{},` +
+		`"progress":{"local":{"a/b":{"one":{"status":"done","hintsUsed":1,"resets":2,"completedAt":3,"updatedAt":4}}}},` +
+		`"generations":{"local":{"a/b":9}},"laps":{"local":{"a/b":{"count":2,"bestMs":50,"lastMs":60,"lastAt":70}}}}`
+	if err := os.WriteFile(filepath.Join(dir, JSONFile), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := OpenJSON(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	laps, err := s.Progress().Laps(ctx, "local")
+	if err != nil || len(laps) != 1 || laps[0] != (LapRecord{UserID: "local", LessonID: "a/b", Count: 2, BestMs: 50, LastMs: 60, LastAt: 70}) {
+		t.Fatalf("laps %v %+v", err, laps)
+	}
+	if recs, err := s.Progress().List(ctx, "local"); err != nil || len(recs) != 1 || recs[0].Resets != 2 {
+		t.Fatalf("progress %v %+v", err, recs)
+	}
+	if g, err := s.Progress().Generations(ctx, "local"); err != nil || g["a/b"] != 9 {
+		t.Fatalf("generations %v %v", err, g)
+	}
+	data, _ := os.ReadFile(filepath.Join(dir, JSONFile))
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil || raw["version"] != float64(3) {
+		t.Fatalf("not rewritten: %v %s", err, data)
+	}
+	laps[0].LastLapID = "a/b@1"
+	if err := s.Progress().PutLap(ctx, laps[0]); err != nil {
+		t.Fatal(err)
+	}
+	s2, _ := OpenJSON(dir)
+	if laps, _ := s2.Progress().Laps(ctx, "local"); laps[0].LastLapID != "a/b@1" {
+		t.Fatalf("lap id not stored: %+v", laps)
 	}
 }

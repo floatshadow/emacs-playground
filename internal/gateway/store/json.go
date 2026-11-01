@@ -21,8 +21,8 @@ const JSONFile = "local.json"
 
 // jsonVersion is the current local.json format. Opening an older file
 // rewrites it, which drops data of removed features (version 1 kept
-// sign-in codes).
-const jsonVersion = 2
+// sign-in codes); version 3 added lastLapId to laps.
+const jsonVersion = 3
 
 // Retention limits of the JSON store (local mode keeps a short history).
 const (

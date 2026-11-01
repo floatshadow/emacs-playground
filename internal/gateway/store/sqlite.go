@@ -348,7 +348,7 @@ ON CONFLICT(user_id, lesson_id) DO UPDATE SET generation = MAX(generation, exclu
 }
 
 func (r sqlProgress) Laps(ctx context.Context, userID string) ([]LapRecord, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT lesson_id, count, best_ms, last_ms, last_at FROM laps WHERE user_id = ? ORDER BY lesson_id`, userID)
+	rows, err := r.db.QueryContext(ctx, `SELECT lesson_id, count, best_ms, last_ms, last_at, COALESCE(last_lap_id, '') FROM laps WHERE user_id = ? ORDER BY lesson_id`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -356,7 +356,7 @@ func (r sqlProgress) Laps(ctx context.Context, userID string) ([]LapRecord, erro
 	var out []LapRecord
 	for rows.Next() {
 		rec := LapRecord{UserID: userID}
-		if err := rows.Scan(&rec.LessonID, &rec.Count, &rec.BestMs, &rec.LastMs, &rec.LastAt); err != nil {
+		if err := rows.Scan(&rec.LessonID, &rec.Count, &rec.BestMs, &rec.LastMs, &rec.LastAt, &rec.LastLapID); err != nil {
 			return nil, err
 		}
 		out = append(out, rec)
@@ -365,9 +365,9 @@ func (r sqlProgress) Laps(ctx context.Context, userID string) ([]LapRecord, erro
 }
 
 func (r sqlProgress) PutLap(ctx context.Context, rec LapRecord) error {
-	_, err := r.db.ExecContext(ctx, `INSERT INTO laps (user_id, lesson_id, count, best_ms, last_ms, last_at) VALUES (?, ?, ?, ?, ?, ?)
-ON CONFLICT (user_id, lesson_id) DO UPDATE SET count = excluded.count, best_ms = excluded.best_ms, last_ms = excluded.last_ms, last_at = excluded.last_at`,
-		rec.UserID, rec.LessonID, rec.Count, rec.BestMs, rec.LastMs, rec.LastAt)
+	_, err := r.db.ExecContext(ctx, `INSERT INTO laps (user_id, lesson_id, count, best_ms, last_ms, last_at, last_lap_id) VALUES (?, ?, ?, ?, ?, ?, NULLIF(?, ''))
+ON CONFLICT (user_id, lesson_id) DO UPDATE SET count = excluded.count, best_ms = excluded.best_ms, last_ms = excluded.last_ms, last_at = excluded.last_at, last_lap_id = excluded.last_lap_id`,
+		rec.UserID, rec.LessonID, rec.Count, rec.BestMs, rec.LastMs, rec.LastAt, rec.LastLapID)
 	return err
 }
 
