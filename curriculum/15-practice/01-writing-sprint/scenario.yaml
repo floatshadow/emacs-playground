@@ -1,0 +1,36 @@
+id: 15-practice/01-writing-sprint
+title: Writing sprint
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files]
+vscode: "Markdown editing, word wrap"
+setup:
+  workspace: fixtures/practice-writing
+  root: practice-writing
+  reset: true
+  open: [practice-writing/notes/essay.md]
+  layout: single
+# Practice steps check the saved file only, never which keys made it.
+steps:
+  - id: draft
+    goal: Write the first section
+    detail: "Replace the TODO under the first heading with at least 80 words of your own, every line within 80 characters, and save."
+    demo: 'M-< ~300 C-s ~300 "TODO" ~300 RET ~300 C-a ~200 C-k ~300 "I keep my notes in plain text because a text file outlives every app I have tried. It opens in any editor, on any machine, today and in twenty years. I can search it with grep, keep it in git, and read the history of an idea line by line. Lists, drafts, meeting notes and recipes all fit in one folder. Nothing hides behind a sync button or a format I cannot read, and moving to a new tool means copying that folder." ~500 M-q ~500 C-x C-s ~1000'
+    conditions:
+      - text: the first section has at least 80 words
+        shell: { run: "awk '/^#/ { h++; next } h == 1 { n += NF } END { exit !(n >= 80) }' notes/essay.md" }
+        hint: "Only the saved file counts, and only the text between the first heading and the second. M-x count-words with the section marked shows how far you are."
+      - text: no line is longer than 80 characters
+        shell: { run: "awk 'length > 80 { bad = 1 } END { exit bad }' notes/essay.md" }
+        hint: "A paragraph typed as one long line breaks into lines of at most 80 characters with M-q (fill-paragraph), with the cursor anywhere in it."
+  - id: finish
+    goal: Fill in the other two sections
+    detail: "Replace the two TODO lines left with your own text, keep the three headings as they are, and save."
+    demo: 'M-< ~300 C-s ~300 "TODO" ~300 RET ~300 C-a ~200 C-k ~300 "Lists of things to try, drafts like this one, and notes from meetings." ~500 C-s ~300 "TODO" ~300 RET ~300 C-a ~200 C-k ~300 "I want to keep one folder of notes instead of three apps." ~500 C-x C-s ~1000'
+    conditions:
+      - text: no TODO is left
+        file: { path: practice-writing/notes/essay.md, not_contains: "TODO" }
+        hint: "C-s TODO finds the next one; the search is case-sensitive because it has capitals. Remember to save."
+      - text: the three headings are still there
+        shell: { run: "grep -qx '# Why I keep my notes in plain text' notes/essay.md && grep -qx '## What goes in' notes/essay.md && grep -qx '## What I would change' notes/essay.md" }
+        hint: "Each heading must stay a line of its own, exactly as it was. C-/ undoes an edit that went too far."

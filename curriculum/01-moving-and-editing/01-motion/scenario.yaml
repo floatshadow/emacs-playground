@@ -8,7 +8,8 @@ setup:
   workspace: fixtures/editing
   root: editing
   reset: true
-  open: [editing/src/main.rs]
+  # tour.md is opened too, for the last step; main.rs, the first, is shown.
+  open: [editing/src/main.rs, editing/notes/tour.md]
   layout: single
   eval: '(with-current-buffer (find-buffer-visiting "/work/editing/src/main.rs") (goto-char (point-min)))'
 steps:
@@ -75,3 +76,17 @@ steps:
       - text: C-l recentred the window
         event: { command: recenter-top-bottom }
         hint: "C-l scrolls so the cursor line is in the middle. Press it again: top, then bottom."
+  - id: page
+    goal: Page through the tour
+    detail: "`C-x b tour.md RET` switches to the field guide, which is already open in a buffer of its own (lesson 2.1 explains buffers). `C-v` pages down a screen, `M-v` back up; if Alt does not reach Emacs, `ESC v` is `M-v`. On the last screen `C-v` goes to the very end, and one more says End of buffer: there is nothing more to show."
+    demo: 'C-x b ~200 "tour.md" RET ~400 C-v ~500 C-v ~500 M-v'
+    conditions:
+      - text: C-v paged down
+        event: { command: scroll-up-command }
+        hint: "The view jumps by a whole screen and the cursor comes along. Is the bottom line asking for a buffer? Type tour.md there and RET first."
+      - text: M-v paged back up
+        event: { command: scroll-down-command }
+        hint: "Alt v, or Escape then v. If the browser opens a menu on Alt v, Escape then v always reaches Emacs."
+      - text: the tour is shown, scrolled past its first line
+        elisp: '(with-current-buffer (window-buffer (selected-window)) (and (equal buffer-file-name "/work/editing/notes/tour.md") (> (window-start) (point-min))))'
+        hint: "Page down twice and up once, so the window still starts below the title. M-< or too many M-v bring you back to the top: C-v again."

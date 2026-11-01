@@ -18,12 +18,12 @@ Control and Meta together move by a balanced expression, a :jargon[sexp]: a word
 
 ## Bigger jumps
 
-:try[M-<] and :try[M->] go to the top and bottom of the buffer. :try[C-v] scrolls down a screen and `M-v` up. :try[M-g g] asks for a line number. Any of these takes a count first: `C-u 10 C-n` moves ten lines, `C-u 3 M-f` three words.
+:try[M-<] and :try[M->] go to the top and bottom of the buffer. :try[C-v] scrolls down a screen and `M-v` up (`ESC v` if Alt does not reach Emacs); `main.rs` fits in one screen, so the last step pages through a longer file, `notes/tour.md`. :try[M-g g] asks for a line number. Any of these takes a count first: `C-u 10 C-n` moves ten lines, `C-u 3 M-f` three words.
 
 When you jump, the screen follows, but not always where you want it. :try[C-l] scrolls so the cursor's line is in the middle; press it again for the top, again for the bottom. `C-M-l` scrolls to show as much of the current function as fits.
 
 ## Five spots
 
-`src/main.rs` has five spots marked in its comments, *(1)* to *(5)*. Reach each with as few keys as you can. Watch the ticker: it names each motion command as you use it, which is the fastest way to learn their names.
+`src/main.rs` has five spots marked in its comments, *(1)* to *(5)*. Reach each with as few keys as you can, then page through the tour. Watch the ticker: it names each motion command as you use it, which is the fastest way to learn their names.
 
 ::steps

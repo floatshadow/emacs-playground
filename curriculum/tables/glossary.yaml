@@ -144,9 +144,8 @@ multi-hop: "A TRAMP path that chains connections with |, such as /ssh:box|sudo::
 package archives: "Servers that offer Emacs packages to package.el: GNU ELPA, NonGNU ELPA and MELPA."
 theme: "A named set of colours and styles for every face. M-x load-theme turns one on."
 face: "A named text style: font, size, colour, weight. Themes set faces; M-x describe-face shows the one under the cursor."
-hydra: "A menu of keys that stays open (the hydra package). It lists its keys at the bottom; each one, a head, runs a command. q or C-g closes it."
-head: "One key of a hydra and the command it runs. Red heads keep the hydra open, blue heads close it."
-transient: "Magit's kind of menu, built into Emacs: a popup of keys that take arguments and remember values."
+transient: "A menu of keys built into Emacs, as in Magit: it lists its keys at the bottom, each one runs a command, and C-g closes it. Keys can take arguments and remember values."
+suffix: "One key of a transient menu and the command it runs. It closes the menu unless it says :transient t."
 
 # --- proj-1-4 ---
 SyncTeX: "A map between a LaTeX source and its PDF, written during the build, so the editor can jump from a line to its place in the PDF and back."

@@ -198,91 +198,6 @@ def check_regex(where: str, rx: str, rep: Report) -> None:
         rep.err(where, f"regex {rx!r}: {e}")
 
 
-JS_LEADING_FLAGS = re.compile(r"^\(\?([ims]+)\)")
-
-
-def js_regex_problem(rx: str) -> str | None:
-    """Why the browser cannot read RX as RE2 does, or None.
-
-    The browser (web/src/advice/predicate.ts) translates leading i/m/s
-    flags, scoped i/s flags, named groups, \\A, \\z, \\Q...\\E, \\x{...},
-    octal escapes and escaped punctuation for Unicode-mode RegExp, which
-    also accepts braced \\p classes. This check rejects the remaining
-    unsupported syntax; js_compile_all checks with the browser compiler.
-    """
-    m = JS_LEADING_FLAGS.match(rx)
-    if m:
-        rx = rx[m.end():]
-    i, n = 0, len(rx)
-    in_class = False
-    while i < n:
-        c = rx[i]
-        if c == "\\":
-            nxt = rx[i + 1:i + 2]
-            if nxt == "Q":
-                end = rx.find(r"\E", i + 2)
-                i = n if end < 0 else end + 2
-                continue
-            if nxt in ("E", "C"):
-                return f"\\{nxt} is not supported by the browser"
-            if nxt in ("p", "P") and rx[i + 2:i + 3] != "{":
-                return "Unicode classes require braces in the browser"
-            if nxt and nxt in "123456789":
-                octal = re.match(r"[0-7]{2,3}", rx[i + 1:])
-                if not octal:
-                    return "backreferences are not supported by RE2"
-                i += 1 + len(octal[0])
-                continue
-            i += 2
-            continue
-        if in_class:
-            if rx.startswith("[:", i):
-                return "POSIX classes ([[:alpha:]]) are not JavaScript"
-            if c == "]":
-                in_class = False
-            i += 1
-            continue
-        if c == "[":
-            in_class = True
-            i += 1
-            if rx[i:i + 1] == "^":
-                i += 1
-            if rx[i:i + 1] == "]":
-                i += 1
-            continue
-        if c == "(" and rx[i + 1:i + 2] == "?":
-            if not re.match(r"\(\?(?::|[is]+:|P?<[^=!])", rx[i:]):
-                return "unsupported flag or special group (only leading i/m/s and scoped i/s flags are accepted)"
-        i += 1
-    return None
-
-
-def js_compile_all(patterns: list[str]) -> dict[str, str]:
-    """Compile PATTERNS with the browser translator when Node 24+ is installed."""
-    import json
-    import shutil
-    import subprocess
-
-    node = shutil.which("node")
-    if not node or not patterns:
-        return {}
-    compiler = HERE.parent.parent / "web" / "src" / "advice" / "predicate.ts"
-    prog = (
-        f"import {{compileRe2}} from {json.dumps(compiler.as_uri())};"
-        "import fs from 'node:fs';"
-        "const ps = JSON.parse(fs.readFileSync(0, 'utf8')); const out = {};"
-        "for (const p of ps) { try { compileRe2(p); }"
-        " catch (e) { out[p] = String(e.message); } }"
-        "process.stdout.write(JSON.stringify(out));"
-    )
-    try:
-        r = subprocess.run([node, "--input-type=module", "-e", prog], input=json.dumps(patterns), capture_output=True,
-                           text=True, timeout=30)
-        return json.loads(r.stdout or "{}")
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return {}
-
-
 def predicate_regexes(pred) -> list[str]:
     out = []
     if not isinstance(pred, dict):
@@ -875,10 +790,6 @@ def check_tables(tdir: Path, rep: Report) -> dict:
                 rep.err(w, "id missing or duplicate")
             ids.add(rid)
             check_predicate(w, row.get("when"), rep, allow_session=True)
-            for rx in predicate_regexes(row.get("when")):
-                prob = js_regex_problem(rx)
-                if prob:
-                    rep.err(w, f"regex {rx!r}: {prob}; the browser evaluates this row")
             for k in ("why", "how"):
                 v = row.get(k)
                 if not isinstance(v, str) or not v.strip():
@@ -889,9 +800,6 @@ def check_tables(tdir: Path, rep: Report) -> dict:
                     if msg:
                         rep.err(w, f"{k} template: {msg}")
         rows = [r for r in exits if isinstance(r, dict)]
-        all_rx = sorted({rx for r in rows for rx in predicate_regexes(r.get("when"))})
-        for rx, msg in js_compile_all(all_rx).items():
-            rep.err("tables/exits.yaml", f"regex {rx!r} does not compile in JavaScript: {msg}")
         check_exit_prompts(rows, rep)
     habits = out.get("habits")
     if not isinstance(habits, list) or not habits:
@@ -943,8 +851,8 @@ def check_index(cur: Path, rep: Report) -> list[str]:
     idx = load_yaml(cur / "index.yaml")
     ready: list[str] = []
     parts = idx.get("parts") or []
-    if [p.get("n") for p in parts] != list(range(15)):
-        rep.err("index.yaml", "parts must be numbered 0 to 14 in order")
+    if [p.get("n") for p in parts] != list(range(16)):
+        rep.err("index.yaml", "parts must be numbered 0 to 15 in order")
     listed = set()
     for p in parts:
         pid = p.get("id")

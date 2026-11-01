@@ -1,0 +1,38 @@
+id: 15-practice/04-mend-an-elisp-file
+title: Mend an Elisp file
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files]
+vscode: "Problems panel, test runner"
+setup:
+  workspace: fixtures/practice-elisp
+  root: practice-elisp
+  reset: true
+  open: [practice-elisp/my-tools.el]
+  layout: single
+# Practice steps check outcomes only: a separate batch Emacs compiles the
+# saved file (the .elc goes to a temporary directory) and runs its ERT
+# tests, so the learner's Emacs is never touched by a check.
+steps:
+  - id: compile
+    goal: Make my-tools.el compile
+    detail: "The file does not byte-compile: one form is not closed. Find it, fix it, and save."
+    demo: 'M-< ~300 C-s ~300 "(point-max)))" ~300 RET ~300 ")" ~500 C-x C-s ~1500'
+    conditions:
+      - text: it byte-compiles
+        shell: { run: "d=$(mktemp -d) && D=$d emacs -Q --batch --eval '(setq byte-compile-dest-file-function (lambda (_) (expand-file-name \"my-tools.elc\" (getenv \"D\"))))' -f batch-byte-compile my-tools.el; s=$?; rm -rf $d; exit $s", timeout: 30 }
+        hint: "M-x byte-compile-file names the line where reading stopped, which is often the end of the file. C-M-f from the start of each defun shows where its parentheses really end."
+      - text: it compiles without warnings
+        shell: { run: "d=$(mktemp -d) && D=$d emacs -Q --batch --eval '(setq byte-compile-error-on-warn t byte-compile-dest-file-function (lambda (_) (expand-file-name \"my-tools.elc\" (getenv \"D\"))))' -f batch-byte-compile my-tools.el; s=$?; rm -rf $d; exit $s", timeout: 30 }
+        hint: "The compile log lists each warning with its line; a parenthesis added in the wrong place can turn the next defun into part of this one."
+  - id: run
+    goal: Make my-tools-wrap-region work, and a command
+    detail: "my-tools-test.el has the tests. my-tools-wrap-region calls my-tools-wrap with its arguments in the wrong order, and M-x does not offer it. Fix both and save."
+    demo: 'M-< ~300 C-s ~300 "to 40 columns.\"" ~300 RET ~300 RET ~200 "(interactive \"r\")" ~300 C-s ~300 "(my-tools-wrap 40 text)" ~300 RET ~300 C-b ~200 DEL DEL DEL DEL DEL DEL DEL ~300 "text 40" ~500 C-x C-s ~1500'
+    conditions:
+      - text: my-tools-wrap-region wraps the region
+        shell: { run: "emacs -Q --batch -l my-tools.el -l my-tools-test.el --eval \"(ert-run-tests-batch-and-exit 'my-tools-test-wrap)\"", timeout: 30 }
+        hint: "Compare the call with the definition of my-tools-wrap: its parameters are (text width). M-x ert RET t RET runs the tests after you evaluate both files."
+      - text: M-x my-tools-wrap-region wraps the marked region
+        shell: { run: "emacs -Q --batch -l my-tools.el -l my-tools-test.el --eval \"(ert-run-tests-batch-and-exit 'my-tools-test-command)\"", timeout: 30 }
+        hint: "A function becomes a command with an interactive form, the first thing after its docstring; the code letter r passes the region's start and end."

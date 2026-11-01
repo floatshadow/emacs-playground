@@ -4,7 +4,7 @@ summary: Try a theme family, set up a light and dark pair you can toggle, enlarg
 minutes: 12
 ---
 
-How Emacs looks is configuration like everything else: a :jargon[theme] sets the colours of every :jargon[face], the font is one face attribute, icons come from packages, and the mode line is a variable you can replace. This lesson runs in the graphical frame, where fonts, sizes and ligatures show.
+How Emacs looks is configuration like everything else: a :jargon[theme] sets the colours of every :jargon[face], the font is one face attribute, icons come from packages, and the mode line is a variable you can replace. This lesson runs in the graphical frame, where fonts and sizes show.
 
 :::vscode
 Color Theme, File Icon Theme and the font settings become `M-x load-theme` (or a family's own command), the nerd-icons packages and `set-face-attribute`. VS Code's "auto switch between light and dark" is a theme pair you toggle with one command.
@@ -31,10 +31,6 @@ Then `M-x modus-themes-toggle` flips between them (`ef-themes-to-toggle` and `ef
 ```
 
 `:height` is in tenths of a point. A bigger font only for writing is a hook: `(add-hook 'markdown-mode-hook (lambda () (text-scale-set 1)))`. Chinese, Japanese and Korean text falls back to Noto CJK here; `set-fontset-font` picks another font for a script. The terminal frame uses the browser terminal's font and size, so none of this changes it.
-
-:::gui-only
-Ligatures are on in this frame: `->`, `=>` and `!=` in code are drawn as single glyphs. `M-x global-ligature-mode` turns them off.
-:::
 
 ## Icons and the mode line
 

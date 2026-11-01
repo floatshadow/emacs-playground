@@ -3,7 +3,8 @@
 Practice files for Part 1 of the course: moving, killing and yanking,
 undo, search, replace, macros and multiple cursors.
 
-- `src/main.rs` has five marked spots for lesson 1.1.
+- `src/main.rs` has five marked spots for lesson 1.1, and `notes/tour.md`
+  is long enough to page through with `C-v` and `M-v` (1.1).
 - `src/shapes.rs` has three functions in the wrong order (1.2).
 - `notes/journal.md` is where a paragraph goes missing (1.3).
 - `notes/style.md` and `src/latency.rs` need renaming (1.5).

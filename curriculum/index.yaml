@@ -248,7 +248,7 @@ parts:
       - { id: 13-making-it-yours/02-packages, n: "13.2", title: "Packages: install, update, pin, remove", minutes: 15, vscode: Extensions, status: ready }
       - { id: 13-making-it-yours/03-keybindings, n: "13.3", title: Keybindings, minutes: 15, vscode: keybindings.json, status: ready }
       - { id: 13-making-it-yours/04-first-command, n: "13.4", title: "Your first command, hooks and advice", minutes: 15, status: ready }
-      - { id: 13-making-it-yours/07-key-menus, n: "13.5", title: Key menus with hydra, minutes: 15, vscode: "Command Palette categories, Ctrl+K chords", status: ready }
+      - { id: 13-making-it-yours/07-key-menus, n: "13.5", title: Key menus with transient, minutes: 15, vscode: "Command Palette categories, Ctrl+K chords", status: ready }
       - { id: 13-making-it-yours/05-themes-fonts-icons, n: "13.6", title: "Themes, fonts, icons and the mode line", minutes: 12, vscode: "colour theme, file icon theme, font settings", status: ready }
       - { id: 13-making-it-yours/06-take-it-home, n: "13.7", title: Take it home, minutes: 12, vscode: Settings Sync, tags: [remote], status: ready }
 
@@ -270,6 +270,20 @@ parts:
       - { id: projects/p6-polyglot, n: P6, title: Polyglot service, minutes: 75, tags: [project, remote], status: ready }
       - { id: projects/p7-notebook, n: P7, title: Literate experiment notebook, minutes: 75, tags: [project, remote], status: ready }
       - { id: projects/p8-refactor, n: P8, title: Repository-wide refactor, minutes: 75, tags: [project], status: ready }
+
+  - n: 15
+    id: 15-practice
+    title: Practice
+    minutes: 60
+    outcome: Write a short essay, make a Rust and an OCaml build pass and mend a broken Emacs Lisp file, with any keys you like, checked only by the result.
+    modules: []
+    status: ready
+    suggestedAfter: 7
+    lessons:
+      - { id: 15-practice/01-writing-sprint, n: "15.1", title: Writing sprint, minutes: 15, vscode: "Markdown editing, word wrap", status: ready }
+      - { id: 15-practice/02-fix-the-rust-build, n: "15.2", title: Fix the Rust build, minutes: 15, vscode: "Problems panel, rust-analyzer, cargo tasks", status: ready }
+      - { id: 15-practice/03-fix-the-ocaml-build, n: "15.3", title: Fix the OCaml build, minutes: 15, vscode: "OCaml Platform, Problems panel", status: ready }
+      - { id: 15-practice/04-mend-an-elisp-file, n: "15.4", title: Mend an Elisp file, minutes: 15, vscode: "Problems panel, test runner", status: ready }
 
 projects:
   - id: projects/p1-hello-cargo

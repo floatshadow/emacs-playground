@@ -72,19 +72,14 @@
   why: "which-key is showing pages of the keys that can follow the prefix."
   how: "n and p turn the pages, a aborts (C-g only goes back to the prefix)."
 
-# An open hydra (lesson 13.5) is no loop: its keymap sits over every other
-# until it closes. A red one closes on a key it does not list and runs it,
-# a pink one lets the key through and stays, an amaranth one ignores it.
-- id: hydra
-  when: { "waiting.kind": hydra }
-  why: "A hydra is open ({waiting.what}): the keys it lists at the bottom stay active until it closes."
-  how: "Press one of them, or its quit key (q in most hydras; the hint says). C-g always closes a hydra, and so does Rescue me."
-  flag: Hydra
-
-- id: hydra-amaranth
-  when: { "session.echo": { regex: "^An amaranth Hydra can only exit" } }
-  why: "This hydra ignores every key it does not list (an amaranth hydra)."
-  how: "Press its quit key, usually q (the hint shows it), or C-g."
+# An open transient menu (lesson 13.5, Magit) is no loop: its keymap sits
+# over every other until it closes. Keys it does not list are refused, or
+# run with the menu staying or closing, as the menu says.
+- id: transient
+  when: { "waiting.kind": transient }
+  why: "A key menu is open ({waiting.what}): the keys it lists at the bottom stay active until it closes."
+  how: "Press one of them. C-g always closes the menu (q too, when the menu lists it), and so does Rescue me."
+  flag: Menu
 
 # C-h has a row of its own (VS Code users press it for replace); the
 # generic row's regex is every pending prefix but exactly C-h.

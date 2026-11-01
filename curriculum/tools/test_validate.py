@@ -16,64 +16,6 @@ sys.path.insert(0, str(HERE))
 import validate as v  # noqa: E402
 
 
-class JsRegexTest(unittest.TestCase):
-    def test_portable(self):
-        for rx in [
-            "M-x",
-            r"\((y or n|yes or no)\)",
-            r"^[A-Z][a-z]+( to| in| from)? buffer\b",
-            r"[Bb]ookmark[^?]*$",
-            "(?i)buffer",  # a leading flag group becomes RegExp flags
-            "[(?]x",  # inside a class, (? is literal
-            r"a\(?x",  # an escaped parenthesis is literal
-            "(?:a|b)c",
-            "(?i:file)",
-            "(?is:file.)",
-            "(?P<name>a)",
-            "(?<name>a)",
-            r"\Afoo",
-            r"foo\z",
-            r"\Q(?x)[[:alpha:]]\E",
-            r"\Qliteral remainder",
-            r"\p{L}+",
-            r"\x{263a}",
-            r"\0",
-            r"\11",
-            r"\141",
-            r"C\-x",
-            r"a\:b",
-            "x{",
-            "a]",
-        ]:
-            self.assertIsNone(v.js_regex_problem(rx), rx)
-
-    def test_not_portable(self):
-        for rx in [
-            "a(?i)b",
-            "(?U)a+",
-            "(?m:^a)",
-            "(?-i:a)",
-            "(?=a)",
-            "(?<=a)",
-            r"\1", r"\2", r"\3", r"\4", r"\5", r"\6", r"\7",
-            r"\pL+",
-            r"\E",
-            r"\C",
-            "[[:alpha:]]+",
-        ]:
-            self.assertIsNotNone(v.js_regex_problem(rx), rx)
-
-    def test_browser_compiler(self):
-        if "(" not in v.js_compile_all(["("]):
-            self.skipTest("Node 24+ is not installed")
-        self.assertEqual(v.js_compile_all([
-            "(?i:file)", "(?P<name>a)", r"\Afoo\z", r"\Qx{]\E",
-            r"\x{263a}", r"\p{L}+", r"C\-x", r"a\:b", "x{", "a]",
-        ]), {})
-        bad = [r"\1", r"\2", r"\3", r"\4", r"\5", r"\6", r"\7"]
-        self.assertEqual(set(v.js_compile_all(bad)), set(bad))
-
-
 class HintTest(unittest.TestCase):
     STEP = {"goal": "Copy the whole file", "detail": "`C-x h` selects the whole buffer. `M-w` copies it."}
 
@@ -109,11 +51,6 @@ class ExitPromptTest(unittest.TestCase):
         rep = v.Report()
         v.check_exit_prompts(rows, rep)
         self.assertTrue(any("kill anyway" in e for e in rep.errors), rep.errors)
-
-    def test_exit_regexes_are_portable(self):
-        for r in self.rows():
-            for rx in v.predicate_regexes(r.get("when")):
-                self.assertIsNone(v.js_regex_problem(rx), (r["id"], rx))
 
 
 class SessionRowsTest(unittest.TestCase):

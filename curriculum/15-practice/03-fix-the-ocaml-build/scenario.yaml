@@ -1,0 +1,43 @@
+id: 15-practice/03-fix-the-ocaml-build
+title: Fix the OCaml build
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python]
+vscode: "OCaml Platform, Problems panel"
+setup:
+  workspace: fixtures/practice-ocaml
+  root: practice-ocaml
+  reset: true
+  open: [practice-ocaml/lib/stats.ml]
+  layout: single
+  # merlin reads the project's configuration from dune's build
+  # directory, which a fresh workspace does not have yet.
+  run: "dune build 2>/dev/null; true"
+# Practice steps check outcomes only: dune, run in build directories of
+# its own (a second dune in the learner's _build would stop at its lock);
+# "no warnings" builds afresh in the release profile, where warnings are
+# printed instead of failing the build (under $HOME: /tmp is noexec, and
+# the build runs the test).
+steps:
+  - id: build
+    goal: Make the library build
+    detail: "dune build stops at a type error in lib/stats.ml, and at a second one once the first is fixed. Fix both and save."
+    demo: 'M-< ~300 C-s ~300 "/. List" ~300 RET ~300 M-b ~200 "float_of_int (" ~300 C-e ~200 C-b ~200 ")" ~300 C-s ~300 "x :: rest -> " ~300 RET ~300 "Some (" ~300 C-e ~200 ")" ~500 C-x C-s ~2000'
+    conditions:
+      - text: dune build succeeds
+        shell: { run: "mkdir -p $HOME/.cache/pg-check && dune build --build-dir $HOME/.cache/pg-check/practice-ocaml 2>&1", timeout: 120 }
+        hint: "C-c C-c builds; the error names the expression and both types. /. divides floats, and float_of_int turns an int into one."
+      - text: a fresh build prints no warnings
+        shell: { run: "mkdir -p $HOME/.cache/pg-check && d=$(mktemp -d -p $HOME/.cache/pg-check) && out=$(dune build --build-dir $d --profile release 2>&1); s=$?; rm -rf $d; [ $s -eq 0 ] && ! printf '%s' \"$out\" | grep -qi warning", timeout: 120 }
+        hint: "The second error shows only once the first is fixed. largest promises an int option in every branch: one branch returns None, so the other needs Some."
+  - id: test
+    goal: Make the expect test pass, formatted
+    detail: "dune test compares what test/test_stats.ml prints with test/test_stats.expected, and one line differs. Fix the library, not the expected output, and keep the code formatted as .ocamlformat says."
+    demo: 'C-x C-f ~400 "/work/practice-ocaml/lib/stats.ml" ~300 RET ~800 M-< ~300 C-s ~300 "x >= t" ~300 RET ~300 C-b C-b ~200 DEL ~300 C-x C-s ~2000'
+    conditions:
+      - text: dune test passes
+        shell: { run: "mkdir -p $HOME/.cache/pg-check && dune test --build-dir $HOME/.cache/pg-check/practice-ocaml 2>&1", timeout: 120 }
+        hint: "C-c C-r runs the tests: the diff marks the expected line with - and the printed one with +. Read the comment above the function that printed it."
+      - text: the code is formatted
+        shell: { run: "mkdir -p $HOME/.cache/pg-check && dune build @fmt --build-dir $HOME/.cache/pg-check/practice-ocaml-fmt 2>&1", timeout: 120 }
+        hint: "Saving an OCaml buffer formats it with ocamlformat (lesson 7.3); a file you never saved keeps its old layout. dune fmt in a shell formats every file."

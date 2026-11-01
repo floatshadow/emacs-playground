@@ -1,0 +1,37 @@
+id: 15-practice/02-fix-the-rust-build
+title: Fix the Rust build
+minutes: 15
+mode: terminal
+modules: [base, agent, editing, files, windows, completion, git, terminals, lsp, lang-rust, lang-ocaml, lang-python]
+vscode: "Problems panel, rust-analyzer, cargo tasks"
+setup:
+  workspace: fixtures/practice-rust
+  root: practice-rust
+  reset: true
+  open: [practice-rust/src/lib.rs]
+  layout: single
+# Practice steps check outcomes only: cargo, run in build directories of
+# their own so they never wait on rust-analyzer's or the learner's.
+steps:
+  - id: build
+    goal: Make the crate build without warnings
+    detail: "cargo finds two errors in src/lib.rs and, once they are gone, a warning in src/main.rs. Fix all three and save."
+    demo: 'M-< ~300 C-s ~300 " as u32" ~300 RET ~300 DEL DEL DEL DEL DEL DEL DEL ~300 C-s ~300 "let counts" ~300 RET ~300 M-b ~200 "mut " ~300 C-x C-s ~1000 C-x C-f ~400 "/work/practice-rust/src/main.rs" ~300 RET ~800 M-< ~200 C-k C-k ~300 C-x C-s ~1500'
+    conditions:
+      - text: cargo build succeeds
+        shell: { run: "cargo build --offline -q --target-dir $HOME/.cache/pg-check/practice-rust", timeout: 120 }
+        hint: "C-c C-c builds in the compile window; M-g M-n jumps to each error in turn. A function declared to return usize must not convert its result to another type."
+      - text: it builds without warnings
+        shell: { run: "RUSTFLAGS='-D warnings' cargo build --offline -q --target-dir $HOME/.cache/pg-check/practice-rust-strict", timeout: 120 }
+        hint: "The warning shows only once the errors are gone: build again and read past the last error. An unused import is deleted, not commented."
+  - id: test
+    goal: Make the tests and clippy pass
+    detail: "cargo test finds one failing test, and cargo clippy two lints on one line. Fix the code, not the tests, and save."
+    demo: 'C-x C-f ~400 "/work/practice-rust/src/lib.rs" ~300 RET ~800 M-< ~300 C-s ~300 "return words" ~300 RET ~300 C-a ~200 C-k ~300 "    words(text).is_empty()" ~500 C-s ~300 "then(b.0.cmp(&a.0))" ~300 RET ~300 C-b C-b ~200 DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL DEL ~300 "a.0.cmp(&b.0" ~500 C-x C-s ~1500'
+    conditions:
+      - text: cargo test passes
+        shell: { run: "cargo test --offline -q --target-dir $HOME/.cache/pg-check/practice-rust", timeout: 120 }
+        hint: "C-c C-t runs the tests. The failing one says what it expected (right) and what it got (left): look at how top breaks ties."
+      - text: cargo clippy finds nothing
+        shell: { run: "cargo clippy --offline -q --target-dir $HOME/.cache/pg-check/practice-rust-clippy -- -D warnings", timeout: 120 }
+        hint: "C-c C-k runs clippy; each lint names its fix. The last expression of a function is its value, and a Vec knows whether it is empty."

@@ -784,17 +784,10 @@ keymap-global-set: Bind a key to a command everywhere, for this session
 duplicate-line: Copy the current line below itself
 toggle-truncate-lines: Cut long lines off at the window edge, or wrap them
 my-dated-header: "Your command: insert a Markdown heading with today's date"
-my-menu/body: "Your menu (a hydra): its keys stay active until q"
-my-menu/nil: Close your menu (its quit key)
-my-menu/other-window: "other-window from your menu, which stays open"
-my-menu/display-line-numbers-mode: "Line numbers on or off, from your menu, which stays open"
-my-menu/duplicate-line: "duplicate-line from your menu, which stays open"
-my-menu/find-file-and-exit: "Open a file from your menu, which then closes (a blue key)"
-my-sizes/body: "Your window-size hydra (pink: other keys still type)"
-my-sizes/enlarge-window-horizontally: "Make this window wider; the size menu stays open"
-my-sizes/shrink-window-horizontally: "Make this window narrower; the size menu stays open"
-my-sizes/nil: Close the size menu
-hydra-amaranth-warn: "The hydra ignored this key: only its quit key or C-g closes it"
+my-menu: "Your transient menu: its keys show at the bottom; q or C-g closes it"
+my-sizes: "Your window-size menu: other keys still type; q closes it"
+transient-undefined: "The open menu refused this key: it is not one of its keys (C-g closes the menu)"
+transient-quit-one: Close the open transient menu (back to the outer one, if any)
 load-theme: Turn on a colour theme
 ef-themes-select: Pick one of the ef themes and turn it on
 modus-themes-toggle: Switch between the two themes in modus-themes-to-toggle
@@ -802,7 +795,6 @@ nerd-icons-completion-mode: Show or hide icons in completion lists
 doom-modeline-mode: Switch between doom-modeline and the built-in mode line
 breadcrumb-mode: Show or hide the header line with the file's path and the function at point
 describe-package: Describe a package by name, installed or not
-global-ligature-mode: Draw or stop drawing ligatures such as -> as one glyph (GUI frame)
 nerd-icons-dired-mode: Show or hide icons in Dired listings
 ef-themes-toggle: Switch between the two themes in ef-themes-to-toggle
 repeat-mode: Let keys of a repeat map repeat without their prefix
