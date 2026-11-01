@@ -104,7 +104,7 @@ The browser never evaluates conditions. It renders the latest `check` and select
 2. It extracts the fixtures into the lesson root without overwriting the learner's files, unless `setup.reset` (or `reset`) is set: then edited files are overwritten and files the fixtures do not contain are removed, keeping `target`, `_build`, `.venv`, `node_modules` and `.git`.
 3. If the union of the current module set and the scenario's `modules` differs from the current set, it writes `modules.el` and restarts the daemon (§5.2); the RPC returns `restarting: true` and the load finishes in the background, while later requests wait for it. Modules are never removed (DESIGN.md ADR-021).
 4. It waits (up to 15 s) for a restart in progress and for the terminal frame, then asks the agent to `setup`: `open`, `layout`, `eval`, `compile` in one call. With `reset` the agent first reverts or kills the buffers of changed or removed files, closes other tabs and clears unmodified leftovers and save-place positions under the root, so a replayed lesson starts on line 1 of its files (emacs.md §10).
-5. For a `stepId` after the first ("Go to this step") it restores that step's checkpoint, or else fast-forwards by replaying the earlier steps' demos while the engine rehearses them quietly (10 s per step, 3 minutes in all).
+5. For a `stepId` after the first ("Go to this step") it restores that step's checkpoint, or else fast-forwards by replaying the earlier steps' demos while each is rehearsed quietly (phase Rehearsing, §5.3; 10 s per step, 3 minutes in all).
 6. It takes the step's checkpoint `refs/playground/<lesson>/<step>` (not after a fast-forward that did not complete every earlier step) and emits `step {status: loaded}`.
 
 ### 3.4 Rescue and reset
@@ -190,14 +190,15 @@ Every 30 s and before every planned restart sessiond saves the agent's buffer an
 ### 5.3 Step
 
 ```
-loaded → (conditions hold) → complete → next step loaded
-  │  ↑        └─ while "Watch it" plays → demonstrated (step stays active)
-  │  └─ reset (Reset this step, Do it yourself, Watch it after the learner typed)
-  ├─ skip → skipped → next step loaded
-  └─ progress reset → dropped (no active step)
+loaded/reset → Active → (conditions hold) → complete → Advancing → next step loaded, or lesson complete
+                 │ ├─ demo start → Watching → (conditions hold) → demonstrated (once; step stays active)
+                 │ ├─ skip → Skipping → demo played → skipped → Advancing
+                 │ └─ reset (Reset this step, Do it yourself, Watch it or Skip after the learner typed)
+                 └─ progress reset → dropped → Idle (no active step)
+Go to this step without a checkpoint: the earlier steps run as Rehearsing (silent), then the step loads.
 ```
 
-Only a completion outside a demonstration counts as `done` (api.md §3.4).
+Each activation is a new attempt; an evaluation of an older attempt changes nothing. Only a completion outside a demonstration counts as `done` (api.md §3.4).
 
 ## 6. Failure modes
 

@@ -77,7 +77,7 @@ sessiond reports progress (step start, completions, hints, resets, finished laps
 
 ### 3.1 Responsibilities
 
-Keep Emacs, tmux and Xvnc alive; serve PTY, events, VNC, RPC and preview; tap input; evaluate the active step; checkpoint and restore; load scenarios; report progress. Runs as `learner` under `tini`. `sessiond -fake` replaces Emacs and Xvnc with bash and the agent and tmux with the fake editor.
+Keep Emacs, tmux and Xvnc alive; serve PTY, events, VNC, RPC and preview; tap input; own the lesson state and evaluate the active step; checkpoint and restore; load scenarios; report progress. Runs as `learner` under `tini`. `sessiond -fake` replaces Emacs and Xvnc with bash and the agent and tmux with the fake editor.
 
 ### 3.2 Startup sequence
 
@@ -117,21 +117,34 @@ Decodes input into Emacs keys to emit `prefix` within milliseconds; the agent's 
 
 `events.Bus` stamps a monotonic `seq`, encodes once and shares the frame with subscribers, the 500-event replay ring, the stuck window (200) and the event log (deployment.md §9.4). A subscriber whose 256-entry buffer fills gets `gap` instead of blocking producers.
 
-### 3.8 Step engine
+### 3.8 Steps: core, phases, evaluator
 
-`steps.Engine` holds the active step, counts commands since step and lesson start, evaluates conditions, emits `check`/`step`, reports progress, checkpoints the next step on completion and runs stuck rules.
+`session.Core` owns the lesson state (`session.Lesson`: scenario, active step, `Attempt`, `Phase`, demo latch, `Saved`) under `Core.mu`. Ops (§3.12), `Observe` (also while an op runs) and the demo bracket write it under the lock; an op never holds it across I/O, and after any I/O re-reads the attempt and phase in the same lock hold in which it writes, so `demo start` and `skip` enter their phase only while the step is still active and a completion observed first wins. `steps.Evaluator` evaluates the step of the attempt the core began and hands each result with the attempt's key-stream statistics to `Core.Observe`; it knows nothing of progress, laps or checkpoints.
+
+Activation (load, resume, reset, advance): the attempt number rises, demo flags clear, the evaluator begins the attempt (step counts, quits and cached shell results start afresh, lesson counts with another lesson), `state.json` records the step, `step loaded|reset` goes out, then an `in-progress` report (once per process and step) or a counted reset's totals, and an evaluation is scheduled. Observations, demos and skips carry the attempt; one of another attempt is ignored.
+
+| Phase | A completion |
+|---|---|
+| Active | records `done`, emits `complete` (`lapMs` on a lap's last step), enters Advancing and queues the `advance` op first: the next step's checkpoint (when it takes one; a failure is logged) then its activation, or no step after the last |
+| Watching (demo latch) | records `demonstrated` once per latch; the step stays active |
+| Skipping | nothing: the skip op records `skipped` and advances inline |
+| Rehearsing (fast-forward) | nothing, and no `check` either |
+| Advancing, Idle | observations are ignored |
+
+`check` goes out when the results change (always for `rpc check`). Incomplete observations run the stuck rules (`session/stuck.go`, edge-triggered, on the statistics) unless a demo plays, a skip runs or a lap is on.
 
 Triggers: agent `key`/`state`, `file` events, a 2 s ticker (for asynchronous output). One goroutine with a trailing debounce: 40 ms after the last trigger, at most 120 ms after the first (`DefaultDebounce`, `DefaultDebounceMax`); `check` follows its `key` by about 50 ms.
 
-Evaluators: `event` from command counts; `elisp` and `buffer` (turned into a form) by batched agent `check` (error or timeout → unknown); `file` through `os.Root`, fresh, ≤ 1 MB; `shell` as `sh -c` in `cwd` (default setup root), exit 0 true, timeout → unknown, stdout ≤ 4 KB in `detail`, cached until the next file event, nested `.git` change or step change, one run per script at a time, unknown ("running") after 1.5 s while it finishes in the background. A run delivers its result once without caching it when the tree changes during the run, regardless of the writer; the next trigger re-evaluates, and a later file event discards an unconsumed result. A step about to complete on a shell result older than the last command re-runs it first (a save is seen before its file event). `host: box` conditions run over `ssh box` (exit 255 → unknown), cached 3 s; `layout` and `state` use the last agent state (none → unknown). `all`/`any`/`not` are three-valued. A step completes when every top-level condition is true. Stuck rules run on the ticker, never while a demo plays.
+Evaluators: `event` from command counts; `elisp` and `buffer` (turned into a form) by batched agent `check` (error or timeout → unknown); `file` through `os.Root`, fresh, ≤ 1 MB; `shell` as `sh -c` in `cwd` (default setup root), exit 0 true, timeout → unknown, stdout ≤ 4 KB in `detail`, cached until the next file event, nested `.git` change or attempt, one run per script at a time, unknown ("running") after 1.5 s while it finishes in the background. A run delivers its result once without caching it when the tree changes during the run, regardless of the writer; the next trigger re-evaluates, and a later file event discards an unconsumed result. A step about to complete on a shell result older than the last command re-runs it first (a save is seen before its file event). `host: box` conditions run over `ssh box` (exit 255 → unknown), cached 3 s; `layout` and `state` use the last agent state (none → unknown). `all`/`any`/`not` are three-valued. A step completes when every top-level condition is true.
 
 Statuses and the demo latch: api.md §4.1. Internals:
 
-- The restore of `demo start` or `skip` emits `step reset` without counting a reset.
-- `skip` holds completions while `protocol.PlayDemo` plays, detached from the request.
-- `Engine.Rehearse` (fast-forward, §3.12) activates a step with nothing recorded, emitted or persisted; a drop during it emits `step dropped` for the rehearsed step. A load that ends mid-rehearsal calls `EndRehearsal`, which makes the step active before it active again (dirty, nothing emitted), as after a load that fails earlier.
-- `.playground/state.json` keeps the active step, the running lap and per lesson the done, skipped and demonstrated times, hints and resets.
-- Laps (`Engine.ActivateLap`): started by `scenario {lap}`, kept on resume, ended by any other activation or `drop-step`; hints, demos and skips are refused and stuck rules pause; the last completion reports `lapMs`.
+- `demo start` (op, 30 s) restores when dirty (a command since activation, or a failed load changed the workspace under the step) and re-activates as an uncounted `reset`, then enters Watching with `Playing`. `demo end`, the page's pty closing and `DemoIdle` (checked on each observation) clear `Playing`; a latch that never demonstrated drops back to Active.
+- `skip` (op, 60 s) restores when dirty, enters Skipping, plays the demo with `protocol.PlayDemo` through the supervisor, polls ≤ 8 s, records `skipped` and advances. A drop cancels it, demo included; its deadline still records the skip.
+- The fast-forward (§3.12) activates each earlier step as Rehearsing (nothing recorded, emitted or persisted); a load that fails mid-rehearsal makes the step active before it active again (dirty, nothing emitted). A drop of a rehearsed step emits `step dropped`.
+- `.playground/state.json` (version 1, `session.Saved`) keeps the active step, the running lap and per lesson the done, skipped and demonstrated times, hints and resets.
+- Laps: started by `scenario {lap}`, kept on resume, ended by any other load or `drop-step`; hints, demos and skips answer 409 and stuck rules pause; the last completion reports `lapMs`.
+- Locks: `Core.mu`, then the evaluator's state lock; the evaluator calls `Observe` holding neither. Events go out under `Core.mu`, in the order of the state changes; reports and `state.json` after it.
 
 ### 3.9 Checkpoints
 
@@ -161,7 +174,7 @@ Not captured: the staging area of `/work` itself (nested repositories keep their
 
 ### 3.12 Session core and scenario load
 
-`session.Core` owns lesson orchestration. `scenario`, `restore`, `modules`, `drop-step`, the restore before `demo start` and `skip`, and the startup resume are ops that one worker runs one at a time, each detached from its request (a request that goes away changes nothing) and bounded from its start: load 3 min (fast-forward included), restore 2 min, resume 1 min, module change 3 min, drop 10 s. An op checks its context between phases; once the context ends nothing activates. `drop-step` jumps the queue and, when its generation is newer than the one applied, cancels the running op when it concerns the same lesson (any lesson for `{}`), so a dropped lesson's fast-forward stops at once and loads nothing. While an op runs, `status` and `hello` carry `busy` (api.md §3.4). Demo start and skip play outside the queue after their restore op; completion and advance stay in the step engine.
+`session.Core` owns lesson orchestration. `scenario`, `restore`, `modules`, `drop-step` and the startup resume are ops that one worker runs one at a time, each detached from its request (a request that goes away changes nothing) and bounded from its start: load 3 min (fast-forward included), restore 2 min, resume 1 min, module change 3 min, drop 10 s. An op checks its context between phases; once the context ends nothing activates. `drop-step` jumps the queue and, when its generation is newer than the one applied, cancels the running op when it concerns the same lesson (any lesson for `{}`), so a dropped lesson's fast-forward stops at once and loads nothing. The generation sync (at startup and before each `scenario`) applies each missed reset as such a drop, then adopts the gateway's generations; `drop-step` waits for a sync under way. While an op runs, `status` and `hello` carry `busy` (api.md §3.4). `demo start` (30 s), `skip` (60 s) and the `advance` after a completion (1 min, queued first) are ops too (§3.8).
 
 The load op, `rpc scenario {lessonId, stepId?, reset?, lap?}`:
 

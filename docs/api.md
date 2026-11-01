@@ -117,7 +117,7 @@ Envelope `{t, seq, ts, …}`, `seq` monotonic from 1 per process; unknown types 
 
 ### 4.1 Step lifecycle
 
-`step` statuses (engine: backend.md §3.8):
+`step` statuses (session core: backend.md §3.8):
 
 - `loaded`: scenario load or advance; the step's checkpoint exists.
 - `reset`: `restore {}` or a restoring `demo start`; command counts and checks cleared.
@@ -126,7 +126,7 @@ Envelope `{t, seq, ts, …}`, `seq` monotonic from 1 per process; unknown types 
 - `skipped`: after `skip`; progress `skipped`; continues as `complete`.
 - `dropped`: `drop-step` forgot the active step.
 
-**Watch it**: `demo start` restores the checkpoint if a command ran since the step started or was reset (`restored: true`, no reset counted), then sets the latch, which lasts until `restore {}`, a reload of the step or `drop-step`. Playing ends with `demo end`, 65 s without `keys` (`steps.DemoIdle`, longer than the maximum 60 s pause) or the page's terminal closing; if the step had not completed, the latch is dropped then. Stuck rules pause while playing. Open: under the latch the learner's own completion gets no reaction until Do it yourself.
+**Watch it**: `demo start` restores the checkpoint if a command ran since the step started or was reset (`restored: true`, no reset counted), then sets the latch, which lasts until `restore {}`, a reload of the step or `drop-step`. Playing ends with `demo end`, 65 s without `keys` (`session.DemoIdle`, longer than the maximum 60 s pause) or the page's terminal closing; if the step had not completed, the latch is dropped then. Stuck rules pause while playing. Open: under the latch the learner's own completion gets no reaction until Do it yourself.
 
 **Skip**: restores like `demo start`, plays the demo into the learner's frame at playctl pacing, waits ≤ 8 s for the conditions (`demoCompleted: false` is a curriculum defect), records `skipped`, advances; ≤ 60 s, even if the browser leaves.
 
