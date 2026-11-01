@@ -55,7 +55,7 @@ sessiond listens on `:7000` and on the Unix socket `/run/playground/agent.sock` 
 |---|---|---|---|
 | Learner files, config, build output | learner | `/work` (bind mount `./workspace` or volume `pg-ws-<user>`) | until the volume is deleted; server: retention period after last use |
 | Checkpoints | sessiond | `refs/playground/*` in `/work/.git`, metadata in `/work/.playground/checkpoints/` | with the workspace |
-| Playground state (module set, scenario cache, buffer snapshot, event log) | sessiond | `/work/.playground/`, `/work/emacs.d/modules.el` | with the workspace |
+| Playground state (module set, scenario cache, buffer snapshot, event log; `state.json`: active step, lap, saved outcomes, reset generations, progress reports the gateway has not accepted) | sessiond | `/work/.playground/`, `/work/emacs.d/modules.el` | with the workspace |
 | Progress (steps done, demonstrated, skipped; hints used; resets) | gateway | `<dataDir>/local.json` (local) or `<dataDir>/playground.db` (SQLite, server) | until the user is deleted |
 | Users (OIDC claims), session registry | gateway | same store | operator-managed |
 | Curriculum bundle | gateway | `curriculum.dir`: `curriculum.json`, per-lesson bundles, `fixtures/<id>.tar.zst`; built into the gateway image | replaced on upgrade |
@@ -115,7 +115,7 @@ Reset (`POST /rpc/restore`, `{}` for the active step):
 
 1. `git restore --source=<ref> --worktree --staged -- .` and `git clean -fd`, keeping `target`, `_build`, `.venv`, `node_modules` and `.playground`; empty directories recorded with the checkpoint are recreated; `emacs.d/modules.el` is kept.
 2. One agent call, `restore-editor`, with the editor state stored with the checkpoint: revert visiting buffers, kill buffers of files that no longer exist, reopen windows by file, remake Dired, ibuffer, buffer-list and help buffers, restore tabs, and close unmodified workspace file buffers the spec does not list; then put back the unsaved text and undo history of file buffers and the session variables steps rely on (kill ring, histories, keyboard macro). Each buffer is restored on its own (backend.md §3.9).
-3. sessiond writes the checkpoint's window spec to `snapshot.json`. Without an agent the files are restored and the agent's next hello gets the editor state, while the checkpoint's step is still active.
+3. sessiond writes the checkpoint's window spec to `snapshot.json`. Without an agent the files are restored and the agent's next hello gets the editor state (the session core's `reconnect` op, after the op in progress), unless a step activated since.
 
 A restore runs in sessiond's op queue, after any load in progress, and once started runs to the end even if the request is cancelled; a git lock older than 10 s that blocks a command is removed and the command retried. All of it goes through sessiond's snapshot service, the only path to checkpoints and editor state.
 
@@ -212,6 +212,8 @@ Each activation is a new attempt; an evaluation of an older attempt changes noth
 | Container OOM-killed or gone | inspect, health | re-created from the volume on the next request | reconnect; unsaved edits since the last auto-save are lost |
 | Gateway restarts | health | sessions keep running; registry and network membership rebuilt from container labels | reconnect |
 | Fixture or scenario fetch fails | HTTP error | retries with backoff, then the cached copy, else an `error` event | "Could not load the lesson files", retry |
+| Gateway unreachable, or its store lost or replaced | progress POST fails; the generations sync finds lower generations | the progress outbox keeps each step's latest report in `state.json` and retries (1 to 30 s); every sessiond start sends all saved outcomes again; a report applied twice changes nothing | nothing; progress shows once the gateway is back |
+| Progress reset while the session is stopped | `drop-step` fails; the next generations sync | the session forgets the lesson and drops its pending reports; the gateway discards reports of older generations | the lesson starts over on its next load |
 | Shell check hangs | timeout | condition reported as unknown | step waits; hint unaffected |
 
 ## 7. Performance budgets

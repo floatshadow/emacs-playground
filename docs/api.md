@@ -34,7 +34,7 @@ Contracts between browser, gateway, sessiond and the Emacs agent. The Go types i
 - `GET /progress` → `{lessons:{[id]:{status, counts:{done, demonstrated, skipped, total}, steps:{[id]:{status, hintsUsed, resets, completedAt?}}, laps?:{count, bestMs, lastMs, lastAt}}}, updatedAt}`; `laps` counts finished "again, without hints" laps.
 - `POST /progress/reset {lessonId}` clears one lesson; no body, `{}` or empty `lessonId` clears all ("Start over"). `204`; the gateway then sends the session `drop-step {lessonId?, generation}`. Files, checkpoints and modules stay.
 
-Each reset issues `max(stored maximum + 1, gateway time in milliseconds)` as its generation; reports older than the gateway generation for their lesson are discarded with a warning (the greater of the lesson and whole-user generations, initially 0). Newer reports are accepted, and sessiond adopts the gateway generations exactly on sync. Report timestamps do not order resets; omitted completion times default to receipt time. Retrying the latest lap with the same completion time and duration counts once.
+Each reset issues `max(stored maximum + 1, gateway time in milliseconds)` as its generation; reports older than the gateway generation for their lesson are discarded with a warning (the greater of the lesson and whole-user generations, initially 0). Newer reports are accepted, and sessiond adopts the gateway generations exactly on sync. Report timestamps do not order resets; omitted completion times default to receipt time. A report applied twice changes nothing: a finished lap counts once per `lapId` (a report without one, once per completion time and duration).
 
 Step statuses only rise, `not-started` < `in-progress` < `demonstrated` < `skipped` < `done` (`protocol.ProgressRank`); only a reset lowers them. `hintsUsed` and `resets` are absolute totals. A lesson is `done` only when every step of the bundle's scenario is `done`; `counts.total` is 0 outside the bundle. Resume starts at the first step neither `done` nor `skipped`.
 
@@ -48,7 +48,7 @@ Step statuses only rise, `not-started` < `in-progress` < `demonstrated` < `skipp
 
 - `GET /internal/curriculum/scenarios/{lessonId}`; `GET /internal/curriculum/fixtures/{lessonId}` (zstd tarball, `204` if none, ETag).
 - `GET /internal/sessions/{id}/progress-generations` → a map of lesson ids to generations; the empty key is the whole-user generation. sessiond synchronizes it at startup and before scenario requests.
-- `POST /internal/sessions/{id}/progress` `{lessonId, stepId, status, generation?, hintsUsed?, resets?, at?, lapMs?}` (`lapMs` only on the last step's `done`); `…/stuck` `{lessonId?, stepId?, note, events}`; `…/heartbeat` `{activeWebSockets}` every 30 s.
+- `POST /internal/sessions/{id}/progress` `{lessonId, stepId, status, generation?, hintsUsed?, resets?, at?, lapMs?, lapId?}` (`lapMs` and `lapId` only on the last step's `done`; `lapId` is the lap's `id`, `<lessonId>@<startedAt>`, else 400); sessiond sends each step's report until it is answered and may send one again (backend.md §3.8); `…/stuck` `{lessonId?, stepId?, note, events}`; `…/heartbeat` `{activeWebSockets}` every 30 s.
 
 ## 3. Session API (`/s/{id}`)
 
@@ -76,7 +76,7 @@ Result `{"ok":true,"result":…}` or problem+json. *(n)*: not idempotent. Ops ne
 - `eval {form, timeoutMs?}` → `{value}`: author mode only (`403`); 2 s default, 10 s max; symbol-keyed alists become objects.
 - `open {path}` → `{buffer}`: visits a workspace file.
 - `rescue {}` → `{did}`: `playground-rescue` (emacs.md §10.3), or C-g through tmux when Emacs is unresponsive.
-- `scenario {lessonId, stepId?, reset?, lap?}` → `{step, index, count, modules, restarting, lap?}`: backend.md §3.12. Returns when the step is active, or with `restarting: true` once a daemon restart begins (the load then finishes in the background; a request arriving meanwhile gets the final result). `lap: true` starts the lap (CURRICULUM.md B.3): reset, first step, `lap {lessonId, startedAt}`; until it ends `hint`, `demo start` and `skip` answer `409`. A plain reload keeps the lap; an explicit `stepId` without `lap` ends it.
+- `scenario {lessonId, stepId?, reset?, lap?}` → `{step, index, count, modules, restarting, lap?}`: backend.md §3.12. Returns when the step is active, or with `restarting: true` once a daemon restart begins (the load then finishes in the background; a request arriving meanwhile gets the final result). `lap: true` starts the lap (CURRICULUM.md B.3): reset, first step, `lap {id, lessonId, startedAt}` (`id` names the lap for its progress report); until it ends `hint`, `demo start` and `skip` answer `409`. A plain reload keeps the lap; an explicit `stepId` without `lap` ends it.
 - `check {}` → `{lessonId, stepId, conditions:[{id, ok, unknown?, detail?}], complete}`.
 - `hint {stepId, level}` → `{}`.
 - `checkpoint {label}` → `{ref, createdAt}`; `checkpoints {}` → `{items:[{label, ref, createdAt, files, step?}]}`, newest first; `files` would change on restore.
@@ -85,7 +85,7 @@ Result `{"ok":true,"result":…}` or problem+json. *(n)*: not idempotent. Ops ne
 - `modules {enabled}` → `{restarting}`: sets the set exactly (`scenario` only adds).
 - `restart-emacs {}` → `{}`: background restart, reported by `emacs` events.
 - `stuck {note}` → `{events}`: last 200 events. Through the proxy (`X-Forwarded-For` present) sessiond also files the report.
-- `status {}` (also `GET /status`) → `{sessionId, emacs, frames, mode, step, modules, versions?, activeWebSockets, lap?, remoteBox?, busy?}`; `remoteBox` once the box alias is written (deployment.md §6); `busy {op, lessonId?, stepId?, startedAt}` while an op runs (`op` names its kind, e.g. `load` or `restore`; an open set the page never switches on), so a reloaded page can veil "Going to step N…".
+- `status {}` (also `GET /status`) → `{sessionId, emacs, frames, mode, step, modules, versions?, activeWebSockets, lap?, remoteBox?, busy?}`; `remoteBox` once the box alias is written (deployment.md §6); `busy {op, lessonId?, stepId?, startedAt}` while an op runs (`op` names its kind, e.g. `load` or `restore`; an open set: the page recognises `load` and ignores kinds it does not know), so a reloaded page veils "Going to step N…" until the step is active.
 - `describe {keys}` → `{cmd, doc}`: for ticker glosses; `cmd` `""` when unbound or a prefix.
 - `demo {stepId, phase: start|end}` → `{restored}` *(n)*; `skip {stepId}` → `{next|null, demoCompleted}` *(n)*, `409` while another skip runs: §4.1.
 - `drop-step {lessonId?, generation?}` → `{}`: internal (gateway only); forgets that lesson's (without `lessonId` every lesson's) saved progress and the active step if it belongs to it; a `generation` not newer than the one applied is ignored. It runs before queued ops and, unless ignored, cancels a running op on that lesson.
@@ -119,7 +119,7 @@ Envelope `{t, seq, ts, …}`, `seq` monotonic from 1 per process; unknown types 
 
 `step` statuses (session core: backend.md §3.8):
 
-- `loaded`: scenario load or advance; the step's checkpoint exists.
+- `loaded`: scenario load, resume or advance. A step that takes a checkpoint has it, unless its capture failed or a fast-forward to it did not complete (it then activates without one, and `restore {}` answers 404 until the next load takes it).
 - `reset`: `restore {}` or a restoring `demo start`; command counts and checks cleared.
 - `complete`: all conditions hold without a latch; progress `done`; next step `loaded`, or `lessonComplete`.
 - `demonstrated`: all conditions hold under the latch (once per latch); progress `demonstrated`; no advance; the browser offers Do it yourself (`restore {}`).
@@ -174,7 +174,6 @@ sessiond → agent: `pong`, `call {id, op, args, timeoutMs}`, serialised; a prom
 - `open WindowSpec` → `{opened, layoutDeferred?}`; `visit {path}` → `{buffer}`; `setup {open?, layout?, eval?, compile?, workspace, reset?, root?}` → `{ok}`.
 - `rescue` → `{did}`; `set-modules {enabled}` → `{written}` (sessiond then restarts); `describe {keys}|{cmd}` → `{cmd, doc}`.
 - `frame {kind, display?}` → `{frame}`; `leave-display` → `{closed, detail}`; `resume-loop` → `{}`; `reset-debug` → `{}` (the supervisor).
-- `snapshot` → `WindowSpec` and `reset-step {spec}` → `{reverted, killed}`: replaced by `capture-editor` and `restore-editor`, kept one phase.
 
 `WindowSpec`: `files:[{path, point, visible}]` (most recent first, workspace-relative), `layout` (used without `windowState`), `windowState` and `specialBuffers` (printed, opaque to sessiond), `selected`, `tab`, `tabs`, `tabIndex`, `takenAt`; semantics in emacs.md §10.3.
 

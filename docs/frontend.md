@@ -28,7 +28,7 @@ Loading a lesson (`useLesson`) calls `rpc('scenario', {lessonId, stepId})` unles
 
 - A `prefix` event older than the newest `key` event is stale and ignored.
 - The ticker (max 40), pending prefix and habit cards are cleared when a step of another lesson loads.
-- The engine's last step stays active after the lesson completes, so the lesson is not reloaded.
+- After the last step completes sessiond has no active step (`status` and `hello` report none); the store keeps that step as `activeStep`, so the page shows the lesson complete without reloading it.
 - `outcomes` are this visit's `done`/`demonstrated`/`skipped`; a step that loads again loses its outcome.
 - `watched` is the Watch it latch (§7); `quietHabitsUntil` keeps habit cards quiet during a demo, Skip or Go to this step and a short tail after (none when the learner's key stopped it).
 - `forgetProgress(lessonId?)` (Start over) forgets outcomes, completions, checks, the latch and, for all lessons, habits seen and cards.
@@ -78,9 +78,9 @@ Views over the store and the index tables (CURRICULUM.md B.4).
 
 Markdown goes through `directives.ts` (dialect in CURRICULUM.md B.2): `:kbd` keycaps, `:try` → `rpc('keys')`, `:jargon`, `:::vscode`/`:::aside`/`:::gui-only`, `::steps`. Backticked key sequences render as keycaps; unknown directives revert to source text.
 
-**Step statuses** (`stepStatuses`): the engine's active step of this lesson is always active, whatever progress says (the last step stays active after completing unless this visit saw it end); later steps show no tick; others show this visit's outcome, else a saved `done`/`demonstrated`/`skipped`, else to do.
+**Step statuses** (`stepStatuses`): the store's active step of this lesson is always active, whatever progress says (the last step stays so after completing unless this visit saw it end); later steps show no tick; others show this visit's outcome, else a saved `done`/`demonstrated`/`skipped`, else to do.
 
-**Go to this step / Do this step again**: `rpc('scenario', {lessonId, stepId})` (checkpoint or fast-forward, api.md §3.4). For a step after the first: stop any demo, veil the screen ("Going to step N…"), swallow keys until the step is active, then refocus the terminal.
+**Go to this step / Do this step again**: `rpc('scenario', {lessonId, stepId})` (checkpoint or fast-forward, api.md §3.4). For a step after the first: stop any demo, veil the screen ("Going to step N…"), swallow keys until the step is active, then refocus the terminal. A page opened while such a load runs gets it as `busy` in hello (`serverBusy`) and shows the same veil until the step's event, or a status poll without `busy`, ends it; the veil and the terminal's key guard read the same selector (`serverStepJump`), so keys wait under it too.
 
 A lesson with every step done or skipped is not loaded on opening: it shows Lesson complete; "Start this lesson over" (`POST /progress/reset {lessonId}`, then `scenario {reset: true}`) or a step's Go to loads it. When another page made another lesson active, a page offers "Load this lesson here" instead of reloading.
 

@@ -73,7 +73,7 @@ flowchart LR
 |---|---|---|
 | web | screens, panes, ticker, Where am I, nudges, preview | frontend.md |
 | gateway | auth, sessions, routing, curriculum, progress | backend.md §2 |
-| sessiond (per session) | supervises Emacs, tmux, Xvnc; endpoints; input tap; step engine; checkpoints | backend.md §3 |
+| sessiond (per session) | supervises Emacs, tmux, Xvnc; endpoints; input tap; session core and step evaluation; checkpoints; progress outbox | backend.md §3 |
 | playground-agent.el (+ feature files) | state and command reports; rescue, check, editor-state capture and restore | emacs.md §10 |
 | playctl | curriculum validate, build, replay; config check; TypeScript types | backend.md §4 |
 | curriculum | lessons, fixtures, exit and habit tables | CURRICULUM.md |
@@ -104,7 +104,7 @@ Go 1.27 with the stdlib mux, `coder/websocket`, `creack/pty`, the Docker client,
 - ADR-009 Git checkpoints `refs/playground/<lesson>/<step>` via a temporary index, plus window spec, unsaved text and undo of file buffers, and the session variables steps rely on (add one when a lesson needs it, backend.md §3.9). Restores keep build directories, `modules.el` and the learner's git index. One snapshot service owns them, captures through typed agent ops and publishes the ref after the manifest, and every restore writes the `snapshot.json` all recovery paths reopen.
 - ADR-010 The curriculum bundle ships apart from images; sessiond fetches and caches fixtures from the gateway.
 - ADR-011 Gateway-native auth: generic OpenID Connect (code flow with PKCE) in server mode, none locally; Caddy only terminates TLS.
-- ADR-012 Steps are evaluated in sessiond (Elisp, files, shells; progress survives a closed tab); the browser renders and picks hints, and only it evaluates `session.*` exit rows.
+- ADR-012 Steps are evaluated in sessiond (Elisp, files, shells; progress survives a closed tab); the browser renders and picks hints, and only it evaluates `session.*` exit rows. Progress reports are idempotent (statuses only rise, totals are absolute, a lap counts once per id, a reset is a gateway generation), so sessiond's persistent outbox resends each step's latest report until the gateway answers, with no acknowledgements.
 - ADR-013 sessiond's input tap gives prefix feedback even when Emacs is busy; the agent stays authoritative for command names.
 - ADR-014 CSS Modules over the demo's design tokens.
 - ADR-015 SQLite in server mode, a JSON file locally; one host in v1.
