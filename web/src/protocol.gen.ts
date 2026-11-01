@@ -16,17 +16,25 @@ export const AgentCall = "call" satisfies AgentMsgType;
 export const AgentPong = "pong" satisfies AgentMsgType;
 
 /** AgentOp names an op the agent implements (emacs.md §10.3). */
-export type AgentOp = "eval" | "check" | "rescue" | "reset-step" | "snapshot" | "set-modules" | "open" | "frame" | "describe" | "setup";
+export type AgentOp = "eval" | "check" | "rescue" | "capture-editor" | "restore-editor" | "modified-files" | "flush-buffers" | "set-modules" | "open" | "visit" | "frame" | "leave-display" | "resume-loop" | "reset-debug" | "describe" | "setup" | "reset-step" | "snapshot";
 export const AgentOpEval = "eval" satisfies AgentOp;
 export const AgentOpCheck = "check" satisfies AgentOp;
 export const AgentOpRescue = "rescue" satisfies AgentOp;
-export const AgentOpResetStep = "reset-step" satisfies AgentOp;
-export const AgentOpSnapshot = "snapshot" satisfies AgentOp;
+export const AgentOpCaptureEditor = "capture-editor" satisfies AgentOp;
+export const AgentOpRestoreEditor = "restore-editor" satisfies AgentOp;
+export const AgentOpModifiedFiles = "modified-files" satisfies AgentOp;
+export const AgentOpFlushBuffers = "flush-buffers" satisfies AgentOp;
 export const AgentOpSetModules = "set-modules" satisfies AgentOp;
 export const AgentOpOpen = "open" satisfies AgentOp;
+export const AgentOpVisit = "visit" satisfies AgentOp;
 export const AgentOpFrame = "frame" satisfies AgentOp;
+export const AgentOpLeaveDisplay = "leave-display" satisfies AgentOp;
+export const AgentOpResumeLoop = "resume-loop" satisfies AgentOp;
+export const AgentOpResetDebug = "reset-debug" satisfies AgentOp;
 export const AgentOpDescribe = "describe" satisfies AgentOp;
 export const AgentOpSetup = "setup" satisfies AgentOp;
+export const AgentOpResetStep = "reset-step" satisfies AgentOp;
+export const AgentOpSnapshot = "snapshot" satisfies AgentOp;
 
 /** AuthMode selects learner authentication. */
 export type AuthMode = "none" | "oidc";
@@ -2269,8 +2277,9 @@ export interface Window {
 
 /**
  * WindowSpec is the buffer and window spec saved with each checkpoint and
- * periodically for restart restore (backend.md §3.9, emacs.md §7). It is
- * the result of the snapshot op and the argument of open and reset-step.
+ * in snapshot.json for restart restore (backend.md §3.9, emacs.md §7). It
+ * is the spec of capture-editor and the argument of open and
+ * restore-editor.
  */
 export interface WindowSpec {
   /** Files are the file-visiting buffers, most recently used first. */
@@ -2296,7 +2305,7 @@ export interface WindowSpec {
   /**
    * Tabs are the names of the frame's tab-bar tabs in order, "" for a
    * tab without an explicit name (its name follows its buffer). A
-   * reset-step closes the named tabs the list does not have and brings
+   * restore closes the named tabs the list does not have and brings
    * back the named ones it misses, so a step's demo leaves no tab
    * behind. Absent when the snapshot was taken without tab-bar.
    */
@@ -2306,7 +2315,7 @@ export interface WindowSpec {
   /**
    * SpecialBuffers is the printed list of the non-file buffers the agent
    * can make again (help buffers: name and the help command that made
-   * them); opaque to sessiond. A reset-step makes the missing ones again
+   * them); opaque to sessiond. A restore makes the missing ones again
    * and kills the help buffers it does not list, so a demo that killed
    * or opened help buffers leaves the step as it started (lesson 2.5).
    */

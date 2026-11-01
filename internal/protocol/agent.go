@@ -109,18 +109,32 @@ type AgentPongMsg struct {
 // AgentOp names an op the agent implements (emacs.md §10.3).
 type AgentOp string
 
-// Agent ops.
+// Agent ops. sessiond builds no Lisp: every op but eval (author mode)
+// and check (curriculum conditions) takes typed arguments.
 const (
-	AgentOpEval       AgentOp = "eval"
-	AgentOpCheck      AgentOp = "check"
-	AgentOpRescue     AgentOp = "rescue"
-	AgentOpResetStep  AgentOp = "reset-step"
-	AgentOpSnapshot   AgentOp = "snapshot"
-	AgentOpSetModules AgentOp = "set-modules"
-	AgentOpOpen       AgentOp = "open"
-	AgentOpFrame      AgentOp = "frame"
-	AgentOpDescribe   AgentOp = "describe"
-	AgentOpSetup      AgentOp = "setup"
+	AgentOpEval   AgentOp = "eval"
+	AgentOpCheck  AgentOp = "check"
+	AgentOpRescue AgentOp = "rescue"
+	// AgentOpCaptureEditor and AgentOpRestoreEditor read and write the
+	// editor state a checkpoint keeps (snapshot service, backend.md §3.9).
+	AgentOpCaptureEditor AgentOp = "capture-editor"
+	AgentOpRestoreEditor AgentOp = "restore-editor"
+	AgentOpModifiedFiles AgentOp = "modified-files"
+	AgentOpFlushBuffers  AgentOp = "flush-buffers"
+	AgentOpSetModules    AgentOp = "set-modules"
+	AgentOpOpen          AgentOp = "open"
+	AgentOpVisit         AgentOp = "visit"
+	AgentOpFrame         AgentOp = "frame"
+	AgentOpLeaveDisplay  AgentOp = "leave-display"
+	AgentOpResumeLoop    AgentOp = "resume-loop"
+	AgentOpResetDebug    AgentOp = "reset-debug"
+	AgentOpDescribe      AgentOp = "describe"
+	AgentOpSetup         AgentOp = "setup"
+	// AgentOpResetStep and AgentOpSnapshot are what restore-editor and
+	// capture-editor replace; the agent keeps them for one phase.
+	// TODO(sessiond, api.md §7): deleted with the agent's aliases.
+	AgentOpResetStep AgentOp = "reset-step"
+	AgentOpSnapshot  AgentOp = "snapshot"
 )
 
 // AgentEvalArgs: eval {form} → AgentEvalResult.
@@ -152,6 +166,128 @@ type AgentRescueResult struct {
 // AgentResetStepArgs: reset-step {spec}.
 type AgentResetStepArgs struct {
 	Spec WindowSpec `json:"spec"`
+}
+
+// AgentCaptureEditorArgs: capture-editor → AgentCaptureEditorResult. The
+// bounds keep a restore within one agent line (MaxAgentLine): a buffer's
+// text is kept up to MaxText characters, its printed undo history up to
+// MaxUndo, the buffers in all up to MaxTotal, the printed variables up to
+// MaxGlobals. Zero bounds and no Vars capture the spec alone.
+type AgentCaptureEditorArgs struct {
+	// Workspace is the absolute workspace root; buffers of files under it
+	// are captured, by workspace-relative path.
+	Workspace  string   `json:"workspace"`
+	Vars       []string `json:"vars"`
+	MaxText    int      `json:"maxText"`
+	MaxUndo    int      `json:"maxUndo"`
+	MaxTotal   int      `json:"maxTotal"`
+	MaxGlobals int      `json:"maxGlobals"`
+}
+
+// AgentCaptureEditorResult is the editor state a checkpoint keeps beside
+// the files.
+type AgentCaptureEditorResult struct {
+	Spec WindowSpec `json:"spec"`
+	// Buffers are the file buffers with unsaved text or an undo history,
+	// by workspace-relative path.
+	Buffers map[string]AgentBufferState `json:"buffers"`
+	// Globals is the printed alist of the variables in Vars (opaque to
+	// sessiond); null when none were asked for or it was over MaxGlobals.
+	Globals *string `json:"globals"`
+}
+
+// AgentBufferState is one buffer of capture-editor and restore-editor, on
+// the wire the array [modified, text or null, undo or null]: the unsaved
+// text (a modified buffer within MaxText) and the printed undo history
+// (opaque to sessiond).
+type AgentBufferState struct {
+	Modified bool
+	Text     *string
+	Undo     *string
+}
+
+// MarshalJSON implements json.Marshaler.
+func (b AgentBufferState) MarshalJSON() ([]byte, error) {
+	return json.Marshal([]any{b.Modified, b.Text, b.Undo})
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (b *AgentBufferState) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("buffer state: %w", err)
+	}
+	if len(raw) != 3 {
+		return fmt.Errorf("buffer state: want [modified, text, undo], got %d elements", len(raw))
+	}
+	*b = AgentBufferState{}
+	if err := json.Unmarshal(raw[0], &b.Modified); err != nil {
+		return fmt.Errorf("buffer state modified: %w", err)
+	}
+	if err := json.Unmarshal(raw[1], &b.Text); err != nil {
+		return fmt.Errorf("buffer state text: %w", err)
+	}
+	if err := json.Unmarshal(raw[2], &b.Undo); err != nil {
+		return fmt.Errorf("buffer state undo: %w", err)
+	}
+	return nil
+}
+
+// AgentRestoreEditorArgs: restore-editor → AgentRestoreEditorResult. The
+// agent resets the step (as reset-step: buffers reverted to the restored
+// files, the spec's buffers, tabs and windows), then puts back each
+// buffer's unsaved text, undo history and point (from Spec), then the
+// variables; each part on its own.
+type AgentRestoreEditorArgs struct {
+	Workspace string                      `json:"workspace"`
+	Spec      WindowSpec                  `json:"spec"`
+	Buffers   map[string]AgentBufferState `json:"buffers"`
+	Globals   string                      `json:"globals,omitempty"`
+}
+
+// AgentRestoreEditorResult counts what the restore did; Degraded names
+// the parts that failed and were skipped.
+type AgentRestoreEditorResult struct {
+	Reverted int      `json:"reverted"`
+	Killed   int      `json:"killed"`
+	Buffers  int      `json:"buffers"`
+	Globals  int      `json:"globals"`
+	Degraded []string `json:"degraded"`
+}
+
+// AgentModifiedFilesArgs: modified-files → AgentModifiedFilesResult.
+type AgentModifiedFilesArgs struct {
+	Workspace string `json:"workspace"`
+}
+
+// AgentModifiedFilesResult lists the workspace-relative paths of the file
+// buffers with unsaved changes.
+type AgentModifiedFilesResult struct {
+	Paths []string `json:"paths"`
+}
+
+// AgentFlushResult: flush-buffers saves every modified file buffer that
+// can be saved without a question and has not changed on disk.
+type AgentFlushResult struct {
+	Saved int `json:"saved"`
+}
+
+// AgentLeaveDisplayResult: leave-display deletes the X frames and closes
+// the X display connections; Detail says why a display stayed open.
+type AgentLeaveDisplayResult struct {
+	Closed bool   `json:"closed"`
+	Detail string `json:"detail"`
+}
+
+// AgentVisitArgs: visit {path} visits a workspace file in the learner's
+// window → AgentVisitResult.
+type AgentVisitArgs struct {
+	Path string `json:"path"`
+}
+
+// AgentVisitResult names the buffer visiting the file.
+type AgentVisitResult struct {
+	Buffer string `json:"buffer"`
 }
 
 // AgentSetModulesArgs: set-modules {enabled}; the agent writes modules.el
@@ -202,8 +338,9 @@ type AgentSetupArgs struct {
 }
 
 // WindowSpec is the buffer and window spec saved with each checkpoint and
-// periodically for restart restore (backend.md §3.9, emacs.md §7). It is
-// the result of the snapshot op and the argument of open and reset-step.
+// in snapshot.json for restart restore (backend.md §3.9, emacs.md §7). It
+// is the spec of capture-editor and the argument of open and
+// restore-editor.
 type WindowSpec struct {
 	// Files are the file-visiting buffers, most recently used first.
 	Files []FileSpec `json:"files"`
@@ -221,7 +358,7 @@ type WindowSpec struct {
 	Tab string `json:"tab,omitempty"`
 	// Tabs are the names of the frame's tab-bar tabs in order, "" for a
 	// tab without an explicit name (its name follows its buffer). A
-	// reset-step closes the named tabs the list does not have and brings
+	// restore closes the named tabs the list does not have and brings
 	// back the named ones it misses, so a step's demo leaves no tab
 	// behind. Absent when the snapshot was taken without tab-bar.
 	Tabs []string `json:"tabs,omitempty"`
@@ -229,7 +366,7 @@ type WindowSpec struct {
 	TabIndex int `json:"tabIndex,omitempty"`
 	// SpecialBuffers is the printed list of the non-file buffers the agent
 	// can make again (help buffers: name and the help command that made
-	// them); opaque to sessiond. A reset-step makes the missing ones again
+	// them); opaque to sessiond. A restore makes the missing ones again
 	// and kills the help buffers it does not list, so a demo that killed
 	// or opened help buffers leaves the step as it started (lesson 2.5).
 	SpecialBuffers string `json:"specialBuffers,omitempty"`
