@@ -42,7 +42,7 @@ func TestLoadFlow(t *testing.T) {
 	if f.evs() != "step:open:loaded" {
 		t.Fatalf("events %s", f.evs())
 	}
-	if a := f.engine.Active(); a == nil || a.StepID != "open" {
+	if a := f.core.Active(); a == nil || a.StepID != "open" {
 		t.Fatal("not active")
 	}
 
@@ -78,7 +78,7 @@ func TestLoadFlow(t *testing.T) {
 	f.fetch.mu.Lock()
 	f.fetch.down = true
 	f.fetch.mu.Unlock()
-	f.engine.Drop(lessonID)
+	f.core.dropGeneration(lessonID, 0)
 	_ = os.RemoveAll(filepath.Join(f.ws, "hello"))
 	res, err = f.core.Load(ctx, protocol.ScenarioRequest{LessonID: lessonID, Reset: true})
 	if err != nil || res.Step.StepID != "open" {
@@ -180,7 +180,7 @@ func TestDropDuringModuleRestart(t *testing.T) {
 	if cut != 0 || f.sup.numRestarts() != 1 {
 		t.Fatalf("restarts %d, cut short %d", f.sup.numRestarts(), cut)
 	}
-	if a := f.engine.Active(); a != nil {
+	if a := f.core.Active(); a != nil {
 		t.Fatalf("active after the drop %+v", a)
 	}
 	if evs := f.evs(); evs != "modules:base,agent,editing,files:restarting modules:base,agent,editing,files:done" {
@@ -224,7 +224,7 @@ func TestLoadsQueueBehindARestart(t *testing.T) {
 			if tc.ok {
 				want = tc.other
 			}
-			if a := f.engine.Active(); a == nil || a.LessonID != want {
+			if a := f.core.Active(); a == nil || a.LessonID != want {
 				t.Fatalf("active %+v, want %s", a, want)
 			}
 		})
@@ -267,7 +267,7 @@ func TestResume(t *testing.T) {
 	activeDuringCall := false
 	watch := func(f *fixture, _ *Deps) {
 		// Emacs is fresh: the step becomes active only once its buffers are back.
-		f.agent.onCall = func(protocol.AgentOp) { activeDuringCall = activeDuringCall || f.engine.Active() != nil }
+		f.agent.onCall = func(protocol.AgentOp) { activeDuringCall = activeDuringCall || f.core.Active() != nil }
 	}
 
 	// No snapshot: the lesson's setup, without reset.
@@ -275,7 +275,7 @@ func TestResume(t *testing.T) {
 	if err := f.core.Resume(ctx, protocol.StepRef{LessonID: lessonID, StepID: "save"}); err != nil {
 		t.Fatal(err)
 	}
-	if a := f.engine.Active(); a == nil || a.StepID != "save" {
+	if a := f.core.Active(); a == nil || a.StepID != "save" {
 		t.Fatalf("resume active %+v", a)
 	}
 	if calls := f.agent.setups(); len(calls) != 1 || calls[0].Reset || len(calls[0].Open) != 1 || len(f.agent.opens) != 0 {
@@ -288,7 +288,7 @@ func TestResume(t *testing.T) {
 	if err := f.core.Resume(ctx, protocol.StepRef{LessonID: lessonID, StepID: "open"}); err != nil {
 		t.Fatal(err)
 	}
-	if a := f.engine.Active(); a == nil || a.StepID != "save" || len(f.agent.setups()) != 1 {
+	if a := f.core.Active(); a == nil || a.StepID != "save" || len(f.agent.setups()) != 1 {
 		t.Fatalf("a second resume replaced the active step: %+v", a)
 	}
 
@@ -301,7 +301,7 @@ func TestResume(t *testing.T) {
 	if len(g.agent.opens) != 1 || g.agent.opens[0] != snap || len(g.agent.setups()) != 0 || activeDuringCall {
 		t.Fatalf("resume with a snapshot: opens %v setups %+v", g.agent.opens, g.agent.setups())
 	}
-	if a := g.engine.Active(); a == nil || a.StepID != "save" {
+	if a := g.core.Active(); a == nil || a.StepID != "save" {
 		t.Fatalf("resume active %+v", a)
 	}
 
@@ -382,11 +382,11 @@ func TestGoToStepFastForwards(t *testing.T) {
 	if f.evs() != "step:save:loaded" {
 		t.Fatalf("the replay must not emit: %s", f.evs())
 	}
-	if a := f.engine.Active(); a == nil || a.StepID != "save" || f.engine.Dirty() {
-		t.Fatalf("active %+v dirty %v", a, f.engine.Dirty())
+	if a := f.core.Active(); a == nil || a.StepID != "save" || f.dirty() {
+		t.Fatalf("active %+v dirty %v", a, f.dirty())
 	}
 	// Nothing was recorded for the replayed step.
-	if ls := f.engine.Saved().Lessons[demoID]; ls != nil && (ls.Done["open"] != 0 || ls.Skipped["open"] != 0) {
+	if ls := f.core.Saved().Lessons[demoID]; ls != nil && (ls.Done["open"] != 0 || ls.Skipped["open"] != 0) {
 		t.Fatalf("replayed step recorded %+v", ls)
 	}
 
@@ -407,8 +407,8 @@ func TestGoToStepRestoreFailure(t *testing.T) {
 	f := newDemoFixture(t)
 	f.snaps.restoreErr = errors.New("reset-step failed")
 	_, err := f.core.Load(context.Background(), protocol.ScenarioRequest{LessonID: demoID, StepID: "kill"})
-	if err == nil || f.played() != "" || f.snaps.captured() != "" || f.engine.Active() != nil {
-		t.Fatalf("error=%v played=%v checkpoints=%v active=%v", err, f.played(), f.snaps.captured(), f.engine.Active())
+	if err == nil || f.played() != "" || f.snaps.captured() != "" || f.core.Active() != nil {
+		t.Fatalf("error=%v played=%v checkpoints=%v active=%v", err, f.played(), f.snaps.captured(), f.core.Active())
 	}
 }
 
@@ -423,7 +423,7 @@ func TestIncompleteFastForwardTakesNoCheckpoint(t *testing.T) {
 		if err != nil || res.Index != 1 {
 			t.Fatalf("load %+v %v", res, err)
 		}
-		if a := f.engine.Active(); a == nil || a.StepID != "save" || f.snaps.captured() != "" {
+		if a := f.core.Active(); a == nil || a.StepID != "save" || f.snaps.captured() != "" {
 			t.Fatalf("active %+v checkpoints %q", a, f.snaps.captured())
 		}
 	})
@@ -436,7 +436,7 @@ func TestIncompleteFastForwardTakesNoCheckpoint(t *testing.T) {
 		if err != nil || v.(protocol.ScenarioResult).Index != 2 {
 			t.Fatalf("load %+v %v", v, err)
 		}
-		if a := f.engine.Active(); a == nil || a.StepID != "kill" || f.snaps.captured() != "" {
+		if a := f.core.Active(); a == nil || a.StepID != "kill" || f.snaps.captured() != "" {
 			t.Fatalf("active %+v checkpoints %q", a, f.snaps.captured())
 		}
 	})
@@ -483,8 +483,8 @@ func TestInterruptedFastForwardEndsTheRehearsal(t *testing.T) {
 		t.Fatal("the interrupted load succeeded")
 	}
 	f.idle()
-	if a := f.engine.Active(); a == nil || a.LessonID != lessonID || a.StepID != "open" || !f.engine.Dirty() {
-		t.Fatalf("after the interrupted load: active %+v dirty %v", a, f.engine.Dirty())
+	if a := f.core.Active(); a == nil || a.LessonID != lessonID || a.StepID != "open" || !f.dirty() {
+		t.Fatalf("after the interrupted load: active %+v dirty %v", a, f.dirty())
 	}
 	if f.snaps.captured() != lessonID+"/open" {
 		t.Fatalf("checkpoints %q", f.snaps.captured())
@@ -567,17 +567,17 @@ func TestProjectSetupAndLap(t *testing.T) {
 	if len(sh.runs) != 1 || sh.runs[0] != filepath.Join(f.ws, "projects/hello")+": echo ran >> setup.log" {
 		t.Fatalf("setup.run %v", sh.runs)
 	}
-	if f.engine.Lap() != nil {
+	if f.core.Lap() != nil {
 		t.Fatal("an ordinary load started a lap")
 	}
 
 	// A lap: reset, first step, timer started.
-	f.engine.ActivateLap(f.engine.Scenario(), 1, steps.LapEnd)
+	f.core.activate(f.core.Scenario(), 1, activation{status: protocol.StepLoaded, phase: Active, lap: lapEnd})
 	res, err = f.core.Load(ctx, protocol.ScenarioRequest{LessonID: id, Lap: true})
 	if err != nil || res.Lap == nil || res.Lap.StartedAt == 0 || res.Step.StepID != "scaffold" {
 		t.Fatalf("lap load %+v %v", res, err)
 	}
-	if f.engine.Lap() == nil {
+	if f.core.Lap() == nil {
 		t.Fatal("no lap running")
 	}
 	// Reloading during the lap keeps it and reports it.
@@ -586,7 +586,7 @@ func TestProjectSetupAndLap(t *testing.T) {
 		t.Fatalf("reload %+v %v", res, err)
 	}
 	res, err = f.core.Load(ctx, protocol.ScenarioRequest{LessonID: id, StepID: res.Step.StepID})
-	if err != nil || res.Lap != nil || f.engine.Lap() != nil {
+	if err != nil || res.Lap != nil || f.core.Lap() != nil {
 		t.Fatalf("stop lap %+v %v", res, err)
 	}
 	if _, err := f.core.Load(ctx, protocol.ScenarioRequest{LessonID: id, StepID: "commit", Lap: true}); httpx.AsError(err).Status != 400 {
@@ -602,7 +602,7 @@ func TestProjectSetupAndLap(t *testing.T) {
 	if !strings.Contains(f.evs(), "error") {
 		t.Fatalf("no error event for a failed setup.run: %s", f.evs())
 	}
-	if f.engine.Lap() != nil {
+	if f.core.Lap() != nil {
 		t.Fatal("an ordinary load kept the lap")
 	}
 }

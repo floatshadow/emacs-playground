@@ -27,7 +27,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/config"
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent/fakeeditor"
-	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/session"
 )
 
 const testLesson = `{
@@ -46,7 +46,7 @@ const testLesson = `{
 func TestPersistOrdersSnapshots(t *testing.T) {
 	s := New(&protocol.SessiondConfig{Workspace: t.TempDir()}, Options{})
 	for _, revision := range []uint64{2, 1} {
-		s.persist(steps.Saved{Revision: revision, Active: &protocol.StepRef{LessonID: "a/b", StepID: fmt.Sprint(revision)}})
+		s.persist(session.Saved{Revision: revision, Active: &protocol.StepRef{LessonID: "a/b", StepID: fmt.Sprint(revision)}})
 	}
 	if saved := s.readState(); saved.Active == nil || saved.Active.StepID != "2" {
 		t.Fatalf("saved %+v", saved)

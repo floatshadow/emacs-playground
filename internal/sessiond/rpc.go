@@ -38,7 +38,7 @@ func (s *Server) rpc(w http.ResponseWriter, r *http.Request) error {
 		s.syncProgress(ctx)
 		res, err = withBody(w, r, s.core.Load)
 	case protocol.OpCheck:
-		cr, ok := s.engine.Check(ctx)
+		cr, ok := s.core.Check(ctx)
 		if !ok {
 			return httpx.Conflict("no step is active; load a lesson first")
 		}
@@ -99,23 +99,11 @@ func withBody[Req, Res any](w http.ResponseWriter, r *http.Request, f func(conte
 	return f(r.Context(), req)
 }
 
-// errNotActiveStep answers ops naming a step that is not the active one.
-func errNotActiveStep() error { return httpx.Conflict("that step is not the active step") }
-
-// errLap answers hint, demo start and skip during a lap.
-func errLap() error { return httpx.Conflict("hints, demonstrations and skips are off during the lap") }
-
 func (s *Server) rpcHint(_ context.Context, req protocol.HintRequest) (any, error) {
 	if req.StepID == "" || req.Level < 1 {
 		return nil, httpx.BadRequest("stepId and a level of at least 1 are required")
 	}
-	if s.engine.Lap() != nil {
-		return nil, errLap()
-	}
-	if !s.engine.Hint(req.StepID, req.Level) {
-		return nil, httpx.Conflict("that step is not part of the active lesson")
-	}
-	return protocol.Empty{}, nil
+	return protocol.Empty{}, s.core.Hint(req.StepID, req.Level)
 }
 
 func (s *Server) rpcModules(ctx context.Context, req protocol.ModulesRequest) (any, error) {
@@ -149,8 +137,10 @@ func (s *Server) rpcDescribe(ctx context.Context, req protocol.DescribeRequest) 
 }
 
 // rpcDropStep forgets a lesson's active step; an empty lessonId forgets
-// every lesson ("Start over").
+// every lesson ("Start over"). It waits for a generation sync under way.
 func (s *Server) rpcDropStep(ctx context.Context, req protocol.DropStepRequest) (any, error) {
+	s.progressMu.Lock()
+	defer s.progressMu.Unlock()
 	if err := s.core.Drop(ctx, req.LessonID, req.Generation); err != nil {
 		return nil, err
 	}
@@ -191,7 +181,7 @@ func (s *Server) rpcKeys(ctx context.Context, req protocol.KeysRequest) (any, er
 	if ok, reason := s.sup.Ready(); !ok {
 		return nil, httpx.EmacsUnavailable(reason)
 	}
-	s.engine.DemoTraffic()
+	s.core.DemoTraffic()
 	if err := s.sup.SendKeys(ctx, req.Frame, req.Keys, req.Text); err != nil {
 		if strings.Contains(err.Error(), "cannot be sent") {
 			return nil, httpx.BadRequest(err.Error())
@@ -317,110 +307,19 @@ func (s *Server) rpcCheckpoint(ctx context.Context, req protocol.CheckpointReque
 
 // rpcDemo brackets the browser's "Watch it" (api.md §3.4, §4.1).
 func (s *Server) rpcDemo(ctx context.Context, req protocol.DemoRequest) (any, error) {
-	if req.Phase != protocol.DemoStart && req.Phase != protocol.DemoEnd {
-		return nil, httpx.BadRequest("phase must be start or end")
+	switch req.Phase {
+	case protocol.DemoStart:
+		return s.core.DemoStart(ctx, req.StepID)
+	case protocol.DemoEnd:
+		return protocol.DemoResult{}, s.core.DemoEnd(req.StepID)
 	}
-	act := s.engine.Active()
-	if act == nil || req.StepID == "" || act.StepID != req.StepID {
-		return nil, errNotActiveStep()
-	}
-	if req.Phase == protocol.DemoEnd {
-		if !s.engine.EndDemo(req.StepID) {
-			return nil, errNotActiveStep()
-		}
-		return protocol.DemoResult{}, nil
-	}
-	if s.engine.Lap() != nil {
-		return nil, errLap()
-	}
-	restored, err := s.core.RestoreIfDirty(ctx, *act)
-	if err != nil {
-		return nil, err
-	}
-	if !s.engine.StartDemo(req.StepID) {
-		return nil, errNotActiveStep()
-	}
-	return protocol.DemoResult{Restored: restored}, nil
+	return nil, httpx.BadRequest("phase must be start or end")
 }
-
-// SkipTimeout bounds rpc skip: the demo, the wait for its conditions and
-// the next step's checkpoint.
-const SkipTimeout = 60 * time.Second
-
-// skipSettle is how long rpc skip waits for the step's conditions after
-// its demo (file events, compilation output).
-const skipSettle = 8 * time.Second
 
 // rpcSkip does the active step for the learner ("Skip this step", api.md
-// §3.4): back to the step's checkpoint when commands ran, the step's demo
-// played into Emacs with completions held, then the step is recorded
-// skipped and the next one starts.
+// §3.4).
 func (s *Server) rpcSkip(ctx context.Context, req protocol.SkipRequest) (any, error) {
-	act := s.engine.Active()
-	if act == nil || req.StepID == "" || act.StepID != req.StepID {
-		return nil, errNotActiveStep()
-	}
-	if s.engine.Lap() != nil {
-		return nil, errLap()
-	}
-	if !s.skipMu.TryLock() {
-		return nil, httpx.Conflict("a skip is already running")
-	}
-	defer s.skipMu.Unlock()
-	// The skip finishes even when the browser goes away.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), SkipTimeout)
-	defer cancel()
-	var demo string
-	if sc := s.engine.Scenario(); sc != nil && sc.ID == act.LessonID {
-		if i := sc.StepIndex(act.StepID); i >= 0 {
-			demo = sc.Steps[i].Demo
-		}
-	}
-	if _, err := s.core.RestoreIfDirty(ctx, *act); err != nil {
-		return nil, err
-	}
-	if !s.engine.BeginSkip(act.StepID) {
-		return nil, errNotActiveStep()
-	}
-	completed := false
-	if demo != "" {
-		if err := s.core.PlayDemo(ctx, demo); err != nil {
-			s.log.Warn("skip: playing the demo", "lesson", act.LessonID, "step", act.StepID, "err", err)
-		}
-		completed = s.awaitComplete(ctx, act.StepID, skipSettle)
-		if !completed {
-			s.log.Warn("skip: the step's demo did not complete it (curriculum defect)", "lesson", act.LessonID, "step", act.StepID)
-		}
-	}
-	next, ok := s.engine.FinishSkip(ctx, act.StepID)
-	if !ok {
-		s.engine.AbortSkip()
-		return nil, httpx.Conflict("the step changed while it was being skipped")
-	}
-	return protocol.SkipResult{Next: next, DemoCompleted: completed}, nil
-}
-
-// awaitComplete evaluates the active step until its conditions hold, it is
-// no longer stepID, or d passes.
-func (s *Server) awaitComplete(ctx context.Context, stepID string, d time.Duration) bool {
-	deadline := time.Now().Add(d)
-	for {
-		res, ok := s.engine.Check(ctx)
-		if !ok || res.StepID != stepID {
-			return false
-		}
-		if res.Complete {
-			return true
-		}
-		if time.Now().After(deadline) || ctx.Err() != nil {
-			return false
-		}
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(250 * time.Millisecond):
-		}
-	}
+	return s.core.Skip(ctx, req.StepID)
 }
 
 func (s *Server) rpcRestore(ctx context.Context, req protocol.RestoreRequest) (any, error) {
@@ -470,7 +369,7 @@ func (s *Server) rpcStuck(r *http.Request, req protocol.StuckRPCRequest) any {
 	}
 	if s.gw != nil && viaProxy(r) {
 		rep := protocol.InternalStuckReport{Note: req.Note, Events: evs}
-		if act := s.engine.Active(); act != nil {
+		if act := s.core.Active(); act != nil {
 			rep.LessonID, rep.StepID = act.LessonID, act.StepID
 		}
 		s.bg.Add(1)

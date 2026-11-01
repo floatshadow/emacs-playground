@@ -59,10 +59,11 @@ type Options struct {
 	// Editor is the fake editor in Fake mode (tests drive and inspect it);
 	// nil makes one for the workspace.
 	Editor *fakeeditor.Editor
-	// Clock replaces time.Now in the step engine (tests).
+	// Clock replaces time.Now in the session core and the evaluator
+	// (tests).
 	Clock func() time.Time
-	// Debounce replaces the step engine's evaluation debounce, and three
-	// times it the longest wait (tests).
+	// Debounce replaces the evaluator's debounce, and three times it the
+	// longest wait (tests).
 	Debounce time.Duration
 }
 
@@ -77,7 +78,7 @@ type Server struct {
 	agent    *agent.Server
 	sup      *supervisor.Supervisor
 	tap      *inputtap.Tap
-	engine   *steps.Engine
+	eval     *steps.Evaluator
 	core     *session.Core
 	snaps    *session.Checkpoints
 	modules  *scenario.Modules
@@ -96,12 +97,10 @@ type Server struct {
 	done          chan struct{}
 	stateMu       sync.Mutex
 	stateRevision uint64
-	// progressMu serialises gateway snapshots with incoming resets.
+	// progressMu serialises generation syncs with rpc drop-step.
 	progressMu sync.Mutex
-	// skipMu serialises rpc skip.
-	skipMu sync.Mutex
-	bg     sync.WaitGroup
-	addr   atomic.Value // string
+	bg         sync.WaitGroup
+	addr       atomic.Value // string
 
 	// editor is the fake editor (Fake mode); fakeCancel stops its
 	// connection loop.
@@ -182,7 +181,7 @@ func (s *Server) Run(ctx context.Context) error {
 		s.log.Warn("file watcher unavailable", "err", err)
 	} else {
 		s.watcher = w
-		w.OnGit = s.engine.Invalidate
+		w.OnGit = s.eval.Invalidate
 		defer w.Close()
 	}
 
@@ -214,7 +213,7 @@ func (s *Server) Run(ctx context.Context) error {
 	s.bg.Add(2)
 	go func() {
 		defer s.bg.Done()
-		s.engine.Run(runCtx)
+		s.eval.Run(runCtx)
 	}()
 	go func() {
 		defer s.bg.Done()
@@ -246,7 +245,7 @@ func (s *Server) Run(ctx context.Context) error {
 	s.shutdown(srv)
 	cancel()
 	s.bg.Wait()
-	// The reporter closes last: the engine and the resume stopped with
+	// The reporter closes last: the evaluator and the core stopped with
 	// runCtx and the HTTP handlers in shutdown, so nothing reports any more.
 	if s.reporter != nil {
 		s.reporter.Close(5 * time.Second)
@@ -310,7 +309,7 @@ func (s *Server) wire() {
 		Spawn: attach, Tap: s.tap, DefaultCols: cols, DefaultRows: rows, Track: s.track, Done: s.done, Log: log,
 		// The page that plays a "Watch it" sends its keys while its
 		// terminal is attached; when it goes away the demo is over.
-		OnDetach: func() { s.engine.AbandonDemo() },
+		OnDetach: func() { s.core.AbandonDemo() },
 		Ready: func() error {
 			if ok, reason := s.sup.Ready(); !ok {
 				return errors.New(reason)
@@ -319,7 +318,7 @@ func (s *Server) wire() {
 		},
 	}
 
-	s.engine = steps.New(steps.Options{
+	s.eval = steps.New(steps.Options{
 		Root:      s.preview.Root(),
 		Workspace: cfg.Workspace,
 		Checker:   checker{s.agent},
@@ -327,24 +326,8 @@ func (s *Server) wire() {
 		Now:       s.opt.Clock,
 		Debounce:  s.opt.Debounce,
 		Log:       log.With("component", "steps"),
-		Hooks: steps.Hooks{
-			Emit: func(ev protocol.Event) { s.bus.Publish(ev) },
-			Report: func(r protocol.ProgressReport) {
-				if s.reporter != nil {
-					s.reporter.Report(r)
-				}
-			},
-			Checkpoint: func(ctx context.Context, lessonID, stepID string) {
-				if err := session.CaptureStep(ctx, s.snaps, lessonID, stepID, true); err != nil {
-					s.log.Warn("step checkpoint", "err", err)
-				}
-			},
-			Persist: s.persist,
-		},
+		Observe:   func(o steps.Observation) { s.core.Observe(o) },
 	})
-	if s.gw != nil {
-		s.reporter = gwclient.NewReporter(s.gw, s.engine.ProgressReports)
-	}
 	var fetch scenario.Fetcher
 	if s.gw != nil {
 		fetch = s.gw
@@ -358,16 +341,26 @@ func (s *Server) wire() {
 	}
 	s.core = session.New(session.Deps{
 		Workspace: cfg.Workspace, Root: s.preview.Root(), CacheDir: filepath.Join(s.playgroundDir(), "cache"),
-		Fetch: fetch, Agent: s.agent, Sup: s.sup, Snapshots: s.snaps, Modules: s.modules, Engine: s.engine,
-		DropProgress: s.dropProgress,
+		Fetch: fetch, Agent: s.agent, Sup: s.sup, Snapshots: s.snaps, Modules: s.modules, Evaluator: s.eval,
+		Report: func(r protocol.ProgressReport) {
+			if s.reporter != nil {
+				s.reporter.Report(r)
+			}
+		},
+		Persist:      s.persist,
+		PurgeReports: s.purgeReports,
 		Git:          checkpoint.ExecRunner{Bin: cfg.GitBin}, Shell: s.shell(),
 		Emit: func(ev protocol.Event) { s.bus.Publish(ev) },
 		Log:  log.With("component", "session"),
+		Now:  s.opt.Clock,
 	})
+	if s.gw != nil {
+		s.reporter = gwclient.NewReporter(s.gw, s.core.ProgressReports)
+	}
 	s.eventsH = &events.Handler{Bus: s.bus, Hello: s.hello, Track: s.track, Done: s.done, Log: log}
 }
 
-// checker adapts the agent's check op for the step engine.
+// checker adapts the agent's check op for the evaluator.
 type checker struct{ a *agent.Server }
 
 func (c checker) Check(ctx context.Context, forms []string, timeout time.Duration) ([]protocol.Truth, error) {
@@ -457,10 +450,10 @@ func (s *Server) hello(replayed bool) *protocol.HelloEvent {
 		Mode:      s.sup.Mode(),
 		Emacs:     protocol.EmacsInfo{Version: st.Version, UptimeMs: st.UptimeMs},
 		Frames:    s.sup.Frames(),
-		Step:      s.engine.Active(),
+		Step:      s.core.Active(),
 		Modules:   s.modules.Current(),
 		Replayed:  replayed,
-		Lap:       s.engine.Lap(),
+		Lap:       s.core.Lap(),
 		Busy:      s.busy(),
 	}
 }
@@ -480,11 +473,11 @@ func (s *Server) status() protocol.StatusResult {
 		Emacs:            s.sup.Status(),
 		Frames:           s.sup.Frames(),
 		Mode:             s.sup.Mode(),
-		Step:             s.engine.Active(),
+		Step:             s.core.Active(),
 		Modules:          s.modules.Current(),
 		Versions:         readVersions(s.cfg.VersionsFile),
 		ActiveWebSockets: int(s.wsCount.Load()),
-		Lap:              s.engine.Lap(),
+		Lap:              s.core.Lap(),
 		RemoteBox:        s.boxReady.Load(),
 		Busy:             s.busy(),
 	}
@@ -530,13 +523,13 @@ func (s *Server) OnEvent(ev protocol.Event) {
 		s.tap.Reset()
 		s.sup.OnKey(e)
 		s.bus.Publish(e)
-		s.engine.OnKey(e)
+		s.eval.OnKey(e)
 	case *protocol.State:
 		s.bus.Publish(e)
-		s.engine.OnState(e)
+		s.eval.OnState(e)
 	case *protocol.MinibufferEvent:
 		s.bus.Publish(e)
-		s.engine.OnMinibuffer(e)
+		s.eval.OnMinibuffer(e)
 	default:
 		s.bus.Publish(ev)
 	}
@@ -550,7 +543,7 @@ func (s *Server) OnDisconnect(error) {}
 
 func (s *Server) onFile(ev *protocol.FileEvent) {
 	s.bus.Publish(ev)
-	s.engine.OnFile(ev)
+	s.eval.OnFile(ev)
 }
 
 // --- checkpoints and state -----------------------------------------------
@@ -558,12 +551,12 @@ func (s *Server) onFile(ev *protocol.FileEvent) {
 // stateFile is /work/.playground/state.json.
 type stateFile struct {
 	Version int `json:"version"`
-	steps.Saved
+	session.Saved
 }
 
 func (s *Server) statePath() string { return filepath.Join(s.playgroundDir(), "state.json") }
 
-func (s *Server) persist(saved steps.Saved) {
+func (s *Server) persist(saved session.Saved) {
 	s.stateMu.Lock()
 	defer s.stateMu.Unlock()
 	if saved.Revision < s.stateRevision {
@@ -589,20 +582,23 @@ func (s *Server) persist(saved steps.Saved) {
 }
 
 // readState reads state.json (empty when missing or unreadable).
-func (s *Server) readState() steps.Saved {
+func (s *Server) readState() session.Saved {
 	b, err := os.ReadFile(s.statePath())
 	if err != nil {
-		return steps.Saved{}
+		return session.Saved{}
 	}
 	var st stateFile
 	if err := json.Unmarshal(b, &st); err != nil {
 		s.log.Warn("state.json is unreadable; starting fresh", "err", err)
-		return steps.Saved{}
+		return session.Saved{}
 	}
 	return st.Saved
 }
 
-// syncProgress applies gateway resets missed while this session was unavailable.
+// syncProgress applies gateway resets missed while this session was
+// unavailable (the core's drop ops), then adopts the gateway's generations
+// in the core and the reporter. progressMu serialises it with rpc
+// drop-step, so a reset arriving meanwhile applies after the adoption.
 func (s *Server) syncProgress(ctx context.Context) {
 	if s.gw == nil {
 		return
@@ -616,29 +612,29 @@ func (s *Server) syncProgress(ctx context.Context) {
 		s.log.Warn("progress generations", "err", err)
 		return
 	}
+	if err := s.core.SyncGenerations(ctx, generations); err != nil {
+		s.log.Warn("applying progress generations", "err", err)
+		return
+	}
 	if s.reporter != nil {
 		s.reporter.SyncGenerations(generations)
 	}
-	s.engine.SyncGenerations(generations)
 }
 
-// dropProgress applies a gateway reset (the core's drop op): queued
-// reports and saved progress of the scope, under progressMu.
-func (s *Server) dropProgress(lessonID string, generation int64) {
-	s.progressMu.Lock()
-	defer s.progressMu.Unlock()
+// purgeReports discards the queued reports a gateway reset makes stale
+// (the core's drop op).
+func (s *Server) purgeReports(lessonID string, generation int64) {
 	if s.reporter != nil {
 		s.reporter.Purge(lessonID, generation)
 	}
-	s.engine.DropGeneration(lessonID, generation)
 }
 
 // restoreState loads the saved progress and queues the resume of the
 // active step (the core's resume op).
-func (s *Server) restoreState(ctx context.Context, saved steps.Saved) {
-	s.engine.Restore(saved)
+func (s *Server) restoreState(ctx context.Context, saved session.Saved) {
+	s.core.RestoreSaved(saved)
 	s.syncProgress(ctx)
-	saved = s.engine.Saved()
+	saved = s.core.Saved()
 	if s.reporter != nil {
 		s.reporter.Reconcile()
 	}

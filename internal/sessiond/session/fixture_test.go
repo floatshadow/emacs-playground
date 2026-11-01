@@ -143,14 +143,14 @@ func (a *fakeAgent) setups() []protocol.AgentSetupArgs {
 var demoCommands = map[string]string{"C-x C-f": "find-file", "C-x C-s": "save-buffer", "C-x k": "kill-buffer"}
 
 // fakeSup restarts in 20 ms (or when release is closed) and turns demo
-// keys into the engine's key events.
+// keys into the evaluator's key events.
 type fakeSup struct {
 	mu       sync.Mutex
 	restarts int
 	// cutShort counts restarts whose context ended before they finished.
 	cutShort int
 	release  chan struct{}
-	engine   *steps.Engine
+	eval     *steps.Evaluator
 	played   []string
 	// pending is the key sequence typed so far towards a demo command.
 	pending string
@@ -205,7 +205,7 @@ func (s *fakeSup) SendKeys(ctx context.Context, frame protocol.FrameKind, keys, 
 	}
 	s.mu.Unlock()
 	if ok {
-		s.engine.OnKey(&protocol.KeyEvent{Keys: seq, Cmd: cmd})
+		s.eval.OnKey(&protocol.KeyEvent{Keys: seq, Cmd: cmd})
 	}
 	return nil
 }
@@ -225,6 +225,8 @@ type fakeSnaps struct {
 	restorable map[string]bool
 	restoreErr error
 	spec       *protocol.WindowSpec
+	// onCapture, when set, runs at the start of each capture.
+	onCapture func()
 }
 
 func (s *fakeSnaps) Exists(ctx context.Context, ref string) bool {
@@ -241,6 +243,12 @@ func (s *fakeSnaps) ReadMeta(ref string) (checkpoint.Meta, error) {
 func (s *fakeSnaps) List(ctx context.Context) ([]protocol.CheckpointInfo, error) { return nil, nil }
 
 func (s *fakeSnaps) Capture(ctx context.Context, meta checkpoint.Meta) (checkpoint.Meta, error) {
+	s.mu.Lock()
+	hook := s.onCapture
+	s.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.cps = append(s.cps, strings.TrimPrefix(meta.Ref, checkpoint.RefPrefix))
@@ -292,7 +300,7 @@ type fixture struct {
 	agent  *fakeAgent
 	sup    *fakeSup
 	snaps  *fakeSnaps
-	engine *steps.Engine
+	eval   *steps.Evaluator
 	mods   *scenario.Modules
 	ws     string
 	mu     sync.Mutex
@@ -332,11 +340,11 @@ func newFixture(t *testing.T, mutate ...func(*fixture, *Deps)) *fixture {
 			f.events = append(f.events, string(ev.Type()))
 		}
 	}
-	f.engine = steps.New(steps.Options{Hooks: steps.Hooks{Emit: emit}, Debounce: 5 * time.Millisecond})
-	f.sup = &fakeSup{engine: f.engine}
+	f.eval = steps.New(steps.Options{Debounce: 5 * time.Millisecond, Observe: func(o steps.Observation) { f.core.Observe(o) }})
+	f.sup = &fakeSup{eval: f.eval}
 	d := Deps{
 		Workspace: ws, Root: root, CacheDir: filepath.Join(ws, ".playground", "cache"),
-		Fetch: f.fetch, Agent: f.agent, Sup: f.sup, Snapshots: f.snaps, Modules: f.mods, Engine: f.engine,
+		Fetch: f.fetch, Agent: f.agent, Sup: f.sup, Snapshots: f.snaps, Modules: f.mods, Evaluator: f.eval,
 		Emit: emit, Log: slog.New(slog.NewTextHandler(io.Discard, nil)),
 	}
 	for _, m := range mutate {
@@ -347,7 +355,7 @@ func newFixture(t *testing.T, mutate ...func(*fixture, *Deps)) *fixture {
 	f.cancel, f.done = cancel, make(chan struct{})
 	go func() {
 		defer close(f.done)
-		f.engine.Run(ctx)
+		f.eval.Run(ctx)
 	}()
 	go f.core.Run(ctx)
 	t.Cleanup(f.stop)
@@ -385,6 +393,13 @@ func (f *fixture) evs() string {
 }
 
 // waitFor polls cond for up to 2 s.
+// dirty reports whether the active step counts as dirty.
+func (f *fixture) dirty() bool {
+	f.core.mu.Lock()
+	defer f.core.mu.Unlock()
+	return f.core.dirtyLocked()
+}
+
 func (f *fixture) waitFor(what string, cond func() bool) {
 	f.t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

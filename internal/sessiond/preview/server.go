@@ -40,7 +40,7 @@ func New(workspace string) (*Server, error) {
 // Close releases the root.
 func (s *Server) Close() error { return s.root.Close() }
 
-// Root returns the workspace root (shared with the step engine's file
+// Root returns the workspace root (shared with the evaluator's file
 // conditions).
 func (s *Server) Root() *os.Root { return s.root }
 

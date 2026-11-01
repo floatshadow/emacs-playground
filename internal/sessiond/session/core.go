@@ -47,16 +47,28 @@ type Deps struct {
 	Sup       Supervisor
 	Snapshots Snapshots
 	Modules   *scenario.Modules
-	Engine    *steps.Engine
-	// DropProgress applies a gateway reset to saved progress and queued
-	// reports in one step, serialised with generation syncs.
-	DropProgress func(lessonID string, generation int64)
+	// Evaluator evaluates the current attempt; its Observe hook must call
+	// Core.Observe.
+	Evaluator *steps.Evaluator
+	// Report sends progress to the gateway without blocking (queue it);
+	// Persist writes state.json (revision-ordered). Both are called
+	// without Core.mu.
+	Report  func(protocol.ProgressReport)
+	Persist func(Saved)
+	// PurgeReports discards the queued reports a gateway reset makes
+	// stale (the drop op, before it forgets saved progress); nil: none.
+	PurgeReports func(lessonID string, generation int64)
 	// Git runs git for setup.repos (nil: the git binary); Shell runs
 	// setup.run.
 	Git   checkpoint.Runner
 	Shell steps.ShellRunner
-	Emit  func(protocol.Event)
-	Log   *slog.Logger
+	// Emit publishes an event; it must not block (it runs under Core.mu).
+	Emit func(protocol.Event)
+	Log  *slog.Logger
+	// Now is the clock of attempts, outcomes, laps and demos (default
+	// time.Now); Locale selects nudge text (default "en").
+	Now    func() time.Time
+	Locale string
 	// SetupTimeout bounds the agent's setup op (default 10 s).
 	SetupTimeout time.Duration
 }
@@ -71,11 +83,11 @@ const (
 	OpRestore    OpKind = "restore"
 	OpSetModules OpKind = "set-modules"
 	OpDrop       OpKind = "drop"
-	// OpRestoreIfDirty puts the active step back to its checkpoint when
-	// the learner ran a command in it (demo start and skip).
-	// TODO(sessiond, backend.md §3.12): folded into the demo-start and
-	// skip ops.
-	OpRestoreIfDirty OpKind = "restore-if-dirty"
+	OpDemoStart  OpKind = "demo-start"
+	OpSkip       OpKind = "skip"
+	// OpAdvance follows a completion: the next step's checkpoint and
+	// activation.
+	OpAdvance OpKind = "advance"
 )
 
 // Deadlines bound each op from the moment it starts running.
@@ -85,6 +97,9 @@ const (
 	RestoreDeadline = 2 * time.Minute
 	ModulesDeadline = 3 * time.Minute
 	DropDeadline    = 10 * time.Second
+	DemoDeadline    = 30 * time.Second
+	SkipDeadline    = 60 * time.Second
+	AdvanceDeadline = time.Minute
 )
 
 // RestartTimeout bounds a daemon restart for a module change.
@@ -95,8 +110,9 @@ type Op struct {
 	Kind     OpKind
 	Req      any
 	Deadline time.Duration
-	// Preempt (drop) runs the op next; Cancels (a drop that applies) also
-	// cancels the running op when it concerns the same lesson scope.
+	// Preempt (drop, advance) runs the op next; Cancels (a drop that
+	// applies) also cancels the running op when it concerns the same
+	// lesson scope.
 	Preempt bool
 	Cancels bool
 
@@ -125,10 +141,12 @@ type OpInfo struct {
 	StartedAt time.Time
 }
 
-// Core owns lesson orchestration: one worker runs the ops one at a time,
-// each to completion and detached from the request that asked for it.
-// Between phases an op checks its context, which its deadline or a
-// preempting drop cancels. Ops never hold mu across I/O.
+// Core owns the lesson state and its orchestration: one worker runs the
+// ops one at a time, each to completion and detached from the request that
+// asked for it. Between phases an op checks its context, which its
+// deadline or a preempting drop cancels. Ops never hold mu across I/O;
+// events are emitted under mu, so they keep the order of the state
+// changes.
 type Core struct {
 	d   Deps
 	log *slog.Logger
@@ -141,6 +159,15 @@ type Core struct {
 	queue   []*Op
 	running *Op
 	wake    chan struct{}
+	lesson  Lesson
+	// obs is what the current attempt's observations left (Observe).
+	obs observed
+	// reported holds the lesson and step ids reported in progress in this
+	// process.
+	reported map[string]bool
+	// dirty marks the active step dirty after a load that failed changed
+	// the workspace (until the next activation).
+	dirty bool
 }
 
 // New returns a core; Run executes its ops.
@@ -151,10 +178,26 @@ func New(d Deps) *Core {
 	if d.SetupTimeout <= 0 {
 		d.SetupTimeout = 10 * time.Second
 	}
-	return &Core{d: d, log: d.Log, wake: make(chan struct{}, 1)}
+	if d.Now == nil {
+		d.Now = time.Now
+	}
+	if d.Locale == "" {
+		d.Locale = protocol.DefaultLocale
+	}
+	return &Core{d: d, log: d.Log, wake: make(chan struct{}, 1), reported: map[string]bool{},
+		lesson: Lesson{Index: -1, Saved: Saved{Lessons: map[string]*LessonState{}}}}
 }
 
+func (c *Core) now() time.Time { return c.d.Now() }
+
+// emit publishes an event (ops, outside mu).
 func (c *Core) emit(ev protocol.Event) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.emitLocked(ev)
+}
+
+func (c *Core) emitLocked(ev protocol.Event) {
 	if c.d.Emit != nil {
 		c.d.Emit(ev)
 	}
@@ -222,8 +265,13 @@ func (c *Core) exec(ctx context.Context, op *Op) (any, error) {
 		return nil, c.resume(ctx, op.Req.(protocol.StepRef))
 	case OpRestore:
 		return c.restore(ctx, op)
-	case OpRestoreIfDirty:
-		return c.restartIfDirty(ctx, op.Req.(protocol.StepRef)), nil
+	case OpDemoStart:
+		return c.demoStart(ctx, op.Req.(string))
+	case OpSkip:
+		return c.skip(ctx, op.Req.(string))
+	case OpAdvance:
+		_, err := c.advance(ctx, op.Req.(uint64))
+		return nil, err
 	case OpSetModules:
 		restarting, err := c.setModules(ctx, op)
 		return restarting, err
@@ -239,10 +287,15 @@ func (c *Core) exec(ctx context.Context, op *Op) (any, error) {
 // cancels the running op when that one concerns the same lesson (or the
 // cancelling op concerns every lesson).
 func (c *Core) Submit(op *Op) {
+	c.mu.Lock()
+	c.submitLocked(op)
+	c.mu.Unlock()
+}
+
+func (c *Core) submitLocked(op *Op) {
 	op.early = make(chan any, 1)
 	op.done = make(chan Result, 1)
 	op.info.Kind = op.Kind
-	c.mu.Lock()
 	if r := c.running; op.Cancels && r != nil && lessonScoped(r.Kind) && (op.info.LessonID == "" || r.info.LessonID == op.info.LessonID) {
 		r.cancel()
 	}
@@ -251,7 +304,6 @@ func (c *Core) Submit(op *Op) {
 	} else {
 		c.queue = append(c.queue, op)
 	}
-	c.mu.Unlock()
 	select {
 	case c.wake <- struct{}{}:
 	default:
@@ -347,16 +399,32 @@ func (c *Core) Restore(ctx context.Context, req protocol.RestoreRequest) (protoc
 	return v.(protocol.RestoreResult), nil
 }
 
-// RestoreIfDirty puts the active step act back to its checkpoint, without
-// counting a reset, when the learner ran a command in it since it started
-// or was last reset (demo start and skip, api.md §3.4). It reports whether
-// it restored.
-func (c *Core) RestoreIfDirty(ctx context.Context, act protocol.StepRef) (bool, error) {
-	v, err := c.do(ctx, &Op{Kind: OpRestoreIfDirty, Req: act, Deadline: RestoreDeadline, info: OpInfo{LessonID: act.LessonID, StepID: act.StepID}})
+// DemoStart implements rpc demo start (api.md §4.1): the active step,
+// restored first when the learner ran a command in it, gets a "Watch it"
+// latch.
+func (c *Core) DemoStart(ctx context.Context, stepID string) (protocol.DemoResult, error) {
+	sc, idx, err := c.requireActive(stepID)
 	if err != nil {
-		return false, err
+		return protocol.DemoResult{}, err
 	}
-	return v.(bool), nil
+	v, err := c.do(ctx, &Op{Kind: OpDemoStart, Req: stepID, Deadline: DemoDeadline, info: OpInfo{LessonID: sc.ID, StepID: sc.Steps[idx].ID}})
+	if err != nil {
+		return protocol.DemoResult{}, err
+	}
+	return v.(protocol.DemoResult), nil
+}
+
+// Skip implements rpc skip (api.md §3.4).
+func (c *Core) Skip(ctx context.Context, stepID string) (protocol.SkipResult, error) {
+	sc, idx, err := c.requireActive(stepID)
+	if err != nil {
+		return protocol.SkipResult{}, err
+	}
+	v, err := c.do(ctx, &Op{Kind: OpSkip, Req: stepID, Deadline: SkipDeadline, info: OpInfo{LessonID: sc.ID, StepID: sc.Steps[idx].ID}})
+	if err != nil {
+		return protocol.SkipResult{}, err
+	}
+	return v.(protocol.SkipResult), nil
 }
 
 // SetModules implements rpc modules: it replaces the set exactly and
@@ -375,14 +443,14 @@ func (c *Core) SetModules(ctx context.Context, mods []string) (bool, error) {
 // Drop implements rpc drop-step: it forgets a lesson's (with "" every
 // lesson's) saved progress and active step for a gateway reset. It runs
 // next and, when its generation is newer than the one applied (the
-// predicate DropGeneration applies), cancels a running op on that lesson;
+// predicate dropGeneration applies), cancels a running op on that lesson;
 // a stale drop changes nothing and cancels nothing.
 func (c *Core) Drop(ctx context.Context, lessonID string, generation int64) error {
 	if lessonID != "" && !validLessonID(lessonID) {
 		return httpx.BadRequest("lessonId is not a valid lesson id")
 	}
 	_, err := c.do(ctx, &Op{Kind: OpDrop, Req: protocol.DropStepRequest{LessonID: lessonID, Generation: generation},
-		Deadline: DropDeadline, Preempt: true, Cancels: c.d.Engine.GenerationNewer(lessonID, generation),
+		Deadline: DropDeadline, Preempt: true, Cancels: c.generationNewer(lessonID, generation),
 		info: OpInfo{LessonID: lessonID}})
 	return err
 }

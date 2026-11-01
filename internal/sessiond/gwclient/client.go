@@ -3,7 +3,7 @@
 // stuck reports, and the heartbeat. Every request carries
 // "Authorization: Bearer <PG_SESSION_TOKEN>". Fetches retry three times
 // (architecture.md §6); progress reports go through an asynchronous queue
-// so the step engine never waits for the network.
+// so the session core never waits for the network.
 package gwclient
 
 import (
@@ -278,8 +278,8 @@ func (r *Reporter) queued(p protocol.ProgressReport) queuedReport {
 	return queuedReport{report: p, epoch: r.epoch, lessonEpoch: r.lessons[p.LessonID]}
 }
 
-// Report queues a report without holding up the engine. An overflow schedules
-// reconciliation from the engine's saved progress.
+// Report queues a report without holding up the session core. An overflow schedules
+// reconciliation from the core's saved progress.
 func (r *Reporter) Report(p protocol.ProgressReport) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

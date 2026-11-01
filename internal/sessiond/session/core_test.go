@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -41,7 +42,7 @@ func TestOpsOutliveTheRequest(t *testing.T) {
 	}
 	close(block)
 	f.idle()
-	if a := f.engine.Active(); a == nil || a.StepID != "open" || f.snaps.captured() != lessonID+"/open" {
+	if a := f.core.Active(); a == nil || a.StepID != "open" || f.snaps.captured() != lessonID+"/open" {
 		t.Fatalf("the load stopped with its request: active %+v checkpoints %s", a, f.snaps.captured())
 	}
 }
@@ -83,7 +84,7 @@ func TestDropPreemptsFastForward(t *testing.T) {
 		t.Fatalf("cancelled load: %v", err)
 	}
 	f.idle()
-	if a := f.engine.Active(); a != nil {
+	if a := f.core.Active(); a != nil {
 		t.Fatalf("active after the drop %+v", a)
 	}
 	evs := f.evs()
@@ -92,11 +93,54 @@ func TestDropPreemptsFastForward(t *testing.T) {
 	}
 }
 
+// A generation sync applies a missed reset as a drop op: the skip playing
+// the lesson's step is cancelled (its demo stops reaching Emacs), the step
+// goes, and the snapshot is adopted exactly.
+func TestSyncDropPreemptsSkip(t *testing.T) {
+	f := newDemoFixture(t)
+	if _, err := f.core.Load(context.Background(), protocol.ScenarioRequest{LessonID: demoID}); err != nil {
+		t.Fatal(err)
+	}
+	f.idle()
+	inDemo := make(chan struct{})
+	var once sync.Once
+	f.sup.mu.Lock()
+	f.sup.onKeys = func(ctx context.Context) error {
+		once.Do(func() { close(inDemo) })
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	f.sup.mu.Unlock()
+	skipped := make(chan error, 1)
+	go func() {
+		_, err := f.core.Skip(context.Background(), "open")
+		skipped <- err
+	}()
+	<-inDemo
+	gens := protocol.ProgressGenerations{"": 1, demoID: 3}
+	if err := f.core.SyncGenerations(context.Background(), gens); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-skipped; httpx.AsError(err).Status != 409 {
+		t.Fatalf("cancelled skip: %v", err)
+	}
+	f.idle()
+	if a := f.core.Active(); a != nil {
+		t.Fatalf("active after the sync %+v", a)
+	}
+	if got := f.core.Saved().Generations; !maps.Equal(got, gens) {
+		t.Fatalf("generations %v", got)
+	}
+	if evs := f.evs(); !strings.HasSuffix(evs, "step:open:dropped") || strings.Contains(evs, "skipped") {
+		t.Fatalf("events %s", evs)
+	}
+}
+
 // A drop whose generation was already applied cancels nothing: the load
 // it would have preempted finishes.
 func TestStaleDropDoesNotPreempt(t *testing.T) {
 	f := newDemoFixture(t)
-	f.engine.DropGeneration(demoID, 2)
+	f.core.dropGeneration(demoID, 2)
 	release := make(chan struct{})
 	inReplay := make(chan struct{})
 	var once sync.Once
@@ -133,7 +177,7 @@ func TestStaleDropDoesNotPreempt(t *testing.T) {
 	if err := <-dropped; err != nil {
 		t.Fatal(err)
 	}
-	if a := f.engine.Active(); a == nil || a.StepID != "save" {
+	if a := f.core.Active(); a == nil || a.StepID != "save" {
 		t.Fatalf("active %+v", a)
 	}
 }
@@ -167,42 +211,39 @@ func TestDropOfAnotherLessonWaits(t *testing.T) {
 	if err := <-queued; err != nil {
 		t.Fatal(err)
 	}
-	if a := f.engine.Active(); a == nil || a.LessonID != lessonID {
+	if a := f.core.Active(); a == nil || a.LessonID != lessonID {
 		t.Fatalf("the load was cancelled by another lesson's drop: %+v", a)
 	}
 }
 
-func TestRestoreIfDirty(t *testing.T) {
+// Demo start restores the active step's checkpoint only when the learner
+// ran a command in it, restarting the step as an uncounted reset.
+func TestDemoStartRestoresWhenDirty(t *testing.T) {
 	f := newFixture(t)
 	ctx := context.Background()
 	if _, err := f.core.Load(ctx, protocol.ScenarioRequest{LessonID: lessonID}); err != nil {
 		t.Fatal(err)
 	}
-	act := protocol.StepRef{LessonID: lessonID, StepID: "open"}
-	if restored, err := f.core.RestoreIfDirty(ctx, act); err != nil || restored {
-		t.Fatalf("clean step restored=%v %v", restored, err)
+	f.idle()
+	if res, err := f.core.DemoStart(ctx, "open"); err != nil || res.Restored {
+		t.Fatalf("clean step %+v %v", res, err)
 	}
-	f.engine.OnKey(&protocol.KeyEvent{Keys: "C-n", Cmd: "next-line"})
-	// A request that saw another step (an op ahead of it activated this
-	// one) restores nothing: the active step's files stay.
-	stale := protocol.StepRef{LessonID: lessonID, StepID: "save"}
-	f.snaps.mu.Lock()
-	f.snaps.restorable["save"] = true
-	f.snaps.mu.Unlock()
-	if restored, err := f.core.RestoreIfDirty(ctx, stale); err != nil || restored {
-		t.Fatalf("stale step restored=%v %v", restored, err)
+	f.eval.OnKey(&protocol.KeyEvent{Keys: "C-n", Cmd: "next-line"})
+	// A request naming another step restores nothing.
+	if _, err := f.core.DemoStart(ctx, "save"); httpx.AsError(err).Status != 409 {
+		t.Fatalf("demo start of another step: %v", err)
 	}
 	f.snaps.mu.Lock()
 	n := len(f.snaps.restored)
 	f.snaps.mu.Unlock()
 	if n != 0 {
-		t.Fatal("a stale request restored a checkpoint")
+		t.Fatal("a request for another step restored a checkpoint")
 	}
-	if restored, err := f.core.RestoreIfDirty(ctx, act); err != nil || !restored {
-		t.Fatalf("dirty step restored=%v %v", restored, err)
+	if res, err := f.core.DemoStart(ctx, "open"); err != nil || !res.Restored {
+		t.Fatalf("dirty step %+v %v", res, err)
 	}
-	if !strings.HasSuffix(f.evs(), "step:open:reset") || f.engine.Saved().Lessons[lessonID].Resets["open"] != 0 {
-		t.Fatalf("events %s saved %+v", f.evs(), f.engine.Saved().Lessons[lessonID])
+	if !strings.HasSuffix(f.evs(), "step:open:reset") || f.core.Saved().Lessons[lessonID].Resets["open"] != 0 || !f.core.Watching() || f.dirty() {
+		t.Fatalf("events %s saved %+v", f.evs(), f.core.Saved().Lessons[lessonID])
 	}
 }
 
@@ -264,16 +305,15 @@ func (g *restoreGit) Run(_ context.Context, _ string, _ []string, args ...string
 }
 
 type restoreFixture struct {
-	core   *Core
-	engine *steps.Engine
-	snaps  *Checkpoints
-	git    *restoreGit
-	ws     string
+	core  *Core
+	snaps *Checkpoints
+	git   *restoreGit
+	ws    string
 }
 
 // newRestoreFixture runs a core over checkpoints of steps one and two of
 // a/b (taken with a fake git), step two active; ag is the agent (nil: not
-// connected) and emit observes the engine's events.
+// connected) and emit observes the core's events.
 func newRestoreFixture(t *testing.T, ag Agent, emit func(protocol.Event)) *restoreFixture {
 	t.Helper()
 	ws := t.TempDir()
@@ -290,14 +330,14 @@ func newRestoreFixture(t *testing.T, ag Agent, emit func(protocol.Event)) *resto
 			t.Fatal(err)
 		}
 	}
-	engine := steps.New(steps.Options{Hooks: steps.Hooks{Emit: emit}})
-	engine.Activate(&protocol.Scenario{ID: "a/b", Steps: []protocol.Step{{ID: "one"}, {ID: "two"}}}, 1)
+	ev := steps.New(steps.Options{})
 	snaps := &Checkpoints{Workspace: ws, Ckpt: ckpt, Agent: ag, Modules: &scenario.Modules{Path: filepath.Join(ws, "emacs.d", "modules.el")}}
-	core := New(Deps{Workspace: ws, Agent: ag, Sup: &fakeSup{engine: engine}, Snapshots: snaps, Modules: snaps.Modules, Engine: engine})
+	core := New(Deps{Workspace: ws, Agent: ag, Sup: &fakeSup{eval: ev}, Snapshots: snaps, Modules: snaps.Modules, Evaluator: ev, Emit: emit})
+	core.activate(&protocol.Scenario{ID: "a/b", Steps: []protocol.Step{{ID: "one"}, {ID: "two"}}}, 1, activation{status: protocol.StepLoaded, phase: Active})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	go core.Run(ctx)
-	return &restoreFixture{core: core, engine: engine, snaps: snaps, git: g, ws: ws}
+	return &restoreFixture{core: core, snaps: snaps, git: g, ws: ws}
 }
 
 // Ops are serial: a second restore waits until the first one's
@@ -339,7 +379,7 @@ func TestRestoreSerializesActivation(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if a := f.engine.Active(); a == nil || a.StepID != "two" {
+	if a := f.core.Active(); a == nil || a.StepID != "two" {
 		t.Fatalf("active %+v", a)
 	}
 }
@@ -371,15 +411,15 @@ func TestRestoreAgentFailure(t *testing.T) {
 			if _, err := a.WaitHello(wait, 0); err != nil {
 				t.Fatal(err)
 			}
-			before := f.engine.Saved()
+			before := f.core.Saved()
 			_, err = f.core.Restore(ctx, protocol.RestoreRequest{Ref: checkpoint.StepRef("a/b", "one")})
 			if (err != nil) != fail {
 				t.Fatalf("restore error %v", err)
 			}
-			saved := f.engine.Saved()
+			saved := f.core.Saved()
 			if fail {
 				if !reflect.DeepEqual(saved.Active, before.Active) || !reflect.DeepEqual(saved.Lessons, before.Lessons) {
-					t.Fatalf("failed restore changed engine: %+v", saved)
+					t.Fatalf("failed restore changed the lesson state: %+v", saved)
 				}
 				if got := ed.CountCalls(protocol.AgentOpEval); got != 1 {
 					t.Fatalf("eval calls after failed reset: %d", got)

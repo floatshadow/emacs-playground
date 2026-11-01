@@ -35,9 +35,9 @@ func (c *Core) restore(ctx context.Context, op *Op) (any, error) {
 		return nil, interrupted(ctx)
 	}
 	if meta.Step != nil {
-		c.d.Engine.ResetTo(meta.Step.LessonID, meta.Step.StepID)
+		c.resetTo(meta.Step.LessonID, meta.Step.StepID, true)
 	} else if lesson, step, ok := splitStepRef(ref); ok {
-		c.d.Engine.ResetTo(lesson, step)
+		c.resetTo(lesson, step, true)
 	}
 	return protocol.RestoreResult{RestoredFiles: n}, nil
 }
@@ -70,33 +70,12 @@ func (c *Core) resolveRestore(ctx context.Context, req protocol.RestoreRequest) 
 		}
 		return "", httpx.NotFound("no checkpoint labelled " + req.Label)
 	default:
-		act := c.d.Engine.Active()
+		act := c.Active()
 		if act == nil {
 			return "", httpx.Conflict("no step is active; name a checkpoint")
 		}
 		return checkpoint.StepRef(act.LessonID, act.StepID), nil
 	}
-}
-
-// restartIfDirty puts the active step act back to its checkpoint when the
-// learner ran a command in it since it started or was last reset, without
-// counting a reset (demo start and skip, api.md §3.4). It reports whether
-// it restored. act is the step the request saw; an op queued before this
-// one may have activated another, whose files must stay.
-func (c *Core) restartIfDirty(ctx context.Context, act protocol.StepRef) bool {
-	if cur := c.d.Engine.Active(); cur == nil || *cur != act || !c.d.Engine.Dirty() {
-		return false
-	}
-	if _, _, err := c.d.Snapshots.Restore(ctx, checkpoint.StepRef(act.LessonID, act.StepID)); err != nil {
-		if !isNotExist(err) {
-			c.log.Warn("restoring the step before its demo", "lesson", act.LessonID, "step", act.StepID, "err", err)
-		}
-		return false
-	}
-	if ctx.Err() != nil {
-		return false
-	}
-	return c.d.Engine.Restart(act.LessonID, act.StepID)
 }
 
 // splitStepRef parses refs/playground/<part>/<lesson>/<step>.

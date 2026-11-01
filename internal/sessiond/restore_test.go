@@ -17,7 +17,7 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/sessiond/agent"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/gwclient"
-	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
+	"github.com/floatshadow/emacs-playground/internal/sessiond/session"
 )
 
 type restoreGit struct {
@@ -45,8 +45,8 @@ func restoreServer(t *testing.T) (*Server, *restoreGit) {
 	g := &restoreGit{}
 	s.agent = &agent.Server{}
 	s.ckpt = &checkpoint.Manager{Workspace: s.cfg.Workspace, Git: g, Now: time.Now}
-	s.engine = steps.New(steps.Options{})
-	s.engine.Activate(&protocol.Scenario{ID: "a/b", Steps: []protocol.Step{{ID: "one"}, {ID: "two"}}}, 1)
+	s.core = session.New(session.Deps{})
+	s.core.RestoreSaved(session.Saved{Active: &protocol.StepRef{LessonID: "a/b", StepID: "two"}})
 	for _, id := range []string{"one", "two"} {
 		if _, err := s.ckpt.TakeWith(context.Background(), checkpoint.Meta{
 			Ref: checkpoint.StepRef("a/b", id), Step: &protocol.StepRef{LessonID: "a/b", StepID: id},
@@ -56,6 +56,23 @@ func restoreServer(t *testing.T) (*Server, *restoreGit) {
 		}
 	}
 	return s, g
+}
+
+// runCore returns a core with its op worker running until the test ends
+// (generation syncs submit drop ops).
+func runCore(t *testing.T, d session.Deps) *session.Core {
+	c := session.New(d)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	return c
 }
 
 func TestSyncProgressGenerations(t *testing.T) {
@@ -69,11 +86,11 @@ func TestSyncProgressGenerations(t *testing.T) {
 	defer gw.Close()
 	s.gw = gwclient.New(gw.URL, "local", "local", nil)
 	// The saved active step exists before the scenario is resumed.
-	saved := s.engine.Saved()
-	s.engine = steps.New(steps.Options{})
-	s.engine.Restore(saved)
+	saved := s.core.Saved()
+	s.core = runCore(t, session.Deps{})
+	s.core.RestoreSaved(saved)
 	s.syncProgress(context.Background())
-	saved = s.engine.Saved()
+	saved = s.core.Saved()
 	if saved.Active != nil || saved.Generations.ForLesson("a/b") != 3 {
 		t.Fatalf("synchronized state %+v", saved)
 	}
@@ -81,7 +98,7 @@ func TestSyncProgressGenerations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var restored steps.Saved
+	var restored session.Saved
 	if err := json.Unmarshal(data, &restored); err != nil {
 		t.Fatal(err)
 	}
@@ -97,13 +114,13 @@ func TestSyncProgressLowersGenerations(t *testing.T) {
 			gw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { httpx.WriteJSON(w, 200, generations) }))
 			defer gw.Close()
 			s.gw = gwclient.New(gw.URL, "local", "local", nil)
-			saved := s.engine.Saved()
+			saved := s.core.Saved()
 			saved.Generations = protocol.ProgressGenerations{"": 10, "a/b": 18, "a/c": 19}
-			saved.Lessons["a/b"] = &steps.LessonState{Done: map[string]int64{"one": 100}}
-			s.engine = steps.New(steps.Options{Hooks: steps.Hooks{Persist: s.persist}})
-			s.engine.Restore(saved)
+			saved.Lessons["a/b"] = &session.LessonState{Done: map[string]int64{"one": 100}}
+			s.core = runCore(t, session.Deps{Persist: s.persist})
+			s.core.RestoreSaved(saved)
 			s.syncProgress(context.Background())
-			after := s.engine.Saved()
+			after := s.core.Saved()
 			if !reflect.DeepEqual(after.Generations, generations) || !reflect.DeepEqual(after.Lessons, saved.Lessons) || !reflect.DeepEqual(after.Active, saved.Active) {
 				t.Fatalf("synchronized state %+v", after)
 			}
@@ -111,7 +128,7 @@ func TestSyncProgressLowersGenerations(t *testing.T) {
 			if persisted.Generations.ForLesson("a/b") != generations.ForLesson("a/b") {
 				t.Fatalf("persisted %+v", persisted)
 			}
-			if reports := s.engine.ProgressReports(); len(reports) != 1 || reports[0].Generation != generations.ForLesson("a/b") {
+			if reports := s.core.ProgressReports(); len(reports) != 1 || reports[0].Generation != generations.ForLesson("a/b") {
 				t.Fatalf("reports %+v", reports)
 			}
 		})

@@ -138,7 +138,7 @@ func (c *capWriter) Write(p []byte) (int, error) {
 }
 
 // evalContext carries what one evaluation pass needs; it is built under the
-// engine lock and used without it.
+// evaluator lock and used without it.
 type evalContext struct {
 	ctx          context.Context
 	counts       map[string]int
@@ -599,7 +599,7 @@ func (ec *evalContext) runShell(key, dir, script string, timeout, ttl time.Durat
 }
 
 // shellCache keeps shell results until invalidated by a file event or a
-// step change (remote ones also expire), and runs each script once at a
+// new attempt (remote ones also expire), and runs each script once at a
 // time.
 type shellCache struct {
 	mu       sync.Mutex
@@ -694,7 +694,7 @@ func (c *shellCache) clear() {
 	}
 }
 
-// reset detaches runs belonging to the previous step.
+// reset detaches runs belonging to the previous attempt.
 func (c *shellCache) reset() {
 	c.mu.Lock()
 	defer c.mu.Unlock()

@@ -7,7 +7,6 @@ import (
 
 	"github.com/floatshadow/emacs-playground/internal/protocol"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
-	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 )
 
 // resume re-activates the saved step ref at startup (backend.md §3.2 step
@@ -17,7 +16,7 @@ import (
 // runs on an empty frame. A lesson loaded since startup wins over the
 // saved step.
 func (c *Core) resume(ctx context.Context, ref protocol.StepRef) error {
-	if c.d.Engine.Active() != nil {
+	if c.Active() != nil {
 		return nil
 	}
 	sc, err := scenario.FetchScenario(ctx, c.d.Fetch, c.d.CacheDir, ref.LessonID, c.log)
@@ -29,13 +28,13 @@ func (c *Core) resume(ctx context.Context, ref protocol.StepRef) error {
 	}
 	idx := sc.StepIndex(ref.StepID)
 	if idx < 0 {
-		idx = c.d.Engine.FirstIncomplete(sc)
+		idx = c.firstIncomplete(sc)
 	}
 	c.reopen(ctx, sc)
 	if ctx.Err() != nil {
 		return interrupted(ctx)
 	}
-	c.d.Engine.ActivateLap(sc, idx, steps.LapKeep)
+	c.activate(sc, idx, activation{status: protocol.StepLoaded, phase: Active, lap: lapKeep})
 	return nil
 }
 

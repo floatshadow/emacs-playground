@@ -13,105 +13,6 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/sessiond/preview"
 )
 
-const projectJSON = `{
-  "id": "projects/p1-hello-cargo", "title": "Hello, cargo", "minutes": 75, "modules": ["base", "agent"],
-  "steps": [
-    {"id": "scaffold", "goal": "Scaffold", "demo": "a",
-     "conditions": [{"event": {"command": "eshell"}}],
-     "stuck": [{"when": {"step_seconds": 1}, "say": "Taking a while."}]},
-    {"id": "commit", "goal": "Commit", "demo": "b",
-     "conditions": [{"event": {"command": "magit-commit-create"}}]}
-  ]
-}`
-
-func TestLap(t *testing.T) {
-	f := newFixture(t)
-	sc := scenarioFromJSON(t, projectJSON)
-	ctx := context.Background()
-
-	f.e.ActivateLap(sc, 0, LapStart)
-	lap := f.e.Lap()
-	if lap == nil || lap.LessonID != sc.ID || lap.StartedAt != f.clock.now().UnixMilli() {
-		t.Fatalf("lap %+v", lap)
-	}
-	if ev := f.sink.events[0].(*protocol.StepEvent); !ev.Lap {
-		t.Fatalf("loaded event without lap: %+v", ev)
-	}
-	if f.e.Hint("scaffold", 1) || f.e.StartDemo("scaffold") || f.e.BeginSkip("scaffold") {
-		t.Fatal("hint, demo and skip must be refused during a lap")
-	}
-	// Stuck rules are silent.
-	f.clock.add(5 * time.Second)
-	f.sink.clear()
-	f.e.Check(ctx)
-	if strings.Contains(f.sink.types(), "nudge") {
-		t.Fatalf("nudge during a lap: %s", f.sink.types())
-	}
-	// Reset this step keeps the lap.
-	if !f.e.ResetTo(sc.ID, "scaffold") || f.e.Lap() == nil {
-		t.Fatal("reset ended the lap")
-	}
-	f.e.OnKey(&protocol.KeyEvent{Keys: "M-x", Cmd: "eshell"})
-	f.e.Check(ctx)
-	f.clock.add(90 * time.Second)
-	f.e.OnKey(&protocol.KeyEvent{Keys: "c c", Cmd: "magit-commit-create"})
-	f.sink.clear()
-	f.e.Check(ctx)
-	var last *protocol.StepEvent
-	for _, ev := range f.sink.events {
-		if se, ok := ev.(*protocol.StepEvent); ok && se.Status == protocol.StepComplete {
-			last = se
-		}
-	}
-	if last == nil || !last.LessonComplete || !last.Lap || last.LapMs != 95000 {
-		t.Fatalf("lap completion %+v", last)
-	}
-	var rep *protocol.ProgressReport
-	for i := range f.sink.reports {
-		if f.sink.reports[i].LapMs != 0 {
-			rep = &f.sink.reports[i]
-		}
-	}
-	if rep == nil || rep.StepID != "commit" || rep.Status != protocol.ProgressDone || rep.LapMs != 95000 {
-		t.Fatalf("lap report %+v", f.sink.reports)
-	}
-	if f.e.Lap() != nil || f.e.Saved().Lap != nil {
-		t.Fatal("the lap should be over")
-	}
-}
-
-func TestLapEndsAndResumes(t *testing.T) {
-	f := newFixture(t)
-	sc := scenarioFromJSON(t, projectJSON)
-	f.e.ActivateLap(sc, 0, LapStart)
-	saved := f.e.Saved()
-	if saved.Lap == nil {
-		t.Fatal("lap not persisted")
-	}
-	// A restarted sessiond resumes the lap.
-	g := newFixture(t)
-	g.e.Restore(saved)
-	g.e.ActivateLap(sc, 1, LapKeep)
-	if l := g.e.Lap(); l == nil || l.StartedAt != saved.Lap.StartedAt {
-		t.Fatalf("resumed lap %+v", l)
-	}
-	// An ordinary load ends it.
-	g.e.Activate(sc, 1)
-	if g.e.Lap() != nil {
-		t.Fatal("Activate kept the lap")
-	}
-	// So does a progress reset.
-	f.e.Drop(sc.ID)
-	if f.e.Lap() != nil {
-		t.Fatal("Drop kept the lap")
-	}
-	// LapKeep without a lap starts none.
-	f.e.ActivateLap(sc, 0, LapKeep)
-	if f.e.Lap() != nil {
-		t.Fatal("LapKeep started a lap")
-	}
-}
-
 // slowShell blocks each script until released.
 type slowShell struct {
 	mu      sync.Mutex
@@ -325,7 +226,7 @@ func TestBufferCondition(t *testing.T) {
 	  {"id":"run","goal":"g","demo":"x","conditions":[{"buffer":{"name":"*eat*","process":"running"}},{"elisp":"(t)"}]}]}`)
 	f.elisp.set(BufferForm(&protocol.BufferCond{Name: "*eat*", Process: protocol.ProcessRunning}), protocol.True)
 	f.elisp.set("(t)", protocol.True)
-	f.e.Activate(sc, 0)
+	f.begin(sc, 0)
 	res, _ := f.e.Check(context.Background())
 	if !res.Complete || len(f.elisp.calls[len(f.elisp.calls)-1]) != 2 {
 		t.Fatalf("buffer condition %+v, calls %v", res, f.elisp.calls)

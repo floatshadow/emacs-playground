@@ -654,7 +654,7 @@ func TestLifecycle(t *testing.T) {
 			l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoStart}, nil)
 			l.play(`C-x C-f`)
 			_ = pc.Close(websocket.StatusNormalClosure, "page gone")
-			l.waitFor("the demo to be abandoned", func() bool { return !l.server().srv.engine.Latched() })
+			l.waitFor("the demo to be abandoned", func() bool { return !l.server().srv.core.Watching() })
 			l.section("the page with the demo goes away")
 			l.play(`"b.txt" RET`)
 			l.section("learner finishes the step", "step:open:complete", "gw:"+lessonA+"/open:done:gen0")
@@ -667,7 +667,7 @@ func TestLifecycle(t *testing.T) {
 			if err := l.ed.Press("C-n"); err != nil {
 				l.t.Fatal(err)
 			}
-			l.waitFor("the idle demo to expire", func() bool { return !l.server().srv.engine.Latched() })
+			l.waitFor("the idle demo to expire", func() bool { return !l.server().srv.core.Watching() })
 			l.section("the demo idles past DemoIdle")
 			l.play(demoOpen)
 			l.section("learner opens b.txt", "step:open:complete", "gw:"+lessonA+"/open:done:gen0")
@@ -780,8 +780,9 @@ func TestLifecycle(t *testing.T) {
 			code := <-done
 			l.note("skip answered %d", code)
 			l.section("gateway reset while the skip plays", "step:open:dropped")
-			// TODO(sessiond, backend.md §3.8): the skip's demo keeps
-			// typing into Emacs after the drop; drop should cancel it.
+			// Re-recorded in the session core phase (defect fix): the skip
+			// is an op, so the drop cancels it and the rest of its demo
+			// never reaches Emacs (it used to visit b.txt after the drop).
 			l.note("b.txt visited by the rest of the demo: %v", l.ed.Buffer("b.txt") != nil)
 		}},
 		{name: "drop-during-fast-forward", run: func(l *lifecycle) {
@@ -879,6 +880,22 @@ func TestLifecycle(t *testing.T) {
 			}
 			resp.Body.Close()
 			l.section("the same report delivered again", "gw:"+lessonA+"/split:done:gen0:lap3000")
+			l.note("laps counted: %d", l.gw.lapCount(lessonA))
+		}},
+		{name: "lap-refuses-help", opts: []func(*lifecycle){withClock}, run: func(l *lifecycle) {
+			l.load(protocol.ScenarioRequest{LessonID: lessonA, Lap: true})
+			l.section("start the lap", "step:open:loaded")
+			l.note("hint answered %d", l.rpc("hint", protocol.HintRequest{StepID: "open", Level: 1}, nil))
+			l.note("demo start answered %d", l.rpc("demo", protocol.DemoRequest{StepID: "open", Phase: protocol.DemoStart}, nil))
+			l.note("skip answered %d", l.rpc("skip", protocol.SkipRequest{StepID: "open"}, nil))
+			l.section("hint, demo and skip during the lap")
+			l.clock.Advance(2 * time.Second)
+			l.play(demoOpen)
+			l.section("open", "step:write:loaded")
+			l.play(demoWrite)
+			l.section("write", "step:split:loaded")
+			l.play(demoSplit)
+			l.section("split", "step:split:complete:lesson-complete", "gw:"+lessonA+"/split:done:gen0:lap2000")
 			l.note("laps counted: %d", l.gw.lapCount(lessonA))
 		}},
 		{name: "agent-disconnected-during-restore", run: func(l *lifecycle) {

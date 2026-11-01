@@ -12,7 +12,6 @@ import (
 	"github.com/floatshadow/emacs-playground/internal/sessiond/checkpoint"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/gwclient"
 	"github.com/floatshadow/emacs-playground/internal/sessiond/scenario"
-	"github.com/floatshadow/emacs-playground/internal/sessiond/steps"
 )
 
 // FastForwardTimeout bounds the replay of earlier steps' demos when "Go to
@@ -50,20 +49,20 @@ func (c *Core) load(ctx context.Context, op *Op) (any, error) {
 	if len(sc.Steps) == 0 {
 		return nil, httpx.Conflict("the lesson has no steps")
 	}
-	idx := c.d.Engine.FirstIncomplete(sc)
+	idx := c.firstIncomplete(sc)
 	if req.StepID != "" {
 		idx = sc.StepIndex(req.StepID)
 		if idx < 0 {
 			return nil, httpx.BadRequest(fmt.Sprintf("lesson %s has no step %q", sc.ID, req.StepID))
 		}
 	}
-	lap := steps.LapEnd
+	lap := lapEnd
 	if req.Lap {
 		// A lap is the whole lesson again from its initial state.
 		if idx != 0 && req.StepID != "" {
 			return nil, httpx.BadRequest("a lap starts at the first step")
 		}
-		idx, lap = 0, steps.LapStart
+		idx, lap = 0, lapStart
 	}
 	c.setTarget(op, sc.ID, sc.Steps[idx].ID)
 	if ctx.Err() != nil {
@@ -94,7 +93,7 @@ func (c *Core) load(ctx context.Context, op *Op) (any, error) {
 		Step:  protocol.StepRef{LessonID: sc.ID, StepID: sc.Steps[idx].ID},
 		Index: idx, Count: len(sc.Steps), Modules: want,
 	}
-	if lap == steps.LapStart {
+	if lap == lapStart {
 		res.Lap = &protocol.LapInfo{LessonID: sc.ID}
 	}
 	restarted := !slices.Equal(cur, want)
@@ -120,9 +119,11 @@ func (c *Core) load(ctx context.Context, op *Op) (any, error) {
 			return nil, interrupted(ctx)
 		}
 	}
+	prev := c.lessonState()
 	if err := c.finish(ctx, sc, idx, reset, reset && extracted > 0, lap); err != nil {
-		// A fast-forward cut short leaves the engine idle, not rehearsing.
-		c.d.Engine.EndRehearsal()
+		// A fast-forward cut short leaves the step active before it, not
+		// a rehearsal.
+		c.endRehearsal(prev)
 		if restarted && ctx.Err() == nil {
 			// The request has its early result; tell the page.
 			c.emit(&protocol.ErrorEvent{Code: protocol.ErrInternal, Message: "Could not restore the step. Try again."})
@@ -130,7 +131,7 @@ func (c *Core) load(ctx context.Context, op *Op) (any, error) {
 		return nil, err
 	}
 	if res.Lap != nil {
-		res.Lap = c.d.Engine.Lap()
+		res.Lap = c.Lap()
 	}
 	return res, nil
 }
@@ -154,20 +155,19 @@ func (c *Core) alreadyActive(req protocol.ScenarioRequest) (protocol.ScenarioRes
 	if req.Reset || req.Lap {
 		return protocol.ScenarioResult{}, false
 	}
-	e := c.d.Engine
-	sc := e.Scenario()
-	act := e.Active()
+	sc := c.Scenario()
+	act := c.Active()
 	if sc == nil || act == nil || sc.ID != req.LessonID {
 		return protocol.ScenarioResult{}, false
 	}
 	if req.StepID != "" && req.StepID != act.StepID {
 		return protocol.ScenarioResult{}, false
 	}
-	if req.StepID != "" && e.Lap() != nil {
+	if req.StepID != "" && c.Lap() != nil {
 		return protocol.ScenarioResult{}, false
 	}
-	idx, n := e.ActiveIndex()
-	return protocol.ScenarioResult{Step: *act, Index: idx, Count: n, Modules: c.d.Modules.Current(), Lap: e.Lap()}, true
+	idx, n := c.ActiveIndex()
+	return protocol.ScenarioResult{Step: *act, Index: idx, Count: n, Modules: c.d.Modules.Current(), Lap: c.Lap()}, true
 }
 
 // finish runs setup, brings the workspace to the step's starting state,
@@ -181,7 +181,7 @@ func (c *Core) alreadyActive(req protocol.ScenarioRequest) (protocol.ScenarioRes
 // to completion; otherwise the step activates without a checkpoint. A later
 // step's checkpoint is never overwritten with the lesson's initial state
 // (api.md §3.4). Nothing activates once ctx has ended.
-func (c *Core) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset, forceCheckpoint bool, lap steps.LapMode) error {
+func (c *Core) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset, forceCheckpoint bool, lap lapMode) error {
 	c.setup(ctx, sc, reset)
 	if ctx.Err() != nil {
 		return interrupted(ctx)
@@ -201,7 +201,7 @@ func (c *Core) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset
 		}
 		if !complete {
 			c.log.Warn("fast-forward incomplete: the step activates without a checkpoint", "lesson", sc.ID, "step", st.ID)
-			c.d.Engine.ActivateLap(sc, idx, lap)
+			c.activate(sc, idx, activation{status: protocol.StepLoaded, phase: Active, lap: lap})
 			return nil
 		}
 		forceCheckpoint = true
@@ -214,13 +214,13 @@ func (c *Core) finish(ctx context.Context, sc *protocol.Scenario, idx int, reset
 	if ctx.Err() != nil {
 		return interrupted(ctx)
 	}
-	c.d.Engine.ActivateLap(sc, idx, lap)
+	c.activate(sc, idx, activation{status: protocol.StepLoaded, phase: Active, lap: lap})
 	return nil
 }
 
 // restoreStep restores step idx's checkpoint and activates the step; it
 // reports false when the step has none.
-func (c *Core) restoreStep(ctx context.Context, sc *protocol.Scenario, idx int, lap steps.LapMode) (bool, error) {
+func (c *Core) restoreStep(ctx context.Context, sc *protocol.Scenario, idx int, lap lapMode) (bool, error) {
 	ref := checkpoint.StepRef(sc.ID, sc.Steps[idx].ID)
 	if !c.d.Snapshots.Exists(ctx, ref) {
 		return false, nil
@@ -234,13 +234,13 @@ func (c *Core) restoreStep(ctx context.Context, sc *protocol.Scenario, idx int, 
 	if ctx.Err() != nil {
 		return false, interrupted(ctx)
 	}
-	c.d.Engine.ActivateLap(sc, idx, lap)
+	c.activate(sc, idx, activation{status: protocol.StepLoaded, phase: Active, lap: lap})
 	return true, nil
 }
 
 // fastForward replays the demos of the steps before idx into Emacs, each
-// rehearsed by the engine (Engine.Rehearse: conditions are evaluated but
-// nothing is recorded or emitted), waiting for each step's conditions before
+// activated in phase Rehearsing (conditions are evaluated but nothing is
+// recorded or emitted), waiting for each step's conditions before
 // the next demo. A step whose demo does not complete it is logged and the
 // replay goes on. The replay leaves activationReserve of the op's deadline;
 // with less than that left it does not start. It reports whether every
@@ -264,54 +264,24 @@ func (c *Core) fastForward(ctx context.Context, sc *protocol.Scenario, idx int) 
 			break
 		}
 		st := &sc.Steps[i]
-		c.d.Engine.Rehearse(sc, i)
+		c.activate(sc, i, activation{phase: Rehearsing})
 		if st.Demo == "" {
 			c.log.Warn("fast-forward: the step has no demo", "lesson", sc.ID, "step", st.ID)
 			complete = false
 			continue
 		}
-		if err := c.PlayDemo(ctx, st.Demo); err != nil {
+		if err := c.playDemo(ctx, st.Demo); err != nil {
 			c.log.Warn("fast-forward: playing the demo", "lesson", sc.ID, "step", st.ID, "err", err)
 			complete = false
 			continue
 		}
-		if !c.rehearsed(ctx, st.ID) {
+		if !c.settle(ctx, c.attemptSeq(), st.ID, RehearsalSettle, 200*time.Millisecond) {
 			c.log.Warn("fast-forward: the demo did not complete the step", "lesson", sc.ID, "step", st.ID)
 			complete = false
 		}
 	}
 	c.log.Info("fast-forwarded", "lesson", sc.ID, "to", sc.Steps[idx].ID, "complete", complete, "took", time.Since(start).Round(time.Millisecond))
 	return complete
-}
-
-// rehearsed polls the rehearsed step's conditions for up to RehearsalSettle.
-func (c *Core) rehearsed(ctx context.Context, stepID string) bool {
-	deadline := time.Now().Add(RehearsalSettle)
-	for {
-		res, ok := c.d.Engine.Check(ctx)
-		if ok && res.StepID == stepID && res.Complete {
-			return true
-		}
-		if !ok || time.Now().After(deadline) {
-			return false
-		}
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(200 * time.Millisecond):
-		}
-	}
-}
-
-// PlayDemo plays a demo string into the frame the learner sees, at
-// playctl's pacing (protocol.PlayDemo).
-func (c *Core) PlayDemo(ctx context.Context, demo string) error {
-	return protocol.PlayDemo(ctx, demo, 1, func(ctx context.Context, req protocol.KeysRequest) error {
-		if ok, reason := c.d.Sup.Ready(); !ok {
-			return fmt.Errorf("%s", reason)
-		}
-		return c.d.Sup.SendKeys(ctx, "", req.Keys, req.Text)
-	})
 }
 
 // setup runs the lesson's setup op in Emacs once the learner's frame is
