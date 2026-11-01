@@ -30,8 +30,8 @@ type DemoToken struct {
 	PauseMs int `json:"pauseMs,omitempty"`
 }
 
-// Demo pacing used by the browser's DemoPlayer and playctl curriculum play
-// (frontend.md §7).
+// Demo pacing of PlayDemo: playctl curriculum play, Skip and the
+// fast-forward (api.md §6).
 const (
 	DemoChordDelayMs = 170
 	DemoCharDelayMs  = 70

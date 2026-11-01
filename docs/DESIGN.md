@@ -2,7 +2,7 @@
 
 A hands-on Emacs course in the browser on a real, fully configured Emacs in a container. Learners do real work in Rust, OCaml, Python, Markdown, Typst and LaTeX; every keystroke is explained, there is always a way out of a confusing state, and any step can be reset.
 
-Slice 1 and the slice-2 platform are implemented (§10). The code is authoritative where a document disagrees; commands and ownership are in AGENTS.md.
+Slice 1, the slice-2 platform, the session core redesign and Phase 5 are implemented (§10). The code is authoritative where a document disagrees; commands and ownership are in AGENTS.md.
 
 ## 1. Reading guide
 
@@ -10,7 +10,7 @@ Slice 1 and the slice-2 platform are implemented (§10). The code is authoritati
 |---|---|
 | [architecture.md](architecture.md) | data ownership, flows, state machines, failures, budgets |
 | [deployment.md](deployment.md) | images, Compose, configuration, security |
-| [backend.md](backend.md) | gateway, sessiond, playctl, step engine, checkpoints |
+| [backend.md](backend.md) | gateway, sessiond (session core, evaluator, snapshot service, progress outbox), playctl |
 | [api.md](api.md) | HTTP, WebSocket, RPC and agent protocol |
 | [emacs.md](emacs.md) | session image, modules, frames, agent |
 | [frontend.md](frontend.md) | screens, panes, advice engine |
@@ -18,7 +18,7 @@ Slice 1 and the slice-2 platform are implemented (§10). The code is authoritati
 | [third-party.md](third-party.md) | dependencies |
 | [notes.md](notes.md) | workflow, test tools, known limitations, authoring pitfalls |
 
-The design demo (`../design/demo/index.html`) fixes the shapes of events and advice.
+The design demo (`../design/demo/index.html`) is the visual reference for the ticker, Where am I and nudges; event shapes are defined in `internal/protocol` (api.md).
 
 ## 2. Goals
 
@@ -75,7 +75,7 @@ flowchart LR
 | gateway | auth, sessions, routing, curriculum, progress | backend.md §2 |
 | sessiond (per session) | supervises Emacs, tmux, Xvnc; endpoints; input tap; session core and step evaluation; checkpoints; progress outbox | backend.md §3 |
 | playground-agent.el (+ feature files) | state and command reports; rescue, check, editor-state capture and restore | emacs.md §10 |
-| playctl | curriculum validate, build, replay; config check; TypeScript types | backend.md §4 |
+| playctl | curriculum validate, build, play; config schema and check; TypeScript types; images, fonts, `dev`, `session shell` | backend.md §4 |
 | curriculum | lessons, fixtures, exit and habit tables | CURRICULUM.md |
 
 ## 5. Deployment modes
@@ -114,15 +114,16 @@ Go 1.27 with the stdlib mux, `coder/websocket`, `creack/pty`, the Docker client,
 - ADR-019 TypeScript types generated from Go by `internal/protocol/tsgen`; `web/src/protocol.gen.ts` is never hand-edited and a drift test guards it.
 - ADR-020 Server sessions each get an internal network `pg-net-<id>` joined only by the gateway, and sessiond refuses all but `/healthz` without the session's proxy secret.
 - ADR-021 Modules unlock monotonically: a scenario's `modules` are added, never removed, and restores keep `modules.el`. Every lesson must pass with more modules than it lists.
+- ADR-022 Semantics the browser shares (predicates, templates, demo and key parsing) have Go as the reference and one conformance corpus both languages run; predicate regexes are an allow-list dialect both engines agree on, narrowed on a divergence, never translated.
 
 ## 9. Repository layout
 
 ```
 compose*.yaml  .env.example  Makefile  go.mod
 deploy/        config.json  config.dev.json  config.example.json  config.schema.json (generated)  Caddyfile
-cmd/{gateway,sessiond,playctl}   internal/ (protocol/ is the wire contract)
+cmd/{gateway,sessiond,playctl}   internal/ (protocol/ is the wire contract and its conformance corpus)
 web/           React app; e2e/ browser scripts; dev/ fake session
-emacs.d/       Emacs config and playground-agent.el
+emacs.d/       Emacs config; the agent in lisp/; ERT tests and recorded agent fixtures in test/
 curriculum/    lessons, fixtures, tables
 images/{session,remote-box,gateway}/
 design/        demo and screenshots
@@ -132,37 +133,40 @@ workspace/  artifacts/  .dev/   (git-ignored)
 
 ## 10. Roadmap
 
-Slice 1 delivers M1 to M3 and the GUI and preview panes. The slice-2 platform adds M0 for every toolchain and module, project scenarios with laps, and the per-session remote box; curriculum Parts 4–14 and P1–P8 run on it (M4–M6). Server mode (docker backend, OIDC sign-in, group quotas) is experimental.
+Slice 1 delivers M1 to M3 and the GUI and preview panes. The slice-2 platform adds M0 for every toolchain and module, project scenarios with laps, and the per-session remote box; curriculum Parts 4–15 and P1–P8 run on it (M4–M6). Server mode (docker backend, OIDC sign-in, group quotas) is experimental. The session core redesign (R) and Phase 5 (P5) are done.
 
 | Milestone | Deliverable | Done when |
 |---|---|---|
 | M0 | session image, config | every language server attaches; `packages.lock` reproducible |
 | M1 | sessiond, local gateway, terminal | reconnect, extended keys, clipboard; `make local` from a clean clone |
 | M2 | agent, tap, ticker, advice | scripted test per exits row and rule; prefix < 20 ms |
-| M3 | step engine, checkpoints, Parts 0–3 | every shipped lesson replays |
+| M3 | step evaluation, checkpoints, Parts 0–3 | every shipped lesson replays |
 | M4 | preview, Parts 4–10 | previews reload on save; Babel runs four languages |
 | M5 | GUI frame, Parts 8.4, 8.5, 11 | pdf-tools and image lessons over noVNC |
 | M6 | remote box, Parts 12–13, P1–P8 | TRAMP lessons and every project pass |
 | M7 | server mode | OIDC auth, limits and group quotas, reaping, egress policy; 20 sessions per host |
+| R | session core redesign: behavioural harness (fake editor, recorded agent fixtures, lifecycle traces), one op queue, phases and attempts, snapshot service with typed agent ops and agent feature files, progress outbox with lap ids | done: one writer per lifecycle fact; editor state only through typed agent ops; the lifecycle traces pass |
+| P5 | lesson snapshot (protocol 2), regex dialect 1, conformance corpus; Read and Do tabs, resizable lesson pane, transient key menus, Part 15 practice, paging in 1.1 | done: the browser renders sessiond's snapshot and infers no lifecycle |
 
 ## 11. Glossary
 
 - Session: one learner's container (sessiond, Emacs, tmux, optional Xvnc) and workspace (`/work`, a git repository).
 - Scenario: a lesson's fixtures, setup and steps; a step's first unmet condition selects its hint.
 - Checkpoint: the state captured when a step starts (ADR-009).
+- Op: a lesson operation the session core runs one at a time (load, restore, skip, …). Attempt: one activation of a step; results of other attempts are ignored.
+- Lesson snapshot: sessiond's versioned lesson state (`rev`, phase, step, attempt, outcomes, lap, busy) that the browser renders (api.md §4.1).
 - Agent: `playground-agent.el`. Input tap: sessiond's key decoder.
 - Lesson id: the lesson directory relative to `curriculum/` (one slash, literal in URLs).
 
 ## 12. Open questions
 
-- After "Watch it", completing the step with one's own keys gets no reaction until "Do it yourself" (the demonstration latch, api.md), even when the first key stopped the demo.
+- After "Watch it", completing the step with one's own keys gets no reaction until "Do it yourself" (the demonstration latch, api.md §4.1), even when the first key stopped the demo.
 - Habit cards are suppressed only for keys the current step or lesson mentions, and match single keys (no card for `C-g 35` typed as VS Code's Ctrl+G).
-- "Start over" says files stay as they are, yet an open lesson tab then reloads with `setup.reset` and drops unsaved edits.
 - "Skip this step" appears only after an "I'm stuck" report, so `features.stuckReports: false` hides it.
-- project.el sees `/work` (the checkpoint repository) as a project; hiding it needs a separate `GIT_DIR`.
-- Checkpoints record neither `/work`'s own staging area (nested repositories keep theirs), `display-buffer-alist` nor minor modes a demo turned on (backend.md §3.9).
+- What checkpoints do not capture, and project.el treating `/work` (the checkpoint repository) as a project: backend.md §3.9.
 - The preview CSP keeps `allow-same-origin` (deployment.md §9.3): a separate origin, or drop it.
-- Can Emacs 31's terminal key handling replace `kkp.el`? Should vterm join eat?
+- Can Emacs 31's terminal key handling replace `kkp.el`?
 - `make dev` and `playctl dev` duplicate each other; the `keys` RPC maps errors to 400/409 by message text; `editing.el` binds `M-g i`/`M-g o` to consult before the completion module teaches it; `.eld` layouts validate but are not applied.
-- Repository hygiene (deployment.md §9.5): no LICENSE, a tracked `deploy/config.json`, two unused devDependencies.
+- Repository hygiene: deployment.md §9.5.
+- Read and Do side by side at wide viewports, or a free sandbox lesson without conditions, if learners ask for them.
 - No zh-CN curriculum, a partial (hidden) zh-CN UI. Unscheduled: image major-version check, egress proxy for registries, `DELETE /me`, user export, latency histograms, govulncheck, Renovate.

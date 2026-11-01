@@ -266,7 +266,7 @@ export const BackendDocker = "docker" satisfies SessionBackend;
 
 /**
  * SessionIsolation says how the docker backend networks sessions
- * (deployment.md §9.2).
+ * (deployment.md §7).
  */
 export type SessionIsolation = "network" | "shared";
 export const IsolationNetwork = "network" satisfies SessionIsolation;
@@ -509,7 +509,7 @@ export interface BufferCond {
 
 /**
  * BusyInfo describes the lesson operation sessiond is running (api.md
- * §3.4), so a reloaded page can veil while, say, "Go to this step"
+ * §4.1), so a reloaded page can veil while, say, "Go to this step"
  * replays earlier steps.
  */
 export interface BusyInfo {

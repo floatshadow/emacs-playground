@@ -48,7 +48,7 @@ const (
 )
 
 // SessionIsolation says how the docker backend networks sessions
-// (deployment.md §9.2).
+// (deployment.md §7).
 type SessionIsolation string
 
 // Session isolation modes.

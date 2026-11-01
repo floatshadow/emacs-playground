@@ -2,7 +2,7 @@
 
 A browser Emacs course on real per-learner Emacs containers: Go gateway and sessiond, React web app, Emacs agent, YAML curriculum. Read `AGENTS.local.md` (git-ignored, machine-specific) after it if it exists.
 
-The specification is in `docs/`: start with `DESIGN.md` (overview, decisions, roadmap, reading guide), then `architecture.md`, `deployment.md`, `backend.md`, `api.md`, `emacs.md`, `frontend.md`, `CURRICULUM.md` and `third-party.md`. `docs/notes.md` holds the workflow, test tools, parallel QA, scope and known limitations.
+The specification is in `docs/`: start with `DESIGN.md` (overview, decisions, roadmap, and a reading guide to the other documents). `docs/notes.md` holds the workflow, test tools, parallel QA, scope and known limitations.
 
 ## 1. The rule
 
@@ -36,16 +36,15 @@ The specification is in `docs/`: start with `DESIGN.md` (overview, decisions, ro
 
 | Target | Does |
 |---|---|
-| `make check` | all CI: Go build, gofmt, vet, protocol drift, Go tests, eslint, prettier, `tsc -b`, vitest, `vite build`, bundle size |
-| `make test` / `make lint` | unit tests / linters and protocol drift |
-| `make protocol` | regenerate `web/src/protocol.gen.ts` (integration only) |
-| `make build` / `make gateway` | binaries and `web/dist` / gateway with embedded bundle |
-| `make local` / `make server` | write `.env` for a mode; `BUILD=1 make local` builds images |
+| `make check` | Go build, gofmt, vet, protocol drift, Go tests, eslint, prettier, `tsc -b`, vitest, `vite build`, bundle size (CI adds `-race` and `curriculum validate`) |
+| `make test` / `lint` | unit tests / linters and protocol drift |
+| `make protocol` / `config-schema` | regenerate `web/src/protocol.gen.ts` / `deploy/config.schema.json` (integration only) |
+| `make build` / `gateway` | binaries and `web/dist` / gateway with embedded bundle |
+| `make local` / `server` | write `.env` for a mode; `BUILD=1 make local` builds images |
 | `make images`, `image-gateway`, `image-session` | build images (`TAG=dev` for a local tag) |
 | `make dev` | session container on the host network and remote box, gateway from source, Vite on :5173 |
-| `make shell` / `make reset-workspace` | attach to the local Emacs / start with a fresh `./workspace` |
-| `make emacs-test` | agent and configuration ERT tests in the session image (replays the agent contract fixtures) |
-| `make agent-fixtures` | re-record the agent contract fixtures (`emacs.d/test/fixtures/agent`) in the session image |
+| `make shell` / `reset-workspace` | attach to the local Emacs / start with a fresh `./workspace` |
+| `make emacs-test` / `agent-fixtures` | agent and configuration ERT tests, replaying the agent contract fixtures / re-record them (`emacs.d/test/fixtures/agent`); both in the session image |
 | `make e2e` | browser smoke test against the running stack (Chrome on CDP :9222) |
 | `make curriculum-play` / `curriculum-watch` | replay every lesson twice / Part 0 (`PART=…`) as Watch it, then as the learner |
 
@@ -62,9 +61,9 @@ Configuration precedence: defaults < JSON file < `PG_*` environment < flags; `PG
 
 ### Testing
 
-- **Unit:** `make test`. Go tests fake every subprocess behind interfaces (backend.md §1).
+- **Unit:** `make test`. Go tests fake every subprocess behind interfaces (backend.md §1); sessiond's behavioural harness and lifecycle traces (`UPDATE_TRACES=1` rewrites them; review a changed trace like code): backend.md §6.
 - **Emacs:** `make emacs-test` (`TAG=dev` for a local image).
-- **Browser:** no browser on the host; run Chrome in Docker with `--shm-size=1g` (the default 64 MB makes later page loads fail with `net::ERR_INSUFFICIENT_RESOURCES`) and drive it with playwright-core over CDP:
+- **Browser:** run Chrome in Docker with `--shm-size=1g` (64 MB makes later page loads fail) and drive it with playwright-core over CDP:
 
   ```sh
   docker run -d --rm --name pg-chrome --network host --shm-size=1g chromedp/headless-shell:156.0.8078.48  # CDP :9222
@@ -78,8 +77,8 @@ Configuration precedence: defaults < JSON file < `PG_*` environment < flags; `PG
 ## 5. Important invariants
 
 - **Code is authoritative**; fix a doc that disagrees.
-- **`web/src/protocol.gen.ts` is generated** by `internal/protocol/tsgen`; never edit it. `go test ./internal/protocol/...` fails when stale.
-- **Go is the reference for shared semantics:** `protocol.Predicate` (regex dialect 1), `ExpandTemplate`, demo and key parsing; their ports in `web/src/` are pinned by `internal/protocol/testdata/conformance` (Go and TypeScript run the same cases; add a case there, never a table in one language). `MatchLayout` has no port.
+- **`web/src/protocol.gen.ts` is generated** by `internal/protocol/tsgen`; never edit it. `go test ./internal/protocol/...` fails when stale. A breaking change to events, RPC or agent messages bumps `protocol.Version` (2; api.md §1).
+- **Go is the reference for shared semantics:** `protocol.Predicate` (regex dialect 1), `ExpandTemplate`, demo and key parsing; their ports in `web/src/` are pinned by the corpus `internal/protocol/testdata/conformance`, which Go and TypeScript both run (api.md §8): add cases there, never a table in one language. `MatchLayout` has no browser port.
 - **Lesson ids contain one slash** (`02-buffers-and-files/03-opening-files`), literal in URLs; routes use `{lessonId...}`.
 - **Condition ids are 1-based:** `<stepId>/<n>`, stuck rules `<stepId>/stuck/<n>` (`protocol.ConditionID`).
 - **Modules unlock monotonically:** scenario `modules` are added, never removed, so every lesson must pass with more modules than it lists; checkpoint restores keep `emacs.d/modules.el`.

@@ -33,7 +33,7 @@ PG_SESSIOND_URL=http://127.0.0.1:17200 PG_TEST_FAKE_GATEWAY=127.0.0.1:17180 PG_T
 
 Without `PG_SESSIOND_URL`: testcontainers (`PG_SESSION_IMAGE`), no lesson or GUI parts.
 
-**Behavioural harness** (sessiond). `sessiond -fake` runs the fake editor (`internal/sessiond/agent/fakeeditor`): a deterministic model of buffers, windows, tabs, help and build buffers and the minibuffer behind the real agent socket, which answers every agent op from its model and reports key, state and minibuffer events; its tmux turns rpc keys, demos, skips and fast-forwards into editor keys, and tests inject faults (failing ops, a hook run when an op arrives, a dropped connection, a silent Emacs). Its feature budget is what a test needs. It is checked against the real agent by the contract fixtures in `emacs.d/test/fixtures/agent` (setup files, steps, calls and replies, key and minibuffer events, the final state read once every step ran; compared by shape plus the fields marked exact, the final state against the replay's; one case keeps every state message for the state shapes sessiond decodes), recorded by `make agent-fixtures` in the session image and replayed by `make emacs-test` and by `go test ./internal/sessiond/agent/fakeeditor`. `internal/sessiond/lifecycle_test.go` drives every lesson operation through the HTTP API against a fake gateway that applies reports as the real one does (generations, rising statuses, laps once per id) and can go down, reset a lesson or lose its store, and compares the ordered trace of events and gateway reports with `internal/sessiond/testdata/traces/*.trace`; `UPDATE_TRACES=1` rewrites them, and a changed trace is reviewed like code. The progress outbox's retry, coalescing, generation and restart rules have their own tests on `testing/synctest` time (`internal/sessiond/progress`). `TestKilledDuringRestore` re-runs the test binary as a fake-mode sessiond process, kills its process group with SIGKILL while `restore-editor` is held (the files restored, nothing else), and starts another on the same workspace, which must resume the step, Reset it and let the learner complete it.
+**Behavioural harness** (sessiond): the fake editor behind `sessiond -fake`, the agent contract fixtures, the lifecycle traces and the kill test are described in backend.md §6.
 
 **Browser scripts** (`web/e2e/`; `PG_CDP`, `PG_URL`, `PG_WORKSPACE`): `smoke.mjs` (`make e2e`; `PG_SMOKE_ONLY=3,4`, `PG_SMOKE_PLAY=0`), `review.mjs` (one check per UX contract; `PG_REVIEW_ONLY`), `lesson.mjs` (fake session), `shots.mjs`, `demo-focus.mjs`. They write to `artifacts/`, reset the progress they touch and stay under ten page loads a minute (deployment.md §9.3); `*.local.mjs` is git-ignored.
 
@@ -45,7 +45,7 @@ Go 1.27.3 from go.dev into `~/.local/go` (`go1.27.3.linux-amd64.tar.gz`, sha256 
 
 ## 5. Scope
 
-Done: the session image with all eighteen modules; sessiond with projects, laps and the remote box; gateway local mode (server mode with OIDC experimental); playctl; every web screen; Parts 0 to 14 with P1–P8. Everything else is a `TODO` with its doc section (DESIGN.md §10).
+Done: the session image with all eighteen modules; sessiond with projects, laps and the remote box; gateway local mode (server mode with OIDC experimental); playctl; every web screen; Parts 0 to 15 (P1–P8 are Part 14, practice lessons Part 15). Everything else is a `TODO` with its doc section (DESIGN.md §10).
 
 ## 6. Known limitations
 
@@ -56,14 +56,14 @@ Open decisions: DESIGN.md §12; what a restore misses: backend.md §3.9.
 - Fast-forwarded steps show as "Later"; Continue on an all-watched lesson stays on its last step.
 - The WebGL skip above device pixel ratio 1 is verified only under Chrome's emulated scale factor.
 - An activation does not write `snapshot.json`, so a recovery can reopen the previous lesson's windows under the new lesson's step: a recover op queued behind another lesson's load, or a daemon killed within `snapshot.AutosaveInterval` of a lesson switch (before a restore wrote its spec) whose last spec has any file under the new root (`showsLesson`). Reset puts the step back.
-- Lesson 11.6's `fence` misses its Rust-buffer condition on the first `C-c '` after a fresh workspace start; replays from 11.1 pass.
+- Lesson 11.6's `fence` misses its Rust-buffer condition on the first `C-c '` after a fresh workspace start, so `play -watch` fails there on a fresh workspace; replays from 11.1 pass.
 - `progress.Outbox.Flush` serves only the step tests and repeats part of `Run`'s delivery.
 - The progress interleaving tests (`internal/sessiond/session/recovery_test.go`) order the competing drop by a sleep; the reconnect test sends its hello at the start of the restore only; `hosts.test.ts` checks the key guard's predicate, not a dispatched key.
-- backend.md §3.9 describes an agent leaving during `restore-editor` both as `ErrEditor` and as a deferred editor state; the code answers `ErrEditor` and keeps the deferred state.
+- `seq` restarts with every sessiond process and carries no process id: a page that reconnects to a restarted sessiond with `after=` a sequence the new process has already passed gets only the later events, missing earlier ones (keys, checks, echo). Its hello's snapshot keeps the lesson state right.
 - While the snapshot shows a lesson, steps after the active one show no tick (`selectors.ts` `stepStatuses`): they are evaluated again when reached.
 - The splitter sets `aria-valuenow` only after a drag or key, in pixels, without `aria-valuemin`/`aria-valuemax`.
 - Keys reach Emacs only while the terminal has focus (Ctrl+V after a click in the lesson prose stays with the page); in Firefox, Alt+V can open the menu bar and `ESC v` is the `M-v` fallback.
-- The `integration`-tagged sessiond test is outside `make check`, needs real Emacs and tmux, and is only compiled (`go vet -tags integration ./internal/sessiond/`).
+- The `integration`-tagged sessiond test is outside `make check` and needs real Emacs and tmux; `go vet -tags integration ./internal/sessiond/` at least compiles it.
 
 ## 7. Curriculum authoring pitfalls
 
@@ -78,13 +78,13 @@ Rules: CURRICULUM.md B.3 and B.4. Beyond them:
 - **Session state:** add to `snapshot.GlobalVars` what a lesson relies on (backend.md §3.9). Demos never depend on the learner's history (2.2 finds its command with `M-r`; 1.6 sets the macro counter first).
 - **Setups never ask:** bind `kill-buffer-query-functions` to nil to kill a buffer with a process.
 - **Write the keys out:** keys in the lesson or step text silence habit cards, paraphrased ones do not. `:try` clicks are learner input.
-- **Command names:** keep older names (`kill-region` for `C-k`) as alternatives; `M-y` is `consult-yank-pop` only from lesson 4.2.
+- **Command names:** keep older names (`kill-region` for `C-k`) as alternatives; `M-y` is `consult-yank-pop` once the completion module is on (Part 4; lesson 4.2 teaches it).
 - **Test with every module on:** with a language server, imenu can land on doc comments and corfu's popup opens in snippet fields.
 - **No newline right after a symbol** in code buffers: corfu-auto with cape-dabbrev can take the RET, and an open popup takes `M-<` and `M->`, so a demo searches forward instead of jumping back after typing a symbol. Prose buffers open the popup only on request.
 - **Magit** buffers survive restores and remember open sections: setups clear `magit-repository-local-cache`, demos fold first (`M-2`, `M-4`). A conflicted file opens at its first conflict, so `C-c ^ n` goes to the second.
 - **setup.run rebuilding `.git`** races with git run by the previous lesson's buffers (diff-hl, Magit): retry `rm`, `add` and `commit`. Box state comes from setup.run; checkpoints do not cover the box.
 - **No TRAMP calls from timers or process callbacks:** nested in another operation on the connection, they break it.
-- **user-lisp seeds** load from `after-init-hook` in `with-demoted-errors`, so a broken file cannot stop the daemon.
+- **user-lisp seeds** load from `after-init-hook` inside `with-demoted-errors` (as `my-keys.el` and `my-menus.el` in 13.2's `seed/`), so a broken file cannot stop the daemon.
 - **Idempotent demos:** adding to a seeded file replaces a line, so a revisit's Watch it or Skip adds nothing. A "menu closed" condition needs a suffix pressed: `waiting` is null before it opens.
-- **Lessons that edit `emacs.d/modules`** (13.1, 13.7) cannot replay on a stack that mounts the modules read-only.
-- **Check:** `play`, `play -watch`, `-repeat 2` on a fresh workspace (`make curriculum-play`, `curriculum-watch`); `play all` in course order, since Part 13's settings (a 2 s auto-save) stay on for the projects; Part 3 then Parts 0-2 for more modules than listed; pause `~1000` before a `C-g` that follows an edit (emacs.md §10.4).
+- **Lessons that write under `emacs.d`** (13.1 edits `modules/ui.el`; 13.7 makes it a Git repository with a remote) cannot replay on a stack that mounts it read-only.
+- **Check:** `play`, `play -watch`, `-repeat 2` on a fresh workspace (`make curriculum-play`, `curriculum-watch`); `play all` in course order, since Part 13's settings (a 2 s auto-save) stay on for the projects; Part 3 then Parts 0-2 for more modules than listed.

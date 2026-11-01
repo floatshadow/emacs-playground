@@ -261,7 +261,7 @@ type StatusResult struct {
 }
 
 // BusyInfo describes the lesson operation sessiond is running (api.md
-// §3.4), so a reloaded page can veil while, say, "Go to this step"
+// §4.1), so a reloaded page can veil while, say, "Go to this step"
 // replays earlier steps.
 type BusyInfo struct {
 	// Op names the kind of operation (load, restore, …) for logs and

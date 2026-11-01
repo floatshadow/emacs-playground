@@ -3,8 +3,8 @@
 //
 // It reflects over the protocol types for structure and JSON names, and
 // parses the protocol package source for enum constants and doc comments.
-// This replaces the invopop/jsonschema + json-schema-to-typescript pipeline
-// sketched in api.md §8: going direct yields discriminated unions for events,
+// Going direct rather than through invopop/jsonschema and
+// json-schema-to-typescript (api.md §8) yields discriminated unions for events,
 // string-literal enums and an RPC operation map, with no Node step in the Go
 // build. JSON Schema is still generated with invopop/jsonschema for the
 // configuration file (`playctl config schema`).

@@ -21,13 +21,13 @@ Roles, licenses and caveats of external dependencies. Versions live in `go.mod`,
 | tmux | terminal frame persistence; from source (Debian 13 ships 3.5a) | ISC | settings in emacs.md §5; the build checks the version |
 | TigerVNC Xvnc, xdotool | GUI frame display; demo typing in it | GPL-2.0, BSD-3 | localhost, no auth; only sessiond reaches it |
 | kkp | decodes CSI u keys in Emacs | GPL-3.0 | until Emacs does |
-| Iosevka Nerd Font, Noto CJK, Noto Color Emoji, Source Serif 4 | terminal and GUI font; CJK and emoji fallback; chrome typeface | OFL-1.1 | web fonts self-hosted as WOFF2 under `/fonts/` |
+| Iosevka Nerd Font, Noto CJK, Noto Color Emoji; Source Serif 4, JetBrains Mono | terminal and GUI font, CJK and emoji fallback; web prose and interface, keycaps and the terminal's fallback | OFL-1.1 | self-hosted, never a font CDN: the gateway serves Iosevka as WOFF2 under `/fonts/`; the two web faces are Latin subsets bundled from `web/src/assets/fonts/` |
 
 ## 3. Emacs packages
 
-GPL-3.0+ unless noted; `emacs.d/packages.el` maps modules to packages, pinned and vendored as emacs.md §8 describes. Packages whose last stable tag predates Emacs 30 use MELPA snapshots (`:prefer-snapshot`).
+GPL-3.0+ unless noted; `emacs.d/packages.el` maps modules to packages, pinned and vendored as emacs.md §8 describes. Packages whose last stable tag is too old for Emacs 30/31 or their companions, or missing (vterm), use MELPA snapshots (`:prefer-snapshot`); dirvish comes from MELPA Stable (`:pin`), whose tarball keeps the extensions NonGNU ELPA's leaves out.
 
-Native parts are built from the vendored tarballs: vterm's module against libvterm, jinx's against enchant, pdf-tools' `epdfinfo` against poppler. Chinese input is pyim with pyim-basedict, not rime. Org's Rust blocks are the org module's own `org-babel-execute:rust` (rustc); ob-rust needs rust-script. dape 0.28 lacks a codelldb configuration; the lsp module adds it. Typst's grammar is uben0/tree-sitter-typst at a pinned commit (no recent tag). Key menus use built-in transient (Magit's), not hydra: no package to pin, and a menu is one form whose groups are vectors.
+Native parts are built from the vendored tarballs: vterm's module against libvterm, jinx's against enchant, pdf-tools' `epdfinfo` against poppler. Chinese input is pyim with pyim-basedict, not rime. Org's Rust blocks are the org module's own `org-babel-execute:rust` (rustc); ob-rust needs rust-script. dape 0.28 lacks a codelldb configuration; the lsp module adds it. Typst's grammar is uben0/tree-sitter-typst at a pinned commit (no recent tag). Key menus (lesson 13.5) use transient, built into Emacs and the library Magit's menus use: no package to pin, and a menu is one `transient-define-prefix` form whose groups are vectors.
 
 ## 4. Language servers and tools
 
@@ -62,7 +62,7 @@ Node 24 or newer (`engines`; @types/node follows that floor), pnpm through corep
 | @xterm/xterm 6.1 beta, addons fit, webgl, unicode11, clipboard, web-links | terminal | betas from one upstream commit: stable 6.0 lacks `vtExtensions.kittyKeyboard`; re-pin all six together |
 | @novnc/novnc | GUI frame | `core/rfb.js`, lazy loaded |
 | pdfjs-dist | PDF preview | worker is a separate asset; legacy build |
-| react-markdown, remark-gfm, remark-directive; react-i18next | lesson rendering; UI strings | |
+| react-markdown, remark-gfm, remark-directive, unified, unist-util-visit; i18next, react-i18next | lesson rendering; UI strings | |
 | vitest, jsdom, Testing Library, msw, vitest-websocket-mock | unit tests | |
 | playwright-core | `web/e2e/` over CDP | external `chromedp/headless-shell` pinned to Chrome's stable major (its `stable` tag runs ahead) |
 | eslint 9, typescript-eslint, jsx-a11y, prettier | lint, format | not 10: jsx-a11y 6.10 does not declare ESLint 10 |

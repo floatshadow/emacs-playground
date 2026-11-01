@@ -2,7 +2,7 @@
 
 A hands-on Emacs course in the browser, around a real, fully configured Emacs running in Docker: real projects, a key ticker that explains every chord, a panel that gets you out of confusing states, and checkpoints to retry any step.
 
-Status: the whole course (Parts 0 to 14 and projects P1 to P8), every toolchain, terminal and GUI frames, the per-session remote box, local mode; server mode is experimental. Roadmap: `docs/DESIGN.md` §10.
+Status: the whole course (Parts 0 to 13, projects P1 to P8 as Part 14, practice lessons as Part 15), every toolchain, terminal and GUI frames, the per-session remote box, local mode; server mode is experimental. Roadmap: `docs/DESIGN.md` §10.
 
 ## Run it on your machine
 

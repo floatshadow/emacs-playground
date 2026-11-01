@@ -12,9 +12,9 @@
 
 Dockerfiles: `images/<name>/Dockerfile`, context the repository root. Pins: third-party.md; `images/session/versions.env` is reported by sessiond's `/status`.
 
-CI: `ci.yml` (Go, web, curriculum) and `images.yml` (a matrix job per image, then `images/<image>/test/ci-smoke.sh`: session ERT suites, gateway in local mode; a cold session build takes over an hour). Pull requests build without pushing; no provenance or SBOM attestations; session and remote-box build caches live in the `buildcache` package.
+CI: `ci.yml` (Go: gofmt, vet, build, race tests, protocol drift, `playctl curriculum validate`; web: lint, format, typecheck, tests, build, size) and `images.yml` (a matrix job per image, then `images/<image>/test/ci-smoke.sh`: session ERT suites, the remote box's tools, gateway in local mode serving the curriculum; a cold session build takes over an hour). Pull requests build without pushing and smoke-test only the gateway; no provenance or SBOM attestations; session and remote-box build caches live in the `buildcache` package.
 
-Tags: the short commit sha and `latest` for pushes to main; `vX.Y.Z` for release tags. Forks set `IMAGE_BASE` in `.env`. *Planned:* the gateway refuses a session image of another major version.
+Tags: the short commit sha and `latest` for pushes to main; `vX.Y.Z` for release tags. Forks set `IMAGE_BASE` in `.env`. *Planned:* the gateway refuses a session image of another major version; `playctl images build` uses `docker buildx bake` with a registry cache.
 
 ## 2. Compose files
 
@@ -27,7 +27,7 @@ Tags: the short commit sha and `latest` for pushes to main; `vX.Y.Z` for release
 
 `.env` holds only `COMPOSE_FILE`, `TAG`, `IMAGE_BASE`, `DOMAIN`. Never set `hostname:` on the gateway in server mode: it finds its own container by hostname (§7). Caddy answers `/internal/*` with 404; the server-mode gateway also refuses `/internal` requests with forwarding headers.
 
-Server-mode session containers (backend.md §2.3) get the §9.2 profile and `PG_SESSION_ID`, `PG_SESSION_TOKEN`, `PG_PROXY_SECRET`, `PG_GATEWAY_URL` plus geometry from the config.
+Server-mode session containers (backend.md §2.3) get the §9.2 profile and `PG_SESSION_ID`, `PG_SESSION_TOKEN`, `PG_PROXY_SECRET`, `PG_GATEWAY_URL`, plus `PG_VNC_GEOMETRY`, `PG_TERM_SIZE`, `PG_GUI_ENABLED` and `PG_AUTHOR_MODE` from the config and, with a box, `PG_BOX_HOST` and `PG_BOX_KEY` (§6).
 
 ## 3. Configuration file
 
@@ -66,7 +66,7 @@ sessiond reads environment only (backend.md §3.13). `PG_PROXY_SECRET` is derive
 
 ## 5. Server mode (experimental)
 
-Learners sign in with OpenID Connect (backend.md §2.6). Register a client, confidential or public, with redirect URI `https://<DOMAIN>/api/v1/auth/oidc/callback` and post-logout URI `https://<DOMAIN>/login`; ID tokens carry `sub`, and `email_verified` or the groups claim for rules that use them. Run `make server DOMAIN=… OIDC_ISSUER=… OIDC_CLIENT_ID=…` (writes a minimal `deploy/config.json` unless it is a server config already), put any client secret in `deploy/secrets/oidc_client_secret` (kept 644 for the gateway's uid 65532), then `docker compose up -d`. Allow-lists and quotas (all keys: `deploy/config.example.json`):
+Learners sign in with OpenID Connect (backend.md §2.6). Register a client, confidential or public, with redirect URI `https://<DOMAIN>/api/v1/auth/oidc/callback` and post-logout URI `https://<DOMAIN>/login`; ID tokens carry `sub`, and `email_verified` or the groups claim for rules that use them. Run `make server DOMAIN=… OIDC_ISSUER=… OIDC_CLIENT_ID=…` (writes a minimal `deploy/config.json` unless it is a server config already, then checks it with `playctl config check`), put any client secret in `deploy/secrets/oidc_client_secret` (kept 644 for the gateway's uid 65532), then `docker compose up -d`. Allow-lists and quotas (all keys: `deploy/config.example.json`):
 
 ```json
 {"auth": {"oidc": {"issuer": "https://idp.example.edu/realms/main", "clientId": "emacs-playground",
@@ -90,7 +90,7 @@ sshd, a `deploy` user (passwordless sudo, for `/ssh:box|sudo::`), Emacs with the
 |---|---|---|
 | internet → Caddy → gateway | 443 → 8080 | HTTPS, WSS |
 | gateway → sessiond | 7000 | proxy, RPC, status; proxy secret on all but `/healthz` |
-| gateway → socket proxy | 2375 | Engine API (allows `NETWORKS`, `POST`) |
+| gateway → socket proxy | 2375 | Engine API (allows containers, images, volumes, networks, exec, info and `POST`) |
 | sessiond → gateway | 8080 | `/internal`, bearer session token |
 | session → remote box | 22 | TRAMP |
 | session → internet | 443 | per `sessions.egress` |
@@ -139,7 +139,7 @@ Egress: session networks have no route unless `egress: all` (NAT, and cargo and 
 
 ### 9.4 Data and privacy
 
-Event logs stay in the session (`/work/.playground/events.log`, rotated at 10 MB) except the last 200 sent with "I'm stuck"; they never hold file contents or secrets. `features.telemetryUpload` (off) only forwards stuck reports. *Planned:* data export and `DELETE /api/v1/me`.
+Event logs stay in the session (`/work/.playground/events.log`, rotated at 10 MB) except the last 200 sent with "I'm stuck"; they never hold file contents or secrets. *Planned:* `features.telemetryUpload` (off by default) also sends stuck reports to a configured URL; data export and `DELETE /api/v1/me`.
 
 ### 9.5 Supply chain and repository hygiene
 
@@ -147,4 +147,4 @@ CI builds from pinned bases, `versions.env` (checksummed) and `packages.lock` (S
 
 ### 9.6 Residual risks
 
-gVisor narrows kernel escapes. A learner can exhaust only their own session. The server-mode box (`docker.HardenBox`) runs sshd as root with all capabilities dropped except `CHOWN DAC_OVERRIDE FOWNER SETUID SETGID SYS_CHROOT AUDIT_WRITE KILL NET_BIND_SERVICE` (sshd, sudo, nginx), 2 GB, 1024 processes, alone with its session on `pg-net-<id>`.
+gVisor narrows kernel escapes. A learner can exhaust only their own session. The server-mode box (`docker.HardenBox`) runs sshd as root with all capabilities dropped except `CHOWN DAC_OVERRIDE FOWNER SETUID SETGID SYS_CHROOT AUDIT_WRITE KILL NET_BIND_SERVICE` (sshd, sudo, nginx), 1 CPU, 2 GB, 1024 processes, alone with its session on `pg-net-<id>`.
