@@ -81,7 +81,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -89,7 +89,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -135,7 +135,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -143,7 +143,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -189,7 +189,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -197,7 +197,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -243,7 +243,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -251,7 +251,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -297,7 +297,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -305,7 +305,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -351,7 +351,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -359,7 +359,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -412,7 +412,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "a.txt",
           "mode": "text-mode",
           "selected": true,
@@ -420,7 +420,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -461,7 +461,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "a.txt",
           "mode": "text-mode",
           "selected": true,
@@ -469,7 +469,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -510,7 +510,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "a.txt",
           "mode": "text-mode",
           "selected": true,
@@ -518,7 +518,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -559,7 +559,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "a.txt",
           "mode": "text-mode",
           "selected": true,
@@ -567,7 +567,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -608,7 +608,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "a.txt",
           "mode": "text-mode",
           "selected": true,
@@ -616,7 +616,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -657,7 +657,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "a.txt",
           "mode": "text-mode",
           "selected": true,
@@ -665,7 +665,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -706,7 +706,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 13,
+          "id": 15,
           "buf": "a.txt",
           "mode": "text-mode",
           "selected": true,
@@ -714,7 +714,7 @@
           "side": null
         }
       ],
-      "layout": 13,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {

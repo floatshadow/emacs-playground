@@ -1,12 +1,28 @@
 {
-  "name": "snapshot-with-help",
+  "name": "modified-files",
   "setup": [
     {
       "file": "a.txt",
       "contents": "line one\nline two\n"
+    },
+    {
+      "file": "sub/b.txt",
+      "contents": "This is b.\n"
     }
   ],
   "steps": [
+    {
+      "press": "C-x C-f"
+    },
+    {
+      "type": "sub/b.txt"
+    },
+    {
+      "press": "RET"
+    },
+    {
+      "type": "x"
+    },
     {
       "press": "C-x C-f"
     },
@@ -17,60 +33,26 @@
       "press": "RET"
     },
     {
-      "press": "C-h f"
-    },
-    {
-      "type": "find-file"
-    },
-    {
-      "press": "RET"
-    },
-    {
-      "call": "snapshot",
-      "args": {},
+      "call": "modified-files",
+      "args": {
+        "workspace": "$WS"
+      },
       "exact": [
-        "files[].path",
-        "files[].point",
-        "files[].visible",
-        "layout",
-        "selected",
-        "tab",
-        "tabs",
-        "tabIndex"
+        "paths"
       ]
     }
   ],
   "calls": [
     {
-      "op": "snapshot",
+      "op": "modified-files",
       "ok": true,
       "reply": {
-        "files": [
-          {
-            "path": "a.txt",
-            "point": 1,
-            "visible": true
-          }
-        ],
-        "layout": "(vsplit a.txt *Help*)",
-        "windowState": "(((min-height . 8) (min-width . 10) (min-height-ignore . 4) (min-width-ignore . 2) (min-height-safe . 2) (min-width-safe . 2) (min-pixel-height . 8) (min-pixel-width . 10) (min-pixel-height-ignore . 4) (min-pixel-width-ignore . 2) (min-pixel-height-safe . 2) (min-pixel-width-safe . 2)) vc (pixel-width . 80) (pixel-height . 23) (total-width . 80) (total-height . 23) (normal-height . 1.0) (normal-width . 1.0) (combination-limit) (leaf (pixel-width . 80) (pixel-height . 12) (total-width . 80) (total-height . 12) (normal-height . 0.5) (normal-width . 1.0) (buffer \"a.txt\" (selected . t) (hscroll . 0) (fringes 0 0 nil nil) (margins nil) (scroll-bars nil 0 t nil 0 t nil) (vscroll . 0) (dedicated) (point . 1) (start . 1) (file . \"$WS/a.txt\")) (prev-buffers (\"*scratch*\" 1 1))) (leaf (last . t) (pixel-width . 80) (pixel-height . 11) (total-width . 80) (total-height . 11) (normal-height . 0.5) (normal-width . 1.0) (buffer \"*Help*\" (selected) (hscroll . 0) (fringes 0 0 nil nil) (margins nil) (scroll-bars nil 0 t nil 0 t nil) (vscroll . 0) (dedicated) (point . 1) (start . 1))))",
-        "selected": "a.txt",
-        "tab": "a.txt",
-        "tabs": [
-          ""
-        ],
-        "tabIndex": 1,
-        "specialBuffers": "((\"*Help*\" (describe-function--helper find-file nil)))"
+        "paths": [
+          "sub/b.txt"
+        ]
       },
       "exact": [
-        "files[].path",
-        "files[].point",
-        "files[].visible",
-        "layout",
-        "selected",
-        "tab",
-        "tabs",
-        "tabIndex"
+        "paths"
       ]
     }
   ],
@@ -107,7 +89,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -115,7 +97,7 @@
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -138,7 +120,7 @@
     },
     {
       "t": "key",
-      "keys": "a",
+      "keys": "s",
       "cmd": "self-insert-command",
       "buf": " *Minibuf-1*",
       "mode": "minibuffer-mode",
@@ -161,7 +143,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -169,7 +151,7 @@
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -179,7 +161,223 @@
       "minibuffer": {
         "depth": 1,
         "prompt": "Find file: ",
-        "contents": "$WS/a",
+        "contents": "$WS/s",
+        "kind": "prompt"
+      },
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "u",
+      "cmd": "self-insert-command",
+      "buf": " *Minibuf-1*",
+      "mode": "minibuffer-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "state",
+      "buf": "*scratch*",
+      "file": null,
+      "mode": "lisp-interaction-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": false,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 0,
+      "point": 1,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "*scratch*",
+          "mode": "lisp-interaction-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "*scratch*"
+      },
+      "minibuffer": {
+        "depth": 1,
+        "prompt": "Find file: ",
+        "contents": "$WS/su",
+        "kind": "prompt"
+      },
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "b",
+      "cmd": "self-insert-command",
+      "buf": " *Minibuf-1*",
+      "mode": "minibuffer-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "state",
+      "buf": "*scratch*",
+      "file": null,
+      "mode": "lisp-interaction-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": false,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 0,
+      "point": 1,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "*scratch*",
+          "mode": "lisp-interaction-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "*scratch*"
+      },
+      "minibuffer": {
+        "depth": 1,
+        "prompt": "Find file: ",
+        "contents": "$WS/sub",
+        "kind": "prompt"
+      },
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "/",
+      "cmd": "self-insert-command",
+      "buf": " *Minibuf-1*",
+      "mode": "minibuffer-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "state",
+      "buf": "*scratch*",
+      "file": null,
+      "mode": "lisp-interaction-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": false,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 0,
+      "point": 1,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "*scratch*",
+          "mode": "lisp-interaction-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "*scratch*"
+      },
+      "minibuffer": {
+        "depth": 1,
+        "prompt": "Find file: ",
+        "contents": "$WS/sub/",
+        "kind": "prompt"
+      },
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "b",
+      "cmd": "self-insert-command",
+      "buf": " *Minibuf-1*",
+      "mode": "minibuffer-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "state",
+      "buf": "*scratch*",
+      "file": null,
+      "mode": "lisp-interaction-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": false,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 0,
+      "point": 1,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "*scratch*",
+          "mode": "lisp-interaction-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "*scratch*"
+      },
+      "minibuffer": {
+        "depth": 1,
+        "prompt": "Find file: ",
+        "contents": "$WS/sub/b",
         "kind": "prompt"
       },
       "isearch": false,
@@ -215,7 +413,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -223,7 +421,7 @@
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -233,7 +431,7 @@
       "minibuffer": {
         "depth": 1,
         "prompt": "Find file: ",
-        "contents": "$WS/a.",
+        "contents": "$WS/sub/b.",
         "kind": "prompt"
       },
       "isearch": false,
@@ -269,7 +467,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -277,7 +475,7 @@
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -287,7 +485,7 @@
       "minibuffer": {
         "depth": 1,
         "prompt": "Find file: ",
-        "contents": "$WS/a.t",
+        "contents": "$WS/sub/b.t",
         "kind": "prompt"
       },
       "isearch": false,
@@ -323,7 +521,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -331,7 +529,7 @@
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -341,7 +539,7 @@
       "minibuffer": {
         "depth": 1,
         "prompt": "Find file: ",
-        "contents": "$WS/a.tx",
+        "contents": "$WS/sub/b.tx",
         "kind": "prompt"
       },
       "isearch": false,
@@ -377,7 +575,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -385,7 +583,7 @@
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -395,7 +593,443 @@
       "minibuffer": {
         "depth": 1,
         "prompt": "Find file: ",
-        "contents": "$WS/a.txt",
+        "contents": "$WS/sub/b.txt",
+        "kind": "prompt"
+      },
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "RET",
+      "cmd": "minibuffer-complete-and-exit",
+      "buf": " *Minibuf-1*",
+      "mode": "minibuffer-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "minibuffer",
+      "open": false,
+      "prompt": "Find file: ",
+      "depth": 1,
+      "kind": "prompt"
+    },
+    {
+      "t": "state",
+      "buf": "b.txt",
+      "file": "$WS/sub/b.txt",
+      "mode": "text-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": false,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 0,
+      "point": 1,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "b.txt",
+          "mode": "text-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "b.txt"
+      },
+      "minibuffer": null,
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "x",
+      "cmd": "self-insert-command",
+      "buf": "b.txt",
+      "mode": "text-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "state",
+      "buf": "b.txt",
+      "file": "$WS/sub/b.txt",
+      "mode": "text-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": true,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 1,
+      "point": 2,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "b.txt",
+          "mode": "text-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "b.txt"
+      },
+      "minibuffer": null,
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "C-x C-f",
+      "cmd": "find-file",
+      "buf": "b.txt",
+      "mode": "text-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "minibuffer",
+      "open": true,
+      "prompt": "Find file: ",
+      "depth": 1,
+      "kind": "prompt"
+    },
+    {
+      "t": "state",
+      "buf": "b.txt",
+      "file": "$WS/sub/b.txt",
+      "mode": "text-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": true,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 1,
+      "point": 2,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "b.txt",
+          "mode": "text-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "b.txt"
+      },
+      "minibuffer": {
+        "depth": 1,
+        "prompt": "Find file: ",
+        "contents": "$WS/sub/",
+        "kind": "prompt"
+      },
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "a",
+      "cmd": "self-insert-command",
+      "buf": " *Minibuf-1*",
+      "mode": "minibuffer-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "state",
+      "buf": "b.txt",
+      "file": "$WS/sub/b.txt",
+      "mode": "text-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": true,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 1,
+      "point": 2,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "b.txt",
+          "mode": "text-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "b.txt"
+      },
+      "minibuffer": {
+        "depth": 1,
+        "prompt": "Find file: ",
+        "contents": "$WS/sub/a",
+        "kind": "prompt"
+      },
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": ".",
+      "cmd": "self-insert-command",
+      "buf": " *Minibuf-1*",
+      "mode": "minibuffer-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "state",
+      "buf": "b.txt",
+      "file": "$WS/sub/b.txt",
+      "mode": "text-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": true,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 1,
+      "point": 2,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "b.txt",
+          "mode": "text-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "b.txt"
+      },
+      "minibuffer": {
+        "depth": 1,
+        "prompt": "Find file: ",
+        "contents": "$WS/sub/a.",
+        "kind": "prompt"
+      },
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "t",
+      "cmd": "self-insert-command",
+      "buf": " *Minibuf-1*",
+      "mode": "minibuffer-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "state",
+      "buf": "b.txt",
+      "file": "$WS/sub/b.txt",
+      "mode": "text-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": true,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 1,
+      "point": 2,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "b.txt",
+          "mode": "text-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "b.txt"
+      },
+      "minibuffer": {
+        "depth": 1,
+        "prompt": "Find file: ",
+        "contents": "$WS/sub/a.t",
+        "kind": "prompt"
+      },
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "x",
+      "cmd": "self-insert-command",
+      "buf": " *Minibuf-1*",
+      "mode": "minibuffer-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "state",
+      "buf": "b.txt",
+      "file": "$WS/sub/b.txt",
+      "mode": "text-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": true,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 1,
+      "point": 2,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "b.txt",
+          "mode": "text-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "b.txt"
+      },
+      "minibuffer": {
+        "depth": 1,
+        "prompt": "Find file: ",
+        "contents": "$WS/sub/a.tx",
+        "kind": "prompt"
+      },
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "t",
+      "cmd": "self-insert-command",
+      "buf": " *Minibuf-1*",
+      "mode": "minibuffer-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "state",
+      "buf": "b.txt",
+      "file": "$WS/sub/b.txt",
+      "mode": "text-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": true,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 1,
+      "point": 2,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "b.txt",
+          "mode": "text-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "b.txt"
+      },
+      "minibuffer": {
+        "depth": 1,
+        "prompt": "Find file: ",
+        "contents": "$WS/sub/a.txt",
         "kind": "prompt"
       },
       "isearch": false,
@@ -424,7 +1058,7 @@
     {
       "t": "state",
       "buf": "a.txt",
-      "file": "$WS/a.txt",
+      "file": "$WS/sub/a.txt",
       "mode": "text-mode",
       "modeName": "",
       "minors": [],
@@ -438,7 +1072,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "a.txt",
           "mode": "text-mode",
           "selected": true,
@@ -446,622 +1080,7 @@
           "side": null
         }
       ],
-      "layout": 3,
-      "frame": "terminal",
-      "frames": 1,
-      "tabs": {
-        "count": 1,
-        "current": "a.txt"
-      },
-      "minibuffer": null,
-      "isearch": false,
-      "recursive": 0,
-      "macro": false,
-      "prefixArg": null,
-      "waiting": null,
-      "readOnlyReason": null,
-      "diagAtPoint": null
-    },
-    {
-      "t": "key",
-      "keys": "C-h f",
-      "cmd": "describe-function",
-      "buf": "a.txt",
-      "mode": "text-mode",
-      "frame": "terminal"
-    },
-    {
-      "t": "minibuffer",
-      "open": true,
-      "prompt": "Describe function: ",
-      "depth": 1,
-      "kind": "prompt"
-    },
-    {
-      "t": "state",
-      "buf": "a.txt",
-      "file": "$WS/a.txt",
-      "mode": "text-mode",
-      "modeName": "",
-      "minors": [],
-      "modified": false,
-      "readonly": false,
-      "narrowed": false,
-      "overwrite": false,
-      "line": 1,
-      "col": 0,
-      "point": 1,
-      "markActive": false,
-      "windows": [
-        {
-          "id": 3,
-          "buf": "a.txt",
-          "mode": "text-mode",
-          "selected": true,
-          "dedicated": false,
-          "side": null
-        }
-      ],
-      "layout": 3,
-      "frame": "terminal",
-      "frames": 1,
-      "tabs": {
-        "count": 1,
-        "current": "a.txt"
-      },
-      "minibuffer": {
-        "depth": 1,
-        "prompt": "Describe function: ",
-        "contents": "",
-        "kind": "prompt"
-      },
-      "isearch": false,
-      "recursive": 0,
-      "macro": false,
-      "prefixArg": null,
-      "waiting": null,
-      "readOnlyReason": null,
-      "diagAtPoint": null
-    },
-    {
-      "t": "key",
-      "keys": "f",
-      "cmd": "self-insert-command",
-      "buf": " *Minibuf-1*",
-      "mode": "minibuffer-mode",
-      "frame": "terminal"
-    },
-    {
-      "t": "state",
-      "buf": "a.txt",
-      "file": "$WS/a.txt",
-      "mode": "text-mode",
-      "modeName": "",
-      "minors": [],
-      "modified": false,
-      "readonly": false,
-      "narrowed": false,
-      "overwrite": false,
-      "line": 1,
-      "col": 0,
-      "point": 1,
-      "markActive": false,
-      "windows": [
-        {
-          "id": 3,
-          "buf": "a.txt",
-          "mode": "text-mode",
-          "selected": true,
-          "dedicated": false,
-          "side": null
-        }
-      ],
-      "layout": 3,
-      "frame": "terminal",
-      "frames": 1,
-      "tabs": {
-        "count": 1,
-        "current": "a.txt"
-      },
-      "minibuffer": {
-        "depth": 1,
-        "prompt": "Describe function: ",
-        "contents": "f",
-        "kind": "prompt"
-      },
-      "isearch": false,
-      "recursive": 0,
-      "macro": false,
-      "prefixArg": null,
-      "waiting": null,
-      "readOnlyReason": null,
-      "diagAtPoint": null
-    },
-    {
-      "t": "key",
-      "keys": "i",
-      "cmd": "self-insert-command",
-      "buf": " *Minibuf-1*",
-      "mode": "minibuffer-mode",
-      "frame": "terminal"
-    },
-    {
-      "t": "state",
-      "buf": "a.txt",
-      "file": "$WS/a.txt",
-      "mode": "text-mode",
-      "modeName": "",
-      "minors": [],
-      "modified": false,
-      "readonly": false,
-      "narrowed": false,
-      "overwrite": false,
-      "line": 1,
-      "col": 0,
-      "point": 1,
-      "markActive": false,
-      "windows": [
-        {
-          "id": 3,
-          "buf": "a.txt",
-          "mode": "text-mode",
-          "selected": true,
-          "dedicated": false,
-          "side": null
-        }
-      ],
-      "layout": 3,
-      "frame": "terminal",
-      "frames": 1,
-      "tabs": {
-        "count": 1,
-        "current": "a.txt"
-      },
-      "minibuffer": {
-        "depth": 1,
-        "prompt": "Describe function: ",
-        "contents": "fi",
-        "kind": "prompt"
-      },
-      "isearch": false,
-      "recursive": 0,
-      "macro": false,
-      "prefixArg": null,
-      "waiting": null,
-      "readOnlyReason": null,
-      "diagAtPoint": null
-    },
-    {
-      "t": "key",
-      "keys": "n",
-      "cmd": "self-insert-command",
-      "buf": " *Minibuf-1*",
-      "mode": "minibuffer-mode",
-      "frame": "terminal"
-    },
-    {
-      "t": "state",
-      "buf": "a.txt",
-      "file": "$WS/a.txt",
-      "mode": "text-mode",
-      "modeName": "",
-      "minors": [],
-      "modified": false,
-      "readonly": false,
-      "narrowed": false,
-      "overwrite": false,
-      "line": 1,
-      "col": 0,
-      "point": 1,
-      "markActive": false,
-      "windows": [
-        {
-          "id": 3,
-          "buf": "a.txt",
-          "mode": "text-mode",
-          "selected": true,
-          "dedicated": false,
-          "side": null
-        }
-      ],
-      "layout": 3,
-      "frame": "terminal",
-      "frames": 1,
-      "tabs": {
-        "count": 1,
-        "current": "a.txt"
-      },
-      "minibuffer": {
-        "depth": 1,
-        "prompt": "Describe function: ",
-        "contents": "fin",
-        "kind": "prompt"
-      },
-      "isearch": false,
-      "recursive": 0,
-      "macro": false,
-      "prefixArg": null,
-      "waiting": null,
-      "readOnlyReason": null,
-      "diagAtPoint": null
-    },
-    {
-      "t": "key",
-      "keys": "d",
-      "cmd": "self-insert-command",
-      "buf": " *Minibuf-1*",
-      "mode": "minibuffer-mode",
-      "frame": "terminal"
-    },
-    {
-      "t": "state",
-      "buf": "a.txt",
-      "file": "$WS/a.txt",
-      "mode": "text-mode",
-      "modeName": "",
-      "minors": [],
-      "modified": false,
-      "readonly": false,
-      "narrowed": false,
-      "overwrite": false,
-      "line": 1,
-      "col": 0,
-      "point": 1,
-      "markActive": false,
-      "windows": [
-        {
-          "id": 3,
-          "buf": "a.txt",
-          "mode": "text-mode",
-          "selected": true,
-          "dedicated": false,
-          "side": null
-        }
-      ],
-      "layout": 3,
-      "frame": "terminal",
-      "frames": 1,
-      "tabs": {
-        "count": 1,
-        "current": "a.txt"
-      },
-      "minibuffer": {
-        "depth": 1,
-        "prompt": "Describe function: ",
-        "contents": "find",
-        "kind": "prompt"
-      },
-      "isearch": false,
-      "recursive": 0,
-      "macro": false,
-      "prefixArg": null,
-      "waiting": null,
-      "readOnlyReason": null,
-      "diagAtPoint": null
-    },
-    {
-      "t": "key",
-      "keys": "-",
-      "cmd": "self-insert-command",
-      "buf": " *Minibuf-1*",
-      "mode": "minibuffer-mode",
-      "frame": "terminal"
-    },
-    {
-      "t": "state",
-      "buf": "a.txt",
-      "file": "$WS/a.txt",
-      "mode": "text-mode",
-      "modeName": "",
-      "minors": [],
-      "modified": false,
-      "readonly": false,
-      "narrowed": false,
-      "overwrite": false,
-      "line": 1,
-      "col": 0,
-      "point": 1,
-      "markActive": false,
-      "windows": [
-        {
-          "id": 3,
-          "buf": "a.txt",
-          "mode": "text-mode",
-          "selected": true,
-          "dedicated": false,
-          "side": null
-        }
-      ],
-      "layout": 3,
-      "frame": "terminal",
-      "frames": 1,
-      "tabs": {
-        "count": 1,
-        "current": "a.txt"
-      },
-      "minibuffer": {
-        "depth": 1,
-        "prompt": "Describe function: ",
-        "contents": "find-",
-        "kind": "prompt"
-      },
-      "isearch": false,
-      "recursive": 0,
-      "macro": false,
-      "prefixArg": null,
-      "waiting": null,
-      "readOnlyReason": null,
-      "diagAtPoint": null
-    },
-    {
-      "t": "key",
-      "keys": "f",
-      "cmd": "self-insert-command",
-      "buf": " *Minibuf-1*",
-      "mode": "minibuffer-mode",
-      "frame": "terminal"
-    },
-    {
-      "t": "state",
-      "buf": "a.txt",
-      "file": "$WS/a.txt",
-      "mode": "text-mode",
-      "modeName": "",
-      "minors": [],
-      "modified": false,
-      "readonly": false,
-      "narrowed": false,
-      "overwrite": false,
-      "line": 1,
-      "col": 0,
-      "point": 1,
-      "markActive": false,
-      "windows": [
-        {
-          "id": 3,
-          "buf": "a.txt",
-          "mode": "text-mode",
-          "selected": true,
-          "dedicated": false,
-          "side": null
-        }
-      ],
-      "layout": 3,
-      "frame": "terminal",
-      "frames": 1,
-      "tabs": {
-        "count": 1,
-        "current": "a.txt"
-      },
-      "minibuffer": {
-        "depth": 1,
-        "prompt": "Describe function: ",
-        "contents": "find-f",
-        "kind": "prompt"
-      },
-      "isearch": false,
-      "recursive": 0,
-      "macro": false,
-      "prefixArg": null,
-      "waiting": null,
-      "readOnlyReason": null,
-      "diagAtPoint": null
-    },
-    {
-      "t": "key",
-      "keys": "i",
-      "cmd": "self-insert-command",
-      "buf": " *Minibuf-1*",
-      "mode": "minibuffer-mode",
-      "frame": "terminal"
-    },
-    {
-      "t": "state",
-      "buf": "a.txt",
-      "file": "$WS/a.txt",
-      "mode": "text-mode",
-      "modeName": "",
-      "minors": [],
-      "modified": false,
-      "readonly": false,
-      "narrowed": false,
-      "overwrite": false,
-      "line": 1,
-      "col": 0,
-      "point": 1,
-      "markActive": false,
-      "windows": [
-        {
-          "id": 3,
-          "buf": "a.txt",
-          "mode": "text-mode",
-          "selected": true,
-          "dedicated": false,
-          "side": null
-        }
-      ],
-      "layout": 3,
-      "frame": "terminal",
-      "frames": 1,
-      "tabs": {
-        "count": 1,
-        "current": "a.txt"
-      },
-      "minibuffer": {
-        "depth": 1,
-        "prompt": "Describe function: ",
-        "contents": "find-fi",
-        "kind": "prompt"
-      },
-      "isearch": false,
-      "recursive": 0,
-      "macro": false,
-      "prefixArg": null,
-      "waiting": null,
-      "readOnlyReason": null,
-      "diagAtPoint": null
-    },
-    {
-      "t": "key",
-      "keys": "l",
-      "cmd": "self-insert-command",
-      "buf": " *Minibuf-1*",
-      "mode": "minibuffer-mode",
-      "frame": "terminal"
-    },
-    {
-      "t": "state",
-      "buf": "a.txt",
-      "file": "$WS/a.txt",
-      "mode": "text-mode",
-      "modeName": "",
-      "minors": [],
-      "modified": false,
-      "readonly": false,
-      "narrowed": false,
-      "overwrite": false,
-      "line": 1,
-      "col": 0,
-      "point": 1,
-      "markActive": false,
-      "windows": [
-        {
-          "id": 3,
-          "buf": "a.txt",
-          "mode": "text-mode",
-          "selected": true,
-          "dedicated": false,
-          "side": null
-        }
-      ],
-      "layout": 3,
-      "frame": "terminal",
-      "frames": 1,
-      "tabs": {
-        "count": 1,
-        "current": "a.txt"
-      },
-      "minibuffer": {
-        "depth": 1,
-        "prompt": "Describe function: ",
-        "contents": "find-fil",
-        "kind": "prompt"
-      },
-      "isearch": false,
-      "recursive": 0,
-      "macro": false,
-      "prefixArg": null,
-      "waiting": null,
-      "readOnlyReason": null,
-      "diagAtPoint": null
-    },
-    {
-      "t": "key",
-      "keys": "e",
-      "cmd": "self-insert-command",
-      "buf": " *Minibuf-1*",
-      "mode": "minibuffer-mode",
-      "frame": "terminal"
-    },
-    {
-      "t": "state",
-      "buf": "a.txt",
-      "file": "$WS/a.txt",
-      "mode": "text-mode",
-      "modeName": "",
-      "minors": [],
-      "modified": false,
-      "readonly": false,
-      "narrowed": false,
-      "overwrite": false,
-      "line": 1,
-      "col": 0,
-      "point": 1,
-      "markActive": false,
-      "windows": [
-        {
-          "id": 3,
-          "buf": "a.txt",
-          "mode": "text-mode",
-          "selected": true,
-          "dedicated": false,
-          "side": null
-        }
-      ],
-      "layout": 3,
-      "frame": "terminal",
-      "frames": 1,
-      "tabs": {
-        "count": 1,
-        "current": "a.txt"
-      },
-      "minibuffer": {
-        "depth": 1,
-        "prompt": "Describe function: ",
-        "contents": "find-file",
-        "kind": "prompt"
-      },
-      "isearch": false,
-      "recursive": 0,
-      "macro": false,
-      "prefixArg": null,
-      "waiting": null,
-      "readOnlyReason": null,
-      "diagAtPoint": null
-    },
-    {
-      "t": "key",
-      "keys": "RET",
-      "cmd": "minibuffer-complete-and-exit",
-      "buf": " *Minibuf-1*",
-      "mode": "minibuffer-mode",
-      "frame": "terminal"
-    },
-    {
-      "t": "minibuffer",
-      "open": false,
-      "prompt": "Describe function: ",
-      "depth": 1,
-      "kind": "prompt"
-    },
-    {
-      "t": "state",
-      "buf": "a.txt",
-      "file": "$WS/a.txt",
-      "mode": "text-mode",
-      "modeName": "",
-      "minors": [],
-      "modified": false,
-      "readonly": false,
-      "narrowed": false,
-      "overwrite": false,
-      "line": 1,
-      "col": 0,
-      "point": 1,
-      "markActive": false,
-      "windows": [
-        {
-          "id": 3,
-          "buf": "a.txt",
-          "mode": "text-mode",
-          "selected": true,
-          "dedicated": false,
-          "side": null
-        },
-        {
-          "id": 5,
-          "buf": "*Help*",
-          "mode": "help-mode",
-          "selected": false,
-          "dedicated": false,
-          "side": null
-        }
-      ],
-      "layout": [
-        "vsplit",
-        3,
-        5
-      ],
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {

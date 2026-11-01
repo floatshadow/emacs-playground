@@ -1,0 +1,66 @@
+{
+  "name": "display-and-debug-ops",
+  "setup": [],
+  "steps": [
+    {
+      "call": "leave-display",
+      "exact": [
+        "closed",
+        "detail"
+      ]
+    },
+    {
+      "call": "reset-debug"
+    }
+  ],
+  "calls": [
+    {
+      "op": "leave-display",
+      "ok": true,
+      "reply": {
+        "closed": true,
+        "detail": ""
+      },
+      "exact": [
+        "closed",
+        "detail"
+      ]
+    },
+    {
+      "op": "reset-debug",
+      "ok": true,
+      "reply": {},
+      "exact": []
+    }
+  ],
+  "events": [],
+  "eventsExact": {
+    "key": [
+      "keys",
+      "cmd",
+      "buf",
+      "mode"
+    ],
+    "minibuffer": [
+      "open",
+      "prompt",
+      "depth",
+      "kind"
+    ],
+    "state": [
+      "buf",
+      "mode",
+      "modified",
+      "narrowed",
+      "overwrite",
+      "readonly",
+      "line",
+      "col",
+      "point",
+      "markActive",
+      "frame",
+      "isearch",
+      "recursive"
+    ]
+  }
+}

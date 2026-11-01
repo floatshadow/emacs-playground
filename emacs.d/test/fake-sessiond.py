@@ -12,7 +12,7 @@ FIFO given with --calls):
     eval (buffer-name)
     check (eq major-mode 'fundamental-mode) | (> (point) 1)
     rescue
-    snapshot
+    capture-editor
     describe C-x C-f
     set-modules base agent editing
     open {"files":[{"path":"hello/README.md","point":1}],"layout":"single"}
@@ -47,9 +47,9 @@ def parse_command(line, next_id):
         args = {"keys": rest}
     elif op == "set-modules":
         args = {"enabled": rest.split()}
-    elif op in ("open", "reset-step", "setup", "frame"):
+    elif op in ("open", "restore-editor", "setup", "frame"):
         args = json.loads(rest) if rest else {}
-        if op == "reset-step" and "spec" not in args:
+        if op == "restore-editor" and "spec" not in args:
             args = {"spec": args}
     else:
         args = json.loads(rest) if rest else {}

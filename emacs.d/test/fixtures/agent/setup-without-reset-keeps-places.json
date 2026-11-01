@@ -49,17 +49,24 @@
       ]
     },
     {
-      "call": "snapshot",
-      "args": {},
+      "call": "capture-editor",
+      "args": {
+        "workspace": "$WS",
+        "vars": [],
+        "maxText": 0,
+        "maxUndo": 0,
+        "maxTotal": 0,
+        "maxGlobals": 0
+      },
       "exact": [
-        "files[].path",
-        "files[].point",
-        "files[].visible",
-        "layout",
-        "selected",
-        "tab",
-        "tabs",
-        "tabIndex"
+        "spec.files[].path",
+        "spec.files[].point",
+        "spec.files[].visible",
+        "spec.layout",
+        "spec.selected",
+        "spec.tab",
+        "spec.tabs",
+        "spec.tabIndex"
       ]
     }
   ],
@@ -75,40 +82,44 @@
       ]
     },
     {
-      "op": "snapshot",
+      "op": "capture-editor",
       "ok": true,
       "reply": {
-        "files": [
-          {
-            "path": "p/a.rs",
-            "point": 15,
-            "visible": true
-          },
-          {
-            "path": "p/b.rs",
-            "point": 1,
-            "visible": false
-          }
-        ],
-        "layout": "p/a.rs",
-        "windowState": "(((min-height . 4) (min-width . 10) (min-height-ignore . 2) (min-width-ignore . 2) (min-height-safe . 1) (min-width-safe . 2) (min-pixel-height . 4) (min-pixel-width . 10) (min-pixel-height-ignore . 2) (min-pixel-width-ignore . 2) (min-pixel-height-safe . 1) (min-pixel-width-safe . 2)) leaf (pixel-width . 80) (pixel-height . 22) (total-width . 80) (total-height . 22) (normal-height . 1.0) (normal-width . 1.0) (buffer \"a.rs\" (selected . t) (hscroll . 0) (fringes 0 0 nil nil) (margins nil) (scroll-bars nil 0 t nil 0 t nil) (vscroll . 0) (dedicated) (point . 15) (start . 1) (file . \"$WS/p/a.rs\")) (prev-buffers (\"b.rs\" 1 1 \"$WS/p/b.rs\") (\"*scratch*\" 1 1)))",
-        "selected": "p/a.rs",
-        "tab": "a.rs",
-        "tabs": [
-          ""
-        ],
-        "tabIndex": 1,
-        "specialBuffers": "nil"
+        "spec": {
+          "files": [
+            {
+              "path": "p/a.rs",
+              "point": 15,
+              "visible": true
+            },
+            {
+              "path": "p/b.rs",
+              "point": 1,
+              "visible": false
+            }
+          ],
+          "layout": "p/a.rs",
+          "windowState": "(((min-height . 4) (min-width . 10) (min-height-ignore . 2) (min-width-ignore . 2) (min-height-safe . 1) (min-width-safe . 2) (min-pixel-height . 4) (min-pixel-width . 10) (min-pixel-height-ignore . 2) (min-pixel-width-ignore . 2) (min-pixel-height-safe . 1) (min-pixel-width-safe . 2)) leaf (pixel-width . 80) (pixel-height . 22) (total-width . 80) (total-height . 22) (normal-height . 1.0) (normal-width . 1.0) (buffer \"a.rs\" (selected . t) (hscroll . 0) (fringes 0 0 nil nil) (margins nil) (scroll-bars nil 0 t nil 0 t nil) (vscroll . 0) (dedicated) (point . 15) (start . 1) (file . \"$WS/p/a.rs\")) (prev-buffers (\"b.rs\" 1 1 \"$WS/p/b.rs\") (\"*scratch*\" 1 1)))",
+          "selected": "p/a.rs",
+          "tab": "a.rs",
+          "tabs": [
+            ""
+          ],
+          "tabIndex": 1,
+          "specialBuffers": "nil"
+        },
+        "buffers": {},
+        "globals": null
       },
       "exact": [
-        "files[].path",
-        "files[].point",
-        "files[].visible",
-        "layout",
-        "selected",
-        "tab",
-        "tabs",
-        "tabIndex"
+        "spec.files[].path",
+        "spec.files[].point",
+        "spec.files[].visible",
+        "spec.layout",
+        "spec.selected",
+        "spec.tab",
+        "spec.tabs",
+        "spec.tabIndex"
       ]
     }
   ],

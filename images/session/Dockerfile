@@ -697,15 +697,17 @@ COPY --chmod=0755 images/session/bin/ /opt/playground/bin/
 COPY --exclude=vendor emacs.d/ /opt/playground/emacs.d/
 COPY images/session/prebuild.el /src/prebuild.el
 # The pristine config does not need the vendored tarballs (not copied;
-# the rm covers a builder that ignores --exclude). The agent is
-# compiled in place (byte and native code), since agent.el loads this
-# copy. prebuild.el loads every module (failing the build on any error)
-# and ships the native trampolines they need.
+# the rm covers a builder that ignores --exclude). Every agent file
+# (lisp/*.el) is compiled in place (byte and native code), since
+# agent.el loads this copy; a warning fails the build. prebuild.el loads
+# every module (failing the build on any error) and ships the native
+# trampolines they need.
 RUN rm -rf /opt/playground/emacs.d/vendor \
  && cd /opt/playground/emacs.d/lisp \
- && emacs --batch \
+ && emacs --batch -L . \
       --eval '(setq native-comp-eln-load-path (cons "/opt/playground/eln-cache/" (last native-comp-eln-load-path)))' \
-      --eval '(progn (byte-compile-file "playground-agent.el") (native-compile "playground-agent.el"))' \
+      --eval '(setq byte-compile-error-on-warn t)' \
+      --eval '(dolist (f (directory-files "." nil "\\.el$")) (unless (byte-compile-file f) (error "Compiling %s failed" f)) (native-compile f))' \
  && { PG_MODULES="base agent editing files windows completion git terminals lsp lang-rust lang-ocaml lang-python writing input org power remote ui" \
       HOME=/tmp/pg-check PG_WORKSPACE=/tmp/pg-check/work emacs --batch -l /src/prebuild.el > /src/prebuild.log 2>&1 \
       || { tail -40 /src/prebuild.log; exit 1; }; } \

@@ -29,51 +29,62 @@
       "press": "C-/"
     },
     {
-      "call": "snapshot",
-      "args": {},
+      "call": "capture-editor",
+      "args": {
+        "workspace": "$WS",
+        "vars": [],
+        "maxText": 0,
+        "maxUndo": 0,
+        "maxTotal": 0,
+        "maxGlobals": 0
+      },
       "exact": [
-        "files[].path",
-        "files[].point",
-        "files[].visible",
-        "layout",
-        "selected",
-        "tab",
-        "tabs",
-        "tabIndex"
+        "spec.files[].path",
+        "spec.files[].point",
+        "spec.files[].visible",
+        "spec.layout",
+        "spec.selected",
+        "spec.tab",
+        "spec.tabs",
+        "spec.tabIndex"
       ]
     }
   ],
   "calls": [
     {
-      "op": "snapshot",
+      "op": "capture-editor",
       "ok": true,
       "reply": {
-        "files": [
-          {
-            "path": "a.txt",
-            "point": 2,
-            "visible": true
-          }
-        ],
-        "layout": "a.txt",
-        "windowState": "(((min-height . 4) (min-width . 10) (min-height-ignore . 2) (min-width-ignore . 2) (min-height-safe . 1) (min-width-safe . 2) (min-pixel-height . 4) (min-pixel-width . 10) (min-pixel-height-ignore . 2) (min-pixel-width-ignore . 2) (min-pixel-height-safe . 1) (min-pixel-width-safe . 2)) leaf (pixel-width . 80) (pixel-height . 22) (total-width . 80) (total-height . 22) (normal-height . 1.0) (normal-width . 1.0) (buffer \"a.txt\" (selected . t) (hscroll . 0) (fringes 0 0 nil nil) (margins nil) (scroll-bars nil 0 t nil 0 t nil) (vscroll . 0) (dedicated) (point . 2) (start . 1) (file . \"$WS/a.txt\")) (prev-buffers (\"*scratch*\" 1 1)))",
-        "selected": "a.txt",
-        "tab": "a.txt",
-        "tabs": [
-          ""
-        ],
-        "tabIndex": 1,
-        "specialBuffers": "nil"
+        "spec": {
+          "files": [
+            {
+              "path": "a.txt",
+              "point": 2,
+              "visible": true
+            }
+          ],
+          "layout": "a.txt",
+          "windowState": "(((min-height . 4) (min-width . 10) (min-height-ignore . 2) (min-width-ignore . 2) (min-height-safe . 1) (min-width-safe . 2) (min-pixel-height . 4) (min-pixel-width . 10) (min-pixel-height-ignore . 2) (min-pixel-width-ignore . 2) (min-pixel-height-safe . 1) (min-pixel-width-safe . 2)) leaf (pixel-width . 80) (pixel-height . 22) (total-width . 80) (total-height . 22) (normal-height . 1.0) (normal-width . 1.0) (buffer \"a.txt\" (selected . t) (hscroll . 0) (fringes 0 0 nil nil) (margins nil) (scroll-bars nil 0 t nil 0 t nil) (vscroll . 0) (dedicated) (point . 2) (start . 1) (file . \"$WS/a.txt\")) (prev-buffers (\"*scratch*\" 1 1)))",
+          "selected": "a.txt",
+          "tab": "a.txt",
+          "tabs": [
+            ""
+          ],
+          "tabIndex": 1,
+          "specialBuffers": "nil"
+        },
+        "buffers": {},
+        "globals": null
       },
       "exact": [
-        "files[].path",
-        "files[].point",
-        "files[].visible",
-        "layout",
-        "selected",
-        "tab",
-        "tabs",
-        "tabIndex"
+        "spec.files[].path",
+        "spec.files[].point",
+        "spec.files[].visible",
+        "spec.layout",
+        "spec.selected",
+        "spec.tab",
+        "spec.tabs",
+        "spec.tabIndex"
       ]
     }
   ],

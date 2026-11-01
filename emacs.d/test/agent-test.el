@@ -2,7 +2,7 @@
 
 ;; Run from emacs.d/ (emacs.md section 10.6):
 ;;
-;;   emacs --batch -l lisp/playground-agent.el -l test/agent-test.el \
+;;   emacs --batch -L lisp -l playground-agent -l test/agent-test.el \
 ;;     -f ert-run-tests-batch-and-exit
 ;;
 ;; In the session image the compiled agent can be tested the same way:
@@ -14,7 +14,7 @@
 ;; a Unix socket server (make-network-process :server t) that records
 ;; every line the agent sends and can send calls.  They cover the event
 ;; shapes, the state object, rescue from each trap state, reset with a
-;; spec, snapshot and open, check timeouts, the other ops, reconnection
+;; spec, capture-editor and open, check timeouts, the other ops, reconnection
 ;; with backoff, the queue, and the post-command cost.
 
 ;;; Code:
@@ -846,7 +846,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (should (eq (alist-get 'ok (pg-test-call "set-modules" `((enabled . ,(vector "../evil"))))) :false)))))
 
 (ert-deftest pg-agent/snapshot-and-open ()
-  "snapshot describes buffers and layout; open puts them back."
+  "capture-editor's spec describes buffers and layout; open puts them back."
   (pg-test-with-agent
     (let ((a (pg-test-file "a.txt" "line one\nline two\n"))
           (b (pg-test-file "sub/b.txt")))
@@ -857,7 +857,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (other-window 1)
       (find-file b)
       (other-window 1)
-      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+      (let ((snap (pg-test-window-spec)))
         (should (equal (alist-get 'layout snap) "(vsplit a.txt sub/b.txt)"))
         (should (equal (alist-get 'selected snap) "a.txt"))
         (should (> (length (alist-get 'windowState snap)) 0))
@@ -904,7 +904,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (should-not playground--pending-layout))))
 
 (ert-deftest pg-agent/op-reset-step ()
-  "reset-step reverts edited buffers, kills buffers of deleted files, applies the spec."
+  "restore-editor reverts edited buffers, kills buffers of deleted files, applies the spec."
   (pg-test-with-agent
     (let ((a (pg-test-file "a.txt" "original a\n"))
           (b (pg-test-file "b.txt" "original b\n"))
@@ -916,7 +916,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (find-file-noselect c)
       (delete-file c)
       (let ((r (pg-test-value
-                (pg-test-call "reset-step"
+                (pg-test-call "restore-editor"
                               `((spec . ((files . ,(vector '((path . "a.txt") (point . 1) (visible . t))
                                                            '((path . "b.txt") (point . 1) (visible . t))))
                                          (layout . "(hsplit a.txt b.txt)"))))))))
@@ -952,7 +952,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
           (when (buffer-live-p second) (kill-buffer second)))))))
 
 (ert-deftest pg-agent/reset-step-keeps-external-buffers ()
-  "reset-step leaves edited files outside the workspace alone."
+  "restore-editor leaves edited files outside the workspace alone."
   (pg-test-with-agent
     (let* ((dir (make-temp-file "pg-external" t))
            (existing (expand-file-name "existing.txt" dir))
@@ -964,7 +964,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
               (with-current-buffer (find-file-noselect file)
                 (erase-buffer)
                 (insert "unsaved")))
-            (pg-test-value (pg-test-call "reset-step" nil))
+            (pg-test-value (pg-test-call "restore-editor" nil))
             (dolist (file (list existing missing))
               (should (buffer-live-p (get-file-buffer file)))
               (with-current-buffer (get-file-buffer file)
@@ -978,7 +978,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
 
 (defvar pg-test--restored 0)
 (ert-deftest pg-agent/reset-step-runs-the-lesson-hook ()
-  "reset-step runs `playground-reset-step-hook' last; setup empties it before its eval."
+  "restore-editor runs `playground-reset-step-hook' after the step's start; setup empties it before its eval."
   (pg-test-with-agent
     (pg-test-file "a.txt" "a\n")
     (setq pg-test--restored 0)
@@ -987,13 +987,13 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
                                            (eval . "(add-hook 'playground-reset-step-hook (lambda () (cl-incf pg-test--restored)))")
                                            (workspace . ,pg-test--dir))))
     (should (= pg-test--restored 0))
-    (pg-test-value (pg-test-call "reset-step" `((spec . ((files . ,(vector '((path . "a.txt") (point . 1) (visible . t)))))))))
-    (pg-test-value (pg-test-call "reset-step" `((spec . ((files . ,(vector '((path . "a.txt") (point . 1) (visible . t)))))))))
+    (pg-test-value (pg-test-call "restore-editor" `((spec . ((files . ,(vector '((path . "a.txt") (point . 1) (visible . t)))))))))
+    (pg-test-value (pg-test-call "restore-editor" `((spec . ((files . ,(vector '((path . "a.txt") (point . 1) (visible . t)))))))))
     (should (= pg-test--restored 2))
     (setq playground-reset-step-hook nil)))
 
 (ert-deftest pg-agent/op-reset-step-cancels-a-pending-prefix ()
-  "With a prefix key waiting (C-c), reset-step unwinds first, then resets and replies."
+  "With a prefix key waiting (C-c), restore-editor unwinds first, then resets and replies."
   (pg-test-with-agent
     (let* ((a (pg-test-file "a.txt" "original a\n"))
            (unwound nil)
@@ -1001,7 +1001,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (with-current-buffer (find-file-noselect a) (goto-char (point-max)) (insert "edited\n"))
       (cl-letf (((symbol-function 'this-single-command-keys) (lambda () [3])))
         (pg-test-value
-         (pg-test-call "reset-step"
+         (pg-test-call "restore-editor"
                        `((spec . ((files . ,(vector '((path . "a.txt") (point . 1) (visible . t))))
                                   (layout . "a.txt")))))))
       (should unwound)
@@ -1024,7 +1024,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (delete-other-windows)
       (find-file hello)
       (should (equal (buffer-name) "README.md"))
-      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+      (let ((snap (pg-test-window-spec)))
         (should (string-match-p "(file \\. " (alist-get 'windowState snap)))
         ;; During the step: hello's main.rs, polyglot's main.rs and
         ;; README.md; the window ends on polyglot's README.md, and the
@@ -1034,7 +1034,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
         (find-file poly)
         (should (equal (buffer-name (get-file-buffer hello)) "README.md<hello>"))
         (setq snap (pg-test--spec snap))
-        (pg-test-value (pg-test-call "reset-step" `((spec . ,snap)))))
+        (pg-test-value (pg-test-call "restore-editor" `((spec . ,snap)))))
       (should (equal (pg-test--shown-files) (list hello)))
       (should (equal (buffer-name (window-buffer (selected-window))) "README.md"))
       (should (equal (buffer-local-value 'default-directory (window-buffer (selected-window)))
@@ -1054,7 +1054,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (split-window-below)
       (other-window 1)
       (find-file hello)
-      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+      (let ((snap (pg-test-window-spec)))
         ;; Another README.md opens and takes the lower window.
         (find-file poly)
         (other-window 1)
@@ -1072,8 +1072,29 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
           (pg-test-value (pg-test-call "open" snap)))
         (should (equal (pg-test--shown-files) (list main hello)))))))
 
+(defun pg-test-window-spec ()
+  "The learner frame's window spec: capture-editor with zero bounds and
+no variables, as sessiond asks for snapshot.json (snapshot.SpecOnly)."
+  (alist-get 'spec (pg-test-value
+                    (pg-test-call "capture-editor"
+                                  '((vars . []) (maxText . 0) (maxUndo . 0) (maxTotal . 0) (maxGlobals . 0))))))
+
+;; TODO(emacs, api.md §7): deleted with the aliases.
+(ert-deftest pg-agent/legacy-snapshot-and-reset-step ()
+  "The aliases snapshot and reset-step answer like capture-editor's spec and restore-editor."
+  (pg-test-with-agent
+    (pg-test-file "a.txt" "line one\n")
+    (delete-other-windows)
+    (find-file (expand-file-name "a.txt" pg-test--dir))
+    (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+      (should (equal (alist-get 'layout snap) (alist-get 'layout (pg-test-window-spec))))
+      (insert "edited ")
+      (let ((r (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap)))))))
+        (should (= (alist-get 'reverted r) 1)))
+      (should-not (buffer-modified-p (get-file-buffer (expand-file-name "a.txt" pg-test--dir)))))))
+
 (defun pg-test--spec (snap)
-  "SNAP, a parsed snapshot, ready to be sent back as a WindowSpec."
+  "SNAP, a parsed window spec, ready to be sent back as a WindowSpec."
   (setf (alist-get 'files snap) (vconcat (alist-get 'files snap)))
   (when (alist-get 'tabs snap)
     (setf (alist-get 'tabs snap) (vconcat (alist-get 'tabs snap))))
@@ -1089,7 +1110,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (find-file brief)
       (dired dir)
       (dired-goto-file notes)
-      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+      (let ((snap (pg-test-window-spec)))
         (should (string-match-p "(dired \\. " (alist-get 'windowState snap)))
         ;; The demo moves notes.md away and leaves the listing; a reset
         ;; setup would have killed it.  The restore puts the file back.
@@ -1098,7 +1119,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
         (kill-buffer (current-buffer))
         (switch-to-buffer (get-file-buffer brief))
         (rename-file (expand-file-name "docs/notes.md" dir) notes)
-        (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap))))))
+        (pg-test-value (pg-test-call "restore-editor" `((spec . ,(pg-test--spec snap))))))
       (let ((b (window-buffer (selected-window))))
         (should (eq (buffer-local-value 'major-mode b) 'dired-mode))
         (with-current-buffer b
@@ -1115,13 +1136,13 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (find-file-noselect b)
       (delete-other-windows)
       (ibuffer)
-      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+      (let ((snap (pg-test-window-spec)))
         (should (string-match-p "(ibuffer \\. t)" (alist-get 'windowState snap)))
         ;; The demo filters the list and marks a buffer.
         (setq ibuffer-filtering-qualifiers '((filename . "rs$")))
         (ibuffer-update nil t)
         (ibuffer-mark-on-buffer (lambda (x) (eq x (get-file-buffer a))) ?>)
-        (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap))))))
+        (pg-test-value (pg-test-call "restore-editor" `((spec . ,(pg-test--spec snap))))))
       (let ((ib (window-buffer (selected-window))))
         (should (eq (buffer-local-value 'major-mode ib) 'ibuffer-mode))
         (with-current-buffer ib
@@ -1130,7 +1151,7 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
                                 (ibuffer-current-state-list))))))))
 
 (ert-deftest pg-agent/reset-step-tabs ()
-  "reset-step closes the tabs a step opened and reopens the ones it closed."
+  "restore-editor closes the tabs a step opened and reopens the ones it closed."
   (pg-test-with-agent
     (require 'tab-bar)
     (let ((main (pg-test-file "hello/main.rs" "fn main() {}\n")))
@@ -1139,20 +1160,20 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
             (delete-other-windows)
             (find-file main)
             (tab-bar-rename-tab "hello")
-            (let ((one (pg-test-value (pg-test-call "snapshot"))))
+            (let ((one (pg-test-window-spec)))
               (should (equal (alist-get 'tabs one) '("hello")))
               ;; A demo opens a project tab (C-x p p).
               (tab-bar-new-tab)
               (tab-bar-rename-tab "polyglot")
-              (let ((two (pg-test-value (pg-test-call "snapshot"))))
+              (let ((two (pg-test-window-spec)))
                 (should (equal (alist-get 'tabs two) '("hello" "polyglot")))
                 (should (equal (alist-get 'tabIndex two) 2))
-                (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec one)))))
+                (pg-test-value (pg-test-call "restore-editor" `((spec . ,(pg-test--spec one)))))
                 (should (equal (mapcar (lambda (tab) (alist-get 'name tab)) (funcall tab-bar-tabs-function))
                                '("hello")))
                 ;; The next step started with both tabs, polyglot current;
                 ;; its demo closed polyglot.
-                (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec two)))))
+                (pg-test-value (pg-test-call "restore-editor" `((spec . ,(pg-test--spec two)))))
                 (should (equal (mapcar (lambda (tab) (alist-get 'name tab)) (funcall tab-bar-tabs-function))
                                '("hello" "polyglot")))
                 (should (equal (alist-get 'name (tab-bar--current-tab)) "polyglot")))))
@@ -1168,12 +1189,12 @@ Errors (an empty kill ring) are ignored, as the command loop shows them."
       (describe-function 'save-buffer))
     (let* ((names (sort (mapcar #'buffer-name (seq-filter #'playground--help-buffer-p (buffer-list)))
                         #'string<))
-           (snap (pg-test-value (pg-test-call "snapshot"))))
+           (snap (pg-test-window-spec)))
       (should (= (length names) 2))
       ;; The demo kills them (ibuffer's * h D) and the learner opens another.
       (dolist (b (seq-filter #'playground--help-buffer-p (buffer-list))) (kill-buffer b))
       (save-window-excursion (describe-function 'kill-buffer))
-      (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap)))))
+      (pg-test-value (pg-test-call "restore-editor" `((spec . ,(pg-test--spec snap)))))
       (should (equal (sort (mapcar #'buffer-name (seq-filter #'playground--help-buffer-p (buffer-list)))
                            #'string<)
                      names))
@@ -1204,7 +1225,7 @@ finished\" hold before the learner builds anything (lesson 2.7)."
       (delete-other-windows)
       (set-window-buffer (split-window-below) shown)
       (should (buffer-local-value 'playground--run-started early))
-      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+      (let ((snap (pg-test-window-spec)))
         (sleep-for 0.01)
         ;; The demonstration builds, and so does the learner in the shown window.
         (let ((later (pg-test--build "echo Finished dev profile"))
@@ -1212,7 +1233,7 @@ finished\" hold before the learner builds anything (lesson 2.7)."
           (should (eq again shown))
           (should (> (buffer-local-value 'playground--run-started later)
                      (alist-get 'takenAt snap)))
-          (let ((r (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap)))))))
+          (let ((r (pg-test-value (pg-test-call "restore-editor" `((spec . ,(pg-test--spec snap)))))))
             (should (>= (alist-get 'killed r) 1)))
           (should-not (buffer-live-p later))
           (should (buffer-live-p early))
@@ -1220,10 +1241,10 @@ finished\" hold before the learner builds anything (lesson 2.7)."
           (should (get-buffer-window shown))
           (dolist (b (list early shown)) (kill-buffer b)))))))
 
-(ert-deftest pg-agent/snapshot-with-propertized-buffer-names ()
+(ert-deftest pg-agent/spec-with-propertized-buffer-names ()
   "A buffer name with text properties still gives a readable window state.
 uniquify can give a name back with the buffer in a text property; an
-unreadable state would make reset-step fall back to the layout pattern
+unreadable state would make restore-editor fall back to the layout pattern
 and lose the side window."
   (pg-test-with-agent
     (let* ((a (find-file-noselect (pg-test-file "a.txt" "a\n")))
@@ -1235,13 +1256,13 @@ and lose the side window."
       (switch-to-buffer a)
       (switch-to-buffer b)
       (display-buffer-in-side-window side '((side . right)))
-      (let ((snap (pg-test-value (pg-test-call "snapshot"))))
+      (let ((snap (pg-test-window-spec)))
         (should-not (string-search "#<" (alist-get 'windowState snap)))
         (should (car (read-from-string (alist-get 'windowState snap))))
         ;; The step's demo hides the side window (C-x w s); Reset brings it back.
         (window-toggle-side-windows)
         (should-not (get-buffer-window side))
-        (pg-test-value (pg-test-call "reset-step" `((spec . ,(pg-test--spec snap)))))
+        (pg-test-value (pg-test-call "restore-editor" `((spec . ,(pg-test--spec snap)))))
         (should (eq (window-parameter (get-buffer-window side) 'window-side) 'right)))
       (kill-buffer side)))
   ;; A state printed with buffer objects reads them as nil.
@@ -1708,7 +1729,7 @@ and lose the side window."
             (should (equal (seq-take did 2) '("closed the my-sizes hydra" "cancelled the prompt")))))))))
 
 (ert-deftest pg-agent/setup-and-reset-close-a-hydra ()
-  "setup and reset-step close an open hydra, whose keys would take the next ones."
+  "setup and restore-editor close an open hydra, whose keys would take the next ones."
   (pg-test-with-agent
     (pg-test-file "hello/README.md" "# hello\n")
     (pg-test-with-hydra "my-menu"
@@ -1719,7 +1740,7 @@ and lose the side window."
       (should (eq (alist-get 'waiting (playground--state)) :null)))
     (pg-test-with-hydra "my-menu"
       (pg-test-value
-       (pg-test-call "reset-step"
+       (pg-test-call "restore-editor"
                      `((spec . ((files . ,(vector '((path . "hello/README.md") (point . 1) (visible . t))))
                                 (layout . "hello/README.md"))))))
       (should (= pg-test--hydra-quits 1)))))
@@ -1825,10 +1846,10 @@ The hint."
             (delete-other-windows)
             (find-file main)
             (tab-bar-rename-tab "hello")
-            (let ((spec (pg-test--spec (pg-test-value (pg-test-call "snapshot")))))
+            (let ((spec (pg-test--spec (pg-test-window-spec))))
               ;; The GUI frame made since starts with one unnamed tab.
               (tab-bar-rename-tab "")
-              (pg-test-value (pg-test-call "reset-step" `((spec . ,spec))))
+              (pg-test-value (pg-test-call "restore-editor" `((spec . ,spec))))
               (should (equal (mapcar (lambda (tab) (alist-get 'name tab))
                                      (funcall tab-bar-tabs-function))
                              '("hello")))))
@@ -1995,6 +2016,190 @@ but whether the name is remote (no I/O on the connection)."
       (should (equal (playground--read-only-reason) "file is write-protected"))
       (setq buffer-file-name nil))))
 
+;;;; Editor state ops: capture-editor, restore-editor and the small ones
+
+(defun pg-test--editor-args (captured)
+  "The restore-editor arguments for CAPTURED, a parsed capture-editor reply."
+  `((workspace . ,(directory-file-name pg-test--dir))
+    (spec . ,(pg-test--spec (alist-get 'spec captured)))
+    (buffers . ,(or (mapcar (lambda (e) (cons (car e) (vconcat (cdr e))))
+                            (alist-get 'buffers captured))
+                    (make-hash-table)))
+    (globals . ,(alist-get 'globals captured))))
+
+(defun pg-test--capture (&rest overrides)
+  "Call capture-editor with the default bounds, kill-ring as the variable, and OVERRIDES."
+  (pg-test-value
+   (pg-test-call "capture-editor"
+                 (append overrides
+                         `((workspace . ,(directory-file-name pg-test--dir))
+                           (vars . ["kill-ring" "extended-command-history"])
+                           (maxText . 262144) (maxUndo . 131072) (maxTotal . 524288)
+                           (maxGlobals . 262144))))))
+
+(ert-deftest pg-agent/op-capture-editor ()
+  "capture-editor: the spec, unsaved text and undo under the workspace, and the variables."
+  (pg-test-with-agent
+    (let ((a (pg-test-file "a.txt" "line one\nline two\n"))
+          (b (pg-test-file "sub/b.txt" "This is b.\n"))
+          (outside (make-temp-file "pg-outside" nil ".txt" "elsewhere\n"))
+          (kill-ring '("learner kill"))
+          (extended-command-history '("find-file")))
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (find-file a)
+            (goto-char (point-min))
+            (insert "edited ")
+            (with-current-buffer (find-file-noselect b)
+              (goto-char (point-max))
+              (insert "more\n")
+              (save-buffer))
+            (with-current-buffer (find-file-noselect outside) (insert "x"))
+            (let* ((r (pg-test--capture))
+                   (bufs (alist-get 'buffers r))
+                   (ea (alist-get 'a.txt bufs))
+                   (eb (alist-get 'sub/b.txt bufs)))
+              (should (equal (alist-get 'layout (alist-get 'spec r)) "a.txt"))
+              (should (equal (length bufs) 2))
+              (should (eq (nth 0 ea) t))
+              (should (equal (nth 1 ea) "edited line one\nline two\n"))
+              (should (consp (car (read-from-string (nth 2 ea)))))
+              ;; Saved: no text, but the history is kept.
+              (should (eq (nth 0 eb) :false))
+              (should (eq (nth 1 eb) :null))
+              (should (stringp (nth 2 eb)))
+              (let ((g (car (read-from-string (alist-get 'globals r)))))
+                (should (equal (alist-get 'kill-ring g) '("learner kill")))
+                (should (equal (alist-get 'extended-command-history g) '("find-file")))))
+            ;; Bounds: text over maxText is not kept, nothing over maxTotal.
+            (let ((r (pg-test--capture '(maxText . 3))))
+              (should (eq (nth 1 (alist-get 'a.txt (alist-get 'buffers r))) :null)))
+            ;; Zero bounds and no variables: the spec alone.
+            (let ((r (pg-test--capture '(maxTotal . 0) '(vars . []))))
+              (should (alist-get 'spec r))
+              (should-not (alist-get 'buffers r))
+              (should (eq (alist-get 'globals r) :null))))
+        (with-current-buffer (get-file-buffer outside) (set-buffer-modified-p nil) (kill-buffer))
+        (delete-file outside)))))
+
+(ert-deftest pg-agent/op-restore-editor-roundtrip ()
+  "restore-editor puts back the text, undo, point and variables capture-editor took."
+  (pg-test-with-agent
+    (let ((a (pg-test-file "a.txt" "line one\nline two\n"))
+          (kill-ring nil) (kill-ring-yank-pointer nil)
+          (extended-command-history nil))
+      (delete-other-windows)
+      (find-file a)
+      (goto-char (point-min))
+      (insert "edited ")
+      (kill-new "learner kill")
+      (goto-char 5)
+      (let* ((captured (pg-test--capture))
+             (undo (with-current-buffer (get-file-buffer a) buffer-undo-list)))
+        ;; The demo: more edits, a save, a kill and a command in the history.
+        (goto-char (point-max))
+        (insert "demo\n")
+        (save-buffer)
+        (kill-new "demo kill")
+        (push "demo-command" extended-command-history)
+        (goto-char (point-min))
+        (let ((r (pg-test-value (pg-test-call "restore-editor" (pg-test--editor-args captured)))))
+          (should (equal (alist-get 'buffers r) 1))
+          (should (equal (alist-get 'globals r) 2))
+          (should-not (alist-get 'degraded r)))
+        (with-current-buffer (get-file-buffer a)
+          ;; The file keeps the demo's save; the buffer is the captured one.
+          (should (equal (buffer-string) "edited line one\nline two\n"))
+          (should (buffer-modified-p))
+          (should (= (point) 5))
+          (should (equal buffer-undo-list
+                         (mapcar #'playground--readable-undo-entry undo))))
+        (should (equal kill-ring '("learner kill")))
+        (should (eq kill-ring-yank-pointer kill-ring))
+        (should-not extended-command-history)))))
+
+(ert-deftest pg-agent/restore-editor-degrades ()
+  "A buffer whose restore fails is named in degraded; the others are restored."
+  (pg-test-with-agent
+    (let ((a (pg-test-file "a.txt" "original a\n"))
+          (b (pg-test-file "b.txt" "original b\n")))
+      (with-current-buffer (find-file-noselect a) (insert "edited "))
+      (with-current-buffer (find-file-noselect b) (insert "edited "))
+      (let ((revert (symbol-function 'revert-buffer)))
+        (cl-letf (((symbol-function 'revert-buffer)
+                   (lambda (&rest args)
+                     (if (equal (buffer-name) "a.txt")
+                         (error "User interaction while inhibited")
+                       (apply revert args)))))
+          (let ((r (pg-test-value
+                    (pg-test-call "restore-editor"
+                                  `((workspace . ,(directory-file-name pg-test--dir))
+                                    (spec . ((files . ,(vector '((path . "a.txt") (point . 1))
+                                                               '((path . "b.txt") (point . 1))))
+                                             (layout . "b.txt")))
+                                    (buffers . ,(make-hash-table))
+                                    (globals . :null))))))
+            (should (equal (alist-get 'degraded r) '("a.txt: User interaction while inhibited")))
+            (should (equal (alist-get 'reverted r) 1)))))
+      (should (equal (with-current-buffer (get-file-buffer b) (buffer-string)) "original b\n"))
+      (should (with-current-buffer (get-file-buffer a) (buffer-modified-p))))))
+
+(ert-deftest pg-agent/op-modified-files ()
+  "modified-files lists the workspace files whose buffers have unsaved changes."
+  (pg-test-with-agent
+    (let ((outside (make-temp-file "pg-outside" nil ".txt" "elsewhere\n")))
+      (unwind-protect
+          (progn
+            (with-current-buffer (find-file-noselect (pg-test-file "sub/a.txt")) (insert "x"))
+            (find-file-noselect (pg-test-file "b.txt"))
+            (with-current-buffer (find-file-noselect outside) (insert "x"))
+            (should (equal (alist-get 'paths (pg-test-value
+                                              (pg-test-call "modified-files"
+                                                            `((workspace . ,(directory-file-name pg-test--dir))))))
+                           '("sub/a.txt"))))
+        (with-current-buffer (get-file-buffer outside) (set-buffer-modified-p nil) (kill-buffer))
+        (delete-file outside)))))
+
+(ert-deftest pg-agent/op-flush-buffers ()
+  "flush-buffers saves modified buffers, never over a file changed on disk or a read-only one."
+  (pg-test-with-agent
+    (let ((a (pg-test-file "a.txt" "a\n"))
+          (b (pg-test-file "b.txt" "b\n"))
+          (c (pg-test-file "c.txt" "c\n")))
+      (with-current-buffer (find-file-noselect a) (insert "saved "))
+      (with-current-buffer (find-file-noselect b) (insert "kept "))
+      (with-temp-file b (insert "restored b\n"))
+      (set-file-times b (time-add nil 2))
+      (with-current-buffer (find-file-noselect c) (insert "read-only ") (setq buffer-read-only t))
+      (should (equal (alist-get 'saved (pg-test-value (pg-test-call "flush-buffers"))) 1))
+      (should (equal (with-temp-buffer (insert-file-contents a) (buffer-string)) "saved a\n"))
+      (should (equal (with-temp-buffer (insert-file-contents b) (buffer-string)) "restored b\n"))
+      (should (equal (with-temp-buffer (insert-file-contents c) (buffer-string)) "c\n")))))
+
+(ert-deftest pg-agent/op-visit ()
+  "visit opens a workspace file in the learner's window."
+  (pg-test-with-agent
+    (pg-test-file "sub/b.txt")
+    (delete-other-windows)
+    (switch-to-buffer "*scratch*")
+    (should (equal (alist-get 'buffer (pg-test-value (pg-test-call "visit" '((path . "sub/b.txt")))))
+                   "b.txt"))
+    (should (equal (buffer-name (window-buffer (selected-window))) "b.txt"))
+    (should (eq (alist-get 'ok (pg-test-call "visit" '((path . "")))) :false))))
+
+(ert-deftest pg-agent/display-and-loop-ops ()
+  "leave-display closes the X displays (none in batch); resume-loop and reset-debug answer {}."
+  (pg-test-with-agent
+    (let ((r (pg-test-value (pg-test-call "leave-display"))))
+      (should (eq (alist-get 'closed r) t))
+      (should (equal (alist-get 'detail r) "")))
+    (cl-letf (((symbol-function 'top-level) #'ignore))
+      (should-not (pg-test-value (pg-test-call "resume-loop"))))
+    (let ((debug-on-quit t))
+      (should-not (pg-test-value (pg-test-call "reset-debug")))
+      (should-not debug-on-quit))))
+
 ;;;; Contract fixtures (test/fixtures/agent, written by record-fixtures.el)
 
 ;; A fixture case is JSON: {name, setup: [{file, contents}], steps: [{press}
@@ -2035,11 +2240,15 @@ but whether the name is remote (no I/O on the connection)."
    (t v)))
 
 (defun pg-fixture--resolve (v saved)
-  "V with \"$WS\" the test directory and \"$NAME\" the reply saved as NAME."
+  "V with \"$WS\" the test directory, \"$NAME\" the reply saved as NAME
+and \"$NAME.FIELD\" that reply's FIELD."
   (cond
    ((and (stringp v) (equal v "$WS")) (directory-file-name pg-test--dir))
    ((and (stringp v) (string-prefix-p "$" v))
-    (or (cdr (assoc (substring v 1) saved)) (error "No reply saved as %s" v)))
+    (let* ((parts (split-string (substring v 1) "\\."))
+           (reply (or (cdr (assoc (car parts) saved)) (error "No reply saved as %s" v))))
+      (dolist (field (cdr parts) reply)
+        (setq reply (if (consp reply) (alist-get (intern field) reply) :null)))))
    ((vectorp v) (vconcat (mapcar (lambda (x) (pg-fixture--resolve x saved)) v)))
    ((and (consp v) (consp (car v)))
     (mapcar (lambda (kv) (cons (car kv) (pg-fixture--resolve (cdr kv) saved))) v))

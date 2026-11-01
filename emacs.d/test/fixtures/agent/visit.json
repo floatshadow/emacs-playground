@@ -1,69 +1,114 @@
 {
-  "name": "snapshot-with-dired",
+  "name": "visit",
   "setup": [
     {
-      "file": "docs/x.md",
-      "contents": "# x\n"
+      "file": "a.txt",
+      "contents": "line one\nline two\n"
+    },
+    {
+      "file": "sub/b.txt",
+      "contents": "This is b.\n"
     }
   ],
   "steps": [
     {
-      "press": "C-x d"
+      "press": "C-x C-f"
     },
     {
-      "type": "docs"
+      "type": "a.txt"
     },
     {
       "press": "RET"
     },
     {
-      "call": "snapshot",
-      "args": {},
+      "call": "visit",
+      "args": {
+        "path": "sub/b.txt"
+      },
       "exact": [
-        "files[].path",
-        "files[].point",
-        "files[].visible",
-        "layout",
-        "selected",
-        "tab",
-        "tabs",
-        "tabIndex"
+        "buffer"
+      ]
+    },
+    {
+      "call": "capture-editor",
+      "args": {
+        "workspace": "$WS",
+        "vars": [],
+        "maxText": 0,
+        "maxUndo": 0,
+        "maxTotal": 0,
+        "maxGlobals": 0
+      },
+      "exact": [
+        "spec.files[].path",
+        "spec.files[].point",
+        "spec.files[].visible",
+        "spec.layout",
+        "spec.selected",
+        "spec.tab",
+        "spec.tabs",
+        "spec.tabIndex"
       ]
     }
   ],
   "calls": [
     {
-      "op": "snapshot",
+      "op": "visit",
       "ok": true,
       "reply": {
-        "files": [],
-        "layout": "docs",
-        "windowState": "(((min-height . 4) (min-width . 10) (min-height-ignore . 2) (min-width-ignore . 2) (min-height-safe . 1) (min-width-safe . 2) (min-pixel-height . 4) (min-pixel-width . 10) (min-pixel-height-ignore . 2) (min-pixel-width-ignore . 2) (min-pixel-height-safe . 1) (min-pixel-width-safe . 2)) leaf (pixel-width . 80) (pixel-height . 23) (total-width . 80) (total-height . 23) (normal-height . 1.0) (normal-width . 1.0) (buffer \"docs\" (selected . t) (hscroll . 0) (fringes 0 0 nil nil) (margins nil) (scroll-bars nil 0 t nil 0 t nil) (vscroll . 0) (dedicated) (point . 204) (start . 1) (dired . \"$WS/docs/\") (dired-file . \"$WS/docs/x.md\") (dired-marks)) (prev-buffers (\"*scratch*\" 1 1)))",
-        "selected": "docs",
-        "tab": "docs",
-        "tabs": [
-          ""
-        ],
-        "tabIndex": 1,
-        "specialBuffers": "nil"
+        "buffer": "b.txt"
       },
       "exact": [
-        "files[].path",
-        "files[].point",
-        "files[].visible",
-        "layout",
-        "selected",
-        "tab",
-        "tabs",
-        "tabIndex"
+        "buffer"
+      ]
+    },
+    {
+      "op": "capture-editor",
+      "ok": true,
+      "reply": {
+        "spec": {
+          "files": [
+            {
+              "path": "sub/b.txt",
+              "point": 1,
+              "visible": true
+            },
+            {
+              "path": "a.txt",
+              "point": 1,
+              "visible": false
+            }
+          ],
+          "layout": "sub/b.txt",
+          "windowState": "(((min-height . 4) (min-width . 10) (min-height-ignore . 2) (min-width-ignore . 2) (min-height-safe . 1) (min-width-safe . 2) (min-pixel-height . 4) (min-pixel-width . 10) (min-pixel-height-ignore . 2) (min-pixel-width-ignore . 2) (min-pixel-height-safe . 1) (min-pixel-width-safe . 2)) leaf (pixel-width . 80) (pixel-height . 22) (total-width . 80) (total-height . 22) (normal-height . 1.0) (normal-width . 1.0) (buffer \"b.txt\" (selected . t) (hscroll . 0) (fringes 0 0 nil nil) (margins nil) (scroll-bars nil 0 t nil 0 t nil) (vscroll . 0) (dedicated) (point . 1) (start . 1) (file . \"$WS/sub/b.txt\")) (prev-buffers (\"a.txt\" 1 1 \"$WS/a.txt\") (\"*scratch*\" 1 1)))",
+          "selected": "sub/b.txt",
+          "tab": "b.txt",
+          "tabs": [
+            ""
+          ],
+          "tabIndex": 1,
+          "specialBuffers": "nil"
+        },
+        "buffers": {},
+        "globals": null
+      },
+      "exact": [
+        "spec.files[].path",
+        "spec.files[].point",
+        "spec.files[].visible",
+        "spec.layout",
+        "spec.selected",
+        "spec.tab",
+        "spec.tabs",
+        "spec.tabIndex"
       ]
     }
   ],
   "events": [
     {
       "t": "key",
-      "keys": "C-x d",
-      "cmd": "dired",
+      "keys": "C-x C-f",
+      "cmd": "find-file",
       "buf": "*scratch*",
       "mode": "lisp-interaction-mode",
       "frame": "terminal"
@@ -71,7 +116,7 @@
     {
       "t": "minibuffer",
       "open": true,
-      "prompt": "Dired (directory): ",
+      "prompt": "Find file: ",
       "depth": 1,
       "kind": "prompt"
     },
@@ -92,7 +137,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -100,7 +145,7 @@
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -109,7 +154,7 @@
       },
       "minibuffer": {
         "depth": 1,
-        "prompt": "Dired (directory): ",
+        "prompt": "Find file: ",
         "contents": "$WS/",
         "kind": "prompt"
       },
@@ -123,7 +168,7 @@
     },
     {
       "t": "key",
-      "keys": "d",
+      "keys": "a",
       "cmd": "self-insert-command",
       "buf": " *Minibuf-1*",
       "mode": "minibuffer-mode",
@@ -146,7 +191,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -154,7 +199,7 @@
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -163,8 +208,8 @@
       },
       "minibuffer": {
         "depth": 1,
-        "prompt": "Dired (directory): ",
-        "contents": "$WS/d",
+        "prompt": "Find file: ",
+        "contents": "$WS/a",
         "kind": "prompt"
       },
       "isearch": false,
@@ -177,7 +222,7 @@
     },
     {
       "t": "key",
-      "keys": "o",
+      "keys": ".",
       "cmd": "self-insert-command",
       "buf": " *Minibuf-1*",
       "mode": "minibuffer-mode",
@@ -200,7 +245,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -208,7 +253,7 @@
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -217,8 +262,8 @@
       },
       "minibuffer": {
         "depth": 1,
-        "prompt": "Dired (directory): ",
-        "contents": "$WS/do",
+        "prompt": "Find file: ",
+        "contents": "$WS/a.",
         "kind": "prompt"
       },
       "isearch": false,
@@ -231,7 +276,7 @@
     },
     {
       "t": "key",
-      "keys": "c",
+      "keys": "t",
       "cmd": "self-insert-command",
       "buf": " *Minibuf-1*",
       "mode": "minibuffer-mode",
@@ -254,7 +299,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -262,7 +307,7 @@
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -271,8 +316,8 @@
       },
       "minibuffer": {
         "depth": 1,
-        "prompt": "Dired (directory): ",
-        "contents": "$WS/doc",
+        "prompt": "Find file: ",
+        "contents": "$WS/a.t",
         "kind": "prompt"
       },
       "isearch": false,
@@ -285,7 +330,7 @@
     },
     {
       "t": "key",
-      "keys": "s",
+      "keys": "x",
       "cmd": "self-insert-command",
       "buf": " *Minibuf-1*",
       "mode": "minibuffer-mode",
@@ -308,7 +353,7 @@
       "markActive": false,
       "windows": [
         {
-          "id": 3,
+          "id": 15,
           "buf": "*scratch*",
           "mode": "lisp-interaction-mode",
           "selected": true,
@@ -316,7 +361,7 @@
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
@@ -325,8 +370,62 @@
       },
       "minibuffer": {
         "depth": 1,
-        "prompt": "Dired (directory): ",
-        "contents": "$WS/docs",
+        "prompt": "Find file: ",
+        "contents": "$WS/a.tx",
+        "kind": "prompt"
+      },
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "key",
+      "keys": "t",
+      "cmd": "self-insert-command",
+      "buf": " *Minibuf-1*",
+      "mode": "minibuffer-mode",
+      "frame": "terminal"
+    },
+    {
+      "t": "state",
+      "buf": "*scratch*",
+      "file": null,
+      "mode": "lisp-interaction-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": false,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 0,
+      "point": 1,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "*scratch*",
+          "mode": "lisp-interaction-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "*scratch*"
+      },
+      "minibuffer": {
+        "depth": 1,
+        "prompt": "Find file: ",
+        "contents": "$WS/a.txt",
         "kind": "prompt"
       },
       "isearch": false,
@@ -340,7 +439,7 @@
     {
       "t": "key",
       "keys": "RET",
-      "cmd": "minibuffer-completion-exit",
+      "cmd": "minibuffer-complete-and-exit",
       "buf": " *Minibuf-1*",
       "mode": "minibuffer-mode",
       "frame": "terminal"
@@ -348,41 +447,41 @@
     {
       "t": "minibuffer",
       "open": false,
-      "prompt": "Dired (directory): ",
+      "prompt": "Find file: ",
       "depth": 1,
       "kind": "prompt"
     },
     {
       "t": "state",
-      "buf": "docs",
-      "file": null,
-      "mode": "dired-mode",
+      "buf": "a.txt",
+      "file": "$WS/a.txt",
+      "mode": "text-mode",
       "modeName": "",
       "minors": [],
       "modified": false,
-      "readonly": true,
+      "readonly": false,
       "narrowed": false,
       "overwrite": false,
-      "line": 4,
-      "col": 55,
-      "point": 204,
+      "line": 1,
+      "col": 0,
+      "point": 1,
       "markActive": false,
       "windows": [
         {
-          "id": 3,
-          "buf": "docs",
-          "mode": "dired-mode",
+          "id": 15,
+          "buf": "a.txt",
+          "mode": "text-mode",
           "selected": true,
           "dedicated": false,
           "side": null
         }
       ],
-      "layout": 3,
+      "layout": 15,
       "frame": "terminal",
       "frames": 1,
       "tabs": {
         "count": 1,
-        "current": "docs"
+        "current": "a.txt"
       },
       "minibuffer": null,
       "isearch": false,
@@ -390,7 +489,48 @@
       "macro": false,
       "prefixArg": null,
       "waiting": null,
-      "readOnlyReason": "dired-mode",
+      "readOnlyReason": null,
+      "diagAtPoint": null
+    },
+    {
+      "t": "state",
+      "buf": "b.txt",
+      "file": "$WS/sub/b.txt",
+      "mode": "text-mode",
+      "modeName": "",
+      "minors": [],
+      "modified": false,
+      "readonly": false,
+      "narrowed": false,
+      "overwrite": false,
+      "line": 1,
+      "col": 0,
+      "point": 1,
+      "markActive": false,
+      "windows": [
+        {
+          "id": 15,
+          "buf": "b.txt",
+          "mode": "text-mode",
+          "selected": true,
+          "dedicated": false,
+          "side": null
+        }
+      ],
+      "layout": 15,
+      "frame": "terminal",
+      "frames": 1,
+      "tabs": {
+        "count": 1,
+        "current": "b.txt"
+      },
+      "minibuffer": null,
+      "isearch": false,
+      "recursive": 0,
+      "macro": false,
+      "prefixArg": null,
+      "waiting": null,
+      "readOnlyReason": null,
       "diagAtPoint": null
     }
   ],
@@ -411,7 +551,13 @@
       "buf",
       "mode",
       "modified",
+      "narrowed",
+      "overwrite",
       "readonly",
+      "line",
+      "col",
+      "point",
+      "markActive",
       "frame",
       "isearch",
       "recursive"
