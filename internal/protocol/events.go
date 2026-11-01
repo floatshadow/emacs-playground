@@ -194,6 +194,8 @@ type HelloEvent struct {
 	Replayed bool `json:"replayed"`
 	// Lap is the running lap, if any (ScenarioRequest.Lap).
 	Lap *LapInfo `json:"lap,omitempty"`
+	// Busy is the lesson operation in progress, if any.
+	Busy *BusyInfo `json:"busy,omitempty"`
 }
 
 // Type implements Event.

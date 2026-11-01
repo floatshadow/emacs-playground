@@ -492,6 +492,24 @@ export interface BufferCond {
   modified?: boolean;
 }
 
+/**
+ * BusyInfo describes the lesson operation sessiond is running (api.md
+ * §3.4), so a reloaded page can veil while, say, "Go to this step"
+ * replays earlier steps.
+ */
+export interface BusyInfo {
+  /**
+   * Op names the kind of operation (load, restore, …) for logs and
+   * display; the set is open, so clients must not switch on it.
+   */
+  op: string;
+  /** LessonID and StepID name the step the op works on, when known. */
+  lessonId?: string;
+  stepId?: string;
+  /** StartedAt is when the op started (ms). */
+  startedAt: number;
+}
+
 /** CheckEvent carries the latest evaluation of the active step. */
 export interface CheckEvent {
   t: "check";
@@ -1038,6 +1056,8 @@ export interface HelloEvent {
   replayed: boolean;
   /** Lap is the running lap, if any (ScenarioRequest.Lap). */
   lap?: LapInfo;
+  /** Busy is the lesson operation in progress, if any. */
+  busy?: BusyInfo;
 }
 
 /** HintRequest records that the learner revealed a hint (progress counts it). */
@@ -2022,6 +2042,8 @@ export interface StatusResult {
    * ~/.ssh/config written; deployment.md §6).
    */
   remoteBox?: boolean;
+  /** Busy is the lesson operation in progress, if any. */
+  busy?: BusyInfo;
 }
 
 /** Step is one goal of a lesson. */

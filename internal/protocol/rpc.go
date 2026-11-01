@@ -246,6 +246,22 @@ type StatusResult struct {
 	// RemoteBox is true when the box alias is set up (key pair and
 	// ~/.ssh/config written; deployment.md §6).
 	RemoteBox bool `json:"remoteBox,omitempty"`
+	// Busy is the lesson operation in progress, if any.
+	Busy *BusyInfo `json:"busy,omitempty"`
+}
+
+// BusyInfo describes the lesson operation sessiond is running (api.md
+// §3.4), so a reloaded page can veil while, say, "Go to this step"
+// replays earlier steps.
+type BusyInfo struct {
+	// Op names the kind of operation (load, restore, …) for logs and
+	// display; the set is open, so clients must not switch on it.
+	Op string `json:"op"`
+	// LessonID and StepID name the step the op works on, when known.
+	LessonID string `json:"lessonId,omitempty"`
+	StepID   string `json:"stepId,omitempty"`
+	// StartedAt is when the op started (ms).
+	StartedAt int64 `json:"startedAt"`
 }
 
 // DescribeRequest asks what a key sequence runs (ticker glosses for commands
