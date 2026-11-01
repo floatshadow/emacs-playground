@@ -8,7 +8,7 @@ Contracts between browser, gateway, sessiond and the Emacs agent. The Go types i
 - Lesson ids are the lesson directory under `curriculum/`, with one slash (`02-buffers-and-files/03-opening-files`), put into URLs literally; routes use trailing wildcards.
 - Errors: `application/problem+json` `{status, code, message, details?}`, codes from `protocol.ErrorCode`: `unauthenticated` 401, `forbidden` 403, `not_found` 404, `invalid_request` 400, `conflict` 409, `rate_limited` 429, `session_limit` 429/503, `group_quota_exceeded` 429 (details `{group, maxActiveSessions}`, `group` empty for learners in no listed group), `session_unavailable` 502/503, `emacs_unavailable` 503, `timeout` 504, `not_implemented` 501, `internal` 500 (also for unknown codes).
 - Auth: cookie `pg_session`. State-changing requests and WebSocket upgrades need `Origin` equal to the public URL's (local mode: `localhost` ≡ `127.0.0.1`).
-- Versioning: REST under `/api/v1`; WebSocket and agent `hello` carry `protocol: 1`; breaking changes bump both.
+- Versioning: REST under `/api/v1` (it changes only when the gateway REST API breaks); WebSocket and agent `hello` carry `protocol: 2` (`protocol.Version`); a breaking change to events, RPC or agent messages bumps it.
 
 ## 2. Gateway API (`/api/v1`)
 
@@ -62,7 +62,7 @@ Close codes (all session WebSockets): `4000` replaced, `4001` Emacs/tmux unavail
 
 ### 3.2 `GET /events` (WebSocket)
 
-`?after=<seq>` replays from the ring. First frame `hello` (`replayed` when a replay follows), then replayed events in sequence order, or a full `state` when no replay follows (§4). Client may send `ping`.
+`?after=<seq>` replays from the ring. First frame `hello` (`replayed` when a replay follows; its lesson snapshot is read after the subscription began), then replayed events in sequence order, or a full `state` when no replay follows (§4). Client may send `ping`.
 
 ### 3.3 `GET /vnc` (WebSocket)
 
@@ -77,17 +77,17 @@ Result `{"ok":true,"result":…}` or problem+json. *(n)*: not idempotent. Ops ne
 - `open {path}` → `{buffer}`: visits a workspace file.
 - `rescue {}` → `{did}`: `playground-rescue` (emacs.md §10.3), or C-g through tmux when Emacs is unresponsive.
 - `scenario {lessonId, stepId?, reset?, lap?}` → `{step, index, count, modules, restarting, lap?}`: backend.md §3.12. Returns when the step is active, or with `restarting: true` once a daemon restart begins (the load then finishes in the background; a request arriving meanwhile gets the final result). `lap: true` starts the lap (CURRICULUM.md B.3): reset, first step, `lap {id, lessonId, startedAt}` (`id` names the lap for its progress report); until it ends `hint`, `demo start` and `skip` answer `409`. A plain reload keeps the lap; an explicit `stepId` without `lap` ends it.
-- `check {}` → `{lessonId, stepId, conditions:[{id, ok, unknown?, detail?}], complete}`.
+- `check {}` → `{lessonId, stepId, conditions:[{id, ok, unknown?, detail?}], complete}`; the `check` event it causes carries the `attempt`.
 - `hint {stepId, level}` → `{}`.
 - `checkpoint {label}` → `{ref, createdAt}`; `checkpoints {}` → `{items:[{label, ref, createdAt, files, step?}]}`, newest first; `files` would change on restore.
-- `restore {label}|{ref}|{}` → `{restoredFiles}` *(n)*: `{}` is the active step's checkpoint (Reset this step, Do it yourself); counts a reset, clears the latch, emits `step reset`.
+- `restore {label}|{ref}|{}` → `{restoredFiles}` *(n)*: `{}` is the active step's checkpoint (Reset this step, Do it yourself); counts a reset, clears the latch, publishes `lesson reset`.
 - `mode {mode: terminal|gui}` → `{mode}`; `409` if GUI is disabled.
 - `modules {enabled}` → `{restarting}`: sets the set exactly (`scenario` only adds).
 - `restart-emacs {}` → `{}`: background restart, reported by `emacs` events.
 - `stuck {note}` → `{events}`: last 200 events. Through the proxy (`X-Forwarded-For` present) sessiond also files the report.
-- `status {}` (also `GET /status`) → `{sessionId, emacs, frames, mode, step, modules, versions?, activeWebSockets, lap?, remoteBox?, busy?}`; `remoteBox` once the box alias is written (deployment.md §6); `busy {op, lessonId?, stepId?, startedAt}` while an op runs (`op` names its kind, e.g. `load` or `restore`; an open set: the page recognises `load` and ignores kinds it does not know), so a reloaded page veils "Going to step N…" until the step is active.
+- `status {}` (also `GET /status`) → `{sessionId, emacs, frames, mode, step, modules, versions?, activeWebSockets, remoteBox?, lesson}`; `step` is the active step (the gateway's session info), `lesson` the snapshot (§4.1); `remoteBox` once the box alias is written (deployment.md §6).
 - `describe {keys}` → `{cmd, doc}`: for ticker glosses; `cmd` `""` when unbound or a prefix.
-- `demo {stepId, phase: start|end}` → `{restored}` *(n)*; `skip {stepId}` → `{next|null, demoCompleted}` *(n)*, `409` while another skip runs: §4.1.
+- `demo {stepId, phase: start|end}` → `{restored, attempt}` *(n)*; `skip {stepId}` → `{next|null, demoCompleted}` *(n)*, `409` while another skip runs: §4.1.
 - `drop-step {lessonId?, generation?}` → `{}`: internal (gateway only); forgets that lesson's (without `lessonId` every lesson's) saved progress and the active step if it belongs to it; a `generation` not newer than the one applied is ignored. It runs before queued ops and, unless ignored, cancels a running op on that lesson.
 
 ### 3.5 `GET /preview/{path}`
@@ -102,29 +102,31 @@ A workspace file via `os.Root`; `.playground/` never served. `no-store`, `nosnif
 
 Envelope `{t, seq, ts, …}`, `seq` monotonic from 1 per process; unknown types are ignored.
 
-- `hello`: `protocol, sessionId, mode, emacs, frames, step|null, modules, replayed, lap?, busy?` (`busy` as in `status`).
+- `hello`: `protocol, sessionId, mode, emacs, frames, modules, replayed, lesson` (the snapshot, §4.1). `protocol` is `protocol.Version` (2); a page that gets another starts nothing and offers to stop the session (frontend.md §5).
 - `key`: `keys, cmd, buf, mode, frame, prefixArg?, mx?`. `cmd` is `real-this-command` (emacs.md §10.1), `"<lambda>"` or `"undefined"`; with `mx: true` (M-x) `keys` are the reader's.
 - `prefix`: `keys, source: tap|agent`; `""` clears. Advisory; never follows the `key` that consumed it.
 - `state` (§5): coalesced, duplicates suppressed. `echo`: `text` ≤ 500 characters, noise filtered. `minibuffer`: `open, prompt, depth, kind: prompt|isearch`.
 - `emacs`: `event, frame?, reason?`; `frame-opened`, `frame-closed`, `daemon-restarted`, `restarting`, `suspended`, `resumed`, `unresponsive`, `responsive`, `stopping`.
 - `file`: `path, event: created|modified|deleted`.
-- `check`: as the RPC; `unknown: true` (with `ok: false`) when unevaluable; `detail` is evaluator output.
-- `step`: `lessonId, stepId, status, index (0-based), count, lessonComplete?, lap?, lapMs?` (`lapMs` on the event that ends a lap).
+- `check`: as the RPC, plus `attempt`; `unknown: true` (with `ok: false`) when unevaluable; `detail` is evaluator output. A check of another attempt than the snapshot's is stale.
+- `lesson`: `change, stepId?, lapMs?, lesson` (§4.1; `lapMs` on the change that ends a lap).
 - `nudge`: `id` (stable per rule), `kind: calm|ask, title, body`.
 - `checkpoint`: `label, ref, createdAt`. `mode`: `mode`. `modules`: `enabled, restarting` (`true`, then `false` once the lesson that asked for the modules is set up).
 - `gap`: `from, to`; reconnect from the last received sequence to recover lost transitions.
 - `error`: `code, message` for the learner (fixtures, setup, `emacs_unavailable`).
 
-### 4.1 Step lifecycle
+### 4.1 Lesson snapshot and lifecycle
 
-`step` statuses (session core: backend.md §3.8):
+The session core (backend.md §3.8) owns the lesson's lifecycle facts and publishes them as one snapshot: `{rev, lessonId?, step: {id, index, count}|null, phase: idle|active|watching|complete, attempt, outcomes, lap?, busy?}`. `rev` rises with every published change (per sessiond process); `attempt` numbers the active step's activation (0 without a step); `outcomes` are the loaded lesson's saved `done|skipped|demonstrated` steps; `busy {op, lessonId?, stepId?, startedAt}` is the lesson op running (load, resume, restore, demo-start, skip, set-modules, restart-emacs, recover, reconnect). `hello` and `status` carry the current snapshot; the browser applies a `lesson` event only when its `rev` is higher than the snapshot it holds, and every `hello` whatever its rev. A rehearsal (fast-forward) is never visible. `change` names why a snapshot was published:
 
 - `loaded`: scenario load, resume or advance. A step that takes a checkpoint has it, unless its capture failed or a fast-forward to it did not complete (it then activates without one, and `restore {}` answers 404 until the next load takes it).
-- `reset`: `restore {}` or a restoring `demo start`; command counts and checks cleared.
-- `complete`: all conditions hold without a latch; progress `done`; next step `loaded`, or `lessonComplete`.
-- `demonstrated`: all conditions hold under the latch (once per latch); progress `demonstrated`; no advance; the browser offers Do it yourself (`restore {}`).
+- `reset`: `restore {}` or a restoring `demo start`; a new attempt, the step's outcome forgotten.
+- `complete`: all conditions hold without a latch; progress `done`; next step `loaded`, or phase `complete` after the last.
+- `demonstrated`: all conditions hold under the latch (once per latch); progress `demonstrated`; phase stays `watching`; the browser offers Do it yourself (`restore {}`).
 - `skipped`: after `skip`; progress `skipped`; continues as `complete`.
-- `dropped`: `drop-step` forgot the active step.
+- `dropped`: `drop-step` forgot progress (the loaded lesson's, if it is one: then `lessonId` is empty).
+- `phase`: the latch was set or dropped, or an interrupted load put the step before it back (a new attempt).
+- `busy`: a lesson op started or ended.
 
 **Watch it**: `demo start` restores the checkpoint if a command ran since the step started or was reset (`restored: true`, no reset counted), then sets the latch, which lasts until `restore {}`, a reload of the step or `drop-step`. Playing ends with `demo end`, 65 s without `keys` (`session.DemoIdle`, longer than the maximum 60 s pause) or the page's terminal closing; if the step had not completed, the latch is dropped then. Stuck rules pause while playing. Open: under the latch the learner's own completion gets no reaction until Do it yourself.
 
@@ -149,7 +151,7 @@ From the agent, plus `seq` and `ts`. Field names are the paths `state` predicate
 - `windows[].id` is stable per window; `side` is `window-side`.
 - `layout`: a window id or `["vsplit"|"hsplit", child, …]`; `vsplit` stacks (C-x 2), `hsplit` is side by side (C-x 3).
 - `minibuffer` when open: `{depth, prompt, contents, kind}`. `frames` includes the daemon's invisible frame.
-- `waiting` while a loop reads its own keys or a hydra is open: `{kind: menu|avy|which-key|hydra, what, leave}`; Rescue sends `leave` first (`a` for which-key, where C-g only returns to the prefix; a hydra it closes directly).
+- `waiting` while a loop reads its own keys or a transient menu is open: `{kind: menu|avy|which-key|transient, what, leave}`; Rescue sends `leave` first (`a` for which-key, where C-g only returns to the prefix; a transient menu it closes directly).
 
 ## 6. Scenario object
 

@@ -27,7 +27,7 @@ Roles, licenses and caveats of external dependencies. Versions live in `go.mod`,
 
 GPL-3.0+ unless noted; `emacs.d/packages.el` maps modules to packages, pinned and vendored as emacs.md §8 describes. Packages whose last stable tag predates Emacs 30 use MELPA snapshots (`:prefer-snapshot`).
 
-Native parts are built from the vendored tarballs: vterm's module against libvterm, jinx's against enchant, pdf-tools' `epdfinfo` against poppler. Chinese input is pyim with pyim-basedict, not rime. Org's Rust blocks are the org module's own `org-babel-execute:rust` (rustc); ob-rust needs rust-script. dape 0.28 lacks a codelldb configuration; the lsp module adds it. Typst's grammar is uben0/tree-sitter-typst at a pinned commit (no recent tag). Key menus use hydra with pretty-hydra (titled columns), not built-in transient (Magit's): a menu is one short form regrouped by moving lines.
+Native parts are built from the vendored tarballs: vterm's module against libvterm, jinx's against enchant, pdf-tools' `epdfinfo` against poppler. Chinese input is pyim with pyim-basedict, not rime. Org's Rust blocks are the org module's own `org-babel-execute:rust` (rustc); ob-rust needs rust-script. dape 0.28 lacks a codelldb configuration; the lsp module adds it. Typst's grammar is uben0/tree-sitter-typst at a pinned commit (no recent tag). Key menus use built-in transient (Magit's), not hydra: no package to pin, and a menu is one form whose groups are vectors.
 
 ## 4. Language servers and tools
 

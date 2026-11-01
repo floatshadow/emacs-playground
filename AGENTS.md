@@ -79,7 +79,7 @@ Configuration precedence: defaults < JSON file < `PG_*` environment < flags; `PG
 
 - **Code is authoritative**; fix a doc that disagrees.
 - **`web/src/protocol.gen.ts` is generated** by `internal/protocol/tsgen`; never edit it. `go test ./internal/protocol/...` fails when stale.
-- **Go is the reference for shared semantics:** `protocol.Predicate`, `MatchLayout` and `ExpandTemplate`; the ports in `web/src/advice/` must match exactly.
+- **Go is the reference for shared semantics:** `protocol.Predicate` (regex dialect 1), `ExpandTemplate`, demo and key parsing; their ports in `web/src/` are pinned by `internal/protocol/testdata/conformance` (Go and TypeScript run the same cases; add a case there, never a table in one language). `MatchLayout` has no port.
 - **Lesson ids contain one slash** (`02-buffers-and-files/03-opening-files`), literal in URLs; routes use `{lessonId...}`.
 - **Condition ids are 1-based:** `<stepId>/<n>`, stuck rules `<stepId>/stuck/<n>` (`protocol.ConditionID`).
 - **Modules unlock monotonically:** scenario `modules` are added, never removed, so every lesson must pass with more modules than it lists; checkpoint restores keep `emacs.d/modules.el`.

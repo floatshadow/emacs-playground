@@ -60,6 +60,10 @@ Open decisions: DESIGN.md §12; what a restore misses: backend.md §3.9.
 - `progress.Outbox.Flush` serves only the step tests and repeats part of `Run`'s delivery.
 - The progress interleaving tests (`internal/sessiond/session/recovery_test.go`) order the competing drop by a sleep; the reconnect test sends its hello at the start of the restore only; `hosts.test.ts` checks the key guard's predicate, not a dispatched key.
 - backend.md §3.9 describes an agent leaving during `restore-editor` both as `ErrEditor` and as a deferred editor state; the code answers `ErrEditor` and keeps the deferred state.
+- While the snapshot shows a lesson, steps after the active one show no tick (`selectors.ts` `stepStatuses`): they are evaluated again when reached.
+- The splitter sets `aria-valuenow` only after a drag or key, in pixels, without `aria-valuemin`/`aria-valuemax`.
+- Keys reach Emacs only while the terminal has focus (Ctrl+V after a click in the lesson prose stays with the page); in Firefox, Alt+V can open the menu bar and `ESC v` is the `M-v` fallback.
+- The `integration`-tagged sessiond test is outside `make check`, needs real Emacs and tmux, and is only compiled (`go vet -tags integration ./internal/sessiond/`).
 
 ## 7. Curriculum authoring pitfalls
 
@@ -76,11 +80,11 @@ Rules: CURRICULUM.md B.3 and B.4. Beyond them:
 - **Write the keys out:** keys in the lesson or step text silence habit cards, paraphrased ones do not. `:try` clicks are learner input.
 - **Command names:** keep older names (`kill-region` for `C-k`) as alternatives; `M-y` is `consult-yank-pop` only from lesson 4.2.
 - **Test with every module on:** with a language server, imenu can land on doc comments and corfu's popup opens in snippet fields.
-- **No newline right after a symbol** in code buffers: corfu-auto with cape-dabbrev can take the RET. Prose buffers open the popup only on request.
+- **No newline right after a symbol** in code buffers: corfu-auto with cape-dabbrev can take the RET, and an open popup takes `M-<` and `M->`, so a demo searches forward instead of jumping back after typing a symbol. Prose buffers open the popup only on request.
 - **Magit** buffers survive restores and remember open sections: setups clear `magit-repository-local-cache`, demos fold first (`M-2`, `M-4`). A conflicted file opens at its first conflict, so `C-c ^ n` goes to the second.
 - **setup.run rebuilding `.git`** races with git run by the previous lesson's buffers (diff-hl, Magit): retry `rm`, `add` and `commit`. Box state comes from setup.run; checkpoints do not cover the box.
 - **No TRAMP calls from timers or process callbacks:** nested in another operation on the connection, they break it.
-- **user-lisp calling package macros** (`pretty-hydra-define`) needs `no-byte-compile: t` (compiled before packages activate) and loads from `after-init-hook` in `with-demoted-errors`, so a broken file cannot stop the daemon.
-- **Idempotent demos:** adding to a seeded file replaces a line, so a revisit's Watch it or Skip adds nothing. A "hydra closed" condition needs a head pressed: `waiting` is null before it opens.
+- **user-lisp seeds** load from `after-init-hook` in `with-demoted-errors`, so a broken file cannot stop the daemon.
+- **Idempotent demos:** adding to a seeded file replaces a line, so a revisit's Watch it or Skip adds nothing. A "menu closed" condition needs a suffix pressed: `waiting` is null before it opens.
 - **Lessons that edit `emacs.d/modules`** (13.1, 13.7) cannot replay on a stack that mounts the modules read-only.
 - **Check:** `play`, `play -watch`, `-repeat 2` on a fresh workspace (`make curriculum-play`, `curriculum-watch`); `play all` in course order, since Part 13's settings (a 2 s auto-save) stay on for the projects; Part 3 then Parts 0-2 for more modules than listed; pause `~1000` before a `C-g` that follows an edit (emacs.md §10.4).

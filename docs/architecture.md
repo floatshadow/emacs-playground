@@ -56,6 +56,7 @@ sessiond listens on `:7000` and on the Unix socket `/run/playground/agent.sock` 
 | Learner files, config, build output | learner | `/work` (bind mount `./workspace` or volume `pg-ws-<user>`) | until the volume is deleted; server: retention period after last use |
 | Checkpoints | sessiond | `refs/playground/*` in `/work/.git`, metadata in `/work/.playground/checkpoints/` | with the workspace |
 | Playground state (module set, scenario cache, buffer snapshot, event log; `state.json`: active step, lap, saved outcomes, reset generations, progress reports the gateway has not accepted) | sessiond | `/work/.playground/`, `/work/emacs.d/modules.el` | with the workspace |
+| Lesson lifecycle (loaded lesson, active step, phase, attempt, this lesson's outcomes, lap, lesson op in progress) | sessiond session core | in memory and `state.json`; published to browsers as the lesson snapshot (`hello`, `status`, `lesson` events; api.md §4.1); the browser renders it and never derives these facts from events or progress | with the workspace |
 | Progress (steps done, demonstrated, skipped; hints used; resets) | gateway | `<dataDir>/local.json` (local) or `<dataDir>/playground.db` (SQLite, server) | until the user is deleted |
 | Users (OIDC claims), session registry | gateway | same store | operator-managed |
 | Curriculum bundle | gateway | `curriculum.dir`: `curriculum.json`, per-lesson bundles, `fixtures/<id>.tar.zst`; built into the gateway image | replaced on upgrade |
@@ -92,7 +93,7 @@ The input tap gives instant feedback for pending prefixes even while Emacs is bu
 
 sessiond holds the active scenario and step. Agent events (`key`, `state`), file events and a 2 s tick (time-based stuck rules) trigger an evaluation; the debounce is trailing, 40 ms after the last trigger and at most 120 ms after the first, so key to `check` takes about 50 ms.
 
-Conditions are evaluated in order: `event` from sessiond's command counter since the step (or lesson) started; `state` and `layout` from the latest agent state (`protocol.Predicate`, `protocol.MatchLayout`); `file` from the workspace; `shell` by running the command (timeout 5 s unless the condition sets one); `elisp` batched into one agent `check` call; `all`, `any`, `not` combine them. A condition that cannot be evaluated is `unknown` (and not met). Results go out as a `check` event. When every condition holds the step is `complete` (or `demonstrated` while "Watch it" plays), progress is reported to the gateway, and the next step's checkpoint is taken before its `loaded` event.
+Conditions are evaluated in order: `event` from sessiond's command counter since the step (or lesson) started; `state` and `layout` from the latest agent state (`protocol.Predicate`, `protocol.MatchLayout`); `file` from the workspace; `shell` by running the command (timeout 5 s unless the condition sets one); `elisp` batched into one agent `check` call; `all`, `any`, `not` combine them. A condition that cannot be evaluated is `unknown` (and not met). Results go out as a `check` event. When every condition holds the step is `complete` (or `demonstrated` while "Watch it" plays), progress is reported to the gateway, and the next step's checkpoint is taken before the snapshot with that step (`lesson loaded`) is published.
 
 The browser never evaluates conditions. It renders the latest `check` and selects the hint of the first unmet condition from the scenario it already has.
 
@@ -105,7 +106,7 @@ The browser never evaluates conditions. It renders the latest `check` and select
 3. If the union of the current module set and the scenario's `modules` differs from the current set, it writes `modules.el` and restarts the daemon (§5.2); the RPC returns `restarting: true` and the load finishes in the background, while later requests wait for it. Modules are never removed (DESIGN.md ADR-021).
 4. It waits (up to 15 s) for a restart in progress and for the terminal frame, then asks the agent to `setup`: `open`, `layout`, `eval`, `compile` in one call. With `reset` the agent first reverts or kills the buffers of changed or removed files, closes other tabs and clears unmodified leftovers and save-place positions under the root, so a replayed lesson starts on line 1 of its files (emacs.md §10).
 5. For a `stepId` after the first ("Go to this step") it restores that step's checkpoint, or else fast-forwards by replaying the earlier steps' demos while each is rehearsed quietly (phase Rehearsing, §5.3; 10 s per step, 3 minutes in all).
-6. It takes the step's checkpoint `refs/playground/<lesson>/<step>` (not after a fast-forward that did not complete every earlier step) and emits `step {status: loaded}`.
+6. It takes the step's checkpoint `refs/playground/<lesson>/<step>` (not after a fast-forward that did not complete every earlier step) and publishes the lesson snapshot with the step active (`lesson {change: loaded}`). While the load runs the snapshot's `busy` names it; the rehearsed steps of a fast-forward never appear in it.
 
 ### 3.4 Rescue and reset
 
@@ -199,6 +200,8 @@ Go to this step without a checkpoint: the earlier steps run as Rehearsing (silen
 ```
 
 Each activation is a new attempt; an evaluation of an older attempt changes nothing. Only a completion outside a demonstration counts as `done` (api.md §3.4).
+
+Browsers see these states through the lesson snapshot (api.md §4.1): Active and Skipping as `active`, Watching as `watching`, Advancing as `active` on the finished step (or, after the last step, as Idle), Idle as `complete` when every step of the loaded lesson is done or skipped, else `idle`; Rehearsing is never published. Every change publishes a snapshot with a higher `rev`, and `check` events carry the attempt they evaluated, so a page applies only what is newer than what it shows.
 
 ## 6. Failure modes
 
