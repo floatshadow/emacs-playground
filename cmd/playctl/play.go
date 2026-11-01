@@ -320,12 +320,12 @@ func (c *sessionClient) subscribe(ctx context.Context) (*eventLog, error) {
 	return l, nil
 }
 
-// eventLog records the step events of an /events stream.
+// eventLog records the lesson events of an /events stream.
 type eventLog struct {
 	conn    *websocket.Conn
 	stop    context.CancelFunc
 	mu      sync.Mutex
-	steps   []*protocol.StepEvent
+	steps   []*protocol.LessonEvent
 	lastSeq int64
 	err     error
 	changed chan struct{}
@@ -342,7 +342,7 @@ func (l *eventLog) read(ctx context.Context) {
 			return
 		}
 		if ev, derr := protocol.DecodeEvent(data); derr == nil {
-			if s, ok := ev.(*protocol.StepEvent); ok {
+			if s, ok := ev.(*protocol.LessonEvent); ok {
 				l.steps = append(l.steps, s)
 			}
 			if seq := ev.Env().Seq; seq > l.lastSeq {
@@ -361,22 +361,22 @@ func (l *eventLog) notify() {
 	}
 }
 
-// mark returns a position: wait looks at step events after it.
+// mark returns a position: wait looks at lesson events after it.
 func (l *eventLog) mark() int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return len(l.steps)
 }
 
-// wait returns the first step event after mark for lessonID and stepID
-// whose status is one of statuses.
-func (l *eventLog) wait(ctx context.Context, mark int, lessonID, stepID string, d time.Duration, statuses ...protocol.StepStatus) (*protocol.StepEvent, error) {
+// wait returns the first lesson event after mark for lessonID and stepID
+// whose change is one of changes.
+func (l *eventLog) wait(ctx context.Context, mark int, lessonID, stepID string, d time.Duration, changes ...protocol.LessonChange) (*protocol.LessonEvent, error) {
 	deadline := time.NewTimer(d)
 	defer deadline.Stop()
 	for {
 		l.mu.Lock()
 		for _, s := range l.steps[min(mark, len(l.steps)):] {
-			if s.LessonID == lessonID && s.StepID == stepID && slices.Contains(statuses, s.Status) {
+			if s.Lesson.LessonID == lessonID && s.StepID == stepID && slices.Contains(changes, s.Change) {
 				l.mu.Unlock()
 				return s, nil
 			}
@@ -390,7 +390,7 @@ func (l *eventLog) wait(ctx context.Context, mark int, lessonID, stepID string, 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-deadline.C:
-			return nil, fmt.Errorf("no step %v event for %s within %v", statuses, stepID, d)
+			return nil, fmt.Errorf("no lesson %v event for %s within %v", changes, stepID, d)
 		case <-l.changed:
 		}
 	}
@@ -529,12 +529,12 @@ func (p *player) playLesson(ctx context.Context, l *curriculum.Lesson, from int)
 	if p.lap {
 		last := steps[len(steps)-1].ID
 		r := stepResult{Lesson: l.ID, Step: "(lap)", OK: true}
-		ev, err := p.events.wait(ctx, lapMark, l.ID, last, 10*time.Second, protocol.StepComplete)
+		ev, err := p.events.wait(ctx, lapMark, l.ID, last, 10*time.Second, protocol.ChangeComplete)
 		switch {
 		case err != nil:
 			r.OK, r.Detail = false, err.Error()
-		case !ev.Lap || ev.LapMs <= 0:
-			r.OK, r.Detail = false, fmt.Sprintf("the last step did not report the lap (lap %v, lapMs %d)", ev.Lap, ev.LapMs)
+		case ev.LapMs <= 0:
+			r.OK, r.Detail = false, "the last step did not report the lap"
 		default:
 			r.Took = time.Duration(ev.LapMs) * time.Millisecond
 		}
@@ -680,7 +680,7 @@ func (p *player) watch(ctx context.Context, lessonID string, st *protocol.Step) 
 	if perr != nil {
 		return "demo: " + perr.Error()
 	}
-	ev, err := p.events.wait(ctx, mark, lessonID, st.ID, p.timeout, protocol.StepDemonstrated, protocol.StepComplete)
+	ev, err := p.events.wait(ctx, mark, lessonID, st.ID, p.timeout, protocol.ChangeDemonstrated, protocol.ChangeComplete)
 	if err != nil {
 		var res protocol.CheckResult
 		if cerr := p.c.rpc(ctx, protocol.OpCheck, protocol.Empty{}, &res); cerr == nil {
@@ -688,7 +688,7 @@ func (p *player) watch(ctx context.Context, lessonID string, st *protocol.Step) 
 		}
 		return err.Error()
 	}
-	if ev.Status != protocol.StepDemonstrated {
+	if ev.Change != protocol.ChangeDemonstrated {
 		return "the demonstration completed the step as done"
 	}
 	if s, err := p.c.status(ctx); err != nil || s.Step == nil || s.Step.StepID != st.ID {
@@ -698,7 +698,7 @@ func (p *player) watch(ctx context.Context, lessonID string, st *protocol.Step) 
 	if err := p.c.rpc(ctx, protocol.OpRestore, protocol.RestoreRequest{}, nil); err != nil {
 		return "restore: " + err.Error()
 	}
-	if _, err := p.events.wait(ctx, mark, lessonID, st.ID, 15*time.Second, protocol.StepReset); err != nil {
+	if _, err := p.events.wait(ctx, mark, lessonID, st.ID, 15*time.Second, protocol.ChangeReset); err != nil {
 		return "after Do it yourself: " + err.Error()
 	}
 	return ""

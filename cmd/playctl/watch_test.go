@@ -41,10 +41,10 @@ type watchEngine struct {
 
 func (e *watchEngine) steps() []protocol.Step { return e.src.Lessons[e.lesson].Scenario.Steps }
 
-func (e *watchEngine) emitLocked(st protocol.StepStatus, stepID string) {
+func (e *watchEngine) emitLocked(st protocol.LessonChange, stepID string) {
 	e.seq++
-	ev := &protocol.StepEvent{LessonID: e.lesson, StepID: stepID, Status: st, Lap: e.lap}
-	if e.lap && st == protocol.StepComplete && stepID == e.steps()[len(e.steps())-1].ID {
+	ev := &protocol.LessonEvent{Change: st, StepID: stepID, Lesson: protocol.LessonSnapshot{LessonID: e.lesson}}
+	if e.lap && st == protocol.ChangeComplete && stepID == e.steps()[len(e.steps())-1].ID {
 		ev.LapMs = 1234
 	}
 	protocol.Stamp(ev, e.seq, time.Now().UnixMilli())
@@ -94,7 +94,7 @@ func (e *watchEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				e.step = i
 			}
 		}
-		e.emitLocked(protocol.StepLoaded, e.steps()[e.step].ID)
+		e.emitLocked(protocol.ChangeLoaded, e.steps()[e.step].ID)
 		var res protocol.ScenarioResult
 		if req.Lap {
 			res.Lap = &protocol.LapInfo{LessonID: req.LessonID, StartedAt: 1}
@@ -122,7 +122,7 @@ func (e *watchEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case "/s/local/rpc/restore":
 		e.restores++
 		e.latch, e.got = false, nil
-		e.emitLocked(protocol.StepReset, e.steps()[e.step].ID)
+		e.emitLocked(protocol.ChangeReset, e.steps()[e.step].ID)
 		httpx.WriteOK(w, protocol.RestoreResult{})
 	case "/s/local/rpc/keys":
 		var req protocol.KeysRequest
@@ -137,14 +137,14 @@ func (e *watchEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if strings.Join(e.got, "|") == strings.Join(expected(st.Demo), "|") {
 				e.got = nil
 				if e.latch && !e.broken[st.ID] {
-					e.emitLocked(protocol.StepDemonstrated, st.ID)
+					e.emitLocked(protocol.ChangeDemonstrated, st.ID)
 				} else {
-					e.emitLocked(protocol.StepComplete, st.ID)
+					e.emitLocked(protocol.ChangeComplete, st.ID)
 					e.step++
 					if e.step >= len(e.steps()) {
 						e.step = -1
 					} else {
-						e.emitLocked(protocol.StepLoaded, e.steps()[e.step].ID)
+						e.emitLocked(protocol.ChangeLoaded, e.steps()[e.step].ID)
 					}
 				}
 			}
